@@ -10,6 +10,16 @@ TTcut 的正式支持平台为仍处于 Microsoft 支持周期内的 Windows 11 
 - DPI 缩放在测试用户登录前设置为 100%、125%、150% 或 200%；变更缩放后注销并重新登录，再采集证据。
 - 无 NVIDIA/CPU 回退可以在普通虚拟机验证；CUDA 必须在具有可用 NVIDIA 驱动的实体机或可信 GPU 直通环境验证。
 
+## 自动化预检查
+
+`tests/e2e/dpi-layout.spec.ts` 使用真实 Electron Renderer，在 125%、150% 和 200% 强制缩放下把窗口调整到约 840×520 DIP，检查标题栏、侧边栏、设置页、纵向滚动和水平溢出，并把截图写入忽略的 `output/playwright/screenshots/dpi-*.png`：
+
+```powershell
+node .\node_modules\@playwright\test\cli.js test dpi-layout.spec.ts --config=playwright.electron.config.ts
+```
+
+这组测试用于在提交阶段尽早发现布局回归。强制缩放不等于操作系统登录会话的真实 DPI 配置，也不验证 Squirrel 安装、显卡驱动或系统字体，因此不能替代下列干净 Windows 矩阵，不能单独关闭发布闸门。
+
 ## 必跑用例
 
 | ID | OS | DPI | GPU | 网络 | 重点 |

@@ -166,6 +166,8 @@ check(forgeSource.includes("'.runtime/release-metadata'"), 'Forge does not packa
 check(forgeSource.includes("process.env.TTCUT_PUBLIC_RC === '1'"), 'Forge does not enforce the public RC signing mode.');
 check(forgeSource.includes('TTCUT_PUBLISHER_NAME'), 'Forge does not require an explicit personal publisher name.');
 check(forgeSource.includes('windowsSign'), 'Forge Authenticode integration is missing.');
+check(forgeSource.includes('electron-v43.1.1-win32-x64.zip'), 'Pinned Electron Windows archive name is missing.');
+check(forgeSource.includes('b4e9995cd3f65785eb8818276aa9020f3165ab11da41b3c762616d4a0ad8c7ad'), 'Pinned Electron Windows archive checksum is missing.');
 
 const releaseMetadata = path.join(root, '.runtime', 'release-metadata');
 for (const relative of ['THIRD_PARTY_NOTICES.html', 'THIRD_PARTY_NOTICES.md', 'sbom.cdx.json', 'licenses/index.json', 'licenses/tracknet/LICENSE.txt', 'licenses/tracknet/WEIGHT_RIGHTS.md']) {

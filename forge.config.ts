@@ -20,6 +20,9 @@ const certificatePassword = process.env.WINDOWS_CERTIFICATE_PASSWORD;
 const customSigning = Boolean(process.env.WINDOWS_SIGN_WITH_PARAMS || process.env.WINDOWS_SIGNTOOL_PATH);
 const signingConfigured = Boolean((certificateFile && certificatePassword) || customSigning);
 const timestampServer = process.env.WINDOWS_TIMESTAMP_SERVER?.trim() || 'http://timestamp.digicert.com';
+const electronWin32X64Checksums = process.platform === 'win32' && process.arch === 'x64'
+  ? { 'electron-v43.1.1-win32-x64.zip': 'b4e9995cd3f65785eb8818276aa9020f3165ab11da41b3c762616d4a0ad8c7ad' }
+  : undefined;
 
 if (publicReleaseCandidate && !signingConfigured) {
   throw new Error('A public release candidate requires Authenticode credentials or a configured hardware/cloud signing command.');
@@ -61,6 +64,7 @@ const config: ForgeConfig = {
     ...(packagerWindowsSign ? { windowsSign: packagerWindowsSign } : {}),
     download: {
       cacheRoot: path.resolve('.electron-cache'),
+      ...(electronWin32X64Checksums ? { checksums: electronWin32X64Checksums } : {}),
     },
   },
   rebuildConfig: {},

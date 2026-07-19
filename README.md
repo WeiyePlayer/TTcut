@@ -112,6 +112,19 @@ npm run verify:release
 npm run make
 ```
 
+真实 E2E 不随仓库分发测试视频、模型权重或运行时。运行 `npm run test:e2e` 前，通过以下变量指定本机已验证的文件；`TTCUT_E2E_FFMPEG_ROOT` 指向同时包含 `ffmpeg.exe` 和 `ffprobe.exe` 的目录：
+
+```powershell
+$env:TTCUT_E2E_VIDEO='D:\path\to\1-193.mp4'
+$env:TTCUT_E2E_PYTHON='D:\path\to\python.exe'
+$env:TTCUT_E2E_WEIGHTS='D:\path\to\TrackNet_best.pt'
+$env:TTCUT_E2E_FFMPEG_ROOT='D:\path\to\ffmpeg-bin'
+$env:TTCUT_E2E_ELECTRON='D:\path\to\electron.exe'
+npm run test:e2e
+```
+
+125%、150%、200% 的 Electron 布局用例属于自动化 DPI 预检查，不能替代在对应 Windows 登录缩放下执行的干净系统安装与人工验收。
+
 ## 已知限制
 
 - 当前只接受单个 MP4 视频。
