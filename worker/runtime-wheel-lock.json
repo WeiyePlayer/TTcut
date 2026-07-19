@@ -1,0 +1,125 @@
+{
+  "schema_version": 1,
+  "platform": "win_amd64",
+  "python_tag": "cp312",
+  "resolved_at": "2026-07-18T05:35:36.588Z",
+  "wheels": [
+    {
+      "name": "numpy",
+      "version": "2.5.1",
+      "variants": ["cpu", "cu126"],
+      "filename": "numpy-2.5.1-cp312-cp312-win_amd64.whl",
+      "url": "https://files.pythonhosted.org/packages/65/66/53f31807a48a750f9d748da273bc3fcedd12b27ff1f3e373bfec55ef2dc0/numpy-2.5.1-cp312-cp312-win_amd64.whl",
+      "size_bytes": 12430966,
+      "sha256": "f7d60026c0bdb1380e83bfa7a0419c4577ee4b9a08880afcb6dadeb74c649fa2"
+    },
+    {
+      "name": "opencv-python",
+      "version": "4.13.0.92",
+      "variants": ["cpu", "cu126"],
+      "filename": "opencv_python-4.13.0.92-cp37-abi3-win_amd64.whl",
+      "url": "https://files.pythonhosted.org/packages/e9/a5/1be1516390333ff9be3a9cb648c9f33df79d5096e5884b5df71a588af463/opencv_python-4.13.0.92-cp37-abi3-win_amd64.whl",
+      "size_bytes": 40212062,
+      "sha256": "423d934c9fafb91aad38edf26efb46da91ffbc05f3f59c4b0c72e699720706f5"
+    },
+    {
+      "name": "filelock",
+      "version": "3.30.3",
+      "variants": ["cpu", "cu126"],
+      "filename": "filelock-3.30.3-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/e7/20/b0d6da41a08b30faef4f20302f5d826a9d39073750cd9100b463eb840cf4/filelock-3.30.3-py3-none-any.whl",
+      "size_bytes": 94544,
+      "sha256": "06e1c6d5e12277022172b7f8d090affe0e8f940f1a37ca45f548855ee51a6b86"
+    },
+    {
+      "name": "fsspec",
+      "version": "2026.6.0",
+      "variants": ["cpu", "cu126"],
+      "filename": "fsspec-2026.6.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/e5/22/4222d7ddf3da30f363edaa98e329c2bce6c65497c9cb2810931c8b2c0fbc/fsspec-2026.6.0-py3-none-any.whl",
+      "size_bytes": 203949,
+      "sha256": "02e0b71817df9b2169dc30a16832045764def1191b43dcff5bb85bdee212d2a1"
+    },
+    {
+      "name": "Jinja2",
+      "version": "3.1.6",
+      "variants": ["cpu", "cu126"],
+      "filename": "jinja2-3.1.6-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/62/a1/3d680cbfd5f4b8f15abc1d571870c5fc3e594bb582bc3b64ea099db13e56/jinja2-3.1.6-py3-none-any.whl",
+      "size_bytes": 134899,
+      "sha256": "85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67"
+    },
+    {
+      "name": "MarkupSafe",
+      "version": "3.0.3",
+      "variants": ["cpu", "cu126"],
+      "filename": "markupsafe-3.0.3-cp312-cp312-win_amd64.whl",
+      "url": "https://files.pythonhosted.org/packages/aa/5b/bec5aa9bbbb2c946ca2733ef9c4ca91c91b6a24580193e891b5f7dbe8e1e/markupsafe-3.0.3-cp312-cp312-win_amd64.whl",
+      "size_bytes": 15105,
+      "sha256": "26a5784ded40c9e318cfc2bdb30fe164bdb8665ded9cd64d500a34fb42067b1c"
+    },
+    {
+      "name": "mpmath",
+      "version": "1.3.0",
+      "variants": ["cpu", "cu126"],
+      "filename": "mpmath-1.3.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/43/e3/7d92a15f894aa0c9c4b49b8ee9ac9850d6e63b03c9c32c0367a13ae62209/mpmath-1.3.0-py3-none-any.whl",
+      "size_bytes": 536198,
+      "sha256": "a0b2b9fe80bbcd81a6647ff13108738cfb482d481d826cc0e02f5b35e5c88d2c"
+    },
+    {
+      "name": "networkx",
+      "version": "3.6.1",
+      "variants": ["cpu", "cu126"],
+      "filename": "networkx-3.6.1-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/9e/c9/b2622292ea83fbb4ec318f5b9ab867d0a28ab43c5717bb85b0a5f6b3b0a4/networkx-3.6.1-py3-none-any.whl",
+      "size_bytes": 2068504,
+      "sha256": "d47fbf302e7d9cbbb9e2555a0d267983d2aa476bac30e90dfbe5669bd57f3762"
+    },
+    {
+      "name": "setuptools",
+      "version": "81.0.0",
+      "variants": ["cpu", "cu126"],
+      "filename": "setuptools-81.0.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/e1/e3/c164c88b2e5ce7b24d667b9bd83589cf4f3520d97cad01534cd3c4f55fdb/setuptools-81.0.0-py3-none-any.whl",
+      "size_bytes": 1062021,
+      "sha256": "fdd925d5c5d9f62e4b74b30d6dd7828ce236fd6ed998a08d81de62ce5a6310d6"
+    },
+    {
+      "name": "sympy",
+      "version": "1.14.0",
+      "variants": ["cpu", "cu126"],
+      "filename": "sympy-1.14.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/sympy-1.14.0-py3-none-any.whl",
+      "size_bytes": 6299353,
+      "sha256": "e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5"
+    },
+    {
+      "name": "typing-extensions",
+      "version": "4.16.0",
+      "variants": ["cpu", "cu126"],
+      "filename": "typing_extensions-4.16.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl",
+      "size_bytes": 45571,
+      "sha256": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8"
+    },
+    {
+      "name": "torch",
+      "version": "2.12.1+cpu",
+      "variants": ["cpu"],
+      "filename": "torch-2.12.1+cpu-cp312-cp312-win_amd64.whl",
+      "url": "https://download-r2.pytorch.org/whl/cpu/torch-2.12.1%2Bcpu-cp312-cp312-win_amd64.whl",
+      "size_bytes": 122900729,
+      "sha256": "51c6c6e26eaa0d64ed439ebdc9ce3b8cc2d5cfcc7cdd4e72f17831d80886b7f4"
+    },
+    {
+      "name": "torch",
+      "version": "2.12.1+cu126",
+      "variants": ["cu126"],
+      "filename": "torch-2.12.1+cu126-cp312-cp312-win_amd64.whl",
+      "url": "https://download-r2.pytorch.org/whl/cu126/torch-2.12.1%2Bcu126-cp312-cp312-win_amd64.whl",
+      "size_bytes": 2620768231,
+      "sha256": "71ee0eca3bde3a4067dfbc28c705b914d0773edd29ac4a634ad5e7a07f336aa1"
+    }
+  ]
+}

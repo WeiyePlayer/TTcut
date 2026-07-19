@@ -1,0 +1,53 @@
+{
+  "name": "ttcut",
+  "productName": "TTcut",
+  "version": "1.0.0",
+  "description": "Local table-tennis rally cutter for Windows",
+  "author": "weiye",
+  "private": true,
+  "main": ".vite/build/main.js",
+  "scripts": {
+    "start": "electron-forge start",
+    "stage:worker": "node scripts/stage-worker.mjs",
+    "stage:release": "node scripts/stage-worker.mjs && node scripts/generate-release-metadata.mjs",
+    "package": "node scripts/stage-worker.mjs && node scripts/generate-release-metadata.mjs && electron-forge package --arch=x64",
+    "make": "node scripts/stage-worker.mjs && node scripts/generate-release-metadata.mjs && node scripts/make.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "node scripts/stage-worker.mjs && node scripts/generate-release-metadata.mjs && electron-forge package --arch=x64 && playwright test --config=playwright.electron.config.ts",
+    "test:python": "python -m pytest worker/tests -q",
+    "verify:release": "node scripts/stage-worker.mjs && node scripts/generate-release-metadata.mjs && electron-forge package --arch=x64 && node scripts/verify-release.mjs",
+    "verify:signatures": "node scripts/verify-signatures.mjs",
+    "release:assets": "node scripts/generate-public-release-assets.mjs"
+  },
+  "dependencies": {
+    "@fontsource-variable/inter": "^5.2.8",
+    "@fontsource-variable/noto-sans-sc": "^5.2.10",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@electron-forge/cli": "7.11.2",
+    "@electron-forge/maker-squirrel": "7.11.2",
+    "@electron-forge/plugin-fuses": "7.11.2",
+    "@electron-forge/plugin-vite": "7.11.2",
+    "@electron/fuses": "1.8.0",
+    "@playwright/test": "1.61.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/node": "^24.10.0",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.4",
+    "electron": "43.1.1",
+    "jsdom": "^28.1.0",
+    "typescript": "^5.9.3",
+    "vite": "8.1.5",
+    "vitest": "^4.1.2"
+  },
+  "config": {
+    "forge": "./forge.config.ts"
+  }
+}

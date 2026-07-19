@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "tracknet_weight": {
+    "filename": "TrackNet_best.pt",
+    "sha256": "ffb5469161c4bd39a5a7e745c3d13f076b2c5e575f33279ea62f1e5803245a52",
+    "source": "Rightsholder weiye; fixed TrackNet weight associated with core commit 40d4d26bc85802d5925ead6b1fd0ad3c6a8a84ba",
+    "redistribution": "redistributable",
+    "downloadable": true,
+    "provider": "WeiyePlayer/TTcut-runtime-assets GitHub Release tracknet-weight-1.0.0",
+    "release_tag": "tracknet-weight-1.0.0",
+    "url": "https://github.com/WeiyePlayer/TTcut-runtime-assets/releases/download/tracknet-weight-1.0.0/TrackNet_best.pt",
+    "size_bytes": 136191005,
+    "install_directory": "models",
+    "rights_evidence": {
+      "path": "rights/tracknet-weight-rights.md",
+      "sha256": "22043bb1750551088f83115a1f7c933d8748f0ff00f9eca742abdbe4b4608034",
+      "rightsholder": "weiye",
+      "grant": "The rightsholder authorizes public redistribution of the fixed weight as a managed TTcut analysis component."
+    }
+  },
+  "analysis_runtime": {
+    "runtime_id": "3.12.13-2.12.1",
+    "python_version": "3.12.13",
+    "torch_version": "2.12.1",
+    "license_url": "https://docs.python.org/3/license.html",
+    "assets": [
+      {
+        "variant": "cpu",
+        "provider": "WeiyePlayer/TTcut-runtime-assets GitHub Release analysis-3.12.13-2.12.1-r1",
+        "asset": "ttcut-analysis-3.12.13-2.12.1-cpu.zip",
+        "archive_root": "ttcut-analysis-3.12.13-2.12.1-cpu",
+        "install_directory": "analysis-runtime/3.12.13-2.12.1/cpu",
+        "size_bytes": 269628039,
+        "sha256": "b656c87f6261ad53929d72b6726855ecb5961b378315137de1b1af6ce8fd125b",
+        "parts": [
+          {
+            "asset": "ttcut-analysis-3.12.13-2.12.1-cpu.zip",
+            "url": "https://github.com/WeiyePlayer/TTcut-runtime-assets/releases/download/analysis-3.12.13-2.12.1-r1/ttcut-analysis-3.12.13-2.12.1-cpu.zip",
+            "size_bytes": 269628039,
+            "sha256": "b656c87f6261ad53929d72b6726855ecb5961b378315137de1b1af6ce8fd125b"
+          }
+        ]
+      },
+      {
+        "variant": "cu126",
+        "provider": "WeiyePlayer/TTcut-runtime-assets GitHub Release analysis-3.12.13-2.12.1-r1",
+        "asset": "ttcut-analysis-3.12.13-2.12.1-cu126.zip",
+        "archive_root": "ttcut-analysis-3.12.13-2.12.1-cu126",
+        "install_directory": "analysis-runtime/3.12.13-2.12.1/cu126",
+        "size_bytes": 2766688555,
+        "sha256": "2fd0f1498153bd77b886d2e50787a7e40ff35e683ab8b6d6a55787ea51d98e0d",
+        "parts": [
+          {
+            "asset": "ttcut-analysis-3.12.13-2.12.1-cu126.zip.part001",
+            "url": "https://github.com/WeiyePlayer/TTcut-runtime-assets/releases/download/analysis-3.12.13-2.12.1-r1/ttcut-analysis-3.12.13-2.12.1-cu126.zip.part001",
+            "size_bytes": 1000000000,
+            "sha256": "e00c1e4449c811ceec6aad6e31bcc6831e87bf3c8aff29a826eeba63b6e60824"
+          },
+          {
+            "asset": "ttcut-analysis-3.12.13-2.12.1-cu126.zip.part002",
+            "url": "https://github.com/WeiyePlayer/TTcut-runtime-assets/releases/download/analysis-3.12.13-2.12.1-r1/ttcut-analysis-3.12.13-2.12.1-cu126.zip.part002",
+            "size_bytes": 1000000000,
+            "sha256": "f2a3bd2b42f1adccdb6fd5189196c6dafe248d2aa3b341981d8713c7fd97fe71"
+          },
+          {
+            "asset": "ttcut-analysis-3.12.13-2.12.1-cu126.zip.part003",
+            "url": "https://github.com/WeiyePlayer/TTcut-runtime-assets/releases/download/analysis-3.12.13-2.12.1-r1/ttcut-analysis-3.12.13-2.12.1-cu126.zip.part003",
+            "size_bytes": 766688555,
+            "sha256": "8a13c666b9aadbbfdcf3f098bc4ef636dd11d6dc1e9de836ff77b566256af2ce"
+          }
+        ]
+      }
+    ]
+  },
+  "ffmpeg": {
+    "provider": "BtbN/FFmpeg-Builds",
+    "release_tag": "autobuild-2026-07-17-13-22",
+    "version_line": "n8.1.2-22-g94138f6973-20260717",
+    "variant": "win64-lgpl-shared-8.1",
+    "asset": "ffmpeg-n8.1.2-22-g94138f6973-win64-lgpl-shared-8.1.zip",
+    "archive_root": "ffmpeg-n8.1.2-22-g94138f6973-win64-lgpl-shared-8.1",
+    "install_directory": "ffmpeg-8.1",
+    "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-07-17-13-22/ffmpeg-n8.1.2-22-g94138f6973-win64-lgpl-shared-8.1.zip",
+    "license_url": "https://github.com/BtbN/FFmpeg-Builds/blob/master/LICENSE",
+    "size_bytes": 70511588,
+    "sha256": "fcbf0f5c58fec3e516e35ba26d81bc6cbaea09dde76bffd151fa93c0316b0b50",
+    "required_build_flags": [
+      "--enable-shared",
+      "--enable-libopenh264",
+      "--disable-libx264",
+      "--disable-libx265"
+    ],
+    "required_encoders": [
+      "libopenh264",
+      "aac"
+    ]
+  }
+}
