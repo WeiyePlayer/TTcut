@@ -138,3 +138,8 @@ npm run test:e2e
 TTcut 自有源码采用 [MIT License](LICENSE)。TrackNet 派生代码、模型权重、Python、PyTorch、NumPy、OpenCV、FFmpeg、字体和 npm 依赖保留各自许可或权利声明，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 更多实现和发行资料位于 [`docs`](docs) 目录。
+
+## 打赏
+如果本程序对你有帮助，希望能得到你的打赏支持，感谢！
+
+爱发电：https://ifdian.net/a/weiye
