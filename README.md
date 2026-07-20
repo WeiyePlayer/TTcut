@@ -1,10 +1,10 @@
 # TTcut
 
-TTcut 是一款面向 Windows 10/11 x64 的本地乒乓球回合分析与自动剪辑工具。它从比赛视频中定位乒乓球、识别弹跳和有效回合，并按所选模式导出剪辑成片。
+TTcut 是一款面向 Windows 10 22H2 x64 和 Windows 11 x64 的本地乒乓球回合分析与自动剪辑工具。它从比赛视频中定位乒乓球、识别弹跳和有效回合，并按所选模式导出剪辑成片。
 
 视频、分析结果和历史记录只保存在本机；软件不要求登录、不上传视频、不采集遥测。首次安装分析组件和视频处理组件需要联网，组件安装完成后可以离线分析、预览和剪辑。
 
-> 当前 `v1.0.0` 是公开预发布版。Windows 安装包尚未进行可信 Authenticode 签名，可能触发 SmartScreen；Windows 10/11 干净系统和多 DPI 完整矩阵仍在补充。
+> 当前 `v1.0.0` 为正式版本，支持 Windows 10 22H2 x64 和 Windows 11 x64。安装包使用 `CN=weiye` 自签名 Authenticode，不具备公共 CA 信任，仍可能触发“未知发布者”或 SmartScreen；请只从本项目 GitHub Release 下载并核对 SHA-256。
 
 ## 下载与安装
 
@@ -110,6 +110,7 @@ python -m pytest worker/tests -q
 npm run test:e2e
 npm run verify:release
 npm run make
+npm run make:official
 ```
 
 真实 E2E 不随仓库分发测试视频、模型权重或运行时。运行 `npm run test:e2e` 前，通过以下变量指定本机已验证的文件；`TTCUT_E2E_FFMPEG_ROOT` 指向同时包含 `ffmpeg.exe` 和 `ffprobe.exe` 的目录：
@@ -123,15 +124,15 @@ $env:TTCUT_E2E_ELECTRON='D:\path\to\electron.exe'
 npm run test:e2e
 ```
 
-125%、150%、200% 的 Electron 布局用例属于自动化 DPI 预检查，不能替代在对应 Windows 登录缩放下执行的干净系统安装与人工验收。
+125%、150%、200% 的 Electron 布局用例用于当前机器上的自动化 DPI 回归检查，不构成跨 Windows 版本认证。系统、架构和组件兼容性由应用启动自检与任务前检查共同保证，详见 [Windows 兼容策略](docs/windows-compatibility.md)。
 
 ## 已知限制
 
 - 当前只接受单个 MP4 视频。
 - 板数是弹跳代理值，不是真实击球计数。
-- 安装程序尚未进行可信 Authenticode 签名。
+- 安装程序采用 `CN=weiye` 自签名 Authenticode；Windows 默认不信任该证书，SmartScreen 警告仍可能出现。
 - 当前关闭自动更新；新版本需从 GitHub Release 手动安装。
-- Windows 10 22H2 作为兼容平台，正式支持平台为仍处于支持周期的 Windows 11 x64。
+- 支持 Windows 10 22H2 x64（build 19045）和 Windows 11 x64（Client build 22000 及以上）；不支持旧版 Windows 10、x86、ARM64 和 Windows Server。
 
 ## 许可
 

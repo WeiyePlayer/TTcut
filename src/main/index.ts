@@ -22,6 +22,7 @@ import { probeVideo } from './probe';
 import { cancelAllTasks, cancelTask, hasActiveTasks } from './processes';
 import { loadSettings, saveSettings } from './settings';
 import { handleSquirrelStartup } from './squirrel-startup';
+import { assertPlatformCompatible, getPlatformCompatibility } from './platform-compatibility';
 
 const squirrelStartup = handleSquirrelStartup();
 
@@ -62,17 +63,37 @@ async function selectedVideo(filePath: string) {
 }
 
 function registerIpc(): void {
-  ipcMain.handle(IPC.appBootstrap, async () => ({
-    version: app.getVersion(),
-    settings: await loadSettings(),
-    components: await inspectComponents(),
-    componentSetup: await componentSetupInfo(),
-    logsPath: getLogDirectory(),
-  }));
+  ipcMain.handle(IPC.appBootstrap, async () => {
+    const [settings, components, setup, platformCompatibility] = await Promise.all([
+      loadSettings(), inspectComponents(), componentSetupInfo(), getPlatformCompatibility(),
+    ]);
+    const downloadsAllowed = platformCompatibility.status === 'supported';
+    return {
+      version: app.getVersion(),
+      settings,
+      components,
+      componentSetup: {
+        analysis_offer: setup.analysis_offer
+          ? { ...setup.analysis_offer, available_for_download: setup.analysis_offer.available_for_download && downloadsAllowed }
+          : null,
+        media_offer: setup.media_offer
+          ? { ...setup.media_offer, available_for_download: setup.media_offer.available_for_download && downloadsAllowed }
+          : null,
+      },
+      platformCompatibility,
+      logsPath: getLogDirectory(),
+    };
+  });
   ipcMain.handle(IPC.settingsSave, (_event, value: unknown) => saveSettings(appSettingsSchema.parse(value)));
   ipcMain.handle(IPC.componentsRefresh, () => inspectComponents());
-  ipcMain.handle(IPC.componentsInstallAnalysis, (_event, consent: unknown) => startAnalysisComponentInstall(currentWindow(), consent));
-  ipcMain.handle(IPC.componentsInstallMedia, (_event, consent: unknown) => startMediaComponentInstall(currentWindow(), consent));
+  ipcMain.handle(IPC.componentsInstallAnalysis, async (_event, consent: unknown) => {
+    await assertPlatformCompatible();
+    return startAnalysisComponentInstall(currentWindow(), consent);
+  });
+  ipcMain.handle(IPC.componentsInstallMedia, async (_event, consent: unknown) => {
+    await assertPlatformCompatible();
+    return startMediaComponentInstall(currentWindow(), consent);
+  });
   ipcMain.handle(IPC.videoSelect, async () => {
     if (e2eHarnessEnabled()) {
       const fixture = process.env.TTCUT_E2E_VIDEO;
@@ -93,7 +114,8 @@ function registerIpc(): void {
     if (typeof value !== 'string') throw new Error('INVALID_INPUT');
     return probeVideo(value);
   });
-  ipcMain.handle(IPC.analysisStart, (_event, value: unknown) => {
+  ipcMain.handle(IPC.analysisStart, async (_event, value: unknown) => {
+    await assertPlatformCompatible();
     if (!value || typeof value !== 'object') throw new Error('INVALID_REQUEST');
     const record = value as Record<string, unknown>;
     if (typeof record.videoPath !== 'string') throw new Error('INVALID_REQUEST');
@@ -105,7 +127,10 @@ function registerIpc(): void {
       device,
     });
   });
-  ipcMain.handle(IPC.exportStart, (_event, value: unknown) => startExport(currentWindow(), cutSelectionSchema.parse(value)));
+  ipcMain.handle(IPC.exportStart, async (_event, value: unknown) => {
+    await assertPlatformCompatible();
+    return startExport(currentWindow(), cutSelectionSchema.parse(value));
+  });
   ipcMain.handle(IPC.historyList, async () => {
     const entries = await getHistoryStore().list(!hasActiveTasks());
     return historySummarySchema.array().parse(entries.map(({ record, coverPath, sourceStatus }) => ({
@@ -221,6 +246,9 @@ async function createWindow(): Promise<void> {
 }
 
 if (!squirrelStartup) app.whenReady().then(async () => {
+  const compatibility = await getPlatformCompatibility();
+  await logLine('app', compatibility.status === 'supported' ? 'INFO' : 'WARN', `Platform compatibility: ${JSON.stringify(compatibility)}`)
+    .catch(() => undefined);
   try {
     await recoverComponentInstallState();
   } catch (error) {

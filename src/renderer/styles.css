@@ -202,6 +202,8 @@ td input { accent-color: var(--blue); }
 .settings-grid { display: grid; gap: 14px; }
 .setting-card, .actions-card { min-height: 84px; padding: 18px; display: flex; align-items: center; gap: 14px; }
 .setting-card .segmented { margin-left: auto; }
+.platform-card > div { margin-right: auto; }
+.platform-card p { max-width: 620px; line-height: 1.5; }
 .timing-setting-card { padding: 18px; display: grid; grid-template-columns: minmax(180px, .7fr) minmax(320px, 1.3fr); gap: 18px; align-items: center; }
 .timing-setting-card .choice-row { margin-top: 0; }
 .components-card > h2 { padding: 18px 18px 0; }
@@ -212,6 +214,8 @@ td input { accent-color: var(--blue); }
 .component-row span:not(.status) { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
 .status { padding: 4px 8px; border-radius: 7px; background: #f2f2f2; color: var(--muted); font-size: 11px; }
 .status.ok { background: #eaf6ed; color: #27833d; }
+.status.blocked { background: #fff0ef; color: #982222; }
+.platform-notice { border-color: #efc5c2; background: #fff7f6; }
 .actions-card > div { margin-right: auto; }
 .setup-card { padding: 18px; }
 .setup-heading { display: flex; align-items: flex-start; gap: 18px; }

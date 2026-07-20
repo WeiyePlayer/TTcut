@@ -183,6 +183,22 @@ export const componentSetupInfoSchema = z.object({
   media_offer: managedComponentOfferSchema.nullable(),
 }).strict();
 
+export const platformCompatibilitySchema = z.object({
+  status: z.enum(['supported', 'unsupported']),
+  reason: z.enum([
+    'supported',
+    'unsupported_platform',
+    'unsupported_architecture',
+    'unsupported_windows_build',
+    'windows_server',
+    'probe_failed',
+  ]),
+  platform: z.string().min(1),
+  architecture: z.string().min(1),
+  build_number: z.number().int().positive().nullable(),
+  installation_type: z.enum(['Client', 'Server', 'Unknown']),
+}).strict();
+
 export type Calibration = z.infer<typeof calibrationSchema>;
 export type AnalysisRequestV1 = z.infer<typeof analysisRequestSchema>;
 export type VideoMetadata = z.infer<typeof videoMetadataSchema>;
@@ -197,6 +213,7 @@ export type HistorySummaryV1 = z.infer<typeof historySummarySchema>;
 export type ComponentStatus = z.infer<typeof componentStatusSchema>;
 export type ManagedComponentOffer = z.infer<typeof managedComponentOfferSchema>;
 export type ComponentSetupInfo = z.infer<typeof componentSetupInfoSchema>;
+export type PlatformCompatibility = z.infer<typeof platformCompatibilitySchema>;
 
 export type CutGroup = {
   rallyIds: string[];

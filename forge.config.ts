@@ -10,6 +10,8 @@ import type { SignToolOptions as EsmSignToolOptions } from '@electron/windows-si
 import packageJson from './package.json';
 
 const publicReleaseCandidate = process.env.TTCUT_PUBLIC_RC === '1';
+const officialRelease = process.env.TTCUT_OFFICIAL_RELEASE === '1';
+const releaseSigningRequired = publicReleaseCandidate || officialRelease;
 function ignoreUnbuiltSource(file: string): boolean {
   if (!file) return false;
   return !file.startsWith('/.vite');
@@ -17,19 +19,25 @@ function ignoreUnbuiltSource(file: string): boolean {
 const publisherName = process.env.TTCUT_PUBLISHER_NAME?.trim() || 'weiye';
 const certificateFile = process.env.WINDOWS_CERTIFICATE_FILE?.trim();
 const certificatePassword = process.env.WINDOWS_CERTIFICATE_PASSWORD;
-const customSigning = Boolean(process.env.WINDOWS_SIGN_WITH_PARAMS || process.env.WINDOWS_SIGNTOOL_PATH);
+const certificateThumbprint = process.env.WINDOWS_CERTIFICATE_THUMBPRINT?.replace(/\s+/g, '').toUpperCase();
+const signToolPath = process.env.WINDOWS_SIGNTOOL_PATH?.trim();
+const customSigningParams = process.env.WINDOWS_SIGN_WITH_PARAMS?.trim();
+const customSigning = Boolean(customSigningParams || signToolPath || certificateThumbprint);
 const signingConfigured = Boolean((certificateFile && certificatePassword) || customSigning);
 const timestampServer = process.env.WINDOWS_TIMESTAMP_SERVER?.trim() || 'http://timestamp.digicert.com';
 const electronWin32X64Checksums = process.platform === 'win32' && process.arch === 'x64'
   ? { 'electron-v43.1.1-win32-x64.zip': 'b4e9995cd3f65785eb8818276aa9020f3165ab11da41b3c762616d4a0ad8c7ad' }
   : undefined;
 
-if (publicReleaseCandidate && !signingConfigured) {
-  throw new Error('A public release candidate requires Authenticode credentials or a configured hardware/cloud signing command.');
+if (releaseSigningRequired && !signingConfigured) {
+  throw new Error('A public release requires Authenticode credentials or a configured signing command.');
 }
-if (publicReleaseCandidate && certificateFile && !existsSync(certificateFile)) {
+if (releaseSigningRequired && certificateFile && !existsSync(certificateFile)) {
   throw new Error('WINDOWS_CERTIFICATE_FILE does not exist.');
 }
+if (officialRelease && !certificateThumbprint) throw new Error('TTCUT_OFFICIAL_RELEASE requires WINDOWS_CERTIFICATE_THUMBPRINT.');
+if (officialRelease && (!signToolPath || !existsSync(signToolPath))) throw new Error('TTCUT_OFFICIAL_RELEASE requires an existing Windows SDK SignTool path.');
+if (certificateThumbprint && !/^[A-F0-9]{40,64}$/.test(certificateThumbprint)) throw new Error('WINDOWS_CERTIFICATE_THUMBPRINT is invalid.');
 if (!/^https?:\/\//i.test(timestampServer)) throw new Error('WINDOWS_TIMESTAMP_SERVER must be an HTTP(S) RFC 3161 endpoint.');
 
 const signingBase = {
@@ -37,6 +45,11 @@ const signingBase = {
   ...(certificatePassword ? { certificatePassword } : {}),
   timestampServer,
   description: 'TTcut',
+  ...(signToolPath ? { signToolPath } : {}),
+  ...(certificateThumbprint ? {
+    automaticallySelectCertificate: false,
+    signWithParams: ['/sha1', certificateThumbprint],
+  } : customSigningParams ? { signWithParams: customSigningParams } : {}),
   ...(process.env.TTCUT_PUBLISHER_WEBSITE ? { website: process.env.TTCUT_PUBLISHER_WEBSITE } : {}),
 };
 const packagerWindowsSign = signingConfigured ? {

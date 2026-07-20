@@ -1,30 +1,48 @@
-import { spawnSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const catalog = JSON.parse(await readFile(path.join(root, 'resources', 'components.json'), 'utf8'));
-const runtimePart = catalog.analysis_runtime.assets.find((asset) => asset.variant === 'cpu')?.parts[0];
-if (!runtimePart) throw new Error('The production catalog has no CPU runtime part.');
 
-function probe(label, url, expectedSize) {
-  const result = spawnSync('curl.exe', [
-    '--fail', '--location', '--max-redirs', '5', '--proto', '=https', '--proto-redir', '=https',
-    '--connect-timeout', '20', '--retry', '2', '--retry-all-errors', '--range', '0-1023',
-    '--dump-header', '-', '--output', 'NUL', '--silent', '--show-error', '--url', url,
-  ], { encoding: 'utf8', windowsHide: true, timeout: 90_000 });
-  if (result.status !== 0) throw new Error(`${label} curl verification failed: ${result.stderr || result.stdout}`);
-  const statuses = result.stdout.match(/^HTTP\/\S+\s+(\d+)/gim) ?? [];
-  const ranges = result.stdout.match(/^content-range:\s*([^\r\n]+)/gim) ?? [];
-  const status = statuses.at(-1)?.match(/\d+$/)?.[0];
-  const contentRange = ranges.at(-1)?.replace(/^content-range:\s*/i, '').trim();
-  if (status !== '206' || contentRange !== `bytes 0-1023/${expectedSize}`) {
-    throw new Error(`${label} Range verification failed: status=${status}, range=${contentRange}`);
+async function probe(label, url, expectedSize) {
+  if (!url.startsWith('https://')) throw new Error(`${label} does not use HTTPS.`);
+  let lastError;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        headers: {
+          Range: 'bytes=0-1023',
+          'User-Agent': 'TTcut-release-verifier/1.0.0',
+        },
+        redirect: 'follow',
+        signal: AbortSignal.timeout(30_000),
+      });
+      const contentRange = response.headers.get('content-range');
+      const body = new Uint8Array(await response.arrayBuffer());
+      if (!response.url.startsWith('https://')) throw new Error(`redirected to a non-HTTPS URL: ${response.url}`);
+      if (response.status !== 206 || contentRange !== `bytes 0-1023/${expectedSize}` || body.byteLength !== 1024) {
+        throw new Error(`Range verification failed: status=${response.status}, range=${contentRange}, bytes=${body.byteLength}`);
+      }
+      console.log(`${label}: HTTP 206, ${contentRange}`);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 500));
+    }
   }
-  console.log(`${label}: HTTP 206, ${contentRange}`);
+  throw new Error(`${label} HTTPS Range verification failed after 3 attempts: ${String(lastError)}`);
 }
 
-probe('analysis-runtime', runtimePart.url, runtimePart.size_bytes);
-probe('media-runtime', catalog.ffmpeg.url, catalog.ffmpeg.size_bytes);
+const probes = [
+  ['tracknet-weight', catalog.tracknet_weight.url, catalog.tracknet_weight.size_bytes],
+  ...catalog.analysis_runtime.assets.flatMap((asset) => asset.parts.map((part) => [
+    `analysis-${asset.variant}-${part.asset}`,
+    part.url,
+    part.size_bytes,
+  ])),
+  ['media-runtime', catalog.ffmpeg.url, catalog.ffmpeg.size_bytes],
+];
+
+for (const [label, url, expectedSize] of probes) await probe(label, url, expectedSize);
 console.log('Windows component download transport verification passed.');

@@ -72,7 +72,7 @@ const faqs = [
   },
   {
     question: "Windows 为什么提示未知发布者？",
-    answer: "v1.0.0 预发布安装包尚未进行 Authenticode 签名，因此可能触发 SmartScreen。请只从本项目的 GitHub Release 页面下载。",
+    answer: "v1.0.0 使用 CN=weiye 自签名 Authenticode，但证书不受 Windows 公共信任，因此仍可能触发未知发布者或 SmartScreen。请只从本项目 GitHub Release 下载并核对 SHA-256。",
   },
 ];
 
@@ -98,7 +98,7 @@ export default function Home() {
 
       <section className="hero section-shell" id="top">
         <div className="hero-copy">
-          <p className="eyebrow">Windows 10 / 11 · 本地离线处理</p>
+          <p className="eyebrow">Windows 10 22H2 / Windows 11 x64 · 本地离线处理</p>
           <h1>识别每个回合，<br />剪出一场好球。</h1>
           <p className="hero-intro">
             TTcut 为乒乓球视频自动定位有效回合。完成一次球桌标定，即可选择想保留的内容并导出成片。
@@ -280,7 +280,7 @@ export default function Home() {
       </section>
 
       <section className="final-cta section-shell">
-        <p className="eyebrow">TTcut v1.0.0 Pre-release</p>
+        <p className="eyebrow">TTcut v1.0.0 正式版</p>
         <h2>下一场好球，<br />从这里开始。</h2>
         <p>下载 Windows x64 版本，让比赛视频留在本地，让精彩回合更容易被看见。</p>
         <a className="button button-light" href={releaseUrl} target="_blank" rel="noreferrer">前往 GitHub 下载 <ArrowIcon /></a>

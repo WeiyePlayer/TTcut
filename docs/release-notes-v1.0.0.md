@@ -1,6 +1,13 @@
 # TTcut v1.0.0
 
-这是 TTcut 的首个公开 Pre-release：在 Windows 10/11 x64 上本地识别乒乓球回合，并按选择结果自动剪辑 MP4 视频。视频分析、回合选择、剪辑和预览均在本机完成，不上传视频、不要求登录。
+TTcut 是面向 Windows 10 22H2 x64 与 Windows 11 x64 Client 的本地乒乓球回合分析与自动视频剪辑工具。视频分析、回合选择、剪辑和预览均在本机完成，不上传视频、不要求登录。
+
+## 系统要求
+
+- Windows 10 22H2 x64（build `19045`）
+- Windows 11 x64 Client（build `>=22000`）
+
+不支持旧版 Windows 10、Windows Server、x86 或 ARM64。应用会在启动时自检系统 build、版本类型和架构；不兼容时保留设置、许可及日志入口，但禁用组件安装、分析和导出。
 
 ## 主要功能
 
@@ -8,7 +15,7 @@
 - 所有回合、精彩回合和自定义三种剪辑模式。
 - 自定义回合预览、前后时间设置和安全的 MP4 导出。
 - 历史剪辑保存同一视频的分析结果，可直接回到模式选择页面。
-- 输出文件自动避让同名文件，并在完成后进行可读性和音画校验。
+- 输出文件自动避让同名文件，并在完成后校验可读性和音画状态。
 
 ## 快速使用
 
@@ -21,23 +28,32 @@
 
 ## 组件下载
 
-首次使用需要联网。分析组件会下载受管 CPU/CUDA 运行环境和固定模型文件；模型属于分析组件，但不会在设置页单独显示。完成安装后可离线分析。
+首次使用需要联网。分析组件会下载受管 CPU/CUDA 运行环境和固定模型文件；模型属于分析组件，但不会在设置页单独显示。组件安装完成后可以离线分析。
 
-- 分析运行时：[`analysis-3.12.13-2.12.1-r1`](https://github.com/WeiyePlayer/TTcut-runtime-assets/releases/tag/analysis-3.12.13-2.12.1-r1)
-- 固定模型：[`tracknet-weight-1.0.0`](https://github.com/WeiyePlayer/TTcut-runtime-assets/releases/tag/tracknet-weight-1.0.0)
+- [分析运行时](https://github.com/WeiyePlayer/TTcut-runtime-assets/releases/tag/analysis-3.12.13-2.12.1-r1)
+- [固定模型](https://github.com/WeiyePlayer/TTcut-runtime-assets/releases/tag/tracknet-weight-1.0.0)
 
-## 安装包校验
+## 下载与校验
 
 - `TTcut-1.0.0-x64-Setup.exe`
-- 大小：144,757,248 字节
-- SHA-256：`5ed76791b120599520abe865f0abf45439b6609fb1e9ae653dc04a766b584632`
+- 大小：144,831,592 字节
+- SHA-256：`45a1d704e906f1a825b64f8998e1409f9670d3282f2754c2bbf14e0009219e0e`
 
 同时提供 `SHA256SUMS.txt` 和 CycloneDX `sbom.cdx.json`。
 
+安装包使用主题 `CN=weiye`、thumbprint `F840029C794D8925B6F9815B10FD2850CB608A9E` 的自签名 Authenticode，并带 SHA-256 RFC 3161 时间戳。自签名证书不受 Windows 公共信任，仍可能触发“未知发布者”或 SmartScreen；请只从本项目 Release 下载，并核对 SHA-256。签名证明文件在签名后未被修改，不代表公共 CA 背书。
+
+## 2026-07-20 同版本资产替换
+
+本次将原 `v1.0.0` Pre-release 更新为正式 Release，并用带自签名的正式构建替换同名三个资产。旧安装包 SHA-256 为：
+
+`5ed76791b120599520abe865f0abf45439b6609fb1e9ae653dc04a766b584632`
+
+替换会重置资产下载统计。此前下载的旧文件仍应使用旧哈希校验。
+
 ## 已知限制
 
-- 安装包尚未进行 Authenticode 签名，Windows SmartScreen 可能显示未知发布者警告。
-- Windows 10/11 干净系统以及 125%/150%/200% DPI 的完整矩阵尚未完成。
-- 目前只支持单个 MP4；不提供真实击球检测、字幕、水印、音乐或自动更新。
-
-因此本版本标记为 Pre-release，不应视为已签名正式版。
+- 当前只支持单个 MP4。
+- “板数”是弹跳代理值，不提供真实击球检测。
+- 不提供字幕、水印、音乐或自动更新。
+- 自签名证书不具备公共信任，SmartScreen 警告仍可能出现。

@@ -70,14 +70,14 @@ try {
   for (const result of results) {
     for (const artifact of result.artifacts) console.log(`Created installer artifact: ${artifact}`);
   }
-  if (process.env.TTCUT_PUBLIC_RC === '1') {
+  if (process.env.TTCUT_PUBLIC_RC === '1' || process.env.TTCUT_OFFICIAL_RELEASE === '1') {
     const verification = childProcess.spawnSync(process.execPath, [path.join(root, 'scripts', 'verify-signatures.mjs')], {
       cwd: root,
       env: process.env,
       stdio: 'inherit',
       windowsHide: true,
     });
-    if (verification.status !== 0) throw new Error('Public RC signature verification failed.');
+    if (verification.status !== 0) throw new Error('Public release signature verification failed.');
   }
 } finally {
   childProcess.spawn = originalSpawn;

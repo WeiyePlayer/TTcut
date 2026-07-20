@@ -12,6 +12,7 @@
     "stage:release": "node scripts/stage-worker.mjs && node scripts/generate-release-metadata.mjs",
     "package": "node scripts/stage-worker.mjs && node scripts/generate-release-metadata.mjs && electron-forge package --arch=x64",
     "make": "node scripts/stage-worker.mjs && node scripts/generate-release-metadata.mjs && node scripts/make.mjs",
+    "make:official": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-official-release.ps1",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

@@ -38,8 +38,8 @@ node scripts/package-analysis-runtime.mjs cu126 D:\prepared\ttcut-analysis-3.12.
 1. 把 CPU ZIP 和 cu126 固定分片上传到不可变、支持 HTTPS 和 Range 请求的正式发布资产位置。cu126 完整 ZIP 超过 GitHub 单资产限制，因此由 `scripts/split-runtime-asset.mjs` 切成 1,000,000,000、1,000,000,000 和 766,688,555 字节三个有序分片。
 2. 将真实 URL、大小和 SHA-256 写入 `resources/components.json` 的 `analysis_runtime.assets`；禁止 `latest`、可覆盖对象或占位 URL。
 3. CPU 与 cu126 两个描述必须齐全，目录和 variant 必须匹配。
-4. 用下载后的资产在无 NVIDIA 和有 NVIDIA 的干净系统分别完成自检及真实 Worker 验证。
-5. 运行 `TTCUT_PUBLIC_RC=1` 的发布审计；资产缺少、URL仍是占位值或哈希不匹配都会阻止公开 RC。
+4. 在当前发布机执行 CPU 运行时自检、可用 CUDA 运行时自检和真实 Worker 验证；不再要求跨机器发布矩阵。
+5. 运行 `TTCUT_OFFICIAL_RELEASE=1` 的发布审计；资产缺少、URL仍是占位值或哈希不匹配都会阻止正式构建。
 
 当前资产固定在 [WeiyePlayer/TTcut-runtime-assets `analysis-3.12.13-2.12.1-r1`](https://github.com/WeiyePlayer/TTcut-runtime-assets/releases/tag/analysis-3.12.13-2.12.1-r1)。2026-07-18 已验证四个远端对象的文件名、字节数、GitHub SHA-256 摘要和 `206 Partial Content` Range 响应。安装器逐片校验后顺序合并，并再次校验完整 ZIP 哈希。
 

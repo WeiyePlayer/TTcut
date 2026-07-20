@@ -130,9 +130,15 @@ check(componentCatalog.tracknet_weight?.install_directory === 'models', 'The man
 check(/^[a-f0-9]{64}$/.test(componentCatalog.ffmpeg?.sha256 ?? ''), 'The fixed FFmpeg archive hash is missing.');
 
 const publicReleaseCandidate = process.env.TTCUT_PUBLIC_RC === '1';
-if (publicReleaseCandidate) {
-  check((process.env.TTCUT_PUBLISHER_NAME?.trim() || packageJson.author) === 'weiye', 'Public RC publisher must be weiye.');
-  check(Boolean((process.env.WINDOWS_CERTIFICATE_FILE && process.env.WINDOWS_CERTIFICATE_PASSWORD) || process.env.WINDOWS_SIGN_WITH_PARAMS || process.env.WINDOWS_SIGNTOOL_PATH), 'Public RC Authenticode credentials are missing.');
+const officialRelease = process.env.TTCUT_OFFICIAL_RELEASE === '1';
+const releaseSigningRequired = publicReleaseCandidate || officialRelease;
+if (releaseSigningRequired) {
+  check((process.env.TTCUT_PUBLISHER_NAME?.trim() || packageJson.author) === 'weiye', 'Public release publisher must be weiye.');
+  check(Boolean((process.env.WINDOWS_CERTIFICATE_FILE && process.env.WINDOWS_CERTIFICATE_PASSWORD) || process.env.WINDOWS_CERTIFICATE_THUMBPRINT || process.env.WINDOWS_SIGN_WITH_PARAMS), 'Public release Authenticode credentials are missing.');
+  if (officialRelease) {
+    check(/^[A-Fa-f0-9]{40,64}$/.test(process.env.WINDOWS_CERTIFICATE_THUMBPRINT ?? ''), 'Official release certificate thumbprint is missing or invalid.');
+    check(Boolean(process.env.WINDOWS_SIGNTOOL_PATH), 'Official release Windows SDK SignTool path is missing.');
+  }
   const runtimeAssets = componentCatalog.analysis_runtime?.assets ?? [];
   check(runtimeAssets.length === 2 && new Set(runtimeAssets.map((asset) => asset.variant)).size === 2, 'Public RC requires immutable CPU and cu126 runtime assets.');
   check(runtimeAssets.every((asset) => Array.isArray(asset.parts) && asset.parts.length > 0 && asset.parts.every((part) => part.url.startsWith('https://') && !part.url.includes('REPLACE-') && /^[a-f0-9]{64}$/.test(part.sha256))), 'Public RC runtime asset part URLs or hashes are not immutable production values.');
@@ -163,7 +169,9 @@ for (const fuse of [
 }
 check(forgeSource.includes("extraResource: ['.runtime/worker'"), 'Forge does not package the staged minimal Worker.');
 check(forgeSource.includes("'.runtime/release-metadata'"), 'Forge does not package generated license metadata.');
-check(forgeSource.includes("process.env.TTCUT_PUBLIC_RC === '1'"), 'Forge does not enforce the public RC signing mode.');
+check(forgeSource.includes("process.env.TTCUT_PUBLIC_RC === '1'"), 'Forge does not retain the public RC signing mode.');
+check(forgeSource.includes("process.env.TTCUT_OFFICIAL_RELEASE === '1'"), 'Forge does not enforce the official release signing mode.');
+check(forgeSource.includes('WINDOWS_CERTIFICATE_THUMBPRINT'), 'Forge does not pin the official signer certificate thumbprint.');
 check(forgeSource.includes('TTCUT_PUBLISHER_NAME'), 'Forge does not require an explicit personal publisher name.');
 check(forgeSource.includes('windowsSign'), 'Forge Authenticode integration is missing.');
 check(forgeSource.includes('electron-v43.1.1-win32-x64.zip'), 'Pinned Electron Windows archive name is missing.');

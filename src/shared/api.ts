@@ -7,6 +7,7 @@ import type {
   CutSelectionV1,
   ExportResult,
   HistorySummaryV1,
+  PlatformCompatibility,
   TaskProgress,
   VideoMetadata,
 } from './contracts';
@@ -23,6 +24,7 @@ export type BootstrapData = {
   settings: AppSettings;
   components: ComponentStatus;
   componentSetup: ComponentSetupInfo;
+  platformCompatibility: PlatformCompatibility;
   logsPath: string;
 };
 

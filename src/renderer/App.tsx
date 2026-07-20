@@ -242,12 +242,22 @@ export function App() {
   const [historyConfirmation, setHistoryConfirmation] = useState<{ kind: 'delete'; id: string } | { kind: 'clear' } | null>(null);
   const [previewRally, setPreviewRally] = useState<Rally | null>(null);
   const t = messages(settings.language as Language);
+  const platformSupported = bootstrap?.platformCompatibility.status === 'supported';
+  const platformDetail = !bootstrap
+    ? ''
+    : platformSupported
+      ? interpolate(t.platformSupportedDetail, { build: bootstrap.platformCompatibility.build_number ?? '—' })
+      : bootstrap.platformCompatibility.reason === 'probe_failed'
+        ? t.platformProbeFailedDetail
+        : t.platformUnsupportedDetail;
 
   useEffect(() => {
     void window.ttcut.bootstrap().then((data) => {
       setBootstrap(data);
       setSettings(data.settings);
-      if (!data.components.analysis.available || !data.components.media.available) setView('settings');
+      if (data.platformCompatibility.status !== 'supported' || !data.components.analysis.available || !data.components.media.available) {
+        setView('settings');
+      }
     });
     const removeTask = window.ttcut.onTaskEvent((event: AppEvent) => {
       if (event.type === 'progress') {
@@ -326,7 +336,7 @@ export function App() {
   const selectedCount = mode === 'all' ? analysis?.rallies.length ?? 0 : mode === 'highlight' ? highlights.length : customIds.size;
 
   const startAnalysis = async () => {
-    if (!video || !metadata || !calibrationValue || calibrationIssue || !bootstrap?.components.analysis.available) return;
+    if (!video || !metadata || !calibrationValue || calibrationIssue || !platformSupported || !bootstrap?.components.analysis.available) return;
     setStep('analyzing'); setProgress({ percent: 0, stage: 'load_model' });
     try {
       setActiveTask(await window.ttcut.startAnalysis({ videoPath: video.path, calibration: calibrationValue, device: 'auto' }));
@@ -336,7 +346,7 @@ export function App() {
   };
 
   const startCutting = async () => {
-    if (!analysis || !bootstrap?.components.media.available || selectedCount === 0) return;
+    if (!analysis || !platformSupported || !bootstrap?.components.media.available || selectedCount === 0) return;
     let selection: CutSelectionV1;
     const common = { pre_roll_seconds: settings.pre_roll_seconds, post_roll_seconds: settings.post_roll_seconds } as const;
     if (mode === 'all') selection = { mode, ...common };
@@ -426,24 +436,36 @@ export function App() {
   const installMediaComponent = async () => {
     setSetupOutcome(null);
     setSetupFailureCode(null);
+    if (!platformSupported) {
+      setSetupOutcome('failed');
+      setSetupFailureCode(bootstrap?.platformCompatibility.reason === 'probe_failed' ? 'PLATFORM_PROBE_FAILED' : 'PLATFORM_UNSUPPORTED');
+      return;
+    }
     try {
       const taskId = await window.ttcut.installMediaComponent(true);
       setupTaskRef.current = taskId;
       setSetupTask(taskId);
-    } catch {
+    } catch (caught) {
       setSetupOutcome('failed');
+      setSetupFailureCode(errorCode(caught));
     }
   };
 
   const installAnalysisComponent = async () => {
     setSetupOutcome(null);
     setSetupFailureCode(null);
+    if (!platformSupported) {
+      setSetupOutcome('failed');
+      setSetupFailureCode(bootstrap?.platformCompatibility.reason === 'probe_failed' ? 'PLATFORM_PROBE_FAILED' : 'PLATFORM_UNSUPPORTED');
+      return;
+    }
     try {
       const taskId = await window.ttcut.installAnalysisComponent(true);
       setupTaskRef.current = taskId;
       setSetupTask(taskId);
-    } catch {
+    } catch (caught) {
       setSetupOutcome('failed');
+      setSetupFailureCode(errorCode(caught));
     }
   };
 
@@ -497,6 +519,10 @@ export function App() {
                   <button className={settings.language === 'en' ? 'selected' : ''} onClick={() => void changeLanguage('en')}>{t.english}</button>
                 </div>
               </article>
+              <article className="card setting-card platform-card">
+                <div><h2>{t.platformCompatibility}</h2><p>{platformDetail}</p></div>
+                <span className={`status ${platformSupported ? 'ok' : 'blocked'}`}>{platformSupported ? t.platformSupported : t.platformUnsupported}</span>
+              </article>
               <article className="card timing-setting-card">
                 <div><h2>{t.preRoll}</h2><p>{t.preRollSettingDetail}</p></div>
                 <div className="choice-row">{([1.5, 2.5, 5] as const).map((value, index) => <button className={settings.pre_roll_seconds === value ? 'selected' : ''} key={value} onClick={() => void saveRolls({ pre_roll_seconds: value })}><strong>{[t.short, t.medium, t.long][index]}</strong><span>{value} s</span></button>)}</div>
@@ -523,14 +549,14 @@ export function App() {
                 ) : (
                   <div className="setup-options">
                     {bootstrap?.componentSetup.analysis_offer && !bootstrap.components.analysis.available && (
-                      <div className="setup-option"><div><strong>{t.analysisOffer}</strong><span>{t.analysisOfferDetail}</span><small>{interpolate(t.downloadUpTo, { size: fileSize(bootstrap.componentSetup.analysis_offer.download_size_bytes) })}</small></div><div><button className="text-button" onClick={() => void window.ttcut.openExternalUrl(bootstrap.componentSetup.analysis_offer!.license_url)}>{t.viewLicense}</button><button className="primary" disabled={!bootstrap.componentSetup.analysis_offer.available_for_download} onClick={() => void installAnalysisComponent()}>{t.consentInstall}</button></div></div>
+                      <div className="setup-option"><div><strong>{t.analysisOffer}</strong><span>{t.analysisOfferDetail}</span><small>{interpolate(t.downloadUpTo, { size: fileSize(bootstrap.componentSetup.analysis_offer.download_size_bytes) })}</small></div><div><button className="text-button" onClick={() => void window.ttcut.openExternalUrl(bootstrap.componentSetup.analysis_offer!.license_url)}>{t.viewLicense}</button><button className="primary" disabled={!platformSupported || !bootstrap.componentSetup.analysis_offer.available_for_download} onClick={() => void installAnalysisComponent()}>{t.consentInstall}</button></div></div>
                     )}
                     {bootstrap?.componentSetup.media_offer && !bootstrap.components.media.available && (
-                      <div className="setup-option"><div><strong>{t.mediaOffer}</strong><span>{t.mediaOfferDetail}</span><small>{interpolate(t.downloadSize, { size: fileSize(bootstrap.componentSetup.media_offer.download_size_bytes) })}</small></div><div><button className="text-button" onClick={() => void window.ttcut.openExternalUrl(bootstrap.componentSetup.media_offer!.license_url)}>{t.viewLicense}</button><button className="primary" disabled={!bootstrap.componentSetup.media_offer.available_for_download} onClick={() => void installMediaComponent()}>{t.consentInstall}</button></div></div>
+                      <div className="setup-option"><div><strong>{t.mediaOffer}</strong><span>{t.mediaOfferDetail}</span><small>{interpolate(t.downloadSize, { size: fileSize(bootstrap.componentSetup.media_offer.download_size_bytes) })}</small></div><div><button className="text-button" onClick={() => void window.ttcut.openExternalUrl(bootstrap.componentSetup.media_offer!.license_url)}>{t.viewLicense}</button><button className="primary" disabled={!platformSupported || !bootstrap.componentSetup.media_offer.available_for_download} onClick={() => void installMediaComponent()}>{t.consentInstall}</button></div></div>
                     )}
                   </div>
                 )}
-                {setupOutcome && <p className={`setup-outcome ${setupOutcome}`}>{setupOutcome === 'success' ? t.setupSuccess : setupOutcome === 'cancelled' ? t.setupCancelled : setupFailureCode === 'COMPONENT_DOWNLOAD_RETRY_EXHAUSTED' ? t.setupNetworkFailed : t.setupFailed}</p>}
+                {setupOutcome && <p className={`setup-outcome ${setupOutcome}`}>{setupOutcome === 'success' ? t.setupSuccess : setupOutcome === 'cancelled' ? t.setupCancelled : setupFailureCode === 'COMPONENT_DOWNLOAD_RETRY_EXHAUSTED' ? t.setupNetworkFailed : setupFailureCode === 'PLATFORM_UNSUPPORTED' || setupFailureCode === 'PLATFORM_PROBE_FAILED' ? localizedError(setupFailureCode, t) : t.setupFailed}</p>}
               </article>
               <article className="card actions-card">
                 <div><h2>{t.version}</h2><p>{bootstrap?.version ?? '1.0.0'}</p></div>
@@ -564,7 +590,10 @@ export function App() {
           </section>
         ) : (
           <section className="page auto-page">
-            {bootstrap && (!bootstrap.components.analysis.available || !bootstrap.components.media.available) && step === 'select' && (
+            {bootstrap && !platformSupported && step === 'select' && (
+              <div className="notice platform-notice"><strong>{t.platformUnsupported}</strong><span>{platformDetail}</span><button className="secondary" onClick={() => setView('settings')}>{t.openSetup}</button></div>
+            )}
+            {bootstrap && platformSupported && (!bootstrap.components.analysis.available || !bootstrap.components.media.available) && step === 'select' && (
               <div className="notice"><strong>{t.componentMissing}</strong><span>{t.componentMissingDetail}</span><button className="secondary" onClick={() => setView('settings')}>{t.openSetup}</button></div>
             )}
             {step === 'select' && (
@@ -600,7 +629,7 @@ export function App() {
                 <CalibrationSurface video={video} metadata={metadata} points={points} onPointsChange={setPoints} />
                 <div className="point-legend">{[t.point1, t.point2, t.point3, t.point4].map((label, index) => <span className={points[pointOrder[index]!] ? 'done' : ''} key={label}><b>{index + 1}</b>{label.replace(/^\d\s/, '')}</span>)}</div>
                 {calibrationIssue && <p className="calibration-error" role="alert">{t.invalidCalibration}</p>}
-                <div className="footer-actions"><button className="secondary" onClick={() => setPoints({})}>{t.resetPoints}</button><button className="primary" disabled={!allPoints || Boolean(calibrationIssue) || !bootstrap?.components.analysis.available} onClick={() => void startAnalysis()}>{t.startAnalysis}</button></div>
+                <div className="footer-actions"><button className="secondary" onClick={() => setPoints({})}>{t.resetPoints}</button><button className="primary" disabled={!allPoints || Boolean(calibrationIssue) || !platformSupported || !bootstrap?.components.analysis.available} onClick={() => void startAnalysis()}>{t.startAnalysis}</button></div>
               </div>
             )}
 
@@ -631,7 +660,7 @@ export function App() {
                 </div>
                 {mode === 'highlight' && <div className="card inline-setting"><div><h2>{t.threshold}</h2><p>{t.highlightDetail}</p></div><div className="segmented">{([3, 5, 7] as const).map((value) => <button key={value} className={threshold === value ? 'selected' : ''} onClick={() => setThreshold(value)}>&gt; {value}</button>)}</div>{highlights.length === 0 && <span className="inline-error">{t.noHighlights}</span>}</div>}
                 {mode === 'custom' && <div className="rally-table card"><div className="table-tools"><button className="text-button" onClick={() => setCustomIds(new Set(analysis.rallies.map((rally) => rally.id)))}>{t.selectAll}</button><button className="text-button" onClick={() => setCustomIds(new Set())}>{t.clearAll}</button></div><div className="table-scroll"><table><thead><tr><th /><th>{t.rally}</th><th>{t.strokes}</th><th>{t.start}</th><th>{t.end}</th><th>{t.preview}</th></tr></thead><tbody>{analysis.rallies.map((rally: Rally) => <tr key={rally.id}><td><input type="checkbox" checked={customIds.has(rally.id)} onChange={(event) => { const next = new Set(customIds); if (event.target.checked) next.add(rally.id); else next.delete(rally.id); setCustomIds(next); }} /></td><td>{rally.index}</td><td>{rally.bounce_count}</td><td>{formatTimestamp(rally.start_time_seconds)}</td><td>{formatTimestamp(rally.end_time_seconds)}</td><td><button className="text-button" onClick={() => setPreviewRally(rally)}>{t.preview}</button></td></tr>)}</tbody></table></div></div>}
-                <div className="footer-actions"><span>{selectedCount} / {analysis.rallies.length}</span><button className="primary" disabled={selectedCount === 0 || !bootstrap?.components.media.available} onClick={() => void startCutting()}>{t.startCutting}</button></div>
+                <div className="footer-actions"><span>{selectedCount} / {analysis.rallies.length}</span><button className="primary" disabled={selectedCount === 0 || !platformSupported || !bootstrap?.components.media.available} onClick={() => void startCutting()}>{t.startCutting}</button></div>
               </div>
             )}
 
