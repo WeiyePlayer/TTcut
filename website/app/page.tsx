@@ -59,10 +59,6 @@ const faqs = [
     answer: "当前一次处理一个 MP4 视频。拖入多个文件或其他格式时，软件会提示重新选择。",
   },
   {
-    question: "“板数”是真实击球次数吗？",
-    answer: "不是。当前版本以识别到的弹跳次数作为板数代理值，适合筛选较长回合，但不代表球拍实际击球次数。",
-  },
-  {
     question: "使用时必须联网吗？",
     answer: "首次安装分析组件和视频处理组件时需要联网。设置完成后，分析、预览和剪辑都可以离线完成。",
   },
@@ -231,26 +227,6 @@ export default function Home() {
             <div className="selection-lines"><i></i><i className="checked"></i><i></i><i className="checked"></i></div>
           </article>
         </div>
-        <p className="proxy-note"><span>说明</span> 当前版本的“板数”使用识别到的弹跳次数作为代理值，并非球拍实际击球次数。</p>
-      </section>
-
-      <section className="timing-section content-section">
-        <div className="section-shell timing-layout">
-          <div className="section-heading compact">
-            <p className="eyebrow">不让精彩戛然而止</p>
-            <h2>回合前后，<br />都留一点呼吸。</h2>
-            <p>导出采用设置中的回合前、回合后时间；回合预览则固定前后各 1 秒。</p>
-          </div>
-          <div className="timeline-card">
-            <div className="timeline-labels"><span>回合前</span><b>有效回合</b><span>回合后</span><i>收尾 +1 秒</i></div>
-            <div className="timeline-bar"><span></span><b></b><span></span><i></i></div>
-            <div className="timeline-details">
-              <div><small>导出</small><strong>采用设置中的时间</strong></div>
-              <div><small>预览</small><strong>前后固定各 1 秒</strong></div>
-              <div><small>剪辑组结尾</small><strong>最后一回合额外 +1 秒</strong></div>
-            </div>
-          </div>
-        </div>
       </section>
 
       <section className="section-shell content-section history-section">
@@ -258,7 +234,7 @@ export default function Home() {
           <div className="history-card history-back"><div></div><span></span><i></i></div>
           <div className="history-card history-front">
             <div className="history-cover"><span className="play-dot">▶</span></div>
-            <div className="history-copy"><b>1-193.mp4</b><span>47 个回合</span><small>00:08:27.440</small></div>
+            <div className="history-copy"><b>TTcut.mp4</b><span>47 个回合</span><small>00:08:27.440</small></div>
           </div>
         </div>
         <div className="section-heading compact history-text">

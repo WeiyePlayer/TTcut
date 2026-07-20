@@ -17,6 +17,7 @@ test("renders the TTcut product page", async () => {
   assert.match(html, /自定义/);
   assert.match(html, /历史剪辑/);
   assert.match(html, /不上传视频/);
+  assert.match(html, /TTcut\.mp4/);
   assert.match(html, /https:\/\/ttcut\.vercel\.app\/og\.png/);
   const visibleHtml = html.replace(/<script[\s\S]*?<\/script>/gi, "");
   const downloadUrl = "https://github.com/WeiyePlayer/TTcut/releases/download/v1.0.0/TTcut-1.0.0-x64-Setup.exe";
@@ -24,6 +25,9 @@ test("renders the TTcut product page", async () => {
   assert.doesNotMatch(visibleHtml, /releases\/tag\/v1\.0\.0/);
   assert.equal(visibleHtml.match(/>前往Github(?:\s|<)/g)?.length, 1);
   assert.match(visibleHtml, /href="https:\/\/github\.com\/WeiyePlayer\/TTcut"[^>]*>前往Github/);
+  assert.doesNotMatch(visibleHtml, /1-193\.mp4/);
+  assert.doesNotMatch(visibleHtml, /板数.*真实击球次数/);
+  assert.doesNotMatch(visibleHtml, /回合前后.*都留一点呼吸/);
 });
 
 test("does not expose implementation architecture", async () => {
