@@ -1,4 +1,4 @@
-const releaseUrl = "https://github.com/WeiyePlayer/TTcut/releases/tag/v1.0.0";
+const downloadUrl = "https://github.com/WeiyePlayer/TTcut/releases/download/v1.0.0/TTcut-1.0.0-x64-Setup.exe";
 const repositoryUrl = "https://github.com/WeiyePlayer/TTcut";
 
 const features = [
@@ -91,7 +91,7 @@ export default function Home() {
           <a href="#modes">剪辑模式</a>
           <a href="#faq">常见问题</a>
         </nav>
-        <a className="button button-small" href={releaseUrl} target="_blank" rel="noreferrer">
+        <a className="button button-small" href={downloadUrl} target="_blank" rel="noreferrer" aria-label="下载 TTcut v1.0.0 Windows x64 安装包">
           下载 <span className="desktop-only">v1.0.0</span><ArrowIcon />
         </a>
       </header>
@@ -104,9 +104,10 @@ export default function Home() {
             TTcut 为乒乓球视频自动定位有效回合。完成一次球桌标定，即可选择想保留的内容并导出成片。
           </p>
           <div className="hero-actions">
-            <a className="button button-primary" href={releaseUrl} target="_blank" rel="noreferrer">
+            <a className="button button-primary" href={downloadUrl} target="_blank" rel="noreferrer" aria-label="下载 TTcut v1.0.0 Windows x64 安装包">
               下载 TTcut <ArrowIcon />
             </a>
+            <a className="button button-secondary" href={repositoryUrl} target="_blank" rel="noreferrer">前往Github <ArrowIcon /></a>
             <a className="button button-secondary" href="#how-it-works">查看使用方法 <span aria-hidden="true">↓</span></a>
           </div>
           <ul className="trust-list" aria-label="隐私特点">
@@ -283,13 +284,13 @@ export default function Home() {
         <p className="eyebrow">TTcut v1.0.0 正式版</p>
         <h2>下一场好球，<br />从这里开始。</h2>
         <p>下载 Windows x64 版本，让比赛视频留在本地，让精彩回合更容易被看见。</p>
-        <a className="button button-light" href={releaseUrl} target="_blank" rel="noreferrer">前往 GitHub 下载 <ArrowIcon /></a>
+        <a className="button button-light" href={downloadUrl} target="_blank" rel="noreferrer" aria-label="下载 TTcut v1.0.0 Windows x64 安装包">下载 TTcut <ArrowIcon /></a>
       </section>
 
       <footer className="site-footer section-shell">
         <a className="brand" href="#top">TTcut</a>
         <p>本地离线乒乓球回合分析与自动剪辑工具。</p>
-        <div><a href={repositoryUrl} target="_blank" rel="noreferrer">GitHub</a><a href={releaseUrl} target="_blank" rel="noreferrer">下载</a><a href={`${repositoryUrl}/blob/main/LICENSE`} target="_blank" rel="noreferrer">MIT License</a></div>
+        <div><a href={repositoryUrl} target="_blank" rel="noreferrer">GitHub</a><a href={downloadUrl} target="_blank" rel="noreferrer" aria-label="下载 TTcut v1.0.0 Windows x64 安装包">下载</a><a href={`${repositoryUrl}/blob/main/LICENSE`} target="_blank" rel="noreferrer">MIT License</a></div>
       </footer>
     </main>
   );

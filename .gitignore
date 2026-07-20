@@ -5,6 +5,7 @@ node_modules/
 dist/
 out/
 output/playwright/
+.playwright-cli/
 coverage/
 *.log
 *.pyc
