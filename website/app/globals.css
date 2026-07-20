@@ -73,10 +73,11 @@ button, a, summary { -webkit-tap-highlight-color: transparent; }
 .arrow { font-size: 16px; line-height: 1; }
 
 .hero {
-  min-height: 890px;
-  padding-top: 190px;
+  min-height: 720px;
+  padding-top: 150px;
+  padding-bottom: 60px;
   display: grid;
-  grid-template-columns: .82fr 1.18fr;
+  grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr);
   align-items: start;
   gap: 52px;
   overflow: hidden;
@@ -84,7 +85,7 @@ button, a, summary { -webkit-tap-highlight-color: transparent; }
 .hero-copy { padding-top: 42px; animation: enter 700ms cubic-bezier(.2,.8,.2,1) both; }
 .eyebrow { margin: 0 0 22px; color: var(--blue); font-size: 13px; font-weight: 720; letter-spacing: .12em; text-transform: uppercase; }
 h1, h2, h3, p { text-wrap: pretty; }
-h1 { margin: 0; max-width: 680px; font-size: clamp(54px, 6vw, 84px); line-height: 1.04; letter-spacing: -.065em; font-weight: 760; }
+h1 { margin: 0; max-width: 560px; font-size: clamp(48px, 5vw, 72px); line-height: 1.04; letter-spacing: -.065em; font-weight: 760; }
 .hero-intro { max-width: 545px; margin: 30px 0 0; color: var(--muted); font-size: 19px; line-height: 1.75; }
 .hero-actions { margin-top: 34px; display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
 .hero-actions .button { white-space: nowrap; }
@@ -92,7 +93,7 @@ h1 { margin: 0; max-width: 680px; font-size: clamp(54px, 6vw, 84px); line-height
 .trust-list span { margin-right: 5px; color: var(--blue); font-weight: 800; }
 
 .product-frame {
-  width: 760px;
+  width: min(760px, 100%);
   margin-top: 34px;
   border: 1px solid rgba(22, 39, 66, .12);
   border-radius: 25px;
