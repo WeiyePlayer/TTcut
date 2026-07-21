@@ -44,6 +44,8 @@ export interface TTcutApi {
   bootstrap(): Promise<BootstrapData>;
   saveSettings(settings: AppSettings): Promise<AppSettings>;
   refreshComponents(): Promise<ComponentStatus>;
+  importComponents(): Promise<string | null>;
+  openComponentDownloads(): Promise<void>;
   installAnalysisComponent(consent: true): Promise<string>;
   installMediaComponent(consent: true): Promise<string>;
   selectVideo(): Promise<SelectedVideo | null>;

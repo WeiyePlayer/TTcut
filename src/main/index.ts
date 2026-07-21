@@ -12,7 +12,7 @@ import { analysisResultSchema, appSettingsSchema, calibrationSchema, cutSelectio
 import { IPC } from '../shared/ipc';
 import { activateLatestAnalysis, startAnalysis, clearLatestAnalysis } from './analysis';
 import { componentSetupInfo, loadComponentCatalog } from './component-catalog';
-import { recoverComponentInstallState, startAnalysisComponentInstall, startMediaComponentInstall } from './component-manager';
+import { recoverComponentInstallState, startAnalysisComponentInstall, startComponentImport, startMediaComponentInstall } from './component-manager';
 import { inspectComponents } from './components';
 import { startExport } from './export';
 import { getLogDirectory, logLine } from './logger';
@@ -23,6 +23,7 @@ import { cancelAllTasks, cancelTask, hasActiveTasks } from './processes';
 import { loadSettings, saveSettings } from './settings';
 import { handleSquirrelStartup } from './squirrel-startup';
 import { assertPlatformCompatible, getPlatformCompatibility } from './platform-compatibility';
+import { COMPONENT_ASSETS_RELEASE_URL } from '../shared/urls';
 
 const squirrelStartup = handleSquirrelStartup();
 
@@ -86,6 +87,28 @@ function registerIpc(): void {
   });
   ipcMain.handle(IPC.settingsSave, (_event, value: unknown) => saveSettings(appSettingsSchema.parse(value)));
   ipcMain.handle(IPC.componentsRefresh, () => inspectComponents());
+  ipcMain.handle(IPC.componentsOpenDownloads, async () => {
+    const catalog = await loadComponentCatalog();
+    await shell.openExternal(COMPONENT_ASSETS_RELEASE_URL);
+    await shell.openExternal(catalog.ffmpeg.url);
+  });
+  ipcMain.handle(IPC.componentsImport, async () => {
+    await assertPlatformCompatible();
+    if (e2eHarnessEnabled() && process.env.TTCUT_E2E_COMPONENT_IMPORT_FILES) {
+      const filePaths = JSON.parse(process.env.TTCUT_E2E_COMPONENT_IMPORT_FILES) as unknown;
+      if (!Array.isArray(filePaths) || !filePaths.every((value): value is string => typeof value === 'string')) {
+        throw new Error('TTCUT_E2E_COMPONENT_IMPORT_FILES must be a JSON string array.');
+      }
+      return startComponentImport(currentWindow(), filePaths);
+    }
+    const result = await dialog.showOpenDialog(currentWindow(), {
+      title: 'Import TTcut components',
+      properties: ['openFile', 'multiSelections'],
+      filters: [{ name: 'TTcut component files', extensions: ['pt', 'zip', 'part001', 'part002', 'part003'] }],
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return startComponentImport(currentWindow(), result.filePaths);
+  });
   ipcMain.handle(IPC.componentsInstallAnalysis, async (_event, consent: unknown) => {
     await assertPlatformCompatible();
     return startAnalysisComponentInstall(currentWindow(), consent);
@@ -183,7 +206,7 @@ function registerIpc(): void {
   ipcMain.handle(IPC.externalOpen, async (_event, value: unknown) => {
     if (typeof value !== 'string') throw new Error('INVALID_REQUEST');
     const catalog = await loadComponentCatalog();
-    const allowed = new Set([catalog.analysis_runtime.license_url, catalog.ffmpeg.license_url]);
+    const allowed = new Set([COMPONENT_ASSETS_RELEASE_URL, catalog.analysis_runtime.license_url, catalog.ffmpeg.license_url, catalog.ffmpeg.url]);
     if (!allowed.has(value)) throw new Error('EXTERNAL_URL_REJECTED');
     await shell.openExternal(value);
   });

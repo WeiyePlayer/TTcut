@@ -2,6 +2,8 @@ export const IPC = {
   appBootstrap: 'app:bootstrap',
   settingsSave: 'settings:save',
   componentsRefresh: 'components:refresh',
+  componentsImport: 'components:import',
+  componentsOpenDownloads: 'components:open-downloads',
   componentsInstallAnalysis: 'components:install-analysis',
   componentsInstallMedia: 'components:install-media',
   videoSelect: 'video:select',

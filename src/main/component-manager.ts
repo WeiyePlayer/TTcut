@@ -33,6 +33,7 @@ import { beginExternalTask, endExternalTask, runProcess } from './processes';
 import { ANALYSIS_RUNTIME_VARIANTS, analysisRuntimeDirectory } from './runtime-layout';
 import { assembleAssetParts, sha256File } from './component-assets';
 import { withDownloadRetries } from './component-download';
+import { validateImportFiles, type ImportableComponentFile } from './component-import';
 
 const INSTALLABLE_DIRECTORIES = new Set([
   ...ANALYSIS_RUNTIME_VARIANTS.map(analysisRuntimeDirectory),
@@ -589,6 +590,140 @@ export async function startMediaComponentInstall(window: BrowserWindow, consent:
       }, null, 2), 'utf8');
       sendProgress(window, taskId, 'complete', 99);
       return ['media'];
+    } finally {
+      await rm(staging, { recursive: true, force: true });
+    }
+  });
+}
+
+async function prepareImportedRuntime(
+  window: BrowserWindow,
+  taskId: string,
+  signal: AbortSignal,
+  staging: string,
+  files: Extract<ImportableComponentFile, { kind: 'runtime-part' }>[],
+  progress: number,
+): Promise<'cpu' | 'cu126'> {
+  const asset = files[0]!.asset;
+  const assembled = path.join(staging, `${asset.asset}.assembled`);
+  sendProgress(window, taskId, 'extract', progress);
+  await assembleAssetParts(files.sort((left, right) => left.part.asset.localeCompare(right.part.asset)).map((file) => file.sourcePath), assembled, asset.size_bytes);
+  if (await sha256File(assembled) !== asset.sha256) {
+    await rm(assembled, { force: true });
+    throw new Error('COMPONENT_IMPORT_ARCHIVE_HASH_MISMATCH');
+  }
+  if (signal.aborted) throw Object.assign(new Error('SETUP_CANCELLED'), { name: 'AbortError' });
+  await runProcess('tar.exe', ['-xf', assembled, '-C', staging], { timeoutMs: 300_000 });
+  const extracted = path.join(staging, asset.archive_root);
+  const normalized = path.join(staging, ...asset.install_directory.split('/'));
+  if (!await exists(extracted)) throw new Error('COMPONENT_ARCHIVE_LAYOUT_MISMATCH');
+  await mkdir(path.dirname(normalized), { recursive: true });
+  await rename(extracted, normalized);
+  sendProgress(window, taskId, 'self_test', progress + 4);
+  await validateAnalysisRuntimeLicenses(normalized);
+  await validateAnalysisRuntime(path.join(normalized, 'python.exe'), asset.variant);
+  if (signal.aborted) throw Object.assign(new Error('SETUP_CANCELLED'), { name: 'AbortError' });
+  return asset.variant;
+}
+
+export async function startComponentImport(window: BrowserWindow, filePaths: string[]): Promise<string> {
+  if (process.platform !== 'win32') throw new Error('COMPONENT_PLATFORM_UNSUPPORTED');
+  const catalog = await loadComponentCatalog();
+  const taskId = randomUUID();
+  return runSetupTask(window, taskId, async (signal) => {
+    const root = managedComponentsRoot();
+    const staging = path.join(root, '.staging', taskId);
+    await rm(staging, { recursive: true, force: true });
+    await mkdir(staging, { recursive: true });
+    try {
+      sendProgress(window, taskId, 'verify', 0, 0, filePaths.length);
+      const files = await validateImportFiles(filePaths, catalog, (completed, total) => {
+        sendProgress(window, taskId, 'verify', completed / total * 35, completed, total);
+      });
+      if (signal.aborted) throw Object.assign(new Error('SETUP_CANCELLED'), { name: 'AbortError' });
+
+      const directories: string[] = [];
+      const installedVariants: Array<'cpu' | 'cu126'> = [];
+      const weight = files.find((file): file is Extract<ImportableComponentFile, { kind: 'weight' }> => file.kind === 'weight');
+      if (weight) {
+        const target = path.join(staging, weight.asset.install_directory, weight.asset.filename);
+        await mkdir(path.dirname(target), { recursive: true });
+        await copyFile(weight.sourcePath, target);
+        directories.push(weight.asset.install_directory);
+      }
+
+      const runtimeGroups = new Map<'cpu' | 'cu126', Extract<ImportableComponentFile, { kind: 'runtime-part' }>[] >();
+      for (const file of files) {
+        if (file.kind !== 'runtime-part') continue;
+        const group = runtimeGroups.get(file.variant) ?? [];
+        group.push(file);
+        runtimeGroups.set(file.variant, group);
+      }
+      for (const variant of ['cpu', 'cu126'] as const) {
+        const group = runtimeGroups.get(variant);
+        if (!group) continue;
+        try {
+          await prepareImportedRuntime(window, taskId, signal, staging, group, 45 + installedVariants.length * 18);
+          directories.push(group[0]!.asset.install_directory);
+          installedVariants.push(variant);
+        } catch (error) {
+          if (variant !== 'cu126' || setupErrorCode(error) !== 'CUDA_RUNTIME_SELF_TEST_FAILED' || !runtimeGroups.has('cpu')) throw error;
+          await rm(path.join(staging, ...group[0]!.asset.install_directory.split('/')), { recursive: true, force: true });
+          await logLine(taskId, 'WARN', `Imported CUDA runtime failed self-test; using imported CPU runtime: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+
+      const media = files.find((file): file is Extract<ImportableComponentFile, { kind: 'media' }> => file.kind === 'media');
+      if (media) {
+        sendProgress(window, taskId, 'extract', 80);
+        await runProcess('tar.exe', ['-xf', media.sourcePath, '-C', staging], { timeoutMs: 120_000 });
+        const extracted = path.join(staging, media.asset.archive_root);
+        const normalized = path.join(staging, media.asset.install_directory);
+        if (!await exists(extracted)) throw new Error('COMPONENT_ARCHIVE_LAYOUT_MISMATCH');
+        await rename(extracted, normalized);
+        sendProgress(window, taskId, 'self_test', 86);
+        await validateMediaLicense(normalized);
+        await validateMediaComponent(path.join(normalized, 'bin', 'ffmpeg.exe'), path.join(normalized, 'bin', 'ffprobe.exe'));
+        directories.push(media.asset.install_directory);
+      }
+
+      if (directories.length === 0) throw new Error('COMPONENT_IMPORT_NO_FILES');
+      if (signal.aborted) throw Object.assign(new Error('SETUP_CANCELLED'), { name: 'AbortError' });
+      sendProgress(window, taskId, 'install', 94);
+      await commitComponentDirectories(staging, [...new Set(directories)], taskId);
+
+      const manifestRoot = path.join(root, '.manifests');
+      await mkdir(manifestRoot, { recursive: true });
+      if (weight) {
+        await writeFile(path.join(manifestRoot, `analysis-weight-${weight.asset.sha256.slice(0, 12)}.json`), JSON.stringify({
+          schema_version: 1,
+          installed_at: new Date().toISOString(),
+          weight: weight.asset,
+        }, null, 2), 'utf8');
+      }
+      for (const variant of installedVariants) {
+        const asset = runtimeGroups.get(variant)![0]!.asset;
+        await activateManagedAnalysisRuntime(variant);
+        await writeFile(path.join(manifestRoot, `analysis-${asset.variant}-${asset.sha256.slice(0, 12)}.json`), JSON.stringify({
+          schema_version: 1,
+          installed_at: new Date().toISOString(),
+          runtime: catalog.analysis_runtime,
+          asset,
+          weight: catalog.tracknet_weight,
+        }, null, 2), 'utf8');
+      }
+      if (media) {
+        await writeFile(path.join(manifestRoot, `media-${media.asset.release_tag}.json`), JSON.stringify({
+          schema_version: 1,
+          installed_at: new Date().toISOString(),
+          ffmpeg: media.asset,
+        }, null, 2), 'utf8');
+      }
+      sendProgress(window, taskId, 'complete', 99);
+      return [
+        ...(weight || installedVariants.length ? ['analysis' as const] : []),
+        ...(media ? ['media' as const] : []),
+      ];
     } finally {
       await rm(staging, { recursive: true, force: true });
     }

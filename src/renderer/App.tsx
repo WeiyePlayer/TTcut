@@ -240,6 +240,7 @@ export function App() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [historyConfirmation, setHistoryConfirmation] = useState<{ kind: 'delete'; id: string } | { kind: 'clear' } | null>(null);
+  const [missingComponents, setMissingComponents] = useState<string[] | null>(null);
   const [previewRally, setPreviewRally] = useState<Rally | null>(null);
   const t = messages(settings.language as Language);
   const platformSupported = bootstrap?.platformCompatibility.status === 'supported';
@@ -431,6 +432,30 @@ export function App() {
   const refreshComponents = async () => {
     const components = await window.ttcut.refreshComponents();
     setBootstrap((current) => current ? { ...current, components } : current);
+    const missing = [
+      ...(!components.analysis.available ? [t.analysisComponent] : []),
+      ...(!components.media.available ? [t.mediaComponent] : []),
+    ];
+    setMissingComponents(missing.length > 0 ? missing : null);
+  };
+
+  const importComponents = async () => {
+    setSetupOutcome(null);
+    setSetupFailureCode(null);
+    if (!platformSupported) {
+      setSetupOutcome('failed');
+      setSetupFailureCode(bootstrap?.platformCompatibility.reason === 'probe_failed' ? 'PLATFORM_PROBE_FAILED' : 'PLATFORM_UNSUPPORTED');
+      return;
+    }
+    try {
+      const taskId = await window.ttcut.importComponents();
+      if (!taskId) return;
+      setupTaskRef.current = taskId;
+      setSetupTask(taskId);
+    } catch (caught) {
+      setSetupOutcome('failed');
+      setSetupFailureCode(errorCode(caught));
+    }
   };
 
   const installMediaComponent = async () => {
@@ -549,14 +574,18 @@ export function App() {
                 ) : (
                   <div className="setup-options">
                     {bootstrap?.componentSetup.analysis_offer && !bootstrap.components.analysis.available && (
-                      <div className="setup-option"><div><strong>{t.analysisOffer}</strong><span>{t.analysisOfferDetail}</span><small>{interpolate(t.downloadUpTo, { size: fileSize(bootstrap.componentSetup.analysis_offer.download_size_bytes) })}</small></div><div><button className="text-button" onClick={() => void window.ttcut.openExternalUrl(bootstrap.componentSetup.analysis_offer!.license_url)}>{t.viewLicense}</button><button className="primary" disabled={!platformSupported || !bootstrap.componentSetup.analysis_offer.available_for_download} onClick={() => void installAnalysisComponent()}>{t.consentInstall}</button></div></div>
+                      <div className="setup-option"><div><strong>{t.analysisOffer}</strong><span>{t.analysisOfferDetail}</span><small>{interpolate(t.downloadUpTo, { size: fileSize(bootstrap.componentSetup.analysis_offer.download_size_bytes) })}</small><small className="setup-network-hint">{t.networkHint}</small></div><div><button className="text-button" onClick={() => void window.ttcut.openExternalUrl(bootstrap.componentSetup.analysis_offer!.license_url)}>{t.viewLicense}</button><button className="primary" disabled={!platformSupported || !bootstrap.componentSetup.analysis_offer.available_for_download} onClick={() => void installAnalysisComponent()}>{t.consentInstall}</button></div></div>
                     )}
                     {bootstrap?.componentSetup.media_offer && !bootstrap.components.media.available && (
                       <div className="setup-option"><div><strong>{t.mediaOffer}</strong><span>{t.mediaOfferDetail}</span><small>{interpolate(t.downloadSize, { size: fileSize(bootstrap.componentSetup.media_offer.download_size_bytes) })}</small></div><div><button className="text-button" onClick={() => void window.ttcut.openExternalUrl(bootstrap.componentSetup.media_offer!.license_url)}>{t.viewLicense}</button><button className="primary" disabled={!platformSupported || !bootstrap.componentSetup.media_offer.available_for_download} onClick={() => void installMediaComponent()}>{t.consentInstall}</button></div></div>
                     )}
+                    <div className="setup-manual">
+                      <div><strong>{t.manualDownload}</strong></div>
+                      <div className="setup-manual-actions"><button className="text-button" disabled={Boolean(setupTask)} onClick={() => void window.ttcut.openComponentDownloads()}>{t.goToDownload}</button><button className="secondary" disabled={!platformSupported || Boolean(setupTask)} onClick={() => void importComponents()}>{t.importComponents}</button></div>
+                    </div>
                   </div>
                 )}
-                {setupOutcome && <p className={`setup-outcome ${setupOutcome}`}>{setupOutcome === 'success' ? t.setupSuccess : setupOutcome === 'cancelled' ? t.setupCancelled : setupFailureCode === 'COMPONENT_DOWNLOAD_RETRY_EXHAUSTED' ? t.setupNetworkFailed : setupFailureCode === 'PLATFORM_UNSUPPORTED' || setupFailureCode === 'PLATFORM_PROBE_FAILED' ? localizedError(setupFailureCode, t) : t.setupFailed}</p>}
+                {setupOutcome && <p className={`setup-outcome ${setupOutcome}`}>{setupOutcome === 'success' ? t.setupSuccess : setupOutcome === 'cancelled' ? t.setupCancelled : setupFailureCode === 'COMPONENT_DOWNLOAD_RETRY_EXHAUSTED' ? t.setupNetworkFailed : setupFailureCode && (setupFailureCode.startsWith('COMPONENT_IMPORT_') || setupFailureCode === 'PLATFORM_UNSUPPORTED' || setupFailureCode === 'PLATFORM_PROBE_FAILED') ? localizedError(setupFailureCode, t) : t.setupFailed}</p>}
               </article>
               <article className="card actions-card">
                 <div><h2>{t.version}</h2><p>{bootstrap?.version ?? '1.0.0'}</p></div>
@@ -678,6 +707,7 @@ export function App() {
       {toast && <div className="toast" role="status">{toast}</div>}
       {languageTransition && <div className="language-loader"><span /></div>}
       {previewRally && video && analysis && <RallyPreviewDialog key={`${video.mediaUrl}:${previewRally.id}`} video={video} videoDuration={analysis.video.duration_seconds} rally={previewRally} translations={t} onClose={() => setPreviewRally(null)} />}
+      {missingComponents && <div className="modal-backdrop"><div className="modal" role="dialog" aria-modal="true" aria-label={t.componentCheckTitle}><h2>{t.componentCheckTitle}</h2><p>{interpolate(t.missingComponentsMessage, { components: missingComponents.join(settings.language === 'zh-CN' ? '、' : ', ') })}</p><div><button className="primary" onClick={() => setMissingComponents(null)}>{t.confirm}</button></div></div></div>}
       {historyConfirmation && <div className="modal-backdrop"><div className="modal" role="dialog" aria-modal="true"><h2>{historyConfirmation.kind === 'clear' ? t.clearHistoryTitle : t.deleteHistoryTitle}</h2><p>{historyConfirmation.kind === 'clear' ? t.clearHistoryConfirm : t.deleteHistoryConfirm}</p><div><button className="secondary" onClick={() => setHistoryConfirmation(null)}>{t.cancel}</button><button className="primary destructive-confirm" onClick={() => void confirmHistoryAction()}>{t.confirmDelete}</button></div></div></div>}
       {closeDialog && <div className="modal-backdrop"><div className="modal" role="dialog" aria-modal="true"><h2>{t.closeTitle}</h2><p>{t.closeDetail}</p><div><button className="secondary" onClick={() => { setCloseDialog(false); void window.ttcut.confirmClose('cancel'); }}>{t.cancel}</button><button className="secondary" onClick={() => { setCloseDialog(false); void window.ttcut.confirmClose('minimize'); }}>{t.minimize}</button><button className="primary" onClick={() => void window.ttcut.confirmClose('exit')}>{t.exit}</button></div></div></div>}
     </div>

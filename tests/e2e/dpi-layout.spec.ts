@@ -105,6 +105,8 @@ for (const scale of [1.25, 1.5, 2] as const) {
       page = await appPage(browser);
       await page.waitForLoadState('domcontentloaded');
       await expect(page.locator('.settings-page')).toBeVisible();
+      await expect(page.locator('.setup-option').first().locator('.setup-network-hint')).toHaveText('打开虚拟网卡或 TUN 模式加快下载速度');
+      await expect(page.locator('.setup-manual .setup-network-hint')).toHaveCount(0);
 
       await page.evaluate(() => window.resizeTo(840, 520));
       await expect.poll(() => page!.evaluate(() => window.innerWidth)).toBeGreaterThanOrEqual(839);
