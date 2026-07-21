@@ -148,7 +148,8 @@ if (releaseSigningRequired) {
     const evidencePath = path.join(root, 'resources', ...evidence.path.split('/'));
     check(existsSync(evidencePath), 'TrackNet weight rights evidence file is missing.');
     if (existsSync(evidencePath)) {
-      const actual = createHash('sha256').update(await readFile(evidencePath)).digest('hex');
+      const normalizedEvidence = (await readFile(evidencePath, 'utf8')).replace(/\r\n/g, '\n');
+      const actual = createHash('sha256').update(normalizedEvidence, 'utf8').digest('hex');
       check(actual === evidence.sha256, 'TrackNet weight rights evidence hash does not match the catalog.');
     }
   } else {
