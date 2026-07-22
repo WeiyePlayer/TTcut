@@ -5,10 +5,13 @@ import { formatTimestamp } from '../domain/time';
 import { rallyPreviewRange } from '../domain/preview';
 import { validateCalibration } from '../domain/calibration';
 import { interpolate, messages, type Language, type Messages } from './i18n';
+import packageJson from '../../package.json';
 
 type View = 'auto' | 'history' | 'settings';
 type Step = 'select' | 'calibrate' | 'analyzing' | 'empty' | 'mode' | 'cutting' | 'complete' | 'error';
 type PointName = keyof Calibration['points'];
+
+const appVersion = packageJson.version;
 
 const pointOrder: PointName[] = ['top_left', 'top_right', 'bottom_right', 'bottom_left'];
 
@@ -536,7 +539,7 @@ export function App() {
         </div>
       </header>
       <aside className="sidebar">
-        <div className="brand"><span>TTcut</span><small>v{bootstrap?.version ?? '1.0.0'}</small></div>
+        <div className="brand"><span>TTcut</span><small>v{appVersion}</small></div>
         <nav aria-label="Primary navigation">
           <button className={view === 'auto' ? 'active' : ''} onClick={() => setView('auto')}><i />{t.autoCut}</button>
           <button className={view === 'history' ? 'active' : ''} onClick={showHistory}><i />{t.history}</button>
@@ -600,7 +603,7 @@ export function App() {
                 {setupOutcome && <p className={`setup-outcome ${setupOutcome}`}>{setupOutcome === 'success' ? t.setupSuccess : setupOutcome === 'pending' ? setupPendingText : setupOutcome === 'cancelled' ? t.setupCancelled : setupFailureCode === 'COMPONENT_DOWNLOAD_RETRY_EXHAUSTED' ? t.setupNetworkFailed : setupFailureCode && (setupFailureCode.startsWith('COMPONENT_IMPORT_') || setupFailureCode === 'PLATFORM_UNSUPPORTED' || setupFailureCode === 'PLATFORM_PROBE_FAILED') ? localizedError(setupFailureCode, t) : t.setupFailed}</p>}
               </article>
               <article className="card actions-card">
-                <div><h2>{t.version}</h2><p>{bootstrap?.version ?? '1.0.0'}</p></div>
+                <div><h2>{t.version}</h2><p>{appVersion}</p></div>
                 <button className="secondary" onClick={() => void window.ttcut.revealLogs()}>{t.logs}</button>
                 <button className="secondary" onClick={() => void window.ttcut.openLicenses()}>{t.licenses}</button>
               </article>
