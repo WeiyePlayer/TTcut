@@ -71,6 +71,24 @@ describe('media export planning', () => {
     expect(expectedOutputDuration([oneGroup, second])).toBe(11);
   });
 
+  it('builds x264 veryfast CRF 18 arguments without the OpenH264 bitrate policy', () => {
+    const args = buildReencodeArgs(metadata.path, 'x264.mp4', [oneGroup], metadata, 'libx264');
+    expect(args).toContain('libx264');
+    expect(args).toContain('veryfast');
+    expect(args).toContain('18');
+    expect(args).not.toContain('libopenh264');
+    expect(args).not.toContain('-b:v');
+    expect(args).not.toContain('-profile:v');
+    expect(args[args.indexOf('-pix_fmt') + 1]).toBe('yuv420p');
+  });
+
+  it('keeps supported source pixel formats for x264 and falls back for unknown formats', () => {
+    const tenBit = buildReencodeArgs(metadata.path, 'x264-10bit.mp4', [oneGroup], { ...metadata, pixel_format: 'yuv420p10le' }, 'libx264');
+    expect(tenBit[tenBit.indexOf('-pix_fmt') + 1]).toBe('yuv420p10le');
+    const unknown = buildReencodeArgs(metadata.path, 'x264-unknown.mp4', [oneGroup], { ...metadata, pixel_format: 'gbrp' }, 'libx264');
+    expect(unknown[unknown.indexOf('-pix_fmt') + 1]).toBe('yuv420p');
+  });
+
   it('uses stream copy only for stable, packet-aligned single groups', () => {
     expect(canUseStreamCopy([oneGroup], [0, 8, 14], [0, 8, 14], metadata)).toBe(true);
     expect(canUseStreamCopy([oneGroup, { ...oneGroup, start: 20, end: 22 }], [8, 14, 20, 22], [8, 14, 20, 22], metadata)).toBe(false);

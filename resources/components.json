@@ -123,5 +123,45 @@
       "libopenh264",
       "aac"
     ]
+  },
+  "ffmpeg_x264": {
+    "provider": "BtbN/FFmpeg-Builds",
+    "release_tag": "autobuild-2026-07-22-13-36",
+    "version_line": "N-125716-g1b1f602699-20260722",
+    "variant": "win64-gpl",
+    "asset": "ffmpeg-N-125716-g1b1f602699-win64-gpl.zip",
+    "archive_root": "ffmpeg-N-125716-g1b1f602699-win64-gpl",
+    "install_directory": "ffmpeg-x264-N-125716-g1b1f602699",
+    "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-07-22-13-36/ffmpeg-N-125716-g1b1f602699-win64-gpl.zip",
+    "license_url": "https://github.com/BtbN/FFmpeg-Builds/blob/master/LICENSE",
+    "source_url": "https://github.com/BtbN/FFmpeg-Builds/tree/autobuild-2026-07-22-13-36",
+    "size_bytes": 168733210,
+    "sha256": "6dcf685c2fea98221b3f179961165e9c31f55bead576c4479ae4549858fbf826",
+    "required_build_flags": [
+      "--enable-gpl",
+      "--enable-version3",
+      "--enable-libx264"
+    ],
+    "required_encoders": [
+      "libx264",
+      "aac"
+    ],
+    "supported_pixel_formats": [
+      "yuv420p",
+      "yuvj420p",
+      "yuv422p",
+      "yuvj422p",
+      "yuv444p",
+      "yuvj444p",
+      "nv12",
+      "nv16",
+      "nv21",
+      "yuv420p10le",
+      "yuv422p10le",
+      "yuv444p10le",
+      "nv20le",
+      "gray",
+      "gray10le"
+    ]
   }
 }

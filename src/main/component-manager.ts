@@ -15,6 +15,7 @@ import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { Readable, Transform } from 'node:stream';
 import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
+import { setTimeout as delay } from 'node:timers/promises';
 import { app, BrowserWindow, net } from 'electron';
 import type { PendingComponentImport } from '../shared/api';
 import { IPC } from '../shared/ipc';
@@ -27,6 +28,7 @@ import {
   resolveUsableAnalysisComponents,
   validateAnalysisRuntime,
   validateMediaComponent,
+  validateX264EightKCapability,
 } from './components';
 import { loadComponentCatalog } from './component-catalog';
 import { getLogPath, logLine } from './logger';
@@ -50,6 +52,7 @@ const INSTALLABLE_DIRECTORIES = new Set([
   ...ANALYSIS_RUNTIME_VARIANTS.map(analysisRuntimeDirectory),
   'models',
   'ffmpeg-8.1',
+  'ffmpeg-x264-N-125716-g1b1f602699',
 ]);
 
 async function exists(value: string): Promise<boolean> {
@@ -58,6 +61,22 @@ async function exists(value: string): Promise<boolean> {
     return true;
   } catch {
     return false;
+  }
+}
+
+const TRANSIENT_RENAME_ERRORS = new Set(['EACCES', 'EBUSY', 'EPERM']);
+
+async function renameWithRetry(source: string, target: string): Promise<void> {
+  const maxAttempts = process.platform === 'win32' ? 8 : 1;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await rename(source, target);
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (attempt === maxAttempts || !code || !TRANSIENT_RENAME_ERRORS.has(code)) throw error;
+      await delay(Math.min(100 * 2 ** (attempt - 1), 1_000));
+    }
   }
 }
 
@@ -318,10 +337,10 @@ async function commitComponentDirectories(stagingRoot: string, directories: stri
       await mkdir(path.dirname(target), { recursive: true });
       await mkdir(path.dirname(backup), { recursive: true });
       if (await exists(target)) {
-        await rename(target, backup);
+        await renameWithRetry(target, backup);
         backedUp.push(name);
       }
-      await rename(source, target);
+      await renameWithRetry(source, target);
       installed.push(name);
     }
   } catch (error) {
@@ -332,7 +351,7 @@ async function commitComponentDirectories(stagingRoot: string, directories: stri
       const target = path.join(root, ...parts);
       if (await exists(backup)) {
         await mkdir(path.dirname(target), { recursive: true });
-        await rename(backup, target);
+        await renameWithRetry(backup, target);
       }
     }
     throw error;
@@ -645,6 +664,33 @@ async function prepareImportedRuntime(
   return asset.variant;
 }
 
+type ImportedMediaFile =
+  | Extract<ImportableComponentFile, { kind: 'media' }>
+  | Extract<ImportableComponentFile, { kind: 'media-x264' }>;
+
+async function prepareImportedMedia(
+  window: BrowserWindow,
+  taskId: string,
+  signal: AbortSignal,
+  staging: string,
+  media: ImportedMediaFile,
+  progress: number,
+): Promise<void> {
+  sendProgress(window, taskId, 'extract', progress);
+  await runProcess('tar.exe', ['-xf', media.sourcePath, '-C', staging], { timeoutMs: 180_000 });
+  const extracted = path.join(staging, media.asset.archive_root);
+  const normalized = path.join(staging, media.asset.install_directory);
+  if (!await exists(extracted)) throw new Error('COMPONENT_ARCHIVE_LAYOUT_MISMATCH');
+  await rename(extracted, normalized);
+  sendProgress(window, taskId, 'self_test', progress + 5);
+  await validateMediaLicense(normalized);
+  const ffmpeg = path.join(normalized, 'bin', 'ffmpeg.exe');
+  const ffprobe = path.join(normalized, 'bin', 'ffprobe.exe');
+  await validateMediaComponent(ffmpeg, ffprobe, media.kind === 'media-x264' ? 'libx264' : 'libopenh264');
+  if (media.kind === 'media-x264') await validateX264EightKCapability(ffmpeg);
+  if (signal.aborted) throw Object.assign(new Error('SETUP_CANCELLED'), { name: 'AbortError' });
+}
+
 export async function startComponentImport(window: BrowserWindow, filePaths: string[]): Promise<string> {
   if (process.platform !== 'win32') throw new Error('COMPONENT_PLATFORM_UNSUPPORTED');
   const catalog = await loadComponentCatalog();
@@ -696,17 +742,11 @@ export async function startComponentImport(window: BrowserWindow, filePaths: str
         }
       }
 
-      const media = files.find((file): file is Extract<ImportableComponentFile, { kind: 'media' }> => file.kind === 'media');
-      if (media) {
-        sendProgress(window, taskId, 'extract', 80);
-        await runProcess('tar.exe', ['-xf', media.sourcePath, '-C', staging], { timeoutMs: 120_000 });
-        const extracted = path.join(staging, media.asset.archive_root);
-        const normalized = path.join(staging, media.asset.install_directory);
-        if (!await exists(extracted)) throw new Error('COMPONENT_ARCHIVE_LAYOUT_MISMATCH');
-        await rename(extracted, normalized);
-        sendProgress(window, taskId, 'self_test', 86);
-        await validateMediaLicense(normalized);
-        await validateMediaComponent(path.join(normalized, 'bin', 'ffmpeg.exe'), path.join(normalized, 'bin', 'ffprobe.exe'));
+      const mediaFiles = files.filter((file): file is ImportedMediaFile => (
+        file.kind === 'media' || file.kind === 'media-x264'
+      ));
+      for (const [index, media] of mediaFiles.entries()) {
+        await prepareImportedMedia(window, taskId, signal, staging, media, 80 + index * 5);
         directories.push(media.asset.install_directory);
       }
 
@@ -737,8 +777,9 @@ export async function startComponentImport(window: BrowserWindow, filePaths: str
           weight: catalog.tracknet_weight,
         }, null, 2), 'utf8');
       }
-      if (media) {
-        await writeFile(path.join(manifestRoot, `media-${media.asset.release_tag}.json`), JSON.stringify({
+      for (const media of mediaFiles) {
+        const prefix = media.kind === 'media-x264' ? 'media-x264' : 'media';
+        await writeFile(path.join(manifestRoot, `${prefix}-${media.asset.release_tag}.json`), JSON.stringify({
           schema_version: 1,
           installed_at: new Date().toISOString(),
           ffmpeg: media.asset,
@@ -748,7 +789,7 @@ export async function startComponentImport(window: BrowserWindow, filePaths: str
       return {
         imported: [
           ...(weight || installedVariants.length ? ['analysis' as const] : []),
-          ...(media ? ['media' as const] : []),
+          ...(mediaFiles.length ? ['media' as const] : []),
         ],
         pendingImports,
       };
@@ -773,7 +814,7 @@ export async function recoverComponentInstallState(): Promise<void> {
         const target = path.join(root, ...parts);
         if (!await exists(target)) {
           await mkdir(path.dirname(target), { recursive: true });
-          await rename(backup, target);
+          await renameWithRetry(backup, target);
         }
         else await rm(backup, { recursive: true, force: true });
       }

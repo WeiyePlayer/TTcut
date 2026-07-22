@@ -33,6 +33,19 @@ TTcut 组合使用多个保留各自许可证的组件。本文件不替代发�
 
 固定 Windows 媒体组件为 BtbN `win64-lgpl-shared-8.1`，release `autobuild-2026-07-17-13-22`。资产名、SHA-256、编码器和构建参数记录在 `resources/components.json`。该配置启用 `libopenh264`，并明确禁用 `libx264` 和 `libx265`。安装器要求媒体组件根目录存在随资产提供的完整 `LICENSE.txt`，否则拒绝安装。
 
+### Optional x264 media component
+
+TTcut 还支持用户手动导入独立的 BtbN `win64-gpl` 构建。该组件不进入 TTcut 安装包，也不改变默认 OpenH264 组件的在线安装流程。
+
+- Release：`autobuild-2026-07-22-13-36`
+- Asset：`ffmpeg-N-125716-g1b1f602699-win64-gpl.zip`
+- SHA-256：`6dcf685c2fea98221b3f179961165e9c31f55bead576c4479ae4549858fbf826`
+- 构建：启用 GPL、`libx264` 和 AAC；导入时还会执行 8K 编码自检。
+- 许可正文：随 BtbN 资产提供的 `LICENSE.txt`；[BtbN FFmpeg Builds LICENSE](https://github.com/BtbN/FFmpeg-Builds/blob/master/LICENSE)
+- 构建来源：[BtbN fixed Release](https://github.com/BtbN/FFmpeg-Builds/releases/tag/autobuild-2026-07-22-13-36)
+
+导入有效 x264 后，必须重编码的片段使用 `libx264`、`veryfast` 和 CRF 18；可直接复制的片段仍使用 stream copy。FFmpeg 的 GPL 组件可能产生额外的再分发义务，使用者应根据实际分发方式进行许可审阅。
+
 ## Build-only tools
 
 - NuGet command-line 7.0.3 — Apache License 2.0（仅 Squirrel 构建期下载，不打入应用运行时）

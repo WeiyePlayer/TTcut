@@ -10,7 +10,7 @@ import {
   type HistoryRecordV1,
   type HistorySource,
 } from '../shared/contracts';
-import { resolveComponents } from './components';
+import { resolveUsableMediaComponents } from './components';
 import { logLine } from './logger';
 import { runProcess } from './processes';
 
@@ -52,7 +52,7 @@ export function buildHistoryCoverArgs(sourcePath: string, destination: string): 
 }
 
 async function defaultCreateCover(sourcePath: string, destination: string): Promise<void> {
-  const components = await resolveComponents();
+  const components = await resolveUsableMediaComponents();
   if (!components.ffmpeg) throw new Error('MEDIA_COMPONENT_MISSING');
   await runProcess(components.ffmpeg, buildHistoryCoverArgs(sourcePath, destination), { timeoutMs: 30_000 });
 }

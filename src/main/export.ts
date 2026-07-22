@@ -6,7 +6,7 @@ import type { AppEvent } from '../shared/api';
 import { cutSelectionSchema, type CutGroup, type CutSelectionV1, type VideoMetadata } from '../shared/contracts';
 import { IPC } from '../shared/ipc';
 import { createCutGroups } from '../domain/segments';
-import { resolveComponents, validateMediaComponent } from './components';
+import { resolveUsableMediaComponents, type MediaEncoder } from './components';
 import { getLatestAnalysis } from './analysis';
 import { logLine } from './logger';
 import {
@@ -52,6 +52,7 @@ async function assertExportPreconditions(
   taskId: string,
   duration: number,
   metadata: VideoMetadata,
+  encoder: MediaEncoder,
 ): Promise<void> {
   const inputInfo = await stat(input).catch(() => null);
   if (!inputInfo?.isFile() || inputInfo.size <= 0) throw new Error('INPUT_MOVED');
@@ -70,11 +71,17 @@ async function assertExportPreconditions(
   try {
     const filesystem = await statfs(outputDirectory, { bigint: true });
     const availableBytes = filesystem.bavail * filesystem.bsize;
-    const bitsPerSecond = BigInt(
-      Math.max(1, (metadata.average_bitrate ?? 8_000_000) + (metadata.audio_bitrate ?? 192_000)),
-    );
+    const sourceVideoBitrate = metadata.average_bitrate ?? 8_000_000;
+    const estimatedVideoBitrate = encoder === 'libx264'
+      ? Math.max(sourceVideoBitrate * 2, metadata.width * metadata.height * metadata.fps * 0.08)
+      : sourceVideoBitrate;
+    const bitsPerSecond = BigInt(Math.ceil(
+      Math.max(1, estimatedVideoBitrate + (metadata.audio_bitrate ?? 192_000)),
+    ));
     const payloadBytes = bitsPerSecond * BigInt(Math.ceil(duration)) / 8n;
-    const requiredBytes = payloadBytes * 2n + 64n * 1024n * 1024n;
+    const requiredBytes = encoder === 'libx264'
+      ? payloadBytes * 2n + 256n * 1024n * 1024n
+      : payloadBytes * 2n + 64n * 1024n * 1024n;
     if (availableBytes < requiredBytes) throw new Error('DISK_SPACE_LOW');
   } catch (error) {
     if (error instanceof Error && error.message === 'DISK_SPACE_LOW') throw error;
@@ -201,18 +208,29 @@ export async function startExport(window: BrowserWindow, rawSelection: CutSelect
   if (hasActiveTasks()) throw new Error('TASK_BUSY');
   const groups = createCutGroups(analysis, selection);
   if (!groups.length) throw new Error('NO_RALLIES');
-  const components = await resolveComponents();
-  if (!components.ffmpeg || !components.ffprobe) throw new Error('MEDIA_COMPONENT_MISSING');
-  await validateMediaComponent(components.ffmpeg, components.ffprobe);
+  const components = await resolveUsableMediaComponents();
+  if (!components.ffmpeg || !components.ffprobe || components.mediaEncoder === 'unavailable') throw new Error('MEDIA_COMPONENT_MISSING');
+  const highResolution = analysis.video.width > 4096 || analysis.video.height > 2160;
   const taskId = randomUUID();
   const output = await chooseOutput(analysis.video.path);
   const partial = path.join(path.dirname(output), `.${path.basename(output, '.mp4')}.${taskId}.partial.mp4`);
   const duration = expectedOutputDuration(groups);
   send(window, { type: 'progress', data: { taskId, kind: 'export', stage: 'preparing', percent: 0 } });
   await logLine(taskId, 'INFO', `Export target: ${output}`);
+  await logLine(taskId, 'INFO', `Active media encoder: ${components.mediaEncoder}`);
   try {
-    await assertExportPreconditions(analysis.video.path, path.dirname(output), taskId, duration, analysis.video);
+    await assertExportPreconditions(
+      analysis.video.path,
+      path.dirname(output),
+      taskId,
+      duration,
+      analysis.video,
+      components.mediaEncoder,
+    );
     const canCopy = await streamCopyEligibility(analysis.video.path, groups, analysis.video);
+    if (!canCopy && highResolution && components.mediaEncoder !== 'libx264') {
+      throw new Error('X264_COMPONENT_REQUIRED_FOR_HIGH_RESOLUTION');
+    }
     if (canCopy) {
       try {
         await runFfmpeg(
@@ -227,11 +245,14 @@ export async function startExport(window: BrowserWindow, rawSelection: CutSelect
       } catch (error) {
         await logLine(taskId, 'WARN', `Stream copy rejected; accurate encode follows: ${String(error)}`);
         await rm(partial, { force: true });
+        if (highResolution && components.mediaEncoder !== 'libx264') {
+          throw new Error('X264_COMPONENT_REQUIRED_FOR_HIGH_RESOLUTION');
+        }
         await runFfmpeg(
           window,
           taskId,
           components.ffmpeg,
-          buildReencodeArgs(analysis.video.path, partial, groups, analysis.video),
+          buildReencodeArgs(analysis.video.path, partial, groups, analysis.video, components.mediaEncoder),
           duration,
           'cutting-and-exporting',
         );
@@ -242,7 +263,7 @@ export async function startExport(window: BrowserWindow, rawSelection: CutSelect
         window,
         taskId,
         components.ffmpeg,
-        buildReencodeArgs(analysis.video.path, partial, groups, analysis.video),
+        buildReencodeArgs(analysis.video.path, partial, groups, analysis.video, components.mediaEncoder),
         duration,
         'cutting-and-exporting',
       );
@@ -263,7 +284,8 @@ export async function startExport(window: BrowserWindow, rawSelection: CutSelect
     await rm(partial, { force: true }).catch(() => undefined);
     const message = error instanceof Error ? error.message : String(error);
     await logLine(taskId, 'ERROR', message);
-    send(window, { type: 'error', taskId, code: 'EXPORT_FAILED', message });
+    const code = /^[A-Z][A-Z0-9_]+$/.test(message) ? message : 'EXPORT_FAILED';
+    send(window, { type: 'error', taskId, code, message });
     return taskId;
   }
 }

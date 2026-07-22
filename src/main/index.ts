@@ -80,6 +80,7 @@ function registerIpc(): void {
         media_offer: setup.media_offer
           ? { ...setup.media_offer, available_for_download: setup.media_offer.available_for_download && downloadsAllowed }
           : null,
+        x264_manual_offer: setup.x264_manual_offer,
       },
       platformCompatibility,
       logsPath: getLogDirectory(),
@@ -91,6 +92,10 @@ function registerIpc(): void {
     const catalog = await loadComponentCatalog();
     await shell.openExternal(COMPONENT_ASSETS_RELEASE_URL);
     await shell.openExternal(catalog.ffmpeg.url);
+  });
+  ipcMain.handle(IPC.componentsOpenX264Download, async () => {
+    const catalog = await loadComponentCatalog();
+    await shell.openExternal(catalog.ffmpeg_x264.url);
   });
   ipcMain.handle(IPC.componentsImport, async () => {
     await assertPlatformCompatible();
@@ -214,7 +219,14 @@ function registerIpc(): void {
   ipcMain.handle(IPC.externalOpen, async (_event, value: unknown) => {
     if (typeof value !== 'string') throw new Error('INVALID_REQUEST');
     const catalog = await loadComponentCatalog();
-    const allowed = new Set([COMPONENT_ASSETS_RELEASE_URL, catalog.analysis_runtime.license_url, catalog.ffmpeg.license_url, catalog.ffmpeg.url]);
+    const allowed = new Set([
+      COMPONENT_ASSETS_RELEASE_URL,
+      catalog.analysis_runtime.license_url,
+      catalog.ffmpeg.license_url,
+      catalog.ffmpeg.url,
+      catalog.ffmpeg_x264.license_url,
+      catalog.ffmpeg_x264.source_url,
+    ]);
     if (!allowed.has(value)) throw new Error('EXTERNAL_URL_REJECTED');
     await shell.openExternal(value);
   });

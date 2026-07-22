@@ -91,6 +91,23 @@ const componentCatalogSchema = z.object({
     required_build_flags: z.array(z.string().min(1)).min(1),
     required_encoders: z.array(z.string().min(1)).min(1),
   }).strict(),
+  ffmpeg_x264: z.object({
+    provider: z.string().min(1),
+    release_tag: z.literal('autobuild-2026-07-22-13-36'),
+    version_line: z.literal('N-125716-g1b1f602699-20260722'),
+    variant: z.literal('win64-gpl'),
+    asset: z.literal('ffmpeg-N-125716-g1b1f602699-win64-gpl.zip'),
+    archive_root: z.literal('ffmpeg-N-125716-g1b1f602699-win64-gpl'),
+    install_directory: z.literal('ffmpeg-x264-N-125716-g1b1f602699'),
+    url: z.string().url().refine((value) => value.startsWith('https://')),
+    license_url: z.string().url().refine((value) => value.startsWith('https://')),
+    source_url: z.string().url().refine((value) => value.startsWith('https://')),
+    size_bytes: z.literal(168_733_210),
+    sha256: z.literal('6dcf685c2fea98221b3f179961165e9c31f55bead576c4479ae4549858fbf826'),
+    required_build_flags: z.array(z.string().min(1)).min(1),
+    required_encoders: z.array(z.string().min(1)).min(1),
+    supported_pixel_formats: z.array(z.string().min(1)).min(1),
+  }).strict(),
 }).strict();
 
 export type ComponentCatalog = z.infer<typeof componentCatalogSchema>;
@@ -131,6 +148,13 @@ export async function componentSetupInfo(): Promise<ComponentSetupInfo> {
       download_size_bytes: catalog.ffmpeg.size_bytes,
       license_url: catalog.ffmpeg.license_url,
       available_for_download: process.platform === 'win32',
+    },
+    x264_manual_offer: {
+      id: 'media-x264',
+      version: catalog.ffmpeg_x264.version_line,
+      filename: catalog.ffmpeg_x264.asset,
+      download_size_bytes: catalog.ffmpeg_x264.size_bytes,
+      license_url: catalog.ffmpeg_x264.license_url,
     },
   };
 }

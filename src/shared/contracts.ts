@@ -166,6 +166,8 @@ export const componentStatusSchema = z.object({
     available: z.boolean(),
     version: z.string().nullable(),
     path: z.string().nullable(),
+    active_encoder: z.enum(['libopenh264', 'libx264', 'unavailable']),
+    x264_available: z.boolean(),
     detail: z.string().nullable(),
   }).strict(),
 }).strict();
@@ -181,6 +183,13 @@ export const managedComponentOfferSchema = z.object({
 export const componentSetupInfoSchema = z.object({
   analysis_offer: managedComponentOfferSchema.nullable(),
   media_offer: managedComponentOfferSchema.nullable(),
+  x264_manual_offer: z.object({
+    id: z.literal('media-x264'),
+    version: z.string().min(1),
+    filename: z.string().endsWith('.zip'),
+    download_size_bytes: z.number().int().positive(),
+    license_url: z.string().url(),
+  }).strict(),
 }).strict();
 
 export const platformCompatibilitySchema = z.object({

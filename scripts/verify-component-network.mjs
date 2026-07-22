@@ -42,6 +42,7 @@ const probes = [
     part.size_bytes,
   ])),
   ['media-runtime', catalog.ffmpeg.url, catalog.ffmpeg.size_bytes],
+  ['media-x264-runtime', catalog.ffmpeg_x264.url, catalog.ffmpeg_x264.size_bytes],
 ];
 
 for (const [label, url, expectedSize] of probes) await probe(label, url, expectedSize);

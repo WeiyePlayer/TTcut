@@ -31,6 +31,7 @@ async function exists(value: string): Promise<boolean> {
 }
 
 export type RuntimeLocation = AnalysisRuntimeVariant | 'external' | 'legacy';
+export type MediaEncoder = 'libopenh264' | 'libx264';
 
 export type ComponentPaths = {
   python: string | null;
@@ -39,9 +40,11 @@ export type ComponentPaths = {
   weights: string | null;
   ffmpeg: string | null;
   ffprobe: string | null;
+  mediaEncoder: MediaEncoder | 'unavailable';
 };
 
 type RuntimeCandidate = { python: string; variant: RuntimeLocation };
+type MediaCandidate = { ffmpeg: string; ffprobe: string; encoder: MediaEncoder };
 
 function resource(...parts: string[]): string {
   return path.join(app.isPackaged ? process.resourcesPath : app.getAppPath(), ...parts);
@@ -100,28 +103,47 @@ async function resolveWeights(): Promise<string | null> {
   ].filter((item): item is string => Boolean(item)));
 }
 
-export async function resolveComponents(device: 'auto' | 'cuda' | 'cpu' = 'auto'): Promise<ComponentPaths> {
+async function mediaCandidates(): Promise<MediaCandidate[]> {
   const managedRoot = managedComponentsRoot();
+  const raw: MediaCandidate[] = [];
+  if (process.env.TTCUT_FFMPEG && process.env.TTCUT_FFPROBE) {
+    raw.push({ ffmpeg: process.env.TTCUT_FFMPEG, ffprobe: process.env.TTCUT_FFPROBE, encoder: 'libopenh264' });
+  }
+  raw.push(
+    {
+      ffmpeg: path.join(managedRoot, 'ffmpeg-x264-N-125716-g1b1f602699', 'bin', 'ffmpeg.exe'),
+      ffprobe: path.join(managedRoot, 'ffmpeg-x264-N-125716-g1b1f602699', 'bin', 'ffprobe.exe'),
+      encoder: 'libx264',
+    },
+    {
+      ffmpeg: path.join(managedRoot, 'ffmpeg-8.1', 'bin', 'ffmpeg.exe'),
+      ffprobe: path.join(managedRoot, 'ffmpeg-8.1', 'bin', 'ffprobe.exe'),
+      encoder: 'libopenh264',
+    },
+    {
+      ffmpeg: resource('resources', 'ffmpeg', 'ffmpeg.exe'),
+      ffprobe: resource('resources', 'ffmpeg', 'ffprobe.exe'),
+      encoder: 'libopenh264',
+    },
+  );
+  const available: MediaCandidate[] = [];
+  for (const candidate of raw) {
+    if (await exists(candidate.ffmpeg) && await exists(candidate.ffprobe)) available.push(candidate);
+  }
+  return available;
+}
+
+export async function resolveComponents(device: 'auto' | 'cuda' | 'cpu' = 'auto'): Promise<ComponentPaths> {
   const runtimes = await runtimeCandidates(device);
-  const media = await Promise.all([
-    firstExisting([
-      process.env.TTCUT_FFMPEG,
-      path.join(managedRoot, 'ffmpeg-8.1', 'bin', 'ffmpeg.exe'),
-      resource('resources', 'ffmpeg', 'ffmpeg.exe'),
-    ].filter((item): item is string => Boolean(item))),
-    firstExisting([
-      process.env.TTCUT_FFPROBE,
-      path.join(managedRoot, 'ffmpeg-8.1', 'bin', 'ffprobe.exe'),
-      resource('resources', 'ffmpeg', 'ffprobe.exe'),
-    ].filter((item): item is string => Boolean(item))),
-  ]);
+  const media = (await mediaCandidates())[0] ?? null;
   return {
     python: runtimes[0]?.python ?? null,
     runtimeVariant: runtimes[0]?.variant ?? null,
     worker: resource('worker'),
     weights: await resolveWeights(),
-    ffmpeg: media[0],
-    ffprobe: media[1],
+    ffmpeg: media?.ffmpeg ?? null,
+    ffprobe: media?.ffprobe ?? null,
+    mediaEncoder: media?.encoder ?? 'unavailable',
   };
 }
 
@@ -219,8 +241,13 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-export async function validateMediaComponent(ffmpeg: string, ffprobe: string): Promise<{ version: string }> {
+export async function validateMediaComponent(
+  ffmpeg: string,
+  ffprobe: string,
+  encoder: MediaEncoder = 'libopenh264',
+): Promise<{ version: string; encoder: MediaEncoder }> {
   const catalog = await loadComponentCatalog();
+  const asset = encoder === 'libx264' ? catalog.ffmpeg_x264 : catalog.ffmpeg;
   const [version, probeVersion, build, encoders] = await Promise.all([
     runProcess(ffmpeg, ['-version'], { timeoutMs: 10_000 }),
     runProcess(ffprobe, ['-version'], { timeoutMs: 10_000 }),
@@ -229,20 +256,46 @@ export async function validateMediaComponent(ffmpeg: string, ffprobe: string): P
   ]);
   const firstLine = version.stdout.split(/\r?\n/)[0] ?? '';
   const probeFirstLine = probeVersion.stdout.split(/\r?\n/)[0] ?? '';
-  if (!firstLine.includes(catalog.ffmpeg.version_line) || !probeFirstLine.includes(catalog.ffmpeg.version_line)) {
+  if (!firstLine.includes(asset.version_line) || !probeFirstLine.includes(asset.version_line)) {
     throw new Error('MEDIA_RUNTIME_VERSION_MISMATCH');
   }
   const configuration = `${version.stdout}\n${build.stdout}`;
-  for (const flag of catalog.ffmpeg.required_build_flags) {
+  for (const flag of asset.required_build_flags) {
     if (!configuration.includes(flag)) throw new Error(`MEDIA_RUNTIME_BUILD_FLAG_MISSING:${flag}`);
   }
-  for (const encoder of catalog.ffmpeg.required_encoders) {
-    if (!new RegExp(`\\b${escapeRegExp(encoder)}\\b`).test(encoders.stdout)) throw new Error(`MEDIA_RUNTIME_ENCODER_MISSING:${encoder}`);
+  for (const requiredEncoder of asset.required_encoders) {
+    if (!new RegExp(`\\b${escapeRegExp(requiredEncoder)}\\b`).test(encoders.stdout)) throw new Error(`MEDIA_RUNTIME_ENCODER_MISSING:${requiredEncoder}`);
   }
-  return { version: firstLine.replace(/^ffmpeg version\s+/, '') };
+  return { version: firstLine.replace(/^ffmpeg version\s+/, ''), encoder };
 }
 
-export async function inspectComponentPaths(paths: ComponentPaths): Promise<ComponentStatus> {
+export async function validateX264EightKCapability(ffmpeg: string): Promise<void> {
+  try {
+    await runProcess(ffmpeg, [
+      '-hide_banner', '-f', 'lavfi', '-i', 'color=c=black:s=7680x4320:r=1:d=1',
+      '-frames:v', '1', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18',
+      '-pix_fmt', 'yuv420p', '-f', 'null', '-',
+    ], { timeoutMs: 60_000 });
+  } catch (error) {
+    throw new Error('X264_8K_SELF_TEST_FAILED', { cause: error });
+  }
+}
+
+export async function resolveUsableMediaComponents(): Promise<Pick<ComponentPaths, 'ffmpeg' | 'ffprobe' | 'mediaEncoder'>> {
+  let lastError: unknown = null;
+  for (const candidate of await mediaCandidates()) {
+    try {
+      await validateMediaComponent(candidate.ffmpeg, candidate.ffprobe, candidate.encoder);
+      return { ffmpeg: candidate.ffmpeg, ffprobe: candidate.ffprobe, mediaEncoder: candidate.encoder };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  if (lastError instanceof Error) throw lastError;
+  throw new Error('MEDIA_COMPONENT_MISSING');
+}
+
+export async function inspectComponentPaths(paths: ComponentPaths, x264Available = false): Promise<ComponentStatus> {
   let analysisVersion: string | null = null;
   let acceleration: 'cuda' | 'cpu' | 'unavailable' = 'unavailable';
   let analysisDetail: string | null = null;
@@ -263,7 +316,11 @@ export async function inspectComponentPaths(paths: ComponentPaths): Promise<Comp
   let mediaDetail: string | null = null;
   if (paths.ffmpeg && paths.ffprobe) {
     try {
-      mediaVersion = (await validateMediaComponent(paths.ffmpeg, paths.ffprobe)).version;
+      mediaVersion = (await validateMediaComponent(
+        paths.ffmpeg,
+        paths.ffprobe,
+        paths.mediaEncoder === 'libx264' ? 'libx264' : 'libopenh264',
+      )).version;
     } catch (error) {
       mediaDetail = error instanceof Error ? error.message : String(error);
     }
@@ -282,15 +339,33 @@ export async function inspectComponentPaths(paths: ComponentPaths): Promise<Comp
       available: Boolean(paths.ffmpeg && paths.ffprobe && !mediaDetail),
       version: mediaVersion,
       path: paths.ffmpeg,
+      active_encoder: mediaDetail ? 'unavailable' : paths.mediaEncoder,
+      x264_available: x264Available || (!mediaDetail && paths.mediaEncoder === 'libx264'),
       detail: mediaDetail,
     },
   };
 }
 
 export async function inspectComponents(): Promise<ComponentStatus> {
+  const raw = await resolveComponents('auto');
+  const usableMedia = await resolveUsableMediaComponents().catch(() => null);
+  const paths = usableMedia ? { ...raw, ...usableMedia } : raw;
+  const catalog = await loadComponentCatalog();
+  const x264Root = path.join(managedComponentsRoot(), catalog.ffmpeg_x264.install_directory, 'bin');
+  const x264Ffmpeg = path.join(x264Root, 'ffmpeg.exe');
+  const x264Ffprobe = path.join(x264Root, 'ffprobe.exe');
+  const x264Available = await validateMediaComponent(x264Ffmpeg, x264Ffprobe, 'libx264')
+    .then(() => true)
+    .catch(() => false);
   try {
-    return inspectComponentPaths(await resolveUsableAnalysisComponents('auto'));
+    const analysis = await resolveUsableAnalysisComponents('auto');
+    return inspectComponentPaths({
+      ...analysis,
+      ffmpeg: paths.ffmpeg,
+      ffprobe: paths.ffprobe,
+      mediaEncoder: paths.mediaEncoder,
+    }, x264Available);
   } catch {
-    return inspectComponentPaths(await resolveComponents('auto'));
+    return inspectComponentPaths(paths, x264Available);
   }
 }

@@ -14,7 +14,8 @@ export type ImportableComponentFile =
     asset: ComponentCatalog['analysis_runtime']['assets'][number];
     part: ComponentCatalog['analysis_runtime']['assets'][number]['parts'][number];
   }
-  | { kind: 'media'; sourcePath: string; asset: ComponentCatalog['ffmpeg'] };
+  | { kind: 'media'; sourcePath: string; asset: ComponentCatalog['ffmpeg'] }
+  | { kind: 'media-x264'; sourcePath: string; asset: ComponentCatalog['ffmpeg_x264'] };
 
 type ImportCandidate =
   | { kind: 'weight'; asset: ComponentCatalog['tracknet_weight'] }
@@ -24,7 +25,8 @@ type ImportCandidate =
     asset: ComponentCatalog['analysis_runtime']['assets'][number];
     part: ComponentCatalog['analysis_runtime']['assets'][number]['parts'][number];
   }
-  | { kind: 'media'; asset: ComponentCatalog['ffmpeg'] };
+  | { kind: 'media'; asset: ComponentCatalog['ffmpeg'] }
+  | { kind: 'media-x264'; asset: ComponentCatalog['ffmpeg_x264'] };
 
 export async function validateImportFiles(
   filePaths: string[],
@@ -41,6 +43,7 @@ export async function validateImportFiles(
     }
   }
   candidates.set(catalog.ffmpeg.asset, { kind: 'media', asset: catalog.ffmpeg });
+  candidates.set(catalog.ffmpeg_x264.asset, { kind: 'media-x264', asset: catalog.ffmpeg_x264 });
 
   const selectedNames = new Set<string>();
   const validated: ImportableComponentFile[] = [];

@@ -102,6 +102,25 @@ components.push({
   ],
   license_files: ['licenses/tracknet/WEIGHT_RIGHTS.md'],
 });
+components.push({
+  type: 'framework',
+  name: 'FFmpeg libx264 optional media component',
+  version: componentCatalog.ffmpeg_x264.version_line,
+  scope: 'optional',
+  hashes: [{ alg: 'SHA-256', content: componentCatalog.ffmpeg_x264.sha256 }],
+  licenses: [{ license: { id: 'GPL-3.0-only' } }],
+  externalReferences: [
+    { type: 'distribution', url: componentCatalog.ffmpeg_x264.url },
+    { type: 'vcs', url: componentCatalog.ffmpeg_x264.source_url },
+    { type: 'website', url: componentCatalog.ffmpeg_x264.license_url },
+  ],
+  properties: [
+    { name: 'ttcut:distribution', value: 'manual-import-only' },
+    { name: 'ttcut:installer-bundled', value: 'false' },
+    { name: 'ttcut:encoder', value: 'libx264' },
+  ],
+  license_files: ['THIRD_PARTY_NOTICES.md'],
+});
 
 components.sort((left, right) => left.name.localeCompare(right.name));
 const sbom = {

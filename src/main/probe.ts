@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { videoMetadataSchema, type VideoMetadata } from '../shared/contracts';
-import { resolveComponents } from './components';
+import { resolveUsableMediaComponents } from './components';
 import { runProcess } from './processes';
 
 type ProbeStream = {
@@ -95,7 +95,7 @@ async function sampledVfr(ffprobe: string, videoPath: string): Promise<boolean> 
 
 export async function probeVideo(videoPath: string): Promise<VideoMetadata> {
   if (path.extname(videoPath).toLowerCase() !== '.mp4') throw new Error('INVALID_INPUT');
-  const components = await resolveComponents();
+  const components = await resolveUsableMediaComponents();
   if (!components.ffprobe) throw new Error('MEDIA_COMPONENT_MISSING');
   const result = await runProcess(components.ffprobe, [
     '-v', 'error', '-show_format', '-show_streams', '-of', 'json', videoPath,
@@ -154,7 +154,7 @@ export async function probeVideo(videoPath: string): Promise<VideoMetadata> {
 }
 
 export async function probeKeyframes(videoPath: string): Promise<number[]> {
-  const components = await resolveComponents();
+  const components = await resolveUsableMediaComponents();
   if (!components.ffprobe) throw new Error('MEDIA_COMPONENT_MISSING');
   const result = await runProcess(components.ffprobe, [
     '-v', 'error', '-select_streams', 'v:0', '-skip_frame', 'nokey',
@@ -169,7 +169,7 @@ export async function probeKeyframes(videoPath: string): Promise<number[]> {
 }
 
 export async function probeAudioPacketBoundaries(videoPath: string): Promise<number[]> {
-  const components = await resolveComponents();
+  const components = await resolveUsableMediaComponents();
   if (!components.ffprobe) throw new Error('MEDIA_COMPONENT_MISSING');
   const result = await runProcess(components.ffprobe, [
     '-v', 'error', '-select_streams', 'a:0', '-show_packets',

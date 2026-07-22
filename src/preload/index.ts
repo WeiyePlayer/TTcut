@@ -9,6 +9,7 @@ const api: TTcutApi = {
   refreshComponents: () => ipcRenderer.invoke(IPC.componentsRefresh),
   importComponents: () => ipcRenderer.invoke(IPC.componentsImport),
   openComponentDownloads: () => ipcRenderer.invoke(IPC.componentsOpenDownloads),
+  openX264Download: () => ipcRenderer.invoke(IPC.componentsOpenX264Download),
   installAnalysisComponent: (consent: true) => ipcRenderer.invoke(IPC.componentsInstallAnalysis, consent),
   installMediaComponent: (consent: true) => ipcRenderer.invoke(IPC.componentsInstallMedia, consent),
   selectVideo: () => ipcRenderer.invoke(IPC.videoSelect),

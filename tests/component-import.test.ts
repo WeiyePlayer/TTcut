@@ -53,6 +53,13 @@ function testCatalog(): ComponentCatalog {
       install_directory: 'ffmpeg-8.1', url: 'https://example.com/ffmpeg', license_url: 'https://example.com/ffmpeg-license', size_bytes: media.length,
       sha256: hash(media), required_build_flags: ['--enable-shared'], required_encoders: ['aac'],
     },
+    ffmpeg_x264: {
+      provider: 'test', release_tag: 'autobuild-2026-07-22-13-36', version_line: 'N-125716-g1b1f602699-20260722', variant: 'win64-gpl',
+      asset: 'ffmpeg-N-125716-g1b1f602699-win64-gpl.zip', archive_root: 'ffmpeg-N-125716-g1b1f602699-win64-gpl', install_directory: 'ffmpeg-x264-N-125716-g1b1f602699',
+      url: 'https://example.com/ffmpeg-x264', license_url: 'https://example.com/ffmpeg-x264-license', source_url: 'https://example.com/ffmpeg-x264-source',
+      size_bytes: 168_733_210, sha256: '6dcf685c2fea98221b3f179961165e9c31f55bead576c4479ae4549858fbf826',
+      required_build_flags: ['--enable-gpl', '--enable-libx264'], required_encoders: ['libx264', 'aac'], supported_pixel_formats: ['yuv420p'],
+    },
   };
 }
 
@@ -61,7 +68,7 @@ afterEach(async () => {
 });
 
 describe('manual component import validation', () => {
-  it('recognizes the fixed model, CPU runtime, CUDA parts, and media archive', async () => {
+  it('recognizes the fixed model, CPU runtime, CUDA parts, and both media archives', async () => {
     const root = await temporaryDirectory();
     const files = [
       ['TrackNet_best.pt', 'weight-data'], ['cpu.zip', 'cpu-data'], ['cu126.zip.part001', 'cuda-one'], ['cu126.zip.part002', 'cuda-two'],
@@ -79,6 +86,14 @@ describe('manual component import validation', () => {
       expect.objectContaining({ kind: 'runtime-part', variant: 'cu126' }),
       expect.objectContaining({ kind: 'media' }),
     ]));
+  });
+
+  it('rejects the floating x264 latest filename', async () => {
+    const root = await temporaryDirectory();
+    const catalog = testCatalog();
+    const floating = path.join(root, 'ffmpeg-master-latest-win64-gpl.zip');
+    await writeFile(floating, 'media-x264-data', 'utf8');
+    await expect(validateImportFiles([floating], catalog)).rejects.toThrow('COMPONENT_IMPORT_UNSUPPORTED_FILE');
   });
 
   it('rejects unknown, wrong-size, and wrong-hash files', async () => {

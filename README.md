@@ -81,6 +81,16 @@ TTcut 是一款面向乒乓球爱好者的本地乒乓球视频自动剪辑工�
 - 满足安全切点条件时尝试流复制，否则执行一次准确重编码。
 - 保留分辨率、方向、宽高比和色彩信息，并校验输出时长、音画同步和可播放性。
 
+默认视频处理组件使用 OpenH264，在线安装行为和默认剪辑参数保持不变。需要 8K 或更高分辨率重编码时，可以在“设置”中下载并手动导入可选的 x264 组件：
+
+- 固定文件：`ffmpeg-N-125716-g1b1f602699-win64-gpl.zip`
+- 固定 SHA-256：`6dcf685c2fea98221b3f179961165e9c31f55bead576c4479ae4549858fbf826`
+- 导入成功后，所有必须重编码的导出使用 `libx264`、`veryfast` 和 `CRF 18`。
+- 满足边界条件的任务仍使用无损流复制，不会因为导入 x264 而强制重编码。
+- x264 组件与默认 OpenH264 组件并存；x264 损坏或未导入时自动回退 OpenH264。
+- x264 是 GPL 构建，组件不打入 TTcut 安装包，必须从设置页提供的固定 BtbN Release 手动下载并导入。
+- 不进行升频：输入为 8K 时保持 8K，低分辨率视频不会被放大。
+
 ## 从源码运行
 
 要求 Windows x64、Node.js 22、npm 10。安装依赖并启动：
@@ -133,7 +143,7 @@ npm run test:e2e
 
 ## 许可
 
-TTcut 自有源码采用 [MIT License](LICENSE)。TrackNet 派生代码、模型权重、Python、PyTorch、NumPy、OpenCV、FFmpeg、字体和 npm 依赖保留各自许可或权利声明，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+TTcut 自有源码采用 [MIT License](LICENSE)。TrackNet 派生代码、模型权重、Python、PyTorch、NumPy、OpenCV、FFmpeg、可选 GPL x264 组件、字体和 npm 依赖保留各自许可或权利声明，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 更多实现和发行资料位于 [`docs`](docs) 目录。
 

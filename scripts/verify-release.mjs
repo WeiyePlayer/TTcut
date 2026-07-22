@@ -128,6 +128,15 @@ check(componentCatalog.tracknet_weight?.url === 'https://github.com/WeiyePlayer/
 check(componentCatalog.tracknet_weight?.size_bytes === 136191005, 'The managed TrackNet weight size is incorrect.');
 check(componentCatalog.tracknet_weight?.install_directory === 'models', 'The managed TrackNet weight install directory is incorrect.');
 check(/^[a-f0-9]{64}$/.test(componentCatalog.ffmpeg?.sha256 ?? ''), 'The fixed FFmpeg archive hash is missing.');
+check(componentCatalog.ffmpeg?.install_directory === 'ffmpeg-8.1', 'The default OpenH264 FFmpeg install directory changed.');
+check(componentCatalog.ffmpeg?.variant === 'win64-lgpl-shared-8.1', 'The default OpenH264 FFmpeg variant changed.');
+check(componentCatalog.ffmpeg_x264?.asset === 'ffmpeg-N-125716-g1b1f602699-win64-gpl.zip', 'The fixed x264 asset name is incorrect.');
+check(componentCatalog.ffmpeg_x264?.size_bytes === 168733210, 'The fixed x264 asset size is incorrect.');
+check(componentCatalog.ffmpeg_x264?.sha256 === '6dcf685c2fea98221b3f179961165e9c31f55bead576c4479ae4549858fbf826', 'The fixed x264 asset hash is incorrect.');
+check(componentCatalog.ffmpeg_x264?.install_directory === 'ffmpeg-x264-N-125716-g1b1f602699', 'The x264 install directory is incorrect.');
+check(componentCatalog.ffmpeg_x264?.required_build_flags?.includes('--enable-gpl'), 'The x264 GPL build requirement is missing.');
+check(componentCatalog.ffmpeg_x264?.required_build_flags?.includes('--enable-libx264'), 'The x264 encoder build requirement is missing.');
+check(componentCatalog.ffmpeg_x264?.required_encoders?.includes('libx264'), 'The x264 encoder requirement is missing.');
 
 const publicReleaseCandidate = process.env.TTCUT_PUBLIC_RC === '1';
 const officialRelease = process.env.TTCUT_OFFICIAL_RELEASE === '1';
@@ -192,6 +201,7 @@ if (existsSync(path.join(releaseMetadata, 'licenses', 'index.json'))) {
   check(Array.isArray(licenseIndex.components) && licenseIndex.components.length >= 9, 'Generated license index is incomplete.');
   check(licenseIndex.components.every((component) => Array.isArray(component.license_files) && component.license_files.length > 0), 'A shipped component has no bundled license body.');
   check(licenseIndex.components.some((component) => component.name === componentCatalog.tracknet_weight.filename), 'Shipped TrackNet weight is missing from the generated license index.');
+  check(licenseIndex.components.some((component) => component.name === 'FFmpeg libx264 optional media component'), 'Optional x264 component is missing from the generated license index.');
 }
 
 await auditWorker(path.join(root, '.runtime', 'worker'), 'staged Worker');

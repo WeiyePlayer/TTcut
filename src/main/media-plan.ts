@@ -1,4 +1,5 @@
 import type { CutGroup, VideoMetadata } from '../shared/contracts';
+import type { MediaEncoder } from './components';
 
 const TIME_EPSILON = 0.000_001;
 
@@ -117,6 +118,7 @@ export function buildReencodeArgs(
   output: string,
   groups: readonly CutGroup[],
   metadata: VideoMetadata,
+  encoder: MediaEncoder = 'libopenh264',
 ): string[] {
   const hasAudio = metadata.audio_codec !== null;
   const filter = buildTrimFilter(groups, hasAudio, metadata.sample_aspect_ratio);
@@ -129,12 +131,23 @@ export function buildReencodeArgs(
     Math.min(sourceVideoBitrate * 2, 50_000_000),
   ));
   const audioBitrate = Math.round(metadata.audio_bitrate ?? 192_000);
+  const x264PixelFormats = new Set([
+    'yuv420p', 'yuvj420p', 'yuv422p', 'yuvj422p', 'yuv444p', 'yuvj444p',
+    'nv12', 'nv16', 'nv21', 'yuv420p10le', 'yuv422p10le', 'yuv444p10le',
+    'nv20le', 'gray', 'gray10le',
+  ]);
+  const pixelFormat = encoder === 'libx264' && metadata.pixel_format && x264PixelFormats.has(metadata.pixel_format)
+    ? metadata.pixel_format
+    : 'yuv420p';
+  const videoOptions = encoder === 'libx264'
+    ? ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18']
+    : ['-c:v', 'libopenh264', '-profile:v', 'high', '-b:v', String(videoBitrate)];
   const args = [
     '-hide_banner', '-y', '-noautorotate', '-i', input,
     '-filter_complex', filter.filter, ...filter.maps,
     '-map_metadata', '0', '-sn', '-dn',
-    '-c:v', 'libopenh264', '-profile:v', 'high', '-b:v', String(videoBitrate),
-    '-pix_fmt', 'yuv420p', '-fps_mode', 'vfr', '-max_muxing_queue_size', '2048',
+    ...videoOptions,
+    '-pix_fmt', pixelFormat, '-fps_mode', 'vfr', '-max_muxing_queue_size', '2048',
   ];
   if (hasAudio) {
     args.push('-c:a', 'aac', '-b:a', String(audioBitrate));
