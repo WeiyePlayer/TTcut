@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type { AnalysisResultV1, AppSettings, Calibration, CutSelectionV1, ExportResult, HistorySummaryV1, Rally, VideoMetadata } from '../shared/contracts';
-import type { AppEvent, BootstrapData, SelectedVideo } from '../shared/api';
+import type { AppEvent, BootstrapData, PendingComponentImport, SelectedVideo } from '../shared/api';
 import { formatTimestamp } from '../domain/time';
 import { rallyPreviewRange } from '../domain/preview';
 import { validateCalibration } from '../domain/calibration';
@@ -234,8 +234,9 @@ export function App() {
   const [setupTask, setSetupTask] = useState<string | null>(null);
   const setupTaskRef = useRef<string | null>(null);
   const [setupProgress, setSetupProgress] = useState<{ percent: number; stage: string; current?: number; total?: number } | null>(null);
-  const [setupOutcome, setSetupOutcome] = useState<'success' | 'cancelled' | 'failed' | null>(null);
+  const [setupOutcome, setSetupOutcome] = useState<'success' | 'pending' | 'cancelled' | 'failed' | null>(null);
   const [setupFailureCode, setSetupFailureCode] = useState<string | null>(null);
+  const [setupPendingImports, setSetupPendingImports] = useState<PendingComponentImport[]>([]);
   const [historyEntries, setHistoryEntries] = useState<HistorySummaryV1[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -287,8 +288,9 @@ export function App() {
         setupTaskRef.current = null;
         setSetupTask(null);
         setSetupProgress(null);
-        setSetupOutcome('success');
+        setSetupOutcome(event.pendingImports.length > 0 ? 'pending' : 'success');
         setSetupFailureCode(null);
+        setSetupPendingImports(event.pendingImports);
         setBootstrap((current) => current ? { ...current, components: event.data } : current);
       } else {
         if (setupTaskRef.current === event.taskId) {
@@ -297,6 +299,7 @@ export function App() {
           setSetupProgress(null);
           setSetupOutcome(event.code === 'SETUP_CANCELLED' ? 'cancelled' : 'failed');
           setSetupFailureCode(event.code);
+          setSetupPendingImports([]);
           return;
         }
         setActiveTask(null);
@@ -442,6 +445,7 @@ export function App() {
   const importComponents = async () => {
     setSetupOutcome(null);
     setSetupFailureCode(null);
+    setSetupPendingImports([]);
     if (!platformSupported) {
       setSetupOutcome('failed');
       setSetupFailureCode(bootstrap?.platformCompatibility.reason === 'probe_failed' ? 'PLATFORM_PROBE_FAILED' : 'PLATFORM_UNSUPPORTED');
@@ -461,6 +465,7 @@ export function App() {
   const installMediaComponent = async () => {
     setSetupOutcome(null);
     setSetupFailureCode(null);
+    setSetupPendingImports([]);
     if (!platformSupported) {
       setSetupOutcome('failed');
       setSetupFailureCode(bootstrap?.platformCompatibility.reason === 'probe_failed' ? 'PLATFORM_PROBE_FAILED' : 'PLATFORM_UNSUPPORTED');
@@ -479,6 +484,7 @@ export function App() {
   const installAnalysisComponent = async () => {
     setSetupOutcome(null);
     setSetupFailureCode(null);
+    setSetupPendingImports([]);
     if (!platformSupported) {
       setSetupOutcome('failed');
       setSetupFailureCode(bootstrap?.platformCompatibility.reason === 'probe_failed' ? 'PLATFORM_PROBE_FAILED' : 'PLATFORM_UNSUPPORTED');
@@ -495,6 +501,12 @@ export function App() {
   };
 
   const stageText = t.stages[progress.stage as keyof typeof t.stages] ?? progress.stage;
+  const setupPendingText = setupPendingImports.map((pending) => interpolate(t.setupPending, {
+    variant: pending.variant,
+    received: pending.receivedParts,
+    total: pending.totalParts,
+    missing: pending.missingAssets.join(', '),
+  })).join(' ');
   const canReturnToSelection = view === 'auto'
     && step !== 'select'
     && step !== 'analyzing'
@@ -585,7 +597,7 @@ export function App() {
                     </div>
                   </div>
                 )}
-                {setupOutcome && <p className={`setup-outcome ${setupOutcome}`}>{setupOutcome === 'success' ? t.setupSuccess : setupOutcome === 'cancelled' ? t.setupCancelled : setupFailureCode === 'COMPONENT_DOWNLOAD_RETRY_EXHAUSTED' ? t.setupNetworkFailed : setupFailureCode && (setupFailureCode.startsWith('COMPONENT_IMPORT_') || setupFailureCode === 'PLATFORM_UNSUPPORTED' || setupFailureCode === 'PLATFORM_PROBE_FAILED') ? localizedError(setupFailureCode, t) : t.setupFailed}</p>}
+                {setupOutcome && <p className={`setup-outcome ${setupOutcome}`}>{setupOutcome === 'success' ? t.setupSuccess : setupOutcome === 'pending' ? setupPendingText : setupOutcome === 'cancelled' ? t.setupCancelled : setupFailureCode === 'COMPONENT_DOWNLOAD_RETRY_EXHAUSTED' ? t.setupNetworkFailed : setupFailureCode && (setupFailureCode.startsWith('COMPONENT_IMPORT_') || setupFailureCode === 'PLATFORM_UNSUPPORTED' || setupFailureCode === 'PLATFORM_PROBE_FAILED') ? localizedError(setupFailureCode, t) : t.setupFailed}</p>}
               </article>
               <article className="card actions-card">
                 <div><h2>{t.version}</h2><p>{bootstrap?.version ?? '1.0.0'}</p></div>

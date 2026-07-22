@@ -94,6 +94,7 @@ function registerIpc(): void {
   });
   ipcMain.handle(IPC.componentsImport, async () => {
     await assertPlatformCompatible();
+    const catalog = await loadComponentCatalog();
     if (e2eHarnessEnabled() && process.env.TTCUT_E2E_COMPONENT_IMPORT_FILES) {
       const filePaths = JSON.parse(process.env.TTCUT_E2E_COMPONENT_IMPORT_FILES) as unknown;
       if (!Array.isArray(filePaths) || !filePaths.every((value): value is string => typeof value === 'string')) {
@@ -101,10 +102,17 @@ function registerIpc(): void {
       }
       return startComponentImport(currentWindow(), filePaths);
     }
+    const extensions = new Set(['pt', 'zip']);
+    for (const asset of catalog.analysis_runtime.assets) {
+      for (const part of asset.parts) {
+        const extension = path.extname(part.asset).slice(1);
+        if (extension) extensions.add(extension);
+      }
+    }
     const result = await dialog.showOpenDialog(currentWindow(), {
       title: 'Import TTcut components',
       properties: ['openFile', 'multiSelections'],
-      filters: [{ name: 'TTcut component files', extensions: ['pt', 'zip', 'part001', 'part002', 'part003'] }],
+      filters: [{ name: 'TTcut component files', extensions: [...extensions] }],
     });
     if (result.canceled || result.filePaths.length === 0) return null;
     return startComponentImport(currentWindow(), result.filePaths);

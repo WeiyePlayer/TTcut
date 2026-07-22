@@ -12,7 +12,7 @@ const electronPath = process.env.TTCUT_E2E_ELECTRON
   ?? path.join(projectRoot, '.baseline', 'electron-dev', '43.1.1', 'electron.exe');
 const componentSource = process.env.TTCUT_COMPONENT_IMPORT_SOURCE ?? 'D:\\DOCUMENTS\\test';
 const componentsRoot = process.env.TTCUT_COMPONENT_IMPORT_ROOT
-  ?? path.join(process.env.LOCALAPPDATA ?? '', 'TTcutData', 'components');
+  ?? path.join(projectRoot, '.baseline', 'e2e-component-import-components');
 const userData = path.join(projectRoot, 'output', 'playwright', 'component-import-user-data');
 const screenshot = path.join(projectRoot, 'output', 'playwright', 'component-import-settings.png');
 const importFiles = [

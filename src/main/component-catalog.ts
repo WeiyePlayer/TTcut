@@ -65,7 +65,7 @@ const componentCatalogSchema = z.object({
       if (asset.parts.reduce((total, part) => total + part.size_bytes, 0) !== asset.size_bytes) {
         context.addIssue({ code: 'custom', path: ['parts'], message: 'Runtime asset part sizes must equal the complete archive size.' });
       }
-    })).max(2),
+    })).length(ANALYSIS_RUNTIME_VARIANTS.length),
   }).strict().superRefine((runtime, context) => {
     const variants = new Set<string>();
     for (const [index, asset] of runtime.assets.entries()) {
@@ -108,12 +108,20 @@ export function loadComponentCatalog(): Promise<ComponentCatalog> {
 
 export async function componentSetupInfo(): Promise<ComponentSetupInfo> {
   const catalog = await loadComponentCatalog();
+  const cpuAsset = catalog.analysis_runtime.assets.find((asset) => asset.variant === 'cpu');
+  const largestCudaAsset = Math.max(
+    0,
+    ...catalog.analysis_runtime.assets
+      .filter((asset) => asset.variant !== 'cpu')
+      .map((asset) => asset.size_bytes),
+  );
   return {
     analysis_offer: catalog.analysis_runtime.assets.length === ANALYSIS_RUNTIME_VARIANTS.length ? {
       id: 'analysis',
       version: `${catalog.analysis_runtime.python_version} / ${catalog.analysis_runtime.torch_version}`,
       download_size_bytes: catalog.tracknet_weight.size_bytes
-        + catalog.analysis_runtime.assets.reduce((total, asset) => total + asset.size_bytes, 0),
+        + (cpuAsset?.size_bytes ?? 0)
+        + largestCudaAsset,
       license_url: catalog.analysis_runtime.license_url,
       available_for_download: process.platform === 'win32',
     } : null,

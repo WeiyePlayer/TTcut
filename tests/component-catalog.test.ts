@@ -15,13 +15,16 @@ beforeAll(async () => {
 });
 
 describe('production component catalog', () => {
-  it('parses both fixed runtime variants and every immutable part', async () => {
+  it('parses all fixed runtime variants and every immutable part', async () => {
     const catalog = await loadComponentCatalog();
-    expect(catalog.analysis_runtime.assets.map((asset) => asset.variant)).toEqual(['cpu', 'cu126']);
+    expect(catalog.analysis_runtime.assets.map((asset) => asset.variant)).toEqual(['cpu', 'cu126', 'cu132']);
     expect(catalog.analysis_runtime.assets[0]?.parts).toHaveLength(1);
     expect(catalog.analysis_runtime.assets[1]?.parts).toHaveLength(3);
-    expect(catalog.analysis_runtime.assets.flatMap((asset) => asset.parts).every((part) => (
+    expect(catalog.analysis_runtime.assets.slice(0, 2).flatMap((asset) => asset.parts).every((part) => (
       part.url.includes('/analysis-3.12.13-2.12.1-r1/') && /^[a-f0-9]{64}$/.test(part.sha256)
+    ))).toBe(true);
+    expect(catalog.analysis_runtime.assets[2]?.parts.every((part) => (
+      part.url.includes('/analysis-3.12.13-2.12.1-cu132-r1/') && /^[a-f0-9]{64}$/.test(part.sha256)
     ))).toBe(true);
     expect(catalog.tracknet_weight).toMatchObject({
       downloadable: true,

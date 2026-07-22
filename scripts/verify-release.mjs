@@ -42,10 +42,10 @@ async function auditWorker(directory, label) {
   for (const token of ['inpaintnet', 'speed_analysis', 'hit_detection', 'overlay_renderer', 'gradio']) {
     check(!runtimeText.includes(token), `${label} imports or references removed feature: ${token}`);
   }
-  for (const name of ['requirements-cpu.txt', 'requirements-cu126.txt', 'runtime-wheel-lock.json', 'SOURCE_MANIFEST.md', 'LICENSE.tracknet.txt']) {
+  for (const name of ['requirements-cpu.txt', 'requirements-cu126.txt', 'requirements-cu132.txt', 'runtime-wheel-lock.json', 'SOURCE_MANIFEST.md', 'LICENSE.tracknet.txt']) {
     check(relative.includes(name), `${label} is missing ${name}`);
   }
-  for (const requirement of ['requirements-cpu.txt', 'requirements-cu126.txt']) {
+  for (const requirement of ['requirements-cpu.txt', 'requirements-cu126.txt', 'requirements-cu132.txt']) {
     const text = await readFile(path.join(directory, requirement), 'utf8');
     check(text.includes('numpy==2.5.1'), `${label}/${requirement} does not pin NumPy exactly.`);
     check(text.includes('opencv-python==4.13.0.92'), `${label}/${requirement} does not pin OpenCV exactly.`);
@@ -58,7 +58,7 @@ async function auditWorker(directory, label) {
   const wheelLock = JSON.parse(await readFile(path.join(directory, 'runtime-wheel-lock.json'), 'utf8'));
   check(wheelLock.platform === 'win_amd64' && wheelLock.python_tag === 'cp312', `${label}/runtime-wheel-lock.json targets the wrong platform.`);
   const lockedNames = new Set(wheelLock.wheels?.map((wheel) => `${wheel.name.toLowerCase()}:${wheel.version}`));
-  for (const required of ['numpy:2.5.1', 'opencv-python:4.13.0.92', 'torch:2.12.1+cpu', 'torch:2.12.1+cu126', 'filelock:3.30.3', 'fsspec:2026.6.0', 'jinja2:3.1.6', 'markupsafe:3.0.3', 'mpmath:1.3.0', 'networkx:3.6.1', 'setuptools:81.0.0', 'sympy:1.14.0', 'typing-extensions:4.16.0']) {
+  for (const required of ['numpy:2.5.1', 'opencv-python:4.13.0.92', 'torch:2.12.1+cpu', 'torch:2.12.1+cu126', 'torch:2.12.1+cu132', 'filelock:3.30.3', 'fsspec:2026.6.0', 'jinja2:3.1.6', 'markupsafe:3.0.3', 'mpmath:1.3.0', 'networkx:3.6.1', 'setuptools:81.0.0', 'sympy:1.14.0', 'typing-extensions:4.16.0']) {
     check(lockedNames.has(required), `${label}/runtime-wheel-lock.json is missing ${required}.`);
   }
   check(wheelLock.wheels.every((wheel) => Array.isArray(wheel.variants) && wheel.variants.length > 0 && wheel.url.startsWith('https://') && /^[a-f0-9]{64}$/.test(wheel.sha256) && Number.isSafeInteger(wheel.size_bytes) && wheel.size_bytes > 0), `${label}/runtime-wheel-lock.json contains an unpinned wheel.`);
@@ -140,7 +140,7 @@ if (releaseSigningRequired) {
     check(Boolean(process.env.WINDOWS_SIGNTOOL_PATH), 'Official release Windows SDK SignTool path is missing.');
   }
   const runtimeAssets = componentCatalog.analysis_runtime?.assets ?? [];
-  check(runtimeAssets.length === 2 && new Set(runtimeAssets.map((asset) => asset.variant)).size === 2, 'Public RC requires immutable CPU and cu126 runtime assets.');
+  check(runtimeAssets.length === 3 && new Set(runtimeAssets.map((asset) => asset.variant)).size === 3, 'Public RC requires immutable CPU, cu126, and cu132 runtime assets.');
   check(runtimeAssets.every((asset) => Array.isArray(asset.parts) && asset.parts.length > 0 && asset.parts.every((part) => part.url.startsWith('https://') && !part.url.includes('REPLACE-') && /^[a-f0-9]{64}$/.test(part.sha256))), 'Public RC runtime asset part URLs or hashes are not immutable production values.');
   check(componentCatalog.tracknet_weight?.redistribution === 'redistributable', 'Public RC cannot package the internal-only TrackNet weight.');
   const evidence = componentCatalog.tracknet_weight?.rights_evidence;

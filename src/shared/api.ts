@@ -28,11 +28,24 @@ export type BootstrapData = {
   logsPath: string;
 };
 
+export type PendingComponentImport = {
+  variant: 'cpu' | 'cu126' | 'cu132';
+  receivedParts: number;
+  totalParts: number;
+  missingAssets: string[];
+};
+
 export type AppEvent =
   | { type: 'progress'; data: TaskProgress }
   | { type: 'analysis-result'; taskId: string; data: AnalysisResultV1 }
   | { type: 'export-result'; taskId: string; data: ExportResult }
-  | { type: 'component-result'; taskId: string; data: ComponentStatus; imported: Array<'analysis' | 'media'> }
+  | {
+    type: 'component-result';
+    taskId: string;
+    data: ComponentStatus;
+    imported: Array<'analysis' | 'media'>;
+    pendingImports: PendingComponentImport[];
+  }
   | { type: 'error'; taskId: string; code: string; message: string; logPath?: string };
 
 export type HistoryOpenResultV1 = {

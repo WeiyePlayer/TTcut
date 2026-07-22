@@ -2,12 +2,16 @@
   "schema_version": 1,
   "platform": "win_amd64",
   "python_tag": "cp312",
-  "resolved_at": "2026-07-18T05:35:36.588Z",
+  "resolved_at": "2026-07-22T06:53:24.927Z",
   "wheels": [
     {
       "name": "numpy",
       "version": "2.5.1",
-      "variants": ["cpu", "cu126"],
+      "variants": [
+        "cpu",
+        "cu126",
+        "cu132"
+      ],
       "filename": "numpy-2.5.1-cp312-cp312-win_amd64.whl",
       "url": "https://files.pythonhosted.org/packages/65/66/53f31807a48a750f9d748da273bc3fcedd12b27ff1f3e373bfec55ef2dc0/numpy-2.5.1-cp312-cp312-win_amd64.whl",
       "size_bytes": 12430966,
@@ -16,7 +20,11 @@
     {
       "name": "opencv-python",
       "version": "4.13.0.92",
-      "variants": ["cpu", "cu126"],
+      "variants": [
+        "cpu",
+        "cu126",
+        "cu132"
+      ],
       "filename": "opencv_python-4.13.0.92-cp37-abi3-win_amd64.whl",
       "url": "https://files.pythonhosted.org/packages/e9/a5/1be1516390333ff9be3a9cb648c9f33df79d5096e5884b5df71a588af463/opencv_python-4.13.0.92-cp37-abi3-win_amd64.whl",
       "size_bytes": 40212062,
@@ -25,7 +33,11 @@
     {
       "name": "filelock",
       "version": "3.30.3",
-      "variants": ["cpu", "cu126"],
+      "variants": [
+        "cpu",
+        "cu126",
+        "cu132"
+      ],
       "filename": "filelock-3.30.3-py3-none-any.whl",
       "url": "https://files.pythonhosted.org/packages/e7/20/b0d6da41a08b30faef4f20302f5d826a9d39073750cd9100b463eb840cf4/filelock-3.30.3-py3-none-any.whl",
       "size_bytes": 94544,
@@ -34,7 +46,11 @@
     {
       "name": "fsspec",
       "version": "2026.6.0",
-      "variants": ["cpu", "cu126"],
+      "variants": [
+        "cpu",
+        "cu126",
+        "cu132"
+      ],
       "filename": "fsspec-2026.6.0-py3-none-any.whl",
       "url": "https://files.pythonhosted.org/packages/e5/22/4222d7ddf3da30f363edaa98e329c2bce6c65497c9cb2810931c8b2c0fbc/fsspec-2026.6.0-py3-none-any.whl",
       "size_bytes": 203949,
@@ -43,7 +59,11 @@
     {
       "name": "Jinja2",
       "version": "3.1.6",
-      "variants": ["cpu", "cu126"],
+      "variants": [
+        "cpu",
+        "cu126",
+        "cu132"
+      ],
       "filename": "jinja2-3.1.6-py3-none-any.whl",
       "url": "https://files.pythonhosted.org/packages/62/a1/3d680cbfd5f4b8f15abc1d571870c5fc3e594bb582bc3b64ea099db13e56/jinja2-3.1.6-py3-none-any.whl",
       "size_bytes": 134899,
@@ -52,7 +72,11 @@
     {
       "name": "MarkupSafe",
       "version": "3.0.3",
-      "variants": ["cpu", "cu126"],
+      "variants": [
+        "cpu",
+        "cu126",
+        "cu132"
+      ],
       "filename": "markupsafe-3.0.3-cp312-cp312-win_amd64.whl",
       "url": "https://files.pythonhosted.org/packages/aa/5b/bec5aa9bbbb2c946ca2733ef9c4ca91c91b6a24580193e891b5f7dbe8e1e/markupsafe-3.0.3-cp312-cp312-win_amd64.whl",
       "size_bytes": 15105,
@@ -61,7 +85,11 @@
     {
       "name": "mpmath",
       "version": "1.3.0",
-      "variants": ["cpu", "cu126"],
+      "variants": [
+        "cpu",
+        "cu126",
+        "cu132"
+      ],
       "filename": "mpmath-1.3.0-py3-none-any.whl",
       "url": "https://files.pythonhosted.org/packages/43/e3/7d92a15f894aa0c9c4b49b8ee9ac9850d6e63b03c9c32c0367a13ae62209/mpmath-1.3.0-py3-none-any.whl",
       "size_bytes": 536198,
@@ -70,7 +98,11 @@
     {
       "name": "networkx",
       "version": "3.6.1",
-      "variants": ["cpu", "cu126"],
+      "variants": [
+        "cpu",
+        "cu126",
+        "cu132"
+      ],
       "filename": "networkx-3.6.1-py3-none-any.whl",
       "url": "https://files.pythonhosted.org/packages/9e/c9/b2622292ea83fbb4ec318f5b9ab867d0a28ab43c5717bb85b0a5f6b3b0a4/networkx-3.6.1-py3-none-any.whl",
       "size_bytes": 2068504,
@@ -79,7 +111,11 @@
     {
       "name": "setuptools",
       "version": "81.0.0",
-      "variants": ["cpu", "cu126"],
+      "variants": [
+        "cpu",
+        "cu126",
+        "cu132"
+      ],
       "filename": "setuptools-81.0.0-py3-none-any.whl",
       "url": "https://files.pythonhosted.org/packages/e1/e3/c164c88b2e5ce7b24d667b9bd83589cf4f3520d97cad01534cd3c4f55fdb/setuptools-81.0.0-py3-none-any.whl",
       "size_bytes": 1062021,
@@ -88,7 +124,11 @@
     {
       "name": "sympy",
       "version": "1.14.0",
-      "variants": ["cpu", "cu126"],
+      "variants": [
+        "cpu",
+        "cu126",
+        "cu132"
+      ],
       "filename": "sympy-1.14.0-py3-none-any.whl",
       "url": "https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/sympy-1.14.0-py3-none-any.whl",
       "size_bytes": 6299353,
@@ -97,7 +137,11 @@
     {
       "name": "typing-extensions",
       "version": "4.16.0",
-      "variants": ["cpu", "cu126"],
+      "variants": [
+        "cpu",
+        "cu126",
+        "cu132"
+      ],
       "filename": "typing_extensions-4.16.0-py3-none-any.whl",
       "url": "https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl",
       "size_bytes": 45571,
@@ -106,7 +150,9 @@
     {
       "name": "torch",
       "version": "2.12.1+cpu",
-      "variants": ["cpu"],
+      "variants": [
+        "cpu"
+      ],
       "filename": "torch-2.12.1+cpu-cp312-cp312-win_amd64.whl",
       "url": "https://download-r2.pytorch.org/whl/cpu/torch-2.12.1%2Bcpu-cp312-cp312-win_amd64.whl",
       "size_bytes": 122900729,
@@ -115,11 +161,24 @@
     {
       "name": "torch",
       "version": "2.12.1+cu126",
-      "variants": ["cu126"],
+      "variants": [
+        "cu126"
+      ],
       "filename": "torch-2.12.1+cu126-cp312-cp312-win_amd64.whl",
       "url": "https://download-r2.pytorch.org/whl/cu126/torch-2.12.1%2Bcu126-cp312-cp312-win_amd64.whl",
       "size_bytes": 2620768231,
       "sha256": "71ee0eca3bde3a4067dfbc28c705b914d0773edd29ac4a634ad5e7a07f336aa1"
+    },
+    {
+      "name": "torch",
+      "version": "2.12.1+cu132",
+      "variants": [
+        "cu132"
+      ],
+      "filename": "torch-2.12.1+cu132-cp312-cp312-win_amd64.whl",
+      "url": "https://download-r2.pytorch.org/whl/cu132/torch-2.12.1%2Bcu132-cp312-cp312-win_amd64.whl",
+      "size_bytes": 1929153796,
+      "sha256": "5c6c00824a460bfc970d81fc869924b2510cc42e8857c4e87156b8b282e1f5c3"
     }
   ]
 }

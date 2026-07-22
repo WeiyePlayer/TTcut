@@ -9,9 +9,12 @@ import {
   ACTIVE_RUNTIME_MANIFEST,
   ANALYSIS_PYTHON_VERSION,
   ANALYSIS_RUNTIME_ID,
+  ANALYSIS_RUNTIME_VARIANTS,
   ANALYSIS_TORCH_VERSION,
   analysisRuntimePython,
+  isCudaArchitectureSupported,
   expectedTorchVersion,
+  isAnalysisRuntimeVariant,
   type AnalysisRuntimeVariant,
 } from './runtime-layout';
 
@@ -56,8 +59,8 @@ export function managedComponentsRoot(): string {
 
 function requestedVariants(device: 'auto' | 'cuda' | 'cpu'): AnalysisRuntimeVariant[] {
   if (device === 'cpu') return ['cpu'];
-  if (device === 'cuda') return ['cu126'];
-  return ['cu126', 'cpu'];
+  if (device === 'cuda') return ['cu132', 'cu126'];
+  return ['cu132', 'cu126', 'cpu'];
 }
 
 async function runtimeCandidates(device: 'auto' | 'cuda' | 'cpu'): Promise<RuntimeCandidate[]> {
@@ -152,22 +155,35 @@ export async function validateAnalysisRuntime(
 ): Promise<{ version: string; pythonVersion: string; torchVersion: string; acceleration: 'cuda' | 'cpu'; variant: AnalysisRuntimeVariant }> {
   const result = await runProcess(python, [
     '-c',
-    'import cv2,json,numpy,sys,torch;print(json.dumps({"python":sys.version.split()[0],"torch":torch.__version__,"torch_cuda":torch.version.cuda,"opencv":cv2.__version__,"numpy":numpy.__version__,"acceleration":"cuda" if torch.cuda.is_available() else "cpu"}))',
+    'import cv2,json,numpy,sys,torch;value={"python":sys.version.split()[0],"torch":torch.__version__,"torch_cuda":torch.version.cuda,"opencv":cv2.__version__,"numpy":numpy.__version__,"acceleration":"cuda" if torch.cuda.is_available() else "cpu","cuda_smoke":False,"compiled_arch_list":getattr(torch._C,"_cuda_getArchFlags",lambda:" ")().split()};\nif torch.cuda.is_available():\n value["device_name"]=torch.cuda.get_device_name(0);value["device_capability"]=list(torch.cuda.get_device_capability(0));value["cuda_arch_list"]=torch.cuda.get_arch_list();\n try:\n  x=torch.ones((1,3,4,4),device="cuda");w=torch.ones((1,3,3,3),device="cuda");torch.nn.functional.conv2d(x,w);torch.cuda.synchronize();value["cuda_smoke"]=True\n except Exception as error:value["cuda_smoke_error"]=str(error)\nprint(json.dumps(value))',
   ], { timeoutMs: 30_000 });
   const value = JSON.parse(result.stdout.trim()) as Record<string, unknown>;
   const acceptedTorchVersions = new Set<string>([
-    expectedTorchVersion('cpu'),
-    expectedTorchVersion('cu126'),
+    ...ANALYSIS_RUNTIME_VARIANTS.map((variant) => expectedTorchVersion(variant)),
   ]);
   if (value.python !== ANALYSIS_PYTHON_VERSION || typeof value.torch !== 'string' || !acceptedTorchVersions.has(value.torch)) {
     throw new Error('ANALYSIS_RUNTIME_VERSION_MISMATCH');
   }
   if (value.numpy !== ANALYSIS_NUMPY_VERSION || value.opencv !== ANALYSIS_OPENCV_VERSION) throw new Error('ANALYSIS_RUNTIME_VERSION_MISMATCH');
   if (value.acceleration !== 'cuda' && value.acceleration !== 'cpu') throw new Error('ANALYSIS_RUNTIME_SELF_TEST_FAILED');
-  const inferredVariant: AnalysisRuntimeVariant = value.torch === expectedTorchVersion('cu126') ? 'cu126' : 'cpu';
+  const inferredVariant = ANALYSIS_RUNTIME_VARIANTS.find((variant) => value.torch === expectedTorchVersion(variant));
+  if (!inferredVariant) throw new Error('ANALYSIS_RUNTIME_VERSION_MISMATCH');
   if (expectedVariant && value.torch !== expectedTorchVersion(expectedVariant)) throw new Error('ANALYSIS_RUNTIME_VARIANT_MISMATCH');
   if (expectedVariant === 'cpu' && (value.torch_cuda !== null || value.acceleration !== 'cpu')) throw new Error('ANALYSIS_RUNTIME_VARIANT_MISMATCH');
-  if (expectedVariant === 'cu126' && (value.torch_cuda !== '12.6' || value.acceleration !== 'cuda')) throw new Error('CUDA_RUNTIME_SELF_TEST_FAILED');
+  if (expectedVariant && expectedVariant !== 'cpu') {
+    const expectedCuda = expectedVariant === 'cu132' ? '13.2' : '12.6';
+    if (value.torch_cuda !== expectedCuda || value.acceleration !== 'cuda') throw new Error('CUDA_RUNTIME_SELF_TEST_FAILED');
+    const capability = Array.isArray(value.device_capability) && value.device_capability.length === 2
+      ? Number(value.device_capability[0]) + Number(value.device_capability[1]) / 10
+      : null;
+    const archList = Array.isArray(value.cuda_arch_list)
+      ? value.cuda_arch_list.filter((item): item is string => typeof item === 'string')
+      : Array.isArray(value.compiled_arch_list)
+        ? value.compiled_arch_list.filter((item): item is string => typeof item === 'string')
+        : [];
+    if (capability === null || !isCudaArchitectureSupported(capability, archList)) throw new Error('CUDA_RUNTIME_UNSUPPORTED_ARCHITECTURE');
+    if (value.cuda_smoke !== true) throw new Error('CUDA_RUNTIME_SELF_TEST_FAILED');
+  }
   return {
     version: `Python ${value.python} / PyTorch ${value.torch}`,
     pythonVersion: String(value.python),
@@ -185,17 +201,17 @@ export async function resolveUsableAnalysisComponents(device: 'auto' | 'cuda' | 
   let lastError: unknown = null;
   for (const candidate of candidates) {
     try {
-      const expected = candidate.variant === 'cpu' || candidate.variant === 'cu126' ? candidate.variant : undefined;
+      const expected = isAnalysisRuntimeVariant(candidate.variant) ? candidate.variant : undefined;
       const validation = await validateAnalysisComponent(candidate.python, base.weights, expected);
       if (device === 'cuda' && validation.acceleration !== 'cuda') throw new Error('DEVICE_UNAVAILABLE');
       if (device === 'cpu' && validation.acceleration !== 'cpu') throw new Error('DEVICE_UNAVAILABLE');
-      if (candidate.variant === 'cpu' || candidate.variant === 'cu126') await activateManagedAnalysisRuntime(candidate.variant);
+      if (isAnalysisRuntimeVariant(candidate.variant)) await activateManagedAnalysisRuntime(candidate.variant);
       return { ...base, python: candidate.python, runtimeVariant: candidate.variant };
     } catch (error) {
       lastError = error;
     }
   }
-  if (device === 'cuda') throw new Error('DEVICE_UNAVAILABLE');
+  if (device === 'cuda') throw new Error('DEVICE_UNAVAILABLE', { cause: lastError ?? undefined });
   throw lastError instanceof Error ? lastError : new Error('ANALYSIS_RUNTIME_SELF_TEST_FAILED');
 }
 
@@ -232,7 +248,7 @@ export async function inspectComponentPaths(paths: ComponentPaths): Promise<Comp
   let analysisDetail: string | null = null;
   if (paths.python && paths.weights) {
     try {
-      const expected = paths.runtimeVariant === 'cpu' || paths.runtimeVariant === 'cu126' ? paths.runtimeVariant : undefined;
+      const expected = paths.runtimeVariant && isAnalysisRuntimeVariant(paths.runtimeVariant) ? paths.runtimeVariant : undefined;
       const result = await validateAnalysisComponent(paths.python, paths.weights, expected);
       analysisVersion = `${result.version} (${result.variant})`;
       acceleration = result.acceleration;

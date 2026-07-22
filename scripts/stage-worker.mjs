@@ -17,7 +17,7 @@ await cp(path.join(source, 'ttcut_worker'), path.join(destination, 'ttcut_worker
   recursive: true,
   filter: (entry) => !entry.includes('__pycache__') && !entry.endsWith('.pyc'),
 });
-for (const name of ['requirements-cpu.txt', 'requirements-cu126.txt', 'runtime-wheel-lock.json', 'SOURCE_MANIFEST.md', 'LICENSE.tracknet.txt']) {
+for (const name of ['requirements-cpu.txt', 'requirements-cu126.txt', 'requirements-cu132.txt', 'runtime-wheel-lock.json', 'SOURCE_MANIFEST.md', 'LICENSE.tracknet.txt']) {
   await cp(path.join(source, name), path.join(destination, name));
 }
 

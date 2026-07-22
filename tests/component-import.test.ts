@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ComponentCatalog } from '../src/main/component-catalog';
-import { validateImportFiles } from '../src/main/component-import';
+import { cacheAndCollectRuntimeImports, validateImportFiles } from '../src/main/component-import';
 
 const temporaryDirectories: string[] = [];
 
@@ -96,7 +96,7 @@ describe('manual component import validation', () => {
     await expect(validateImportFiles([wrongHash], testCatalog())).rejects.toThrow('COMPONENT_IMPORT_FILE_HASH_MISMATCH');
   });
 
-  it('requires every CUDA runtime part when any CUDA part is selected', async () => {
+  it('persists partial CUDA imports and assembles them after the final part arrives', async () => {
     const root = await temporaryDirectory();
     const selected = await Promise.all(([ 
       ['cu126.zip.part001', 'cuda-one'], ['cu126.zip.part002', 'cuda-two'],
@@ -106,6 +106,48 @@ describe('manual component import validation', () => {
       return file;
     }));
 
-    await expect(validateImportFiles(selected, testCatalog())).rejects.toThrow('COMPONENT_IMPORT_MISSING_PARTS:cu126.zip.part003');
+    const catalog = testCatalog();
+    const first = await validateImportFiles(selected, catalog);
+    const cacheRoot = path.join(root, 'components', '.downloads');
+    const firstResult = await cacheAndCollectRuntimeImports(first, catalog, cacheRoot, 'first-task');
+    expect(firstResult).toEqual([expect.objectContaining({
+      variant: 'cu126',
+      pending: expect.objectContaining({
+        receivedParts: 2,
+        totalParts: 3,
+        missingAssets: ['cu126.zip.part003'],
+      }),
+    })]);
+    expect((await stat(path.join(cacheRoot, 'cu126.zip.part001.download'))).size).toBe('cuda-one'.length);
+
+    const finalPart = path.join(root, 'cu126.zip.part003');
+    await writeFile(finalPart, 'cuda-three', 'utf8');
+    const second = await validateImportFiles([finalPart], catalog);
+    const secondResult = await cacheAndCollectRuntimeImports(second, catalog, cacheRoot, 'second-task');
+    expect(secondResult[0]?.pending).toBeNull();
+    expect(secondResult[0]?.files).toHaveLength(3);
+    expect(await readFile(secondResult[0]!.files[0]!.sourcePath, 'utf8')).toBe('cuda-one');
+  });
+
+  it('does not use a corrupted cached part when completing a later import', async () => {
+    const root = await temporaryDirectory();
+    const catalog = testCatalog();
+    const partPaths = await Promise.all(([
+      ['cu126.zip.part001', 'cuda-one'], ['cu126.zip.part002', 'cuda-two'],
+    ] as const).map(async ([name, content]) => {
+      const file = path.join(root, name);
+      await writeFile(file, content, 'utf8');
+      return file;
+    }));
+    await cacheAndCollectRuntimeImports(await validateImportFiles(partPaths, catalog), catalog, path.join(root, 'cache'), 'first-task');
+    await writeFile(path.join(root, 'cache', 'cu126.zip.part001.download'), 'bad-data', 'utf8');
+    const third = path.join(root, 'cu126.zip.part003');
+    await writeFile(third, 'cuda-three', 'utf8');
+
+    const result = await cacheAndCollectRuntimeImports(await validateImportFiles([third], catalog), catalog, path.join(root, 'cache'), 'second-task');
+    expect(result[0]?.pending).toEqual(expect.objectContaining({
+      receivedParts: 2,
+      missingAssets: ['cu126.zip.part001'],
+    }));
   });
 });

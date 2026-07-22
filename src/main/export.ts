@@ -18,6 +18,7 @@ import {
 import { registerMediaPath } from './media-protocol';
 import { probeAudioPacketBoundaries, probeKeyframes, probeVideo } from './probe';
 import { hasActiveTasks, spawnTracked } from './processes';
+import { isExportDurationWithinTolerance } from '../domain/export-duration';
 
 function send(window: BrowserWindow, event: AppEvent): void {
   if (!window.isDestroyed()) window.webContents.send(IPC.taskEvent, event);
@@ -143,8 +144,7 @@ export async function validateExportOutput(
   const info = await stat(output);
   if (!info.isFile() || info.size < 1024) throw new Error('EXPORT_INVALID');
   const metadata = await probeVideo(output);
-  const durationTolerance = Math.max(0.1, 2 / metadata.fps);
-  if (Math.abs(metadata.duration_seconds - wantedDuration) > durationTolerance) {
+  if (!isExportDurationWithinTolerance(metadata.duration_seconds, wantedDuration)) {
     throw new Error('EXPORT_DURATION_MISMATCH');
   }
   if (metadata.width !== source.width || metadata.height !== source.height) {

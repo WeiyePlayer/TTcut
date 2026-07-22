@@ -6,8 +6,8 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const [variant, baseArgument] = process.argv.slice(2);
-if (!['cpu', 'cu126'].includes(variant) || !baseArgument) {
-  throw new Error('Usage: node scripts/build-analysis-runtime.mjs <cpu|cu126> <python-base-3.12.13-directory>');
+if (!['cpu', 'cu126', 'cu132'].includes(variant) || !baseArgument) {
+  throw new Error('Usage: node scripts/build-analysis-runtime.mjs <cpu|cu126|cu132> <python-base-3.12.13-directory>');
 }
 
 const runtimeId = '3.12.13-2.12.1';
@@ -117,7 +117,15 @@ process.stdout.write(pipCheck.stdout ?? '');
 process.stderr.write(pipCheck.stderr ?? '');
 if (pipCheck.status !== 0) throw new Error('pip check rejected the prepared runtime.');
 
-const selfTest = spawnSync(python, ['-c', 'import cv2,json,numpy,ssl,sys,torch;print(json.dumps({"python":sys.version.split()[0],"torch":torch.__version__,"cuda":torch.version.cuda,"opencv":cv2.__version__,"numpy":numpy.__version__,"available":torch.cuda.is_available(),"openssl":ssl.OPENSSL_VERSION}))'], {
+const selfTestCode = `import cv2,json,numpy,ssl,sys,torch
+value={"python":sys.version.split()[0],"torch":torch.__version__,"cuda":torch.version.cuda,"opencv":cv2.__version__,"numpy":numpy.__version__,"available":torch.cuda.is_available(),"compiled_arch_list":getattr(torch._C,"_cuda_getArchFlags",lambda:" ")().split(),"openssl":ssl.OPENSSL_VERSION,"cuda_smoke":False}
+if torch.cuda.is_available():
+ value["device_name"]=torch.cuda.get_device_name(0);value["device_capability"]=list(torch.cuda.get_device_capability(0));value["cuda_arch_list"]=torch.cuda.get_arch_list()
+ try:
+  x=torch.ones((1,3,4,4),device="cuda");w=torch.ones((1,3,3,3),device="cuda");torch.nn.functional.conv2d(x,w);torch.cuda.synchronize();value["cuda_smoke"]=True
+ except Exception as error:value["cuda_smoke_error"]=str(error)
+print(json.dumps(value))`;
+const selfTest = spawnSync(python, ['-c', selfTestCode], {
   cwd: target,
   encoding: 'utf8',
   windowsHide: true,
@@ -129,7 +137,10 @@ if (versions.python !== '3.12.13' || versions.torch !== `2.12.1+${variant}` || v
   throw new Error(`Runtime versions differ from the immutable lock: ${selfTest.stdout.trim()}`);
 }
 if (variant === 'cpu' && (versions.cuda !== null || versions.available !== false)) throw new Error('CPU runtime unexpectedly exposes CUDA.');
-if (variant === 'cu126' && (versions.cuda !== '12.6' || versions.available !== true)) throw new Error('cu126 runtime cannot use CUDA on this release machine.');
+if (variant !== 'cpu' && versions.cuda !== (variant === 'cu132' ? '13.2' : '12.6')) throw new Error(`${variant} runtime reports the wrong CUDA version.`);
+if (variant !== 'cpu' && versions.available !== true && process.env.TTCUT_ALLOW_UNAVAILABLE_CUDA_SELF_TEST !== '1') throw new Error(`${variant} runtime cannot complete its CUDA self-test on this release machine.`);
+if (variant !== 'cpu' && versions.available === true && versions.cuda_smoke !== true) throw new Error(`${variant} runtime CUDA smoke test failed: ${versions.cuda_smoke_error ?? 'unknown error'}`);
+if (variant === 'cu132' && !versions.compiled_arch_list?.includes('sm_120')) throw new Error('cu132 runtime does not contain sm_120 kernels.');
 
 const provenance = {
   schema_version: 1,

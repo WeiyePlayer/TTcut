@@ -239,6 +239,7 @@ td input { accent-color: var(--blue); }
 .setup-progress .progress-track { width: 100%; }
 .setup-outcome { margin: 14px 0 0 !important; padding: 10px 12px; border-radius: 9px; line-height: 1.5; }
 .setup-outcome.success { color: #246d35; background: #eef8f0; }
+.setup-outcome.pending { color: #72510e; background: #fffaf0; }
 .setup-outcome.cancelled { color: #72510e; background: #fffaf0; }
 .setup-outcome.failed { color: #982222; background: #fff2f2; }
 

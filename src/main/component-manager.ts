@@ -16,6 +16,7 @@ import { pipeline } from 'node:stream/promises';
 import { Readable, Transform } from 'node:stream';
 import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
 import { app, BrowserWindow, net } from 'electron';
+import type { PendingComponentImport } from '../shared/api';
 import { IPC } from '../shared/ipc';
 import type { ComponentPaths } from './components';
 import {
@@ -30,10 +31,20 @@ import {
 import { loadComponentCatalog } from './component-catalog';
 import { getLogPath, logLine } from './logger';
 import { beginExternalTask, endExternalTask, runProcess } from './processes';
-import { ANALYSIS_RUNTIME_VARIANTS, analysisRuntimeDirectory } from './runtime-layout';
+import {
+  ANALYSIS_RUNTIME_VARIANTS,
+  analysisRuntimeDirectory,
+  cudaVariantForComputeCapability,
+  type AnalysisRuntimeVariant,
+  type CudaRuntimeVariant,
+} from './runtime-layout';
 import { assembleAssetParts, sha256File } from './component-assets';
 import { withDownloadRetries } from './component-download';
-import { validateImportFiles, type ImportableComponentFile } from './component-import';
+import {
+  cacheAndCollectRuntimeImports,
+  validateImportFiles,
+  type ImportableComponentFile,
+} from './component-import';
 
 const INSTALLABLE_DIRECTORIES = new Set([
   ...ANALYSIS_RUNTIME_VARIANTS.map(analysisRuntimeDirectory),
@@ -329,12 +340,14 @@ async function commitComponentDirectories(stagingRoot: string, directories: stri
   await rm(backupRoot, { recursive: true, force: true });
 }
 
-async function hasNvidiaGpu(): Promise<boolean> {
+async function preferredCudaVariant(): Promise<CudaRuntimeVariant | null> {
   try {
-    const result = await runProcess('nvidia-smi.exe', ['--query-gpu=driver_version', '--format=csv,noheader'], { timeoutMs: 10_000 });
-    return Boolean(result.stdout.trim());
+    const result = await runProcess('nvidia-smi.exe', ['--query-gpu=compute_cap', '--format=csv,noheader'], { timeoutMs: 10_000 });
+    const capability = Number.parseFloat(result.stdout.split(/\r?\n/)[0]?.trim() ?? '');
+    if (!Number.isFinite(capability)) return null;
+    return cudaVariantForComputeCapability(capability);
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -404,7 +417,7 @@ async function installOnlineAnalysisRuntime(
   window: BrowserWindow,
   taskId: string,
   signal: AbortSignal,
-  variant: 'cpu' | 'cu126',
+  variant: AnalysisRuntimeVariant,
   progressBase: number,
   progressSpan: number,
 ): Promise<void> {
@@ -459,7 +472,7 @@ async function installOnlineAnalysisRuntime(
   try {
     await validateAnalysisRuntime(path.join(normalized, 'python.exe'), variant);
   } catch (error) {
-    if (variant === 'cu126') throw new Error('CUDA_RUNTIME_SELF_TEST_FAILED', { cause: error });
+    if (variant !== 'cpu') throw new Error('CUDA_RUNTIME_SELF_TEST_FAILED', { cause: error });
     throw error;
   }
   if (signal.aborted) throw Object.assign(new Error('SETUP_CANCELLED'), { name: 'AbortError' });
@@ -477,10 +490,15 @@ async function installOnlineAnalysisRuntime(
   }, null, 2), 'utf8');
 }
 
+type SetupTaskResult = {
+  imported: Array<'analysis' | 'media'>;
+  pendingImports: PendingComponentImport[];
+};
+
 function runSetupTask(
   window: BrowserWindow,
   taskId: string,
-  work: (signal: AbortSignal) => Promise<Array<'analysis' | 'media'>>,
+  work: (signal: AbortSignal) => Promise<SetupTaskResult>,
 ): string {
   const controller = new AbortController();
   let complete!: () => void;
@@ -490,9 +508,9 @@ function runSetupTask(
     await completion;
   });
 
-  void work(controller.signal).then(async (imported) => {
+  void work(controller.signal).then(async ({ imported, pendingImports }) => {
     const components = await inspectComponents();
-    window.webContents.send(IPC.taskEvent, { type: 'component-result', taskId, data: components, imported });
+    window.webContents.send(IPC.taskEvent, { type: 'component-result', taskId, data: components, imported, pendingImports });
   }).catch(async (error: unknown) => {
     const code = setupErrorCode(error);
     await logLine(taskId, 'ERROR', error instanceof Error ? `${error.stack ?? error.message}` : String(error));
@@ -519,25 +537,26 @@ export async function startAnalysisComponentInstall(window: BrowserWindow, conse
   return runSetupTask(window, taskId, async (signal) => {
     await installOnlineTrackNetWeight(window, taskId, signal, 0, 12);
     const existing = await resolveUsableAnalysisComponents('auto').catch(() => null);
-    if (existing?.runtimeVariant === 'cpu' || existing?.runtimeVariant === 'cu126') {
-      await activateManagedAnalysisRuntime(existing.runtimeVariant);
+    const existingVariant = existing?.runtimeVariant;
+    if (existingVariant && ANALYSIS_RUNTIME_VARIANTS.includes(existingVariant as AnalysisRuntimeVariant)) {
+      await activateManagedAnalysisRuntime(existingVariant as AnalysisRuntimeVariant);
       sendProgress(window, taskId, 'complete', 99);
-      return ['analysis'];
+      return { imported: ['analysis'], pendingImports: [] };
     }
-    const preferCuda = await hasNvidiaGpu();
-    if (preferCuda) {
+    const cudaVariant = await preferredCudaVariant();
+    if (cudaVariant) {
       try {
-        await installOnlineAnalysisRuntime(window, taskId, signal, 'cu126', 12, 54);
+        await installOnlineAnalysisRuntime(window, taskId, signal, cudaVariant, 12, 54);
         sendProgress(window, taskId, 'complete', 99);
-        return ['analysis'];
+        return { imported: ['analysis'], pendingImports: [] };
       } catch (error) {
-        if (signal.aborted || setupErrorCode(error) !== 'CUDA_RUNTIME_SELF_TEST_FAILED') throw error;
-        await logLine(taskId, 'WARN', `CUDA runtime installation/self-test failed; falling back to CPU: ${error instanceof Error ? error.message : String(error)}`);
+        if (signal.aborted || !['CUDA_RUNTIME_SELF_TEST_FAILED', 'CUDA_RUNTIME_UNSUPPORTED_ARCHITECTURE'].includes(setupErrorCode(error))) throw error;
+        await logLine(taskId, 'WARN', `${cudaVariant} runtime installation/self-test failed; falling back to CPU: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
-    await installOnlineAnalysisRuntime(window, taskId, signal, 'cpu', preferCuda ? 66 : 12, preferCuda ? 32 : 86);
+    await installOnlineAnalysisRuntime(window, taskId, signal, 'cpu', cudaVariant ? 66 : 12, cudaVariant ? 32 : 86);
     sendProgress(window, taskId, 'complete', 99);
-    return ['analysis'];
+    return { imported: ['analysis'], pendingImports: [] };
   });
 }
 
@@ -589,7 +608,7 @@ export async function startMediaComponentInstall(window: BrowserWindow, consent:
         ffmpeg: catalog.ffmpeg,
       }, null, 2), 'utf8');
       sendProgress(window, taskId, 'complete', 99);
-      return ['media'];
+      return { imported: ['media'], pendingImports: [] };
     } finally {
       await rm(staging, { recursive: true, force: true });
     }
@@ -603,7 +622,7 @@ async function prepareImportedRuntime(
   staging: string,
   files: Extract<ImportableComponentFile, { kind: 'runtime-part' }>[],
   progress: number,
-): Promise<'cpu' | 'cu126'> {
+): Promise<AnalysisRuntimeVariant> {
   const asset = files[0]!.asset;
   const assembled = path.join(staging, `${asset.asset}.assembled`);
   sendProgress(window, taskId, 'extract', progress);
@@ -642,8 +661,16 @@ export async function startComponentImport(window: BrowserWindow, filePaths: str
       });
       if (signal.aborted) throw Object.assign(new Error('SETUP_CANCELLED'), { name: 'AbortError' });
 
+      const runtimeImports = await cacheAndCollectRuntimeImports(
+        files,
+        catalog,
+        path.join(root, '.downloads'),
+        taskId,
+      );
+      const pendingImports = runtimeImports.flatMap((group) => group.pending ? [group.pending] : []);
+
       const directories: string[] = [];
-      const installedVariants: Array<'cpu' | 'cu126'> = [];
+      const installedVariants: AnalysisRuntimeVariant[] = [];
       const weight = files.find((file): file is Extract<ImportableComponentFile, { kind: 'weight' }> => file.kind === 'weight');
       if (weight) {
         const target = path.join(staging, weight.asset.install_directory, weight.asset.filename);
@@ -652,14 +679,10 @@ export async function startComponentImport(window: BrowserWindow, filePaths: str
         directories.push(weight.asset.install_directory);
       }
 
-      const runtimeGroups = new Map<'cpu' | 'cu126', Extract<ImportableComponentFile, { kind: 'runtime-part' }>[] >();
-      for (const file of files) {
-        if (file.kind !== 'runtime-part') continue;
-        const group = runtimeGroups.get(file.variant) ?? [];
-        group.push(file);
-        runtimeGroups.set(file.variant, group);
-      }
-      for (const variant of ['cpu', 'cu126'] as const) {
+      const runtimeGroups = new Map<AnalysisRuntimeVariant, Extract<ImportableComponentFile, { kind: 'runtime-part' }>[] >(
+        runtimeImports.filter((group) => group.pending === null).map((group) => [group.variant, group.files]),
+      );
+      for (const variant of ANALYSIS_RUNTIME_VARIANTS) {
         const group = runtimeGroups.get(variant);
         if (!group) continue;
         try {
@@ -667,7 +690,7 @@ export async function startComponentImport(window: BrowserWindow, filePaths: str
           directories.push(group[0]!.asset.install_directory);
           installedVariants.push(variant);
         } catch (error) {
-          if (variant !== 'cu126' || setupErrorCode(error) !== 'CUDA_RUNTIME_SELF_TEST_FAILED' || !runtimeGroups.has('cpu')) throw error;
+          if (variant === 'cpu' || !['CUDA_RUNTIME_SELF_TEST_FAILED', 'CUDA_RUNTIME_UNSUPPORTED_ARCHITECTURE'].includes(setupErrorCode(error)) || !runtimeGroups.has('cpu')) throw error;
           await rm(path.join(staging, ...group[0]!.asset.install_directory.split('/')), { recursive: true, force: true });
           await logLine(taskId, 'WARN', `Imported CUDA runtime failed self-test; using imported CPU runtime: ${error instanceof Error ? error.message : String(error)}`);
         }
@@ -687,10 +710,12 @@ export async function startComponentImport(window: BrowserWindow, filePaths: str
         directories.push(media.asset.install_directory);
       }
 
-      if (directories.length === 0) throw new Error('COMPONENT_IMPORT_NO_FILES');
+      if (directories.length === 0 && pendingImports.length === 0) throw new Error('COMPONENT_IMPORT_NO_FILES');
       if (signal.aborted) throw Object.assign(new Error('SETUP_CANCELLED'), { name: 'AbortError' });
-      sendProgress(window, taskId, 'install', 94);
-      await commitComponentDirectories(staging, [...new Set(directories)], taskId);
+      if (directories.length > 0) {
+        sendProgress(window, taskId, 'install', 94);
+        await commitComponentDirectories(staging, [...new Set(directories)], taskId);
+      }
 
       const manifestRoot = path.join(root, '.manifests');
       await mkdir(manifestRoot, { recursive: true });
@@ -720,10 +745,13 @@ export async function startComponentImport(window: BrowserWindow, filePaths: str
         }, null, 2), 'utf8');
       }
       sendProgress(window, taskId, 'complete', 99);
-      return [
-        ...(weight || installedVariants.length ? ['analysis' as const] : []),
-        ...(media ? ['media' as const] : []),
-      ];
+      return {
+        imported: [
+          ...(weight || installedVariants.length ? ['analysis' as const] : []),
+          ...(media ? ['media' as const] : []),
+        ],
+        pendingImports,
+      };
     } finally {
       await rm(staging, { recursive: true, force: true });
     }

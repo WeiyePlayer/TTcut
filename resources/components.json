@@ -69,6 +69,35 @@
             "sha256": "8a13c666b9aadbbfdcf3f098bc4ef636dd11d6dc1e9de836ff77b566256af2ce"
           }
         ]
+      },
+      {
+        "variant": "cu132",
+        "provider": "WeiyePlayer/TTcut-runtime-assets GitHub Release analysis-3.12.13-2.12.1-cu132-r1",
+        "asset": "ttcut-analysis-3.12.13-2.12.1-cu132.zip",
+        "archive_root": "ttcut-analysis-3.12.13-2.12.1-cu132",
+        "install_directory": "analysis-runtime/3.12.13-2.12.1/cu132",
+        "size_bytes": 2075620809,
+        "sha256": "a36466c8cb7330804e54151e37af3c6caf4360059ac24b76527095068bac6fbd",
+        "parts": [
+          {
+            "asset": "ttcut-analysis-3.12.13-2.12.1-cu132.zip.part001",
+            "url": "https://github.com/WeiyePlayer/TTcut-runtime-assets/releases/download/analysis-3.12.13-2.12.1-cu132-r1/ttcut-analysis-3.12.13-2.12.1-cu132.zip.part001",
+            "size_bytes": 1000000000,
+            "sha256": "8fa51b17f27246bbbf25870be760806ad98c247c0ffcb7d5b85afd70695efe1c"
+          },
+          {
+            "asset": "ttcut-analysis-3.12.13-2.12.1-cu132.zip.part002",
+            "url": "https://github.com/WeiyePlayer/TTcut-runtime-assets/releases/download/analysis-3.12.13-2.12.1-cu132-r1/ttcut-analysis-3.12.13-2.12.1-cu132.zip.part002",
+            "size_bytes": 1000000000,
+            "sha256": "f80ee962306ec255c79ed8fa17de31ba7f764a608ea723b70d5ee575b0b27d93"
+          },
+          {
+            "asset": "ttcut-analysis-3.12.13-2.12.1-cu132.zip.part003",
+            "url": "https://github.com/WeiyePlayer/TTcut-runtime-assets/releases/download/analysis-3.12.13-2.12.1-cu132-r1/ttcut-analysis-3.12.13-2.12.1-cu132.zip.part003",
+            "size_bytes": 75620809,
+            "sha256": "d8f3cdca7a898f11172db45df457423c8ec29d060bddf72580600538e1fe5aff"
+          }
+        ]
       }
     ]
   },
