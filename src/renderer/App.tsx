@@ -1,18 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import type { AnalysisResultV1, AppSettings, Calibration, CutSelectionV1, ExportResult, HistorySummaryV1, Rally, VideoMetadata } from '../shared/contracts';
+import type { AnalysisResultV1, AppSettings, Calibration, CutSelectionV1, ExportResult, HistorySummaryV1, Rally, UpdateState, VideoMetadata } from '../shared/contracts';
 import type { AppEvent, BootstrapData, PendingComponentImport, SelectedVideo } from '../shared/api';
+import { DONATION_URL, GITHUB_URL, RELEASES_URL, WEBSITE_URL } from '../shared/urls';
 import { formatTimestamp } from '../domain/time';
 import { rallyPreviewRange } from '../domain/preview';
 import { validateCalibration } from '../domain/calibration';
 import { interpolate, messages, type Language, type Messages } from './i18n';
+import { MultiTaskPage } from './MultiTaskPage';
 import packageJson from '../../package.json';
 
-type View = 'auto' | 'history' | 'settings';
+type View = 'auto' | 'history' | 'settings' | 'multi';
 type Step = 'select' | 'calibrate' | 'analyzing' | 'empty' | 'mode' | 'cutting' | 'complete' | 'error';
 type PointName = keyof Calibration['points'];
 
 const appVersion = packageJson.version;
-
 const pointOrder: PointName[] = ['top_left', 'top_right', 'bottom_right', 'bottom_left'];
 
 function fileSize(value: number): string {
@@ -216,13 +217,17 @@ function RallyPreviewDialog({ video, videoDuration, rally, translations, onClose
 
 export function App() {
   const [bootstrap, setBootstrap] = useState<BootstrapData | null>(null);
-  const [settings, setSettings] = useState<AppSettings>({ language: 'zh-CN', pre_roll_seconds: 2.5, post_roll_seconds: 2 });
+  const [settings, setSettings] = useState<AppSettings>({ language: 'zh-CN', calibration_method: 'manual', pre_roll_seconds: 2.5, post_roll_seconds: 2 });
   const [view, setView] = useState<View>('auto');
   const [step, setStep] = useState<Step>('select');
   const [video, setVideo] = useState<SelectedVideo | null>(null);
   const [metadata, setMetadata] = useState<VideoMetadata | null>(null);
   const [points, setPoints] = useState<Partial<Record<PointName, [number, number]>>>({});
   const [analysis, setAnalysis] = useState<AnalysisResultV1 | null>(null);
+  const [analysisId, setAnalysisId] = useState<string | null>(null);
+  const [forceManual, setForceManual] = useState(false);
+  const [multiVideos, setMultiVideos] = useState<SelectedVideo[]>([]);
+  const [updateState, setUpdateState] = useState<UpdateState>({ status: 'idle', version: null, message: null });
   const [mode, setMode] = useState<'all' | 'highlight' | 'custom'>('all');
   const [threshold, setThreshold] = useState<3 | 5 | 7>(5);
   const [customIds, setCustomIds] = useState<Set<string>>(new Set());
@@ -236,6 +241,9 @@ export function App() {
   const [dragging, setDragging] = useState(false);
   const [setupTask, setSetupTask] = useState<string | null>(null);
   const setupTaskRef = useRef<string | null>(null);
+  const multiActiveRef = useRef(false);
+  const settingsRef = useRef(settings);
+  const promptedUpdateVersion = useRef<string | null>(null);
   const [setupProgress, setSetupProgress] = useState<{ percent: number; stage: string; current?: number; total?: number } | null>(null);
   const [setupOutcome, setSetupOutcome] = useState<'success' | 'pending' | 'cancelled' | 'failed' | null>(null);
   const [setupFailureCode, setSetupFailureCode] = useState<string | null>(null);
@@ -247,22 +255,27 @@ export function App() {
   const [missingComponents, setMissingComponents] = useState<string[] | null>(null);
   const [previewRally, setPreviewRally] = useState<Rally | null>(null);
   const t = messages(settings.language as Language);
-  const platformDetail = bootstrap
-    ? interpolate(t.platformSupportedDetail, {
-      platform: bootstrap.platformCompatibility.platform,
-      arch: bootstrap.platformCompatibility.architecture,
-    })
-    : '';
+  const platformSupported = bootstrap?.platformCompatibility.status === 'supported';
+  const useManualCalibration = settings.calibration_method === 'manual' || forceManual;
+  const platformDetail = !bootstrap
+    ? ''
+    : platformSupported
+      ? interpolate(t.platformSupportedDetail, { build: bootstrap.platformCompatibility.build_number ?? '—' })
+      : bootstrap.platformCompatibility.reason === 'probe_failed'
+        ? t.platformProbeFailedDetail
+        : t.platformUnsupportedDetail;
 
   useEffect(() => {
     void window.ttcut.bootstrap().then((data) => {
       setBootstrap(data);
       setSettings(data.settings);
-      if (!data.components.analysis.available || !data.components.media.available) {
+      settingsRef.current = data.settings;
+      if (data.platformCompatibility.status !== 'supported' || !data.components.analysis.available || !data.components.media.available) {
         setView('settings');
       }
     });
     const removeTask = window.ttcut.onTaskEvent((event: AppEvent) => {
+      if (multiActiveRef.current && event.type !== 'component-result') return;
       if (event.type === 'progress') {
         if (event.data.kind === 'setup') {
           setupTaskRef.current = event.data.taskId;
@@ -279,7 +292,9 @@ export function App() {
         setProgress({ percent: event.data.percent, stage: event.data.stage });
       } else if (event.type === 'analysis-result') {
         setActiveTask(null);
+        setAnalysisId(event.analysisId);
         setAnalysis(event.data);
+        setPoints(event.calibration.points);
         setStep(event.data.rallies.length ? 'mode' : 'empty');
       } else if (event.type === 'export-result') {
         setActiveTask(null);
@@ -289,7 +304,7 @@ export function App() {
         setupTaskRef.current = null;
         setSetupTask(null);
         setSetupProgress(null);
-        setSetupOutcome(event.pendingImports.length > 0 ? 'pending' : 'success');
+        setSetupOutcome(event.pendingImports.length ? 'pending' : 'success');
         setSetupFailureCode(null);
         setSetupPendingImports(event.pendingImports);
         setBootstrap((current) => current ? { ...current, components: event.data } : current);
@@ -300,7 +315,16 @@ export function App() {
           setSetupProgress(null);
           setSetupOutcome(event.code === 'SETUP_CANCELLED' ? 'cancelled' : 'failed');
           setSetupFailureCode(event.code);
-          setSetupPendingImports([]);
+          return;
+        }
+        if (settingsRef.current.calibration_method === 'automatic'
+          && ['AUTO_CALIBRATION_FAILED', 'TABLE_MODEL_RESOURCE_ERROR'].includes(event.code)) {
+          setActiveTask(null);
+          setForceManual(true);
+          setToast(event.code === 'TABLE_MODEL_RESOURCE_ERROR'
+            ? (settingsRef.current.language === 'zh-CN' ? '自动标定模型不可用，请改用手动标定。' : 'The automatic calibration model is unavailable. Please calibrate manually.')
+            : (settingsRef.current.language === 'zh-CN' ? '自动标定不可靠，请改用手动标定。' : 'Automatic calibration was unreliable. Please calibrate manually.'));
+          setStep('calibrate');
           return;
         }
         setActiveTask(null);
@@ -309,12 +333,23 @@ export function App() {
       }
     });
     const removeClose = window.ttcut.onCloseRequested(() => setCloseDialog(true));
-    return () => { removeTask(); removeClose(); };
+    const removeUpdate = window.ttcut.onUpdateState(setUpdateState);
+    void window.ttcut.getUpdateState().then(setUpdateState);
+    return () => { removeTask(); removeClose(); removeUpdate(); };
   }, []);
+
+  useEffect(() => { settingsRef.current = settings; }, [settings]);
+  useEffect(() => {
+    if (updateState.status !== 'downloaded' || promptedUpdateVersion.current === updateState.version) return;
+    promptedUpdateVersion.current = updateState.version;
+    if (window.confirm(`TTcut ${updateState.version ?? ''} 已下载完成。立即重启安装？\n选择“取消”可稍后重启。`)) {
+      void window.ttcut.restartToUpdate();
+    }
+  }, [updateState]);
 
   const reset = useCallback(() => {
     setPreviewRally(null);
-    setStep('select'); setVideo(null); setMetadata(null); setPoints({}); setAnalysis(null);
+    setStep('select'); setVideo(null); setMetadata(null); setPoints({}); setAnalysis(null); setAnalysisId(null); setForceManual(false);
     setMode('all'); setThreshold(5); setCustomIds(new Set()); setProgress({ percent: 0, stage: 'probe' });
     setActiveTask(null); setExportResult(null); setError(null);
   }, []);
@@ -323,13 +358,24 @@ export function App() {
     if (!selected) return;
     try {
       const info = await window.ttcut.probeVideo(selected.path);
-      setVideo(selected); setMetadata(info); setPoints({}); setError(null); setStep('calibrate'); setView('auto');
+      setVideo(selected); setMetadata(info); setPoints({}); setAnalysisId(null); setForceManual(false); setError(null); setStep('calibrate'); setView('auto');
     } catch (caught) {
       setError({ code: errorCode(caught) }); setStep('error');
     }
   };
 
-  const choose = async () => acceptVideo(await window.ttcut.selectVideo());
+  const acceptVideos = async (selected: SelectedVideo[]) => {
+    if (!selected.length) return;
+    if (selected.length === 1) {
+      await acceptVideo(selected[0] ?? null);
+      return;
+    }
+    if (!window.confirm('测试内容，确认以继续')) return;
+    multiActiveRef.current = true;
+    setMultiVideos(selected);
+    setView('multi');
+  };
+  const choose = async () => acceptVideos(await window.ttcut.selectVideos());
   const allPoints = metadata && pointOrder.every((name) => points[name]);
   const calibrationValue: Calibration | null = metadata && allPoints ? {
     video_width: metadata.width,
@@ -341,17 +387,22 @@ export function App() {
   const selectedCount = mode === 'all' ? analysis?.rallies.length ?? 0 : mode === 'highlight' ? highlights.length : customIds.size;
 
   const startAnalysis = async () => {
-    if (!video || !metadata || !calibrationValue || calibrationIssue || !bootstrap?.components.analysis.available) return;
+    if (!video || !metadata || (useManualCalibration && (!calibrationValue || calibrationIssue)) || !platformSupported || !bootstrap?.components.analysis.available) return;
     setStep('analyzing'); setProgress({ percent: 0, stage: 'load_model' });
     try {
-      setActiveTask(await window.ttcut.startAnalysis({ videoPath: video.path, calibration: calibrationValue, device: 'auto' }));
+      setActiveTask(await window.ttcut.startAnalysis({
+        videoPath: video.path,
+        calibrationChoice: useManualCalibration ? { method: 'manual', calibration: calibrationValue! } : { method: 'automatic' },
+        device: 'auto',
+        historyVisibility: 'visible',
+      }));
     } catch (caught) {
       setError({ code: errorCode(caught) }); setStep('error');
     }
   };
 
   const startCutting = async () => {
-    if (!analysis || !bootstrap?.components.media.available || selectedCount === 0) return;
+    if (!analysis || !analysisId || !platformSupported || !bootstrap?.components.media.available || selectedCount === 0) return;
     let selection: CutSelectionV1;
     const common = { pre_roll_seconds: settings.pre_roll_seconds, post_roll_seconds: settings.post_roll_seconds } as const;
     if (mode === 'all') selection = { mode, ...common };
@@ -359,7 +410,7 @@ export function App() {
     else selection = { mode, selected_rally_ids: [...customIds], ...common };
     setStep('cutting'); setProgress({ percent: 0, stage: 'preparing' });
     try {
-      setActiveTask(await window.ttcut.startExport(selection));
+      setActiveTask(await window.ttcut.startExport({ analysis_id: analysisId, selection, destination: 'source' }));
     } catch (caught) {
       setError({ code: errorCode(caught) }); setStep('error');
     }
@@ -371,6 +422,7 @@ export function App() {
     await new Promise((resolve) => setTimeout(resolve, 160));
     const next = await window.ttcut.saveSettings({ ...settings, language });
     setSettings(next);
+    settingsRef.current = next;
     document.documentElement.lang = language;
     await new Promise((resolve) => setTimeout(resolve, 160));
     setLanguageTransition(false);
@@ -379,6 +431,7 @@ export function App() {
   const saveRolls = async (partial: Partial<AppSettings>) => {
     const next = await window.ttcut.saveSettings({ ...settings, ...partial });
     setSettings(next);
+    settingsRef.current = next;
   };
 
   const loadHistory = async () => {
@@ -405,6 +458,8 @@ export function App() {
       setVideo(opened.video);
       setMetadata(opened.analysis.video);
       setAnalysis(opened.analysis);
+      setAnalysisId(opened.analysisId);
+      setPoints(opened.calibration.points);
       setMode('all');
       setThreshold(5);
       setCustomIds(new Set());
@@ -447,6 +502,11 @@ export function App() {
     setSetupOutcome(null);
     setSetupFailureCode(null);
     setSetupPendingImports([]);
+    if (!platformSupported) {
+      setSetupOutcome('failed');
+      setSetupFailureCode(bootstrap?.platformCompatibility.reason === 'probe_failed' ? 'PLATFORM_PROBE_FAILED' : 'PLATFORM_UNSUPPORTED');
+      return;
+    }
     try {
       const taskId = await window.ttcut.importComponents();
       if (!taskId) return;
@@ -461,7 +521,11 @@ export function App() {
   const installMediaComponent = async () => {
     setSetupOutcome(null);
     setSetupFailureCode(null);
-    setSetupPendingImports([]);
+    if (!platformSupported) {
+      setSetupOutcome('failed');
+      setSetupFailureCode(bootstrap?.platformCompatibility.reason === 'probe_failed' ? 'PLATFORM_PROBE_FAILED' : 'PLATFORM_UNSUPPORTED');
+      return;
+    }
     try {
       const taskId = await window.ttcut.installMediaComponent(true);
       setupTaskRef.current = taskId;
@@ -475,7 +539,11 @@ export function App() {
   const installAnalysisComponent = async () => {
     setSetupOutcome(null);
     setSetupFailureCode(null);
-    setSetupPendingImports([]);
+    if (!platformSupported) {
+      setSetupOutcome('failed');
+      setSetupFailureCode(bootstrap?.platformCompatibility.reason === 'probe_failed' ? 'PLATFORM_PROBE_FAILED' : 'PLATFORM_UNSUPPORTED');
+      return;
+    }
     try {
       const taskId = await window.ttcut.installAnalysisComponent(true);
       setupTaskRef.current = taskId;
@@ -486,20 +554,34 @@ export function App() {
     }
   };
 
-  const stageText = t.stages[progress.stage as keyof typeof t.stages] ?? progress.stage;
+  const tableRecognitionStage = progress.stage === 'table_sampling'
+    || progress.stage === 'table_model'
+    || progress.stage === 'table_inference';
+  const stageText = tableRecognitionStage
+    ? (settings.language === 'zh-CN' ? '正在识别球桌' : 'Recognizing table')
+    : t.stages[progress.stage as keyof typeof t.stages] ?? progress.stage;
   const setupPendingText = setupPendingImports.map((pending) => interpolate(t.setupPending, {
     variant: pending.variant,
     received: pending.receivedParts,
     total: pending.totalParts,
-    missing: pending.missingAssets.join(', '),
   })).join(' ');
-  const canReturnToSelection = view === 'auto'
-    && step !== 'select'
-    && step !== 'analyzing'
-    && step !== 'cutting'
-    && Boolean(video)
-    && !activeTask
-    && !setupTask;
+  const canReturnToSelection = view === 'multi' || (
+    view === 'auto'
+      && step !== 'select'
+      && step !== 'analyzing'
+      && step !== 'cutting'
+      && Boolean(video)
+      && !activeTask
+      && !setupTask
+  );
+  const returnToSelection = () => {
+    if (view === 'multi') {
+      multiActiveRef.current = false;
+      setMultiVideos([]);
+    }
+    reset();
+    setView('auto');
+  };
 
   return (
     <div className={`app-shell ${languageTransition ? 'language-changing' : ''}`}>
@@ -509,7 +591,7 @@ export function App() {
             type="button"
             className="workflow-back"
             onDoubleClick={(event) => event.stopPropagation()}
-            onClick={() => { reset(); setView('auto'); }}
+            onClick={returnToSelection}
           >
             <span aria-hidden="true">←</span>{t.back}
           </button>
@@ -522,19 +604,37 @@ export function App() {
         </div>
       </header>
       <aside className="sidebar">
-        <div className="brand"><span>TTcut</span><small>v{appVersion}</small></div>
+        <div className="brand"><span>TTcut</span><small>v{bootstrap?.version ?? '1.0.0'}</small></div>
         <nav aria-label="Primary navigation">
-          <button className={view === 'auto' ? 'active' : ''} onClick={() => setView('auto')}><i />{t.autoCut}</button>
+          <button className={view === 'auto' || view === 'multi' ? 'active' : ''} onClick={() => { multiActiveRef.current = false; setView('auto'); }}><i />{t.autoCut}</button>
           <button className={view === 'history' ? 'active' : ''} onClick={showHistory}><i />{t.history}</button>
         </nav>
         <button className={`settings-link ${view === 'settings' ? 'active' : ''}`} onClick={() => setView('settings')}><i />{t.settings}</button>
       </aside>
 
       <main className="main-content">
-        {view === 'settings' ? (
+        {view === 'multi' ? (
+          <MultiTaskPage
+            initialVideos={multiVideos}
+            preRoll={settings.pre_roll_seconds}
+            postRoll={settings.post_roll_seconds}
+            onOpenAnalysis={(id) => { multiActiveRef.current = false; void openHistory(id); }}
+          />
+        ) : view === 'settings' ? (
           <section className="page settings-page">
             <div className="page-heading settings-heading"><p className="eyebrow">TTcut</p><h1>{t.settings}</h1></div>
             <div className="settings-grid">
+              <article className="card about-card">
+                <div className="about-brand"><span>TT</span><div><h2>TTcut</h2><p>{settings.language === 'zh-CN' ? `当前版本 ${bootstrap?.version ?? ''}` : `Version ${bootstrap?.version ?? ''}`}</p></div></div>
+                <div className="about-actions">
+                  <button className="secondary" onClick={() => void window.ttcut.openExternalUrl(WEBSITE_URL)}>{settings.language === 'zh-CN' ? '官方网站' : 'Website'}</button>
+                  <button className="secondary" onClick={() => void window.ttcut.openExternalUrl(GITHUB_URL)}>GitHub</button>
+                  <button className="secondary" onClick={() => void window.ttcut.openExternalUrl(RELEASES_URL)}>{settings.language === 'zh-CN' ? '更新日志' : 'Release notes'}</button>
+                  <button className="secondary donate-button" onClick={() => void window.ttcut.openExternalUrl(DONATION_URL)}>{settings.language === 'zh-CN' ? '打赏作者' : 'Support author'}</button>
+                  <button className="secondary" disabled={updateState.status === 'checking'} onClick={() => updateState.status === 'downloaded' ? void window.ttcut.restartToUpdate() : void window.ttcut.checkForUpdates()}>{updateState.status === 'checking' ? (settings.language === 'zh-CN' ? '正在检查…' : 'Checking…') : updateState.status === 'downloaded' ? (settings.language === 'zh-CN' ? '立即重启' : 'Restart now') : (settings.language === 'zh-CN' ? '检查更新' : 'Check updates')}</button>
+                </div>
+                {updateState.status !== 'idle' && <p className="update-detail">{updateState.status === 'up-to-date' ? (settings.language === 'zh-CN' ? '当前已是最新稳定版。' : 'You are using the latest stable version.') : updateState.status === 'available' ? (settings.language === 'zh-CN' ? '发现新版本，正在后台下载。' : 'A new version is downloading in the background.') : updateState.status === 'error' ? (updateState.message ?? (settings.language === 'zh-CN' ? '检查更新失败。' : 'Update check failed.')) : updateState.status === 'unsupported' ? (settings.language === 'zh-CN' ? '开发环境或当前平台不支持自动更新。' : 'Automatic updates are unavailable in this environment.') : ''}</p>}
+              </article>
               <article className="card setting-card">
                 <div><h2>{t.language}</h2></div>
                 <div className="segmented">
@@ -542,9 +642,12 @@ export function App() {
                   <button className={settings.language === 'en' ? 'selected' : ''} onClick={() => void changeLanguage('en')}>{t.english}</button>
                 </div>
               </article>
-              <article className="card setting-card platform-card">
-                <div><h2>{t.platformCompatibility}</h2><p>{platformDetail}</p></div>
-                <span className="status ok">{t.platformSupported}</span>
+              <article className="card setting-card">
+                <div><h2>{settings.language === 'zh-CN' ? '球台标定' : 'Table calibration'}</h2><p>{settings.language === 'zh-CN' ? '选择单视频流程使用的球台标定方式。多任务始终使用自动标定。' : 'Choose the calibration method for single videos. Multi-task mode always uses automatic calibration.'}</p></div>
+                <div className="segmented">
+                  <button className={settings.calibration_method === 'manual' ? 'selected' : ''} onClick={() => void saveRolls({ calibration_method: 'manual' })}>{settings.language === 'zh-CN' ? '手动' : 'Manual'}</button>
+                  <button className={settings.calibration_method === 'automatic' ? 'selected' : ''} onClick={() => void saveRolls({ calibration_method: 'automatic' })}>{settings.language === 'zh-CN' ? '自动' : 'Automatic'}</button>
+                </div>
               </article>
               <article className="card timing-setting-card">
                 <div><h2>{t.preRoll}</h2><p>{t.preRollSettingDetail}</p></div>
@@ -572,17 +675,17 @@ export function App() {
                 ) : (
                   <div className="setup-options">
                     {bootstrap?.componentSetup.analysis_offer && !bootstrap.components.analysis.available && (
-                      <div className="setup-option"><div><strong>{t.analysisOffer}</strong><span>{t.analysisOfferDetail}</span><small>{interpolate(t.downloadUpTo, { size: fileSize(bootstrap.componentSetup.analysis_offer.download_size_bytes) })}</small><small className="setup-network-hint">{t.networkHint}</small></div><div><button className="text-button" onClick={() => void window.ttcut.openExternalUrl(bootstrap.componentSetup.analysis_offer!.license_url)}>{t.viewLicense}</button><button className="primary" disabled={!bootstrap.componentSetup.analysis_offer.available_for_download} onClick={() => void installAnalysisComponent()}>{t.consentInstall}</button></div></div>
+                      <div className="setup-option"><div><strong>{t.analysisOffer}</strong><span>{t.analysisOfferDetail}</span><small>{interpolate(t.downloadUpTo, { size: fileSize(bootstrap.componentSetup.analysis_offer.download_size_bytes) })}</small><small className="setup-network-hint">{t.networkHint}</small></div><div><button className="text-button" onClick={() => void window.ttcut.openExternalUrl(bootstrap.componentSetup.analysis_offer!.license_url)}>{t.viewLicense}</button><button className="primary" disabled={!platformSupported || !bootstrap.componentSetup.analysis_offer.available_for_download} onClick={() => void installAnalysisComponent()}>{t.consentInstall}</button></div></div>
                     )}
                     {bootstrap?.componentSetup.media_offer && !bootstrap.components.media.available && (
-                      <div className="setup-option"><div><strong>{t.mediaOffer}</strong><span>{t.mediaOfferDetail}</span><small>{interpolate(t.downloadSize, { size: fileSize(bootstrap.componentSetup.media_offer.download_size_bytes) })}</small></div><div><button className="text-button" onClick={() => void window.ttcut.openExternalUrl(bootstrap.componentSetup.media_offer!.license_url)}>{t.viewLicense}</button><button className="primary" disabled={!bootstrap.componentSetup.media_offer.available_for_download} onClick={() => void installMediaComponent()}>{t.consentInstall}</button></div></div>
+                      <div className="setup-option"><div><strong>{t.mediaOffer}</strong><span>{t.mediaOfferDetail}</span><small>{interpolate(t.downloadSize, { size: fileSize(bootstrap.componentSetup.media_offer.download_size_bytes) })}</small></div><div><button className="text-button" onClick={() => void window.ttcut.openExternalUrl(bootstrap.componentSetup.media_offer!.license_url)}>{t.viewLicense}</button><button className="primary" disabled={!platformSupported || !bootstrap.componentSetup.media_offer.available_for_download} onClick={() => void installMediaComponent()}>{t.consentInstall}</button></div></div>
                     )}
                     {bootstrap?.componentSetup.x264_manual_offer && !bootstrap.components.media.x264_available && (
                       <div className="setup-option optional-component"><div><strong>{t.x264ManualOffer}</strong><span>{t.x264ManualDetail}</span><small>{interpolate(t.downloadSize, { size: fileSize(bootstrap.componentSetup.x264_manual_offer.download_size_bytes) })}</small></div><div><button className="secondary" disabled={Boolean(setupTask)} onClick={() => void window.ttcut.openX264Download()}>{t.goToDownload}</button></div></div>
                     )}
                     <div className="setup-manual">
                       <div><strong>{t.manualDownload}</strong></div>
-                      <div className="setup-manual-actions"><button className="text-button" disabled={Boolean(setupTask)} onClick={() => void window.ttcut.openComponentDownloads()}>{t.goToDownload}</button><button className="secondary" disabled={Boolean(setupTask)} onClick={() => void importComponents()}>{t.importComponents}</button></div>
+                      <div className="setup-manual-actions"><button className="text-button" disabled={Boolean(setupTask)} onClick={() => void window.ttcut.openComponentDownloads()}>{t.goToDownload}</button><button className="secondary" disabled={!platformSupported || Boolean(setupTask)} onClick={() => void importComponents()}>{t.importComponents}</button></div>
                     </div>
                   </div>
                 )}
@@ -620,7 +723,10 @@ export function App() {
           </section>
         ) : (
           <section className="page auto-page">
-            {bootstrap && (!bootstrap.components.analysis.available || !bootstrap.components.media.available) && step === 'select' && (
+            {bootstrap && !platformSupported && step === 'select' && (
+              <div className="notice platform-notice"><strong>{t.platformUnsupported}</strong><span>{platformDetail}</span><button className="secondary" onClick={() => setView('settings')}>{t.openSetup}</button></div>
+            )}
+            {bootstrap && platformSupported && (!bootstrap.components.analysis.available || !bootstrap.components.media.available) && step === 'select' && (
               <div className="notice"><strong>{t.componentMissing}</strong><span>{t.componentMissingDetail}</span><button className="secondary" onClick={() => setView('settings')}>{t.openSetup}</button></div>
             )}
             {step === 'select' && (
@@ -635,11 +741,9 @@ export function App() {
                   onDragLeave={() => setDragging(false)}
                   onDrop={(event) => {
                     event.preventDefault(); setDragging(false);
-                    if (event.dataTransfer.files.length !== 1) { setToast(t.onlyOne); return; }
-                    const file = event.dataTransfer.files[0];
-                    if (!file) return;
-                    const filePath = window.ttcut.pathForDroppedFile(file);
-                    void window.ttcut.acceptDroppedVideo(filePath).then(acceptVideo).catch(() => {
+                    const files = [...event.dataTransfer.files].filter((file) => file.name.toLowerCase().endsWith('.mp4'));
+                    if (!files.length) { setToast(t.invalidFile); return; }
+                    void Promise.all(files.map((file) => window.ttcut.acceptDroppedVideo(window.ttcut.pathForDroppedFile(file)))).then(acceptVideos).catch(() => {
                       setError({ code: 'INVALID_INPUT' }); setStep('error');
                     });
                   }}
@@ -651,20 +755,22 @@ export function App() {
 
             {step === 'calibrate' && video && metadata && (
               <div className="workflow-page">
-                <div className="page-heading"><p className="eyebrow">1 / 4</p><h1>{t.calibrationTitle}</h1><p>{t.calibrationDescription}</p></div>
+                <div className="page-heading"><p className="eyebrow">1 / 4</p><h1>{t.calibrationTitle}</h1><p>{useManualCalibration ? t.calibrationDescription : (settings.language === 'zh-CN' ? '将调用自动标定内核识别球台四角。' : 'The automatic calibration kernel will identify the table corners.')}</p></div>
                 <div className="file-summary card"><div><span>{t.fileName}</span><strong>{video.name}</strong></div><div><span>{t.fileSize}</span><strong>{fileSize(video.size)}</strong></div><div><span>{t.duration}</span><strong>{formatTimestamp(metadata.duration_seconds)}</strong></div><div><span>{t.resolution}</span><strong>{metadata.width} × {metadata.height}</strong></div><div><span>{t.frameRate}</span><strong>{metadata.fps.toFixed(3)} fps</strong></div></div>
-                <CalibrationSurface video={video} metadata={metadata} points={points} onPointsChange={setPoints} />
-                <div className="point-legend">{[t.point1, t.point2, t.point3, t.point4].map((label, index) => <span className={points[pointOrder[index]!] ? 'done' : ''} key={label}><b>{index + 1}</b>{label.replace(/^\d\s/, '')}</span>)}</div>
-                {calibrationIssue && <p className="calibration-error" role="alert">{t.invalidCalibration}</p>}
-                <div className="footer-actions"><button className="secondary" onClick={() => setPoints({})}>{t.resetPoints}</button><button className="primary" disabled={!allPoints || Boolean(calibrationIssue) || !bootstrap?.components.analysis.available} onClick={() => void startAnalysis()}>{t.startAnalysis}</button></div>
+                {useManualCalibration ? <>
+                  <CalibrationSurface video={video} metadata={metadata} points={points} onPointsChange={setPoints} />
+                  <div className="point-legend">{[t.point1, t.point2, t.point3, t.point4].map((label, index) => <span className={points[pointOrder[index]!] ? 'done' : ''} key={label}><b>{index + 1}</b>{label.replace(/^\d\s/, '')}</span>)}</div>
+                  {calibrationIssue && <p className="calibration-error" role="alert">{t.invalidCalibration}</p>}
+                </> : <div className="card automatic-calibration"><span>⌖</span><div><h2>{settings.language === 'zh-CN' ? '自动球台标定' : 'Automatic table calibration'}</h2><p>{settings.language === 'zh-CN' ? '将识别首帧、25%、50%、75% 和尾帧，并融合为固定球台标定。' : 'The first, 25%, 50%, 75%, and final frames are combined into one fixed table calibration.'}</p></div></div>}
+                <div className="footer-actions">{useManualCalibration && <button className="secondary" onClick={() => setPoints({})}>{t.resetPoints}</button>}<button className="primary" disabled={(useManualCalibration && (!allPoints || Boolean(calibrationIssue))) || !platformSupported || !bootstrap?.components.analysis.available} onClick={() => void startAnalysis()}>{t.startAnalysis}</button></div>
               </div>
             )}
 
             {(step === 'analyzing' || step === 'cutting') && (
               <div className="progress-stage">
                 <div className="progress-orb"><span>{Math.round(progress.percent)}%</span></div>
-                <h1>{step === 'analyzing' ? t.analyzing : stageText}</h1>
-                <p>{step === 'analyzing' ? t.analyzingDetail : video?.name}</p>
+                <h1>{step === 'analyzing' ? (tableRecognitionStage ? stageText : t.analyzing) : stageText}</h1>
+                <p>{step === 'analyzing' ? (tableRecognitionStage ? stageText : t.analyzingDetail) : video?.name}</p>
                 <div className="progress-track"><span style={{ width: `${progress.percent}%` }} /></div>
                 <strong>{stageText}</strong>
                 {activeTask && <button className="secondary" onClick={() => void window.ttcut.cancelTask(activeTask)}>{t.cancel}</button>}
@@ -687,7 +793,7 @@ export function App() {
                 </div>
                 {mode === 'highlight' && <div className="card inline-setting"><div><h2>{t.threshold}</h2><p>{t.highlightDetail}</p></div><div className="segmented">{([3, 5, 7] as const).map((value) => <button key={value} className={threshold === value ? 'selected' : ''} onClick={() => setThreshold(value)}>&gt; {value}</button>)}</div>{highlights.length === 0 && <span className="inline-error">{t.noHighlights}</span>}</div>}
                 {mode === 'custom' && <div className="rally-table card"><div className="table-tools"><button className="text-button" onClick={() => setCustomIds(new Set(analysis.rallies.map((rally) => rally.id)))}>{t.selectAll}</button><button className="text-button" onClick={() => setCustomIds(new Set())}>{t.clearAll}</button></div><div className="table-scroll"><table><thead><tr><th /><th>{t.rally}</th><th>{t.strokes}</th><th>{t.start}</th><th>{t.end}</th><th>{t.preview}</th></tr></thead><tbody>{analysis.rallies.map((rally: Rally) => <tr key={rally.id}><td><input type="checkbox" checked={customIds.has(rally.id)} onChange={(event) => { const next = new Set(customIds); if (event.target.checked) next.add(rally.id); else next.delete(rally.id); setCustomIds(next); }} /></td><td>{rally.index}</td><td>{rally.bounce_count}</td><td>{formatTimestamp(rally.start_time_seconds)}</td><td>{formatTimestamp(rally.end_time_seconds)}</td><td><button className="text-button" onClick={() => setPreviewRally(rally)}>{t.preview}</button></td></tr>)}</tbody></table></div></div>}
-                <div className="footer-actions"><span>{selectedCount} / {analysis.rallies.length}</span><button className="primary" disabled={selectedCount === 0 || !bootstrap?.components.media.available} onClick={() => void startCutting()}>{t.startCutting}</button></div>
+                <div className="footer-actions"><span>{selectedCount} / {analysis.rallies.length}</span><button className="primary" disabled={selectedCount === 0 || !platformSupported || !bootstrap?.components.media.available} onClick={() => void startCutting()}>{t.startCutting}</button></div>
               </div>
             )}
 

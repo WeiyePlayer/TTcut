@@ -26,11 +26,6 @@ function testCatalog(): ComponentCatalog {
   const media = 'media-data';
   return {
     schema_version: 1,
-    tracknet_weight: {
-      filename: 'TrackNet_best.pt', sha256: hash('weight-data'), source: 'test', redistribution: 'redistributable', downloadable: true,
-      provider: 'test', release_tag: 'test', url: 'https://example.com/weight', size_bytes: 11, install_directory: 'models',
-      rights_evidence: { path: 'rights/test.md', sha256: hash('rights'), rightsholder: 'test', grant: 'test' },
-    },
     analysis_runtime: {
       runtime_id: '3.12.13-2.12.1', python_version: '3.12.13', torch_version: '2.12.1', license_url: 'https://example.com/license',
       assets: [
@@ -68,10 +63,10 @@ afterEach(async () => {
 });
 
 describe('manual component import validation', () => {
-  it('recognizes the fixed model, CPU runtime, CUDA parts, and both media archives', async () => {
+  it('recognizes CPU runtime, CUDA parts, and both media archives', async () => {
     const root = await temporaryDirectory();
     const files = [
-      ['TrackNet_best.pt', 'weight-data'], ['cpu.zip', 'cpu-data'], ['cu126.zip.part001', 'cuda-one'], ['cu126.zip.part002', 'cuda-two'],
+      ['cpu.zip', 'cpu-data'], ['cu126.zip.part001', 'cuda-one'], ['cu126.zip.part002', 'cuda-two'],
       ['cu126.zip.part003', 'cuda-three'], ['ffmpeg.zip', 'media-data'],
     ] as const;
     const paths = await Promise.all(files.map(async ([name, content]) => {
@@ -81,7 +76,6 @@ describe('manual component import validation', () => {
     }));
 
     await expect(validateImportFiles(paths, testCatalog())).resolves.toEqual(expect.arrayContaining([
-      expect.objectContaining({ kind: 'weight' }),
       expect.objectContaining({ kind: 'runtime-part', variant: 'cpu' }),
       expect.objectContaining({ kind: 'runtime-part', variant: 'cu126' }),
       expect.objectContaining({ kind: 'media' }),
@@ -106,8 +100,8 @@ describe('manual component import validation', () => {
     await writeFile(wrongSize, 'wrong', 'utf8');
     await expect(validateImportFiles([wrongSize], testCatalog())).rejects.toThrow('COMPONENT_IMPORT_FILE_SIZE_MISMATCH');
 
-    const wrongHash = path.join(root, 'TrackNet_best.pt');
-    await writeFile(wrongHash, 'weight-datX', 'utf8');
+    const wrongHash = path.join(root, 'cpu.zip');
+    await writeFile(wrongHash, 'cpu-datX', 'utf8');
     await expect(validateImportFiles([wrongHash], testCatalog())).rejects.toThrow('COMPONENT_IMPORT_FILE_HASH_MISMATCH');
   });
 

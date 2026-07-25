@@ -6,7 +6,6 @@ import { sha256File } from './component-assets';
 import type { AnalysisRuntimeVariant } from './runtime-layout';
 
 export type ImportableComponentFile =
-  | { kind: 'weight'; sourcePath: string; asset: ComponentCatalog['tracknet_weight'] }
   | {
     kind: 'runtime-part';
     sourcePath: string;
@@ -18,7 +17,6 @@ export type ImportableComponentFile =
   | { kind: 'media-x264'; sourcePath: string; asset: ComponentCatalog['ffmpeg_x264'] };
 
 type ImportCandidate =
-  | { kind: 'weight'; asset: ComponentCatalog['tracknet_weight'] }
   | {
     kind: 'runtime-part';
     variant: AnalysisRuntimeVariant;
@@ -36,7 +34,6 @@ export async function validateImportFiles(
   if (filePaths.length === 0) throw new Error('COMPONENT_IMPORT_NO_FILES');
 
   const candidates = new Map<string, ImportCandidate>();
-  candidates.set(catalog.tracknet_weight.filename, { kind: 'weight', asset: catalog.tracknet_weight });
   for (const asset of catalog.analysis_runtime.assets) {
     for (const part of asset.parts) {
       candidates.set(part.asset, { kind: 'runtime-part', variant: asset.variant, asset, part });

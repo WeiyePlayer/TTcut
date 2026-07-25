@@ -3,7 +3,6 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { createWriteStream } from 'node:fs';
 import {
   access,
-  copyFile,
   mkdir,
   readdir,
   rename,
@@ -370,68 +369,6 @@ async function preferredCudaVariant(): Promise<CudaRuntimeVariant | null> {
   }
 }
 
-async function installOnlineTrackNetWeight(
-  window: BrowserWindow,
-  taskId: string,
-  signal: AbortSignal,
-  progressBase: number,
-  progressSpan: number,
-): Promise<void> {
-  const catalog = await loadComponentCatalog();
-  const asset = catalog.tracknet_weight;
-  if (!asset.downloadable) throw new Error('TRACKNET_WEIGHT_DOWNLOAD_UNAVAILABLE');
-  const root = managedComponentsRoot();
-  const target = path.join(root, asset.install_directory, asset.filename);
-  if (await exists(target) && await sha256File(target) === asset.sha256) {
-    sendProgress(window, taskId, 'verify', progressBase + progressSpan);
-    return;
-  }
-
-  const download = path.join(root, '.downloads', `${asset.filename}.download`);
-  const staging = path.join(root, '.staging', taskId);
-  sendProgress(window, taskId, 'download', progressBase, 0, asset.size_bytes);
-  await downloadWithResume(
-    asset.url,
-    download,
-    asset.size_bytes,
-    signal,
-    (current) => sendProgress(
-      window,
-      taskId,
-      'download',
-      progressBase + current / asset.size_bytes * progressSpan * 0.82,
-      current,
-      asset.size_bytes,
-    ),
-    (error, failedAttempt, maxAttempts) => logLine(
-      taskId,
-      'WARN',
-      `TrackNet weight download attempt ${failedAttempt}/${maxAttempts} failed; preserving partial data and retrying: ${error instanceof Error ? error.message : String(error)}`,
-    ),
-  );
-  sendProgress(window, taskId, 'verify', progressBase + progressSpan * 0.86);
-  if (await sha256File(download) !== asset.sha256) {
-    await rm(download, { force: true });
-    throw new Error('TRACKNET_WEIGHT_HASH_MISMATCH');
-  }
-  if (signal.aborted) throw Object.assign(new Error('SETUP_CANCELLED'), { name: 'AbortError' });
-
-  await rm(staging, { recursive: true, force: true });
-  const stagedDirectory = path.join(staging, asset.install_directory);
-  await mkdir(stagedDirectory, { recursive: true });
-  await copyFile(download, path.join(stagedDirectory, asset.filename));
-  sendProgress(window, taskId, 'install', progressBase + progressSpan * 0.94);
-  await commitComponentDirectories(staging, [asset.install_directory], taskId);
-  await rm(staging, { recursive: true, force: true });
-  const manifestRoot = path.join(root, '.manifests');
-  await mkdir(manifestRoot, { recursive: true });
-  await writeFile(path.join(manifestRoot, `analysis-weight-${asset.sha256.slice(0, 12)}.json`), JSON.stringify({
-    schema_version: 1,
-    installed_at: new Date().toISOString(),
-    weight: asset,
-  }, null, 2), 'utf8');
-}
-
 async function installOnlineAnalysisRuntime(
   window: BrowserWindow,
   taskId: string,
@@ -505,7 +442,6 @@ async function installOnlineAnalysisRuntime(
     installed_at: new Date().toISOString(),
     runtime: catalog.analysis_runtime,
     asset,
-    weight: catalog.tracknet_weight,
   }, null, 2), 'utf8');
 }
 
@@ -554,7 +490,6 @@ export async function startAnalysisComponentInstall(window: BrowserWindow, conse
   if (catalog.analysis_runtime.assets.length !== ANALYSIS_RUNTIME_VARIANTS.length) throw new Error('ANALYSIS_RUNTIME_CATALOG_INCOMPLETE');
   const taskId = randomUUID();
   return runSetupTask(window, taskId, async (signal) => {
-    await installOnlineTrackNetWeight(window, taskId, signal, 0, 12);
     const existing = await resolveUsableAnalysisComponents('auto').catch(() => null);
     const existingVariant = existing?.runtimeVariant;
     if (existingVariant && ANALYSIS_RUNTIME_VARIANTS.includes(existingVariant as AnalysisRuntimeVariant)) {
@@ -717,14 +652,6 @@ export async function startComponentImport(window: BrowserWindow, filePaths: str
 
       const directories: string[] = [];
       const installedVariants: AnalysisRuntimeVariant[] = [];
-      const weight = files.find((file): file is Extract<ImportableComponentFile, { kind: 'weight' }> => file.kind === 'weight');
-      if (weight) {
-        const target = path.join(staging, weight.asset.install_directory, weight.asset.filename);
-        await mkdir(path.dirname(target), { recursive: true });
-        await copyFile(weight.sourcePath, target);
-        directories.push(weight.asset.install_directory);
-      }
-
       const runtimeGroups = new Map<AnalysisRuntimeVariant, Extract<ImportableComponentFile, { kind: 'runtime-part' }>[] >(
         runtimeImports.filter((group) => group.pending === null).map((group) => [group.variant, group.files]),
       );
@@ -759,13 +686,6 @@ export async function startComponentImport(window: BrowserWindow, filePaths: str
 
       const manifestRoot = path.join(root, '.manifests');
       await mkdir(manifestRoot, { recursive: true });
-      if (weight) {
-        await writeFile(path.join(manifestRoot, `analysis-weight-${weight.asset.sha256.slice(0, 12)}.json`), JSON.stringify({
-          schema_version: 1,
-          installed_at: new Date().toISOString(),
-          weight: weight.asset,
-        }, null, 2), 'utf8');
-      }
       for (const variant of installedVariants) {
         const asset = runtimeGroups.get(variant)![0]!.asset;
         await activateManagedAnalysisRuntime(variant);
@@ -774,7 +694,6 @@ export async function startComponentImport(window: BrowserWindow, filePaths: str
           installed_at: new Date().toISOString(),
           runtime: catalog.analysis_runtime,
           asset,
-          weight: catalog.tracknet_weight,
         }, null, 2), 'utf8');
       }
       for (const media of mediaFiles) {
@@ -788,7 +707,7 @@ export async function startComponentImport(window: BrowserWindow, filePaths: str
       sendProgress(window, taskId, 'complete', 99);
       return {
         imported: [
-          ...(weight || installedVariants.length ? ['analysis' as const] : []),
+          ...(installedVariants.length ? ['analysis' as const] : []),
           ...(mediaFiles.length ? ['media' as const] : []),
         ],
         pendingImports,

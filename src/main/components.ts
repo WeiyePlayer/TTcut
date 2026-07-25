@@ -2,7 +2,6 @@ import { access, mkdir, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { app } from 'electron';
 import type { ComponentStatus } from '../shared/contracts';
-import { sha256File } from './component-assets';
 import { loadComponentCatalog } from './component-catalog';
 import { runProcess } from './processes';
 import {
@@ -37,7 +36,8 @@ export type ComponentPaths = {
   python: string | null;
   runtimeVariant: RuntimeLocation | null;
   worker: string;
-  weights: string | null;
+  tracknetWeights: string;
+  tableAnalyzeWeights: string;
   ffmpeg: string | null;
   ffprobe: string | null;
   mediaEncoder: MediaEncoder | 'unavailable';
@@ -95,14 +95,6 @@ async function firstExisting(values: string[]): Promise<string | null> {
   return null;
 }
 
-async function resolveWeights(): Promise<string | null> {
-  const managedRoot = managedComponentsRoot();
-  return firstExisting([
-    process.env.TTCUT_TRACKNET_WEIGHTS,
-    path.join(managedRoot, 'models', 'TrackNet_best.pt'),
-  ].filter((item): item is string => Boolean(item)));
-}
-
 async function mediaCandidates(): Promise<MediaCandidate[]> {
   const managedRoot = managedComponentsRoot();
   const raw: MediaCandidate[] = [];
@@ -140,7 +132,8 @@ export async function resolveComponents(device: 'auto' | 'cuda' | 'cpu' = 'auto'
     python: runtimes[0]?.python ?? null,
     runtimeVariant: runtimes[0]?.variant ?? null,
     worker: resource('worker'),
-    weights: await resolveWeights(),
+    tracknetWeights: process.env.TTCUT_TRACKNET_WEIGHTS || resource('resources', 'models', 'analyze.pt'),
+    tableAnalyzeWeights: process.env.TTCUT_TABLE_ANALYZE_WEIGHTS || resource('resources', 'models', 'table_analyze.pt'),
     ffmpeg: media?.ffmpeg ?? null,
     ffprobe: media?.ffprobe ?? null,
     mediaEncoder: media?.encoder ?? 'unavailable',
@@ -163,11 +156,8 @@ export async function activateManagedAnalysisRuntime(variant: AnalysisRuntimeVar
 
 export async function validateAnalysisComponent(
   python: string,
-  weights: string,
   expectedVariant?: AnalysisRuntimeVariant,
 ): Promise<{ version: string; pythonVersion: string; torchVersion: string; acceleration: 'cuda' | 'cpu'; variant: AnalysisRuntimeVariant }> {
-  const catalog = await loadComponentCatalog();
-  if (await sha256File(weights) !== catalog.tracknet_weight.sha256) throw new Error('TRACKNET_WEIGHT_HASH_MISMATCH');
   return validateAnalysisRuntime(python, expectedVariant);
 }
 
@@ -217,14 +207,13 @@ export async function validateAnalysisRuntime(
 
 export async function resolveUsableAnalysisComponents(device: 'auto' | 'cuda' | 'cpu'): Promise<ComponentPaths> {
   const base = await resolveComponents(device);
-  if (!base.weights) throw new Error('WEIGHT_MISSING');
   const candidates = await runtimeCandidates(device);
   if (!candidates.length) throw new Error('RUNTIME_MISSING');
   let lastError: unknown = null;
   for (const candidate of candidates) {
     try {
       const expected = isAnalysisRuntimeVariant(candidate.variant) ? candidate.variant : undefined;
-      const validation = await validateAnalysisComponent(candidate.python, base.weights, expected);
+      const validation = await validateAnalysisComponent(candidate.python, expected);
       if (device === 'cuda' && validation.acceleration !== 'cuda') throw new Error('DEVICE_UNAVAILABLE');
       if (device === 'cpu' && validation.acceleration !== 'cpu') throw new Error('DEVICE_UNAVAILABLE');
       if (isAnalysisRuntimeVariant(candidate.variant)) await activateManagedAnalysisRuntime(candidate.variant);
@@ -299,17 +288,18 @@ export async function inspectComponentPaths(paths: ComponentPaths, x264Available
   let analysisVersion: string | null = null;
   let acceleration: 'cuda' | 'cpu' | 'unavailable' = 'unavailable';
   let analysisDetail: string | null = null;
-  if (paths.python && paths.weights) {
+  const modelsAvailable = await exists(paths.tracknetWeights) && await exists(paths.tableAnalyzeWeights);
+  if (paths.python && modelsAvailable) {
     try {
       const expected = paths.runtimeVariant && isAnalysisRuntimeVariant(paths.runtimeVariant) ? paths.runtimeVariant : undefined;
-      const result = await validateAnalysisComponent(paths.python, paths.weights, expected);
+      const result = await validateAnalysisComponent(paths.python, expected);
       analysisVersion = `${result.version} (${result.variant})`;
       acceleration = result.acceleration;
     } catch (error) {
       analysisDetail = error instanceof Error ? error.message : String(error);
     }
   } else {
-    analysisDetail = !paths.python ? 'ANALYSIS_RUNTIME_MISSING' : 'TRACKNET_WEIGHT_MISSING';
+    analysisDetail = !paths.python ? 'ANALYSIS_RUNTIME_MISSING' : 'MODEL_RESOURCE_MISSING';
   }
 
   let mediaVersion: string | null = null;
@@ -329,7 +319,7 @@ export async function inspectComponentPaths(paths: ComponentPaths, x264Available
   }
   return {
     analysis: {
-      available: Boolean(paths.python && paths.weights && !analysisDetail),
+      available: Boolean(paths.python && modelsAvailable && !analysisDetail),
       version: analysisVersion,
       path: paths.python,
       acceleration,

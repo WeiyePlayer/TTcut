@@ -1,14 +1,14 @@
 import { access, open, rename, rm, stat, statfs } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { BrowserWindow } from 'electron';
+import { dialog, type BrowserWindow } from 'electron';
 import type { AppEvent } from '../shared/api';
-import { cutSelectionSchema, type CutGroup, type CutSelectionV1, type VideoMetadata } from '../shared/contracts';
+import { exportRequestSchema, type CutGroup, type ExportRequest, type VideoMetadata } from '../shared/contracts';
 import { IPC } from '../shared/ipc';
 import { createCutGroups } from '../domain/segments';
 import { resolveUsableMediaComponents, type MediaEncoder } from './components';
-import { getLatestAnalysis } from './analysis';
 import { logLine } from './logger';
+import { getHistoryStore } from './history';
 import {
   buildReencodeArgs,
   buildStreamCopyArgs,
@@ -18,7 +18,6 @@ import {
 import { registerMediaPath } from './media-protocol';
 import { probeAudioPacketBoundaries, probeKeyframes, probeVideo } from './probe';
 import { hasActiveTasks, spawnTracked } from './processes';
-import { isExportDurationWithinTolerance } from '../domain/export-duration';
 
 function send(window: BrowserWindow, event: AppEvent): void {
   if (!window.isDestroyed()) window.webContents.send(IPC.taskEvent, event);
@@ -33,17 +32,32 @@ async function available(filePath: string): Promise<boolean> {
   }
 }
 
-async function chooseOutput(input: string): Promise<string> {
+export async function uniqueOutput(input: string, suffixLabel: string): Promise<string> {
   const directory = path.dirname(input);
   const extension = path.extname(input);
   const base = path.basename(input, extension);
   let suffix = 1;
   while (true) {
-    const name = suffix === 1 ? `${base}_ttcut${extension}` : `${base}_ttcut_${suffix}${extension}`;
+    const stem = `${base}_TTcut_${suffixLabel}`;
+    const name = suffix === 1 ? `${stem}${extension}` : `${stem}_${suffix}${extension}`;
     const candidate = path.join(directory, name);
     if (!(await available(candidate))) return candidate;
     suffix += 1;
   }
+}
+
+async function chooseOutput(window: BrowserWindow, input: string, request: ExportRequest): Promise<string> {
+  const extension = path.extname(input);
+  const base = path.basename(input, extension);
+  const label = (request.mode_label ?? request.selection.mode).replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').trim();
+  if (request.destination === 'source') return uniqueOutput(input, label || request.selection.mode);
+  const result = await dialog.showSaveDialog(window, {
+    title: 'Save TTcut video',
+    defaultPath: path.join(path.dirname(input), `${base}_TTcut${extension}`),
+    filters: [{ name: 'MP4 video', extensions: ['mp4'] }],
+  });
+  if (result.canceled || !result.filePath) throw new Error('EXPORT_CANCELLED');
+  return path.extname(result.filePath).toLowerCase() === '.mp4' ? result.filePath : `${result.filePath}.mp4`;
 }
 
 async function assertExportPreconditions(
@@ -151,7 +165,8 @@ export async function validateExportOutput(
   const info = await stat(output);
   if (!info.isFile() || info.size < 1024) throw new Error('EXPORT_INVALID');
   const metadata = await probeVideo(output);
-  if (!isExportDurationWithinTolerance(metadata.duration_seconds, wantedDuration)) {
+  const durationTolerance = Math.max(0.1, 2 / metadata.fps);
+  if (Math.abs(metadata.duration_seconds - wantedDuration) > durationTolerance) {
     throw new Error('EXPORT_DURATION_MISMATCH');
   }
   if (metadata.width !== source.width || metadata.height !== source.height) {
@@ -201,10 +216,11 @@ async function streamCopyEligibility(
   }
 }
 
-export async function startExport(window: BrowserWindow, rawSelection: CutSelectionV1): Promise<string> {
-  const selection = cutSelectionSchema.parse(rawSelection);
-  const analysis = getLatestAnalysis();
-  if (!analysis) throw new Error('NO_ANALYSIS');
+export async function startExport(window: BrowserWindow, rawRequest: ExportRequest): Promise<string> {
+  const request = exportRequestSchema.parse(rawRequest);
+  const selection = request.selection;
+  const record = await getHistoryStore().open(request.analysis_id);
+  const analysis = record.analysis;
   if (hasActiveTasks()) throw new Error('TASK_BUSY');
   const groups = createCutGroups(analysis, selection);
   if (!groups.length) throw new Error('NO_RALLIES');
@@ -212,21 +228,14 @@ export async function startExport(window: BrowserWindow, rawSelection: CutSelect
   if (!components.ffmpeg || !components.ffprobe || components.mediaEncoder === 'unavailable') throw new Error('MEDIA_COMPONENT_MISSING');
   const highResolution = analysis.video.width > 4096 || analysis.video.height > 2160;
   const taskId = randomUUID();
-  const output = await chooseOutput(analysis.video.path);
+  const output = await chooseOutput(window, analysis.video.path, request);
   const partial = path.join(path.dirname(output), `.${path.basename(output, '.mp4')}.${taskId}.partial.mp4`);
   const duration = expectedOutputDuration(groups);
   send(window, { type: 'progress', data: { taskId, kind: 'export', stage: 'preparing', percent: 0 } });
   await logLine(taskId, 'INFO', `Export target: ${output}`);
   await logLine(taskId, 'INFO', `Active media encoder: ${components.mediaEncoder}`);
   try {
-    await assertExportPreconditions(
-      analysis.video.path,
-      path.dirname(output),
-      taskId,
-      duration,
-      analysis.video,
-      components.mediaEncoder,
-    );
+    await assertExportPreconditions(analysis.video.path, path.dirname(output), taskId, duration, analysis.video, components.mediaEncoder);
     const canCopy = await streamCopyEligibility(analysis.video.path, groups, analysis.video);
     if (!canCopy && highResolution && components.mediaEncoder !== 'libx264') {
       throw new Error('X264_COMPONENT_REQUIRED_FOR_HIGH_RESOLUTION');
@@ -273,11 +282,13 @@ export async function startExport(window: BrowserWindow, rawSelection: CutSelect
     await rename(partial, output);
     const result = {
       taskId,
+      analysisId: record.id,
       outputPath: output,
       outputName: path.basename(output),
       mediaUrl: registerMediaPath(output),
     };
     send(window, { type: 'progress', data: { taskId, kind: 'export', stage: 'complete', percent: 100 } });
+    await getHistoryStore().markVisible(record.id, 'export', output);
     send(window, { type: 'export-result', taskId, data: result });
     return taskId;
   } catch (error) {

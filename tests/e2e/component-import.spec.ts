@@ -17,7 +17,6 @@ const userData = path.join(projectRoot, 'output', 'playwright', 'component-impor
 const screenshot = path.join(projectRoot, 'output', 'playwright', 'component-import-settings.png');
 const optionalX264Component = process.env.TTCUT_X264_COMPONENT;
 const importFiles = [
-  'TrackNet_best.pt',
   'ttcut-analysis-3.12.13-2.12.1-cpu.zip',
   'ttcut-analysis-3.12.13-2.12.1-cu126.zip.part001',
   'ttcut-analysis-3.12.13-2.12.1-cu126.zip.part002',
@@ -114,7 +113,8 @@ test('imports and configures the real local components', async () => {
       : path.join(componentsRoot, 'ffmpeg-8.1', 'bin', 'ffmpeg.exe'));
     expect(status.media.active_encoder).toBe(optionalX264Component ? 'libx264' : 'libopenh264');
     expect(status.media.x264_available).toBe(Boolean(optionalX264Component));
-    expect(existsSync(path.join(componentsRoot, 'models', 'TrackNet_best.pt'))).toBe(true);
+    expect(existsSync(path.join(projectRoot, 'resources', 'models', 'analyze.pt'))).toBe(true);
+    expect(existsSync(path.join(projectRoot, 'resources', 'models', 'table_analyze.pt'))).toBe(true);
     expect(existsSync(path.join(componentsRoot, 'analysis-runtime', '3.12.13-2.12.1', 'cpu', 'python.exe'))).toBe(true);
     expect(existsSync(path.join(componentsRoot, 'ffmpeg-8.1', 'bin', 'ffmpeg.exe'))).toBe(true);
     expect(existsSync(path.join(componentsRoot, '.manifests', 'media-autobuild-2026-07-17-13-22.json'))).toBe(true);

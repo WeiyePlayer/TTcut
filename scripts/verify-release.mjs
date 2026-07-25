@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { readFile, readdir } from 'node:fs/promises';
+import { readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -12,6 +12,10 @@ const failures = [];
 
 function check(condition, message) {
   if (!condition) failures.push(message);
+}
+
+async function sha256(filePath) {
+  return createHash('sha256').update(await readFile(filePath)).digest('hex');
 }
 
 async function walk(directory) {
@@ -45,6 +49,10 @@ async function auditWorker(directory, label) {
   for (const name of ['requirements-cpu.txt', 'requirements-cu126.txt', 'requirements-cu132.txt', 'runtime-wheel-lock.json', 'SOURCE_MANIFEST.md', 'LICENSE.tracknet.txt']) {
     check(relative.includes(name), `${label} is missing ${name}`);
   }
+  for (const name of ['ttcut_worker/table_analyze.py', 'ttcut_worker/table_model.py']) {
+    check(relative.includes(name), `${label} is missing automatic table analysis source: ${name}`);
+  }
+  check(!relative.some((name) => /(^|\/)vendor(\/|$)/i.test(name)), `${label} contains a vendored training/source tree.`);
   for (const requirement of ['requirements-cpu.txt', 'requirements-cu126.txt', 'requirements-cu132.txt']) {
     const text = await readFile(path.join(directory, requirement), 'utf8');
     check(text.includes('numpy==2.5.1'), `${label}/${requirement} does not pin NumPy exactly.`);
@@ -115,26 +123,23 @@ check(componentManagerSource.includes("spawn('curl.exe'"), 'Windows component do
 check(componentManagerSource.includes("spawn('taskkill.exe'"), 'Stalled Windows component downloads do not terminate the process tree.');
 
 const componentCatalog = JSON.parse(await readFile(path.join(root, 'resources', 'components.json'), 'utf8'));
-check(
-  ['internal-only', 'redistributable'].includes(componentCatalog.tracknet_weight?.redistribution),
-  'The TrackNet weight redistribution boundary is missing or invalid.',
-);
-if (componentCatalog.tracknet_weight?.redistribution === 'internal-only') {
-  check(componentCatalog.tracknet_weight?.downloadable === false, 'The internal-only TrackNet weight is incorrectly marked downloadable.');
+const modelManifest = JSON.parse(await readFile(path.join(root, 'resources', 'model-manifest.json'), 'utf8'));
+check(modelManifest.schema_version === 1, 'The bundled model manifest schema is invalid.');
+check(modelManifest.models?.length === 2, 'The bundled model manifest must contain exactly two models.');
+check(new Set(modelManifest.models?.map((model) => model.filename)).size === 2, 'The bundled model manifest contains duplicate filenames.');
+for (const [filename, size, hash] of [
+  ['analyze.pt', 136191005, 'ffb5469161c4bd39a5a7e745c3d13f076b2c5e575f33279ea62f1e5803245a52'],
+  ['table_analyze.pt', 99028986, '160e1a9b2d0236b501dc4a4d38bbfb39315eeef6de5d8c11770452623ff102df'],
+]) {
+  const model = modelManifest.models?.find((candidate) => candidate.filename === filename);
+  check(model?.size_bytes === size && model?.sha256 === hash, `Bundled model manifest entry is invalid: ${filename}`);
 }
-check(/^[a-f0-9]{64}$/.test(componentCatalog.tracknet_weight?.sha256 ?? ''), 'The fixed TrackNet weight hash is missing.');
-check(componentCatalog.tracknet_weight?.downloadable === true, 'The managed TrackNet weight is not downloadable.');
-check(componentCatalog.tracknet_weight?.url === 'https://github.com/WeiyePlayer/TTcut-runtime-assets/releases/download/tracknet-weight-1.0.0/TrackNet_best.pt', 'The managed TrackNet weight URL is not the fixed production asset.');
-check(componentCatalog.tracknet_weight?.size_bytes === 136191005, 'The managed TrackNet weight size is incorrect.');
-check(componentCatalog.tracknet_weight?.install_directory === 'models', 'The managed TrackNet weight install directory is incorrect.');
+check(!('tracknet_weight' in componentCatalog), 'Model weights remain in the managed component catalog.');
+check(!('table_weight' in componentCatalog), 'Table model weights remain in the managed component catalog.');
 check(/^[a-f0-9]{64}$/.test(componentCatalog.ffmpeg?.sha256 ?? ''), 'The fixed FFmpeg archive hash is missing.');
-check(componentCatalog.ffmpeg?.install_directory === 'ffmpeg-8.1', 'The default OpenH264 FFmpeg install directory changed.');
-check(componentCatalog.ffmpeg?.variant === 'win64-lgpl-shared-8.1', 'The default OpenH264 FFmpeg variant changed.');
 check(componentCatalog.ffmpeg_x264?.asset === 'ffmpeg-N-125716-g1b1f602699-win64-gpl.zip', 'The fixed x264 asset name is incorrect.');
 check(componentCatalog.ffmpeg_x264?.size_bytes === 168733210, 'The fixed x264 asset size is incorrect.');
 check(componentCatalog.ffmpeg_x264?.sha256 === '6dcf685c2fea98221b3f179961165e9c31f55bead576c4479ae4549858fbf826', 'The fixed x264 asset hash is incorrect.');
-check(componentCatalog.ffmpeg_x264?.install_directory === 'ffmpeg-x264-N-125716-g1b1f602699', 'The x264 install directory is incorrect.');
-check(componentCatalog.ffmpeg_x264?.required_build_flags?.includes('--enable-gpl'), 'The x264 GPL build requirement is missing.');
 check(componentCatalog.ffmpeg_x264?.required_build_flags?.includes('--enable-libx264'), 'The x264 encoder build requirement is missing.');
 check(componentCatalog.ffmpeg_x264?.required_encoders?.includes('libx264'), 'The x264 encoder requirement is missing.');
 
@@ -151,20 +156,6 @@ if (releaseSigningRequired) {
   const runtimeAssets = componentCatalog.analysis_runtime?.assets ?? [];
   check(runtimeAssets.length === 3 && new Set(runtimeAssets.map((asset) => asset.variant)).size === 3, 'Public RC requires immutable CPU, cu126, and cu132 runtime assets.');
   check(runtimeAssets.every((asset) => Array.isArray(asset.parts) && asset.parts.length > 0 && asset.parts.every((part) => part.url.startsWith('https://') && !part.url.includes('REPLACE-') && /^[a-f0-9]{64}$/.test(part.sha256))), 'Public RC runtime asset part URLs or hashes are not immutable production values.');
-  check(componentCatalog.tracknet_weight?.redistribution === 'redistributable', 'Public RC cannot package the internal-only TrackNet weight.');
-  const evidence = componentCatalog.tracknet_weight?.rights_evidence;
-  if (evidence) {
-    const evidencePath = path.join(root, 'resources', ...evidence.path.split('/'));
-    check(existsSync(evidencePath), 'TrackNet weight rights evidence file is missing.');
-    if (existsSync(evidencePath)) {
-      const normalizedEvidence = (await readFile(evidencePath, 'utf8')).replace(/\r\n/g, '\n');
-      const actual = createHash('sha256').update(normalizedEvidence, 'utf8').digest('hex');
-      check(actual === evidence.sha256, 'TrackNet weight rights evidence hash does not match the catalog.');
-    }
-  } else {
-    check(false, 'TrackNet weight rights evidence is missing.');
-  }
-  check(componentCatalog.tracknet_weight.downloadable === true, 'Public RC TrackNet weight must be a managed download.');
 }
 
 const forgeSource = await readFile(path.join(root, 'forge.config.ts'), 'utf8');
@@ -188,19 +179,21 @@ check(forgeSource.includes('electron-v43.1.1-win32-x64.zip'), 'Pinned Electron W
 check(forgeSource.includes('b4e9995cd3f65785eb8818276aa9020f3165ab11da41b3c762616d4a0ad8c7ad'), 'Pinned Electron Windows archive checksum is missing.');
 
 const releaseMetadata = path.join(root, '.runtime', 'release-metadata');
-for (const relative of ['THIRD_PARTY_NOTICES.html', 'THIRD_PARTY_NOTICES.md', 'sbom.cdx.json', 'licenses/index.json', 'licenses/tracknet/LICENSE.txt', 'licenses/tracknet/WEIGHT_RIGHTS.md']) {
+for (const relative of ['THIRD_PARTY_NOTICES.html', 'THIRD_PARTY_NOTICES.md', 'sbom.cdx.json', 'licenses/index.json', 'licenses/tracknet/LICENSE.txt']) {
   check(existsSync(path.join(releaseMetadata, ...relative.split('/'))), `Generated release metadata is missing ${relative}.`);
 }
 if (existsSync(path.join(releaseMetadata, 'THIRD_PARTY_NOTICES.html'))) {
   const licenseCenter = await readFile(path.join(releaseMetadata, 'THIRD_PARTY_NOTICES.html'), 'utf8');
   check(licenseCenter.includes('TTcut 第三方许可证'), 'Generated license center is missing its UTF-8 Chinese title.');
-  check(licenseCenter.includes('本页列出桌面应用及其受管下载组件的许可证正文'), 'Generated license center contains missing or corrupted user-facing text.');
+  check(licenseCenter.includes('本页列出桌面应用、随安装器分发的模型资源及受管下载组件的许可证材料'), 'Generated license center contains missing or corrupted user-facing text.');
 }
 if (existsSync(path.join(releaseMetadata, 'licenses', 'index.json'))) {
   const licenseIndex = JSON.parse(await readFile(path.join(releaseMetadata, 'licenses', 'index.json'), 'utf8'));
   check(Array.isArray(licenseIndex.components) && licenseIndex.components.length >= 9, 'Generated license index is incomplete.');
   check(licenseIndex.components.every((component) => Array.isArray(component.license_files) && component.license_files.length > 0), 'A shipped component has no bundled license body.');
-  check(licenseIndex.components.some((component) => component.name === componentCatalog.tracknet_weight.filename), 'Shipped TrackNet weight is missing from the generated license index.');
+  for (const model of modelManifest.models) {
+    check(licenseIndex.components.some((component) => component.name === model.filename), `Bundled model is missing from the generated license index: ${model.filename}`);
+  }
   check(licenseIndex.components.some((component) => component.name === 'FFmpeg libx264 optional media component'), 'Optional x264 component is missing from the generated license index.');
 }
 
@@ -216,13 +209,28 @@ if (existsSync(packagedRoot)) {
   check(existsSync(path.join(packagedRoot, 'resources', 'release-metadata', 'sbom.cdx.json')), 'Packaged SBOM is missing.');
   check(existsSync(path.join(packagedRoot, 'LICENSE')), 'Packaged Electron license is missing.');
   check(existsSync(path.join(packagedRoot, 'LICENSES.chromium.html')), 'Packaged Chromium license collection is missing.');
-  const packagedWeight = path.join(packagedRoot, 'resources', 'resources', 'models', 'TrackNet_best.pt');
+  const packagedModels = path.join(packagedRoot, 'resources', 'resources', 'models');
   const packagedLicenseCenter = path.join(packagedRoot, 'resources', 'release-metadata', 'THIRD_PARTY_NOTICES.html');
   if (existsSync(packagedLicenseCenter)) {
     const licenseCenter = await readFile(packagedLicenseCenter, 'utf8');
     check(licenseCenter.includes('TTcut 第三方许可证'), 'Packaged license center contains corrupted user-facing text.');
   }
-  check(!existsSync(packagedWeight), 'Managed TrackNet weight was incorrectly packaged in the installer.');
+  check(existsSync(path.join(packagedRoot, 'resources', 'resources', 'model-manifest.json')), 'Packaged model manifest is missing.');
+  if (existsSync(packagedModels)) {
+    const modelFiles = (await readdir(packagedModels)).filter((name) => /\.pt$/i.test(name)).sort();
+    check(JSON.stringify(modelFiles) === JSON.stringify(['analyze.pt', 'table_analyze.pt']), `Packaged model names are incorrect: ${modelFiles.join(', ')}`);
+    for (const model of modelManifest.models) {
+      const modelPath = path.join(packagedModels, model.filename);
+      if (!existsSync(modelPath)) {
+        check(false, `Packaged model is missing: ${model.filename}`);
+        continue;
+      }
+      check((await stat(modelPath)).size === model.size_bytes, `Packaged model size is incorrect: ${model.filename}`);
+      check(await sha256(modelPath) === model.sha256, `Packaged model hash is incorrect: ${model.filename}`);
+    }
+  } else {
+    check(false, 'Packaged model directory is missing.');
+  }
   check(existsSync(archive), 'Packaged app.asar is missing.');
   if (existsSync(archive)) {
     const entries = listPackage(archive).map((entry) => entry.replaceAll('\\', '/'));

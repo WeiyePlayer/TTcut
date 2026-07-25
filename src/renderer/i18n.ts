@@ -72,6 +72,7 @@ const zh = {
     INVALID_WORKER_OUTPUT: '分析进程返回了无效结果。请重试并查看技术日志。',
     WORKER_EXITED: '分析进程意外退出。请检查组件状态、显存和技术日志。',
     ANALYSIS_FAILED: '视频分析未完成。请重新标定后重试，必要时查看技术日志。',
+    AUTO_CALIBRATION_FAILED: '自动识别球桌失败。单视频可改用手动标定；多任务会跳过此视频并继续处理其他任务。',
     NO_RALLIES: '没有可剪辑的有效回合。请重新标定或选择其他视频。',
     NO_HIGHLIGHTS: '没有回合超过当前精彩阈值。请降低阈值或更换模式。',
     NO_CUSTOM_SELECTION: '请至少选择一个回合后再开始剪辑。',
@@ -81,7 +82,7 @@ const zh = {
     EXPORT_FAILED: '视频导出或最终校验失败。源视频和已有输出未被覆盖，请查看日志后重试。',
     UNKNOWN: '无法完成操作。请重试；若问题持续，请打开技术日志。',
   },
-  stages: { probe: '正在读取视频', load_model: '正在准备分析', analysis: '正在分析视频', postprocess: '正在识别回合', preparing: '正在准备剪辑', cutting: '正在剪辑视频', 'cutting-and-exporting': '正在剪辑与导出', complete: '正在写入输出文件' },
+  stages: { probe: '正在读取视频', table_sampling: '正在识别球桌', table_model: '正在识别球桌', table_inference: '正在识别球桌', load_model: '正在准备分析', analysis: '正在分析视频', postprocess: '正在识别回合', preparing: '正在准备剪辑', cutting: '正在剪辑视频', 'cutting-and-exporting': '正在剪辑与导出', complete: '正在写入输出文件' },
   setupStages: { download: '正在下载', verify: '正在校验文件', extract: '正在解压', self_test: '正在执行组件自检', install: '正在安全安装', complete: '正在完成设置' },
 } as const;
 
@@ -161,6 +162,7 @@ const en: Messages = {
     INVALID_WORKER_OUTPUT: 'The analysis process returned an invalid result. Retry and inspect the technical log.',
     WORKER_EXITED: 'The analysis process exited unexpectedly. Check components, GPU memory, and the technical log.',
     ANALYSIS_FAILED: 'Video analysis did not complete. Recalibrate and retry, then inspect the log if needed.',
+    AUTO_CALIBRATION_FAILED: 'Automatic table recognition failed. Use manual calibration for a single video; multi-task mode skips this item and continues.',
     NO_RALLIES: 'There are no valid rallies to cut. Recalibrate or choose another video.',
     NO_HIGHLIGHTS: 'No rally exceeds the current highlight threshold. Lower it or choose another mode.',
     NO_CUSTOM_SELECTION: 'Select at least one rally before cutting.',
@@ -170,7 +172,7 @@ const en: Messages = {
     EXPORT_FAILED: 'Export or final validation failed. Existing files were not overwritten; inspect the log and retry.',
     UNKNOWN: 'The operation could not be completed. Retry and open the technical log if it continues.',
   },
-  stages: { probe: 'Reading video', load_model: 'Preparing analysis', analysis: 'Analyzing video', postprocess: 'Detecting rallies', preparing: 'Preparing', cutting: 'Cutting video', 'cutting-and-exporting': 'Cutting and exporting', complete: 'Writing output' },
+  stages: { probe: 'Reading video', table_sampling: 'Recognizing table', table_model: 'Recognizing table', table_inference: 'Recognizing table', load_model: 'Preparing analysis', analysis: 'Analyzing video', postprocess: 'Detecting rallies', preparing: 'Preparing', cutting: 'Cutting video', 'cutting-and-exporting': 'Cutting and exporting', complete: 'Writing output' },
   setupStages: { download: 'Downloading', verify: 'Verifying files', extract: 'Extracting', self_test: 'Running component self-test', install: 'Installing safely', complete: 'Completing setup' },
 };
 

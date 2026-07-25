@@ -15,31 +15,6 @@ const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
 
 const componentCatalogSchema = z.object({
   schema_version: z.literal(1),
-  tracknet_weight: z.object({
-    filename: z.literal('TrackNet_best.pt'),
-    sha256: sha256Schema,
-    source: z.string().min(1),
-    redistribution: z.enum(['internal-only', 'redistributable']),
-    downloadable: z.boolean(),
-    provider: z.string().min(1),
-    release_tag: z.string().min(1),
-    url: z.string().url().refine((value) => value.startsWith('https://')),
-    size_bytes: z.number().int().positive(),
-    install_directory: z.literal('models'),
-    rights_evidence: z.object({
-      path: z.string().regex(/^rights\/[^/]+\.(?:md|pdf)$/),
-      sha256: sha256Schema,
-      rightsholder: z.string().min(1),
-      grant: z.string().min(1),
-    }).strict().nullable(),
-  }).strict().superRefine((weight, context) => {
-    if (weight.redistribution === 'internal-only' && (weight.downloadable || weight.rights_evidence !== null)) {
-      context.addIssue({ code: 'custom', message: 'Internal-only weights cannot be downloadable or claim rights evidence.' });
-    }
-    if (weight.redistribution === 'redistributable' && weight.rights_evidence === null) {
-      context.addIssue({ code: 'custom', path: ['rights_evidence'], message: 'Redistributable weights require immutable rights evidence.' });
-    }
-  }),
   analysis_runtime: z.object({
     runtime_id: z.literal(ANALYSIS_RUNTIME_ID),
     python_version: z.literal(ANALYSIS_PYTHON_VERSION),
@@ -136,9 +111,7 @@ export async function componentSetupInfo(): Promise<ComponentSetupInfo> {
     analysis_offer: catalog.analysis_runtime.assets.length === ANALYSIS_RUNTIME_VARIANTS.length ? {
       id: 'analysis',
       version: `${catalog.analysis_runtime.python_version} / ${catalog.analysis_runtime.torch_version}`,
-      download_size_bytes: catalog.tracknet_weight.size_bytes
-        + (cpuAsset?.size_bytes ?? 0)
-        + largestCudaAsset,
+      download_size_bytes: (cpuAsset?.size_bytes ?? 0) + largestCudaAsset,
       license_url: catalog.analysis_runtime.license_url,
       available_for_download: process.platform === 'win32',
     } : null,

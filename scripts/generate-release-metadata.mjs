@@ -42,6 +42,7 @@ await mkdir(path.join(staging, 'licenses', 'tracknet'), { recursive: true });
 
 const packageLock = JSON.parse(await readFile(path.join(root, 'package-lock.json'), 'utf8'));
 const componentCatalog = JSON.parse(await readFile(path.join(root, 'resources', 'components.json'), 'utf8'));
+const modelManifest = JSON.parse(await readFile(path.join(root, 'resources', 'model-manifest.json'), 'utf8'));
 const selected = Object.entries(packageLock.packages ?? {})
   .filter(([lockPath, metadata]) => lockPath.startsWith('node_modules/') && (metadata.dev !== true || lockPath === 'node_modules/electron'));
 const components = [];
@@ -77,10 +78,6 @@ if (missingLicenses.length) {
 }
 
 await cp(path.join(root, 'worker', 'LICENSE.tracknet.txt'), path.join(staging, 'licenses', 'tracknet', 'LICENSE.txt'));
-await cp(
-  path.join(root, 'resources', ...componentCatalog.tracknet_weight.rights_evidence.path.split('/')),
-  path.join(staging, 'licenses', 'tracknet', 'WEIGHT_RIGHTS.md'),
-);
 await cp(path.join(root, 'THIRD_PARTY_NOTICES.md'), path.join(staging, 'THIRD_PARTY_NOTICES.md'));
 components.push({
   type: 'library',
@@ -89,19 +86,22 @@ components.push({
   licenses: [{ license: { id: 'MIT' } }],
   license_files: ['licenses/tracknet/LICENSE.txt'],
 });
-components.push({
-  type: 'machine-learning-model',
-  name: componentCatalog.tracknet_weight.filename,
-  version: `sha256:${componentCatalog.tracknet_weight.sha256}`,
-  hashes: [{ alg: 'SHA-256', content: componentCatalog.tracknet_weight.sha256 }],
-  licenses: [{ license: { name: 'Rightsholder redistribution grant' } }],
-  externalReferences: [{ type: 'distribution', url: componentCatalog.tracknet_weight.url }],
-  properties: [
-    { name: 'ttcut:distribution', value: 'managed-analysis-component-download' },
-    { name: 'ttcut:installer-bundled', value: 'false' },
-  ],
-  license_files: ['licenses/tracknet/WEIGHT_RIGHTS.md'],
-});
+for (const model of modelManifest.models) {
+  components.push({
+    type: 'machine-learning-model',
+    name: model.filename,
+    version: `sha256:${model.sha256}`,
+    hashes: [{ alg: 'SHA-256', content: model.sha256 }],
+    licenses: [{ license: { name: 'NOASSERTION' } }],
+    properties: [
+      { name: 'ttcut:model-id', value: model.model_id },
+      { name: 'ttcut:distribution', value: 'installer-resource' },
+      { name: 'ttcut:installer-bundled', value: 'true' },
+      { name: 'ttcut:resource-path', value: `resources/models/${model.filename}` },
+    ],
+    license_files: ['THIRD_PARTY_NOTICES.md'],
+  });
+}
 components.push({
   type: 'framework',
   name: 'FFmpeg libx264 optional media component',
