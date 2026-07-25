@@ -37,7 +37,7 @@ KEYPOINT_LABELS = (
     "close_center",
     "far_center",
 )
-CORNER_INDICES = (4, 5, 1, 0)
+CORNER_INDICES = (0, 1, 4, 5)
 MODEL_SIZE = (1600, 896)
 KEYPOINT_THRESHOLD = 0.1
 MEAN = np.asarray([0.485, 0.456, 0.406], dtype=np.float32)
@@ -270,6 +270,44 @@ def _aggregate_nearest_pairs(predictions):
     return fixed, details
 
 
+def _order_corners(fixed_points: np.ndarray) -> dict[str, list[float]]:
+    corners = fixed_points[list(CORNER_INDICES), :2]
+    vertical_order = np.argsort(corners[:, 1], kind="stable")
+    top = corners[vertical_order[:2]]
+    bottom = corners[vertical_order[2:]]
+    top = top[np.argsort(top[:, 0], kind="stable")]
+    bottom = bottom[np.argsort(bottom[:, 0], kind="stable")]
+    return {
+        "top_left": top[0].tolist(),
+        "top_right": top[1].tolist(),
+        "bottom_right": bottom[1].tolist(),
+        "bottom_left": bottom[0].tolist(),
+    }
+
+
+def _select_coherent_corner_pair(predictions, width: int, height: int) -> tuple[int, int]:
+    candidates = []
+    for sample_index, prediction in enumerate(predictions):
+        if not all(prediction["valid"][index] for index in CORNER_INDICES):
+            continue
+        points = np.column_stack((prediction["points"], prediction["valid"].astype(np.float64)))
+        try:
+            calibration = TableCalibration.from_points(width, height, _order_corners(points))
+        except CalibrationError:
+            continue
+        candidates.append((sample_index, np.asarray(calibration.points, dtype=np.float64)))
+    if len(candidates) < 2:
+        raise AutoCalibrationError("Automatic calibration did not find two coherent table samples.")
+
+    best = None
+    for first_index in range(len(candidates)):
+        for second_index in range(first_index + 1, len(candidates)):
+            distance = float(np.linalg.norm(candidates[first_index][1] - candidates[second_index][1], axis=1).sum())
+            if best is None or distance < best[0]:
+                best = (distance, candidates[first_index][0], candidates[second_index][0])
+    return best[1], best[2]
+
+
 def _serializable_prediction(prediction):
     return {
         "label": prediction["label"],
@@ -312,15 +350,29 @@ def analyze_table(
             progress_callback,
         )
         fixed_points, fixed_keypoints = _aggregate_nearest_pairs(predictions)
+        first_sample, second_sample = _select_coherent_corner_pair(
+            predictions,
+            video_info["width"],
+            video_info["height"],
+        )
+        for point_index in CORNER_INDICES:
+            first_point = predictions[first_sample]["points"][point_index].astype(np.float64)
+            second_point = predictions[second_sample]["points"][point_index].astype(np.float64)
+            mean_point = (first_point + second_point) / 2.0
+            first_activation = float(predictions[first_sample]["activations"][point_index])
+            second_activation = float(predictions[second_sample]["activations"][point_index])
+            fixed_points[point_index, :2] = mean_point
+            fixed_points[point_index, 2] = 1.0
+            fixed_keypoints[point_index].update({
+                "selected_samples": [predictions[first_sample]["label"], predictions[second_sample]["label"]],
+                "pair_distance_pixels": float(np.linalg.norm(first_point - second_point)),
+                "x": float(mean_point[0]),
+                "y": float(mean_point[1]),
+                "activation": (first_activation + second_activation) / 2.0,
+            })
         if any(fixed_points[index, 2] != 1 for index in CORNER_INDICES):
             raise AutoCalibrationError("Automatic calibration could not identify all four table corners.")
-        points = {
-            name: fixed_points[index, :2].tolist()
-            for name, index in zip(
-                ("top_left", "top_right", "bottom_right", "bottom_left"),
-                CORNER_INDICES,
-            )
-        }
+        points = _order_corners(fixed_points)
         calibration = TableCalibration.from_points(video_info["width"], video_info["height"], points)
     except AutoCalibrationError:
         raise

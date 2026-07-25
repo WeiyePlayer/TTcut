@@ -90,19 +90,6 @@ async function connectCdp(port: number, child: ChildProcess, stderr: string[]): 
   throw new Error(`Could not connect to Electron CDP: ${String(lastError)}\n${stderr.join('')}`);
 }
 
-async function clickSourcePoint(page: Page, x: number, y: number): Promise<void> {
-  const video = page.locator('.video-surface video');
-  const box = await video.boundingBox();
-  if (!box) throw new Error('Calibration video has no visible bounding box.');
-  const scale = Math.min(box.width / 1280, box.height / 720);
-  const renderedWidth = 1280 * scale;
-  const renderedHeight = 720 * scale;
-  await page.mouse.click(
-    box.x + (box.width - renderedWidth) / 2 + x * scale,
-    box.y + (box.height - renderedHeight) / 2 + y * scale,
-  );
-}
-
 async function stopElectron(page: Page | null, browser: Browser | null, child: ChildProcess | null): Promise<void> {
   if (page && !page.isClosed()) {
     const requestClose = page.evaluate(() => window.ttcut.confirmClose('exit')).catch(() => undefined);
@@ -116,6 +103,31 @@ async function stopElectron(page: Page | null, browser: Browser | null, child: C
     await Promise.race([once(child, 'exit'), delay(5_000)]);
     if (child.exitCode === null) child.kill();
   }
+}
+
+async function clickSourcePoint(page: Page, x: number, y: number): Promise<void> {
+  const video = page.locator('.video-surface video');
+  const box = await video.boundingBox();
+  if (!box) throw new Error('Calibration video has no visible bounding box.');
+  const scale = Math.min(box.width / 1280, box.height / 720);
+  const renderedWidth = 1280 * scale;
+  const renderedHeight = 720 * scale;
+  await page.mouse.click(
+    box.x + (box.width - renderedWidth) / 2 + x * scale,
+    box.y + (box.height - renderedHeight) / 2 + y * scale,
+  );
+}
+
+async function createShortVideo(inputPath: string, outputPath: string): Promise<void> {
+  const stderr: string[] = [];
+  const child = spawn(path.join(ffmpegRoot, 'ffmpeg.exe'), [
+    '-y', '-ss', '0', '-i', inputPath, '-t', '3',
+    '-vf', 'crop=640:360:350:220', '-an', '-c:v', 'libopenh264', '-b:v', '4M', outputPath,
+  ], { cwd: projectRoot, windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
+  child.stderr?.setEncoding('utf8');
+  child.stderr?.on('data', (chunk: string) => stderr.push(chunk));
+  const [code] = await once(child, 'exit');
+  if (code !== 0) throw new Error(`Could not create short E2E video (${code}).\n${stderr.join('')}`);
 }
 
 test('real CUDA analysis, single-rally export, and final preview', async ({}, testInfo) => {
@@ -222,7 +234,22 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     await expect(page.getByRole('button', { name: '返回', exact: true })).toHaveCount(0);
     await page.getByRole('button', { name: /选择 MP4 视频/ }).click();
     await expect(page.getByRole('heading', { name: '标定球桌' })).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator('.automatic-calibration')).toBeVisible();
+    await expect(page.locator('.video-surface')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '开始分析' })).toBeEnabled();
+    await page.screenshot({ path: path.join(screenshotDir, '01-calibration.png'), fullPage: true });
+
+    await page.getByRole('button', { name: '开始分析' }).click();
+    await expect(page.getByRole('heading', { name: '正在分析视频' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '取消' })).toBeVisible({ timeout: 30_000 });
+    await page.getByRole('button', { name: 'Close' }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await page.getByRole('dialog').getByRole('button', { name: '取消' }).click();
+    await expect(page.getByRole('dialog')).toBeHidden();
+
     const calibrationVideo = page.locator('.video-surface video');
+    await expect(calibrationVideo).toBeVisible({ timeout: 90_000 });
+    await expect(page.getByText('自动标定不可靠，请改用手动标定。', { exact: true })).toBeVisible();
     await calibrationVideo.evaluate(async (element: HTMLVideoElement) => {
       if (element.readyState >= 1) return;
       await new Promise<void>((resolve, reject) => {
@@ -235,15 +262,7 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
       await expect(page.getByRole('button', { name: `Calibration point ${index}` })).toBeVisible();
     }
     await expect(page.getByRole('button', { name: '开始分析' })).toBeEnabled();
-    await page.screenshot({ path: path.join(screenshotDir, '01-calibration.png'), fullPage: true });
-
     await page.getByRole('button', { name: '开始分析' }).click();
-    await expect(page.getByRole('heading', { name: '正在分析视频' })).toBeVisible();
-    await expect(page.getByRole('button', { name: '取消' })).toBeVisible({ timeout: 30_000 });
-    await page.getByRole('button', { name: 'Close' }).click();
-    await expect(page.getByRole('dialog')).toBeVisible();
-    await page.getByRole('dialog').getByRole('button', { name: '取消' }).click();
-    await expect(page.getByRole('dialog')).toBeHidden();
 
     await expect(page.getByRole('heading', { name: '选择剪辑模式' })).toBeVisible({ timeout: 7 * 60 * 1_000 });
     await expect(page.getByText('已识别 47 个有效回合', { exact: true })).toBeVisible();
@@ -349,6 +368,96 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
   } finally {
     await writeFile(nativeLog, nativeStderr.join(''), { encoding: 'utf8', flag: 'a' }).catch(() => undefined);
     if (existsSync(nativeLog)) await testInfo.attach('electron-native-log', { path: nativeLog, contentType: 'text/plain' });
+    await stopElectron(page, browser, electronProcess);
+  }
+});
+
+test('automatic calibration completes serial multi-task analysis and records zero-rally results', async ({}, testInfo) => {
+  test.slow();
+  for (const filePath of [sourceVideo, pythonPath, weightsPath, electronPath, path.join(ffmpegRoot, 'ffmpeg.exe'), path.join(ffmpegRoot, 'ffprobe.exe')]) {
+    await requireFile(filePath);
+  }
+
+  const runId = `multi-task-${Date.now()}`;
+  const isolatedRoot = path.join(fixtureDir, runId);
+  const isolatedUserData = path.join(isolatedRoot, 'user-data');
+  const isolatedComponents = path.join(isolatedRoot, 'components');
+  const firstVideo = path.join(isolatedRoot, 'batch-a.mp4');
+  const secondVideo = path.join(isolatedRoot, 'batch-b.mp4');
+  const nativeLog = path.join(isolatedRoot, 'electron-native.log');
+  await mkdir(isolatedRoot, { recursive: true });
+  await mkdir(isolatedUserData, { recursive: true });
+  await createShortVideo(sourceVideo, firstVideo);
+  await copyFile(firstVideo, secondVideo);
+
+  let electronProcess: ChildProcess | null = null;
+  let browser: Browser | null = null;
+  let page: Page | null = null;
+  const nativeStderr: string[] = [];
+  const rendererErrors: string[] = [];
+  try {
+    const port = await freePort();
+    electronProcess = spawn(electronPath, [
+      `--remote-debugging-port=${port}`,
+      '--remote-allow-origins=*',
+      '--no-sandbox',
+      '--disable-gpu',
+      '--enable-logging=file',
+      `--log-file=${nativeLog}`,
+      projectRoot,
+    ], {
+      cwd: projectRoot,
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        PYTHONUTF8: '1',
+        ELECTRON_ENABLE_LOGGING: '1',
+        TTCUT_E2E: '1',
+        TTCUT_E2E_USER_DATA: isolatedUserData,
+        TTCUT_E2E_COMPONENTS_ROOT: isolatedComponents,
+        TTCUT_E2E_VIDEOS: JSON.stringify([firstVideo, secondVideo]),
+        TTCUT_PYTHON: pythonPath,
+        TTCUT_TRACKNET_WEIGHTS: weightsPath,
+        TTCUT_FFMPEG: path.join(ffmpegRoot, 'ffmpeg.exe'),
+        TTCUT_FFPROBE: path.join(ffmpegRoot, 'ffprobe.exe'),
+      },
+    });
+    electronProcess.stderr?.setEncoding('utf8');
+    electronProcess.stderr?.on('data', (chunk: string) => nativeStderr.push(chunk));
+    await waitForCdp(port, electronProcess, nativeStderr);
+    browser = await connectCdp(port, electronProcess, nativeStderr);
+    page = await appPage(browser);
+    page.on('pageerror', (error) => rendererErrors.push(error.message));
+    page.on('console', (message) => {
+      if (message.type() === 'error') rendererErrors.push(message.text());
+    });
+    page.on('dialog', (dialog) => void dialog.accept());
+    await page.waitForLoadState('domcontentloaded');
+
+    await page.locator('.drop-zone').click();
+    await expect(page.locator('.multi-task-page')).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator('.batch-row')).toHaveCount(2);
+    for (const row of await page.locator('.batch-row').all()) {
+      await row.locator('.batch-mode-options button').nth(2).click();
+    }
+    await page.locator('.batch-start').click();
+    await expect(page.locator('.batch-row.analyzing')).toHaveCount(1, { timeout: 30_000 });
+    await expect(page.locator('.batch-row.done')).toHaveCount(2, { timeout: 5 * 60 * 1_000 });
+    await expect(page.locator('.batch-row.analyzing')).toHaveCount(0);
+
+    const history = await page.evaluate(() => window.ttcut.listHistory());
+    expect(history).toHaveLength(2);
+    expect(history.map((entry) => entry.video_name).sort()).toEqual(['batch-a.mp4', 'batch-b.mp4']);
+    expect(history.every((entry) => entry.rally_count === 0 && entry.completion_kind === 'analysis')).toBe(true);
+    expect(rendererErrors).toEqual([]);
+    await testInfo.attach('multi-task-history', {
+      body: Buffer.from(JSON.stringify(history, null, 2)),
+      contentType: 'application/json',
+    });
+  } finally {
+    await writeFile(nativeLog, nativeStderr.join(''), { encoding: 'utf8', flag: 'a' }).catch(() => undefined);
+    if (existsSync(nativeLog)) await testInfo.attach('multi-task-electron-native-log', { path: nativeLog, contentType: 'text/plain' });
     await stopElectron(page, browser, electronProcess);
   }
 });
