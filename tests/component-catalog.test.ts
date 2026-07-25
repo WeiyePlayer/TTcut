@@ -23,17 +23,11 @@ describe('production component catalog', () => {
     expect(catalog.analysis_runtime.assets.flatMap((asset) => asset.parts).every((part) => (
       part.url.includes('/analysis-3.12.13-2.12.1-r1/') && /^[a-f0-9]{64}$/.test(part.sha256)
     ))).toBe(true);
-    expect(catalog.tracknet_weight).toMatchObject({
-      downloadable: true,
-      release_tag: 'tracknet-weight-1.0.0',
-      size_bytes: 136_191_005,
-      install_directory: 'models',
-    });
-    expect(catalog.tracknet_weight.url).toContain('/tracknet-weight-1.0.0/TrackNet_best.pt');
+    expect(catalog).not.toHaveProperty('tracknet_weight');
 
     const setup = await componentSetupInfo();
     expect(setup.analysis_offer?.available_for_download).toBe(process.platform === 'win32');
-    expect(setup.analysis_offer?.download_size_bytes).toBe(3_172_507_599);
+    expect(setup.analysis_offer?.download_size_bytes).toBe(3_036_316_594);
     expect(setup).not.toHaveProperty('offline_import_available');
   });
 });

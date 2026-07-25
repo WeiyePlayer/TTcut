@@ -3,7 +3,6 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { createWriteStream } from 'node:fs';
 import {
   access,
-  copyFile,
   mkdir,
   readdir,
   rename,
@@ -37,7 +36,6 @@ import { validateImportFiles, type ImportableComponentFile } from './component-i
 
 const INSTALLABLE_DIRECTORIES = new Set([
   ...ANALYSIS_RUNTIME_VARIANTS.map(analysisRuntimeDirectory),
-  'models',
   'ffmpeg-8.1',
 ]);
 
@@ -338,68 +336,6 @@ async function hasNvidiaGpu(): Promise<boolean> {
   }
 }
 
-async function installOnlineTrackNetWeight(
-  window: BrowserWindow,
-  taskId: string,
-  signal: AbortSignal,
-  progressBase: number,
-  progressSpan: number,
-): Promise<void> {
-  const catalog = await loadComponentCatalog();
-  const asset = catalog.tracknet_weight;
-  if (!asset.downloadable) throw new Error('TRACKNET_WEIGHT_DOWNLOAD_UNAVAILABLE');
-  const root = managedComponentsRoot();
-  const target = path.join(root, asset.install_directory, asset.filename);
-  if (await exists(target) && await sha256File(target) === asset.sha256) {
-    sendProgress(window, taskId, 'verify', progressBase + progressSpan);
-    return;
-  }
-
-  const download = path.join(root, '.downloads', `${asset.filename}.download`);
-  const staging = path.join(root, '.staging', taskId);
-  sendProgress(window, taskId, 'download', progressBase, 0, asset.size_bytes);
-  await downloadWithResume(
-    asset.url,
-    download,
-    asset.size_bytes,
-    signal,
-    (current) => sendProgress(
-      window,
-      taskId,
-      'download',
-      progressBase + current / asset.size_bytes * progressSpan * 0.82,
-      current,
-      asset.size_bytes,
-    ),
-    (error, failedAttempt, maxAttempts) => logLine(
-      taskId,
-      'WARN',
-      `TrackNet weight download attempt ${failedAttempt}/${maxAttempts} failed; preserving partial data and retrying: ${error instanceof Error ? error.message : String(error)}`,
-    ),
-  );
-  sendProgress(window, taskId, 'verify', progressBase + progressSpan * 0.86);
-  if (await sha256File(download) !== asset.sha256) {
-    await rm(download, { force: true });
-    throw new Error('TRACKNET_WEIGHT_HASH_MISMATCH');
-  }
-  if (signal.aborted) throw Object.assign(new Error('SETUP_CANCELLED'), { name: 'AbortError' });
-
-  await rm(staging, { recursive: true, force: true });
-  const stagedDirectory = path.join(staging, asset.install_directory);
-  await mkdir(stagedDirectory, { recursive: true });
-  await copyFile(download, path.join(stagedDirectory, asset.filename));
-  sendProgress(window, taskId, 'install', progressBase + progressSpan * 0.94);
-  await commitComponentDirectories(staging, [asset.install_directory], taskId);
-  await rm(staging, { recursive: true, force: true });
-  const manifestRoot = path.join(root, '.manifests');
-  await mkdir(manifestRoot, { recursive: true });
-  await writeFile(path.join(manifestRoot, `analysis-weight-${asset.sha256.slice(0, 12)}.json`), JSON.stringify({
-    schema_version: 1,
-    installed_at: new Date().toISOString(),
-    weight: asset,
-  }, null, 2), 'utf8');
-}
-
 async function installOnlineAnalysisRuntime(
   window: BrowserWindow,
   taskId: string,
@@ -473,7 +409,6 @@ async function installOnlineAnalysisRuntime(
     installed_at: new Date().toISOString(),
     runtime: catalog.analysis_runtime,
     asset,
-    weight: catalog.tracknet_weight,
   }, null, 2), 'utf8');
 }
 
@@ -517,7 +452,6 @@ export async function startAnalysisComponentInstall(window: BrowserWindow, conse
   if (catalog.analysis_runtime.assets.length !== ANALYSIS_RUNTIME_VARIANTS.length) throw new Error('ANALYSIS_RUNTIME_CATALOG_INCOMPLETE');
   const taskId = randomUUID();
   return runSetupTask(window, taskId, async (signal) => {
-    await installOnlineTrackNetWeight(window, taskId, signal, 0, 12);
     const existing = await resolveUsableAnalysisComponents('auto').catch(() => null);
     if (existing?.runtimeVariant === 'cpu' || existing?.runtimeVariant === 'cu126') {
       await activateManagedAnalysisRuntime(existing.runtimeVariant);
@@ -527,7 +461,7 @@ export async function startAnalysisComponentInstall(window: BrowserWindow, conse
     const preferCuda = await hasNvidiaGpu();
     if (preferCuda) {
       try {
-        await installOnlineAnalysisRuntime(window, taskId, signal, 'cu126', 12, 54);
+        await installOnlineAnalysisRuntime(window, taskId, signal, 'cu126', 0, 62);
         sendProgress(window, taskId, 'complete', 99);
         return ['analysis'];
       } catch (error) {
@@ -535,7 +469,7 @@ export async function startAnalysisComponentInstall(window: BrowserWindow, conse
         await logLine(taskId, 'WARN', `CUDA runtime installation/self-test failed; falling back to CPU: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
-    await installOnlineAnalysisRuntime(window, taskId, signal, 'cpu', preferCuda ? 66 : 12, preferCuda ? 32 : 86);
+    await installOnlineAnalysisRuntime(window, taskId, signal, 'cpu', preferCuda ? 62 : 0, preferCuda ? 36 : 98);
     sendProgress(window, taskId, 'complete', 99);
     return ['analysis'];
   });
@@ -644,14 +578,6 @@ export async function startComponentImport(window: BrowserWindow, filePaths: str
 
       const directories: string[] = [];
       const installedVariants: Array<'cpu' | 'cu126'> = [];
-      const weight = files.find((file): file is Extract<ImportableComponentFile, { kind: 'weight' }> => file.kind === 'weight');
-      if (weight) {
-        const target = path.join(staging, weight.asset.install_directory, weight.asset.filename);
-        await mkdir(path.dirname(target), { recursive: true });
-        await copyFile(weight.sourcePath, target);
-        directories.push(weight.asset.install_directory);
-      }
-
       const runtimeGroups = new Map<'cpu' | 'cu126', Extract<ImportableComponentFile, { kind: 'runtime-part' }>[] >();
       for (const file of files) {
         if (file.kind !== 'runtime-part') continue;
@@ -694,13 +620,6 @@ export async function startComponentImport(window: BrowserWindow, filePaths: str
 
       const manifestRoot = path.join(root, '.manifests');
       await mkdir(manifestRoot, { recursive: true });
-      if (weight) {
-        await writeFile(path.join(manifestRoot, `analysis-weight-${weight.asset.sha256.slice(0, 12)}.json`), JSON.stringify({
-          schema_version: 1,
-          installed_at: new Date().toISOString(),
-          weight: weight.asset,
-        }, null, 2), 'utf8');
-      }
       for (const variant of installedVariants) {
         const asset = runtimeGroups.get(variant)![0]!.asset;
         await activateManagedAnalysisRuntime(variant);
@@ -709,7 +628,6 @@ export async function startComponentImport(window: BrowserWindow, filePaths: str
           installed_at: new Date().toISOString(),
           runtime: catalog.analysis_runtime,
           asset,
-          weight: catalog.tracknet_weight,
         }, null, 2), 'utf8');
       }
       if (media) {
@@ -721,7 +639,7 @@ export async function startComponentImport(window: BrowserWindow, filePaths: str
       }
       sendProgress(window, taskId, 'complete', 99);
       return [
-        ...(weight || installedVariants.length ? ['analysis' as const] : []),
+        ...(installedVariants.length ? ['analysis' as const] : []),
         ...(media ? ['media' as const] : []),
       ];
     } finally {

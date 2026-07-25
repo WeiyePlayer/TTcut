@@ -4,7 +4,6 @@ import type { ComponentCatalog } from './component-catalog';
 import { sha256File } from './component-assets';
 
 export type ImportableComponentFile =
-  | { kind: 'weight'; sourcePath: string; asset: ComponentCatalog['tracknet_weight'] }
   | {
     kind: 'runtime-part';
     sourcePath: string;
@@ -15,7 +14,6 @@ export type ImportableComponentFile =
   | { kind: 'media'; sourcePath: string; asset: ComponentCatalog['ffmpeg'] };
 
 type ImportCandidate =
-  | { kind: 'weight'; asset: ComponentCatalog['tracknet_weight'] }
   | {
     kind: 'runtime-part';
     variant: 'cpu' | 'cu126';
@@ -32,7 +30,6 @@ export async function validateImportFiles(
   if (filePaths.length === 0) throw new Error('COMPONENT_IMPORT_NO_FILES');
 
   const candidates = new Map<string, ImportCandidate>();
-  candidates.set(catalog.tracknet_weight.filename, { kind: 'weight', asset: catalog.tracknet_weight });
   for (const asset of catalog.analysis_runtime.assets) {
     for (const part of asset.parts) {
       candidates.set(part.asset, { kind: 'runtime-part', variant: asset.variant, asset, part });

@@ -16,7 +16,6 @@ const componentsRoot = process.env.TTCUT_COMPONENT_IMPORT_ROOT
 const userData = path.join(projectRoot, 'output', 'playwright', 'component-import-user-data');
 const screenshot = path.join(projectRoot, 'output', 'playwright', 'component-import-settings.png');
 const importFiles = [
-  'TrackNet_best.pt',
   'ttcut-analysis-3.12.13-2.12.1-cpu.zip',
   'ttcut-analysis-3.12.13-2.12.1-cu126.zip.part001',
   'ttcut-analysis-3.12.13-2.12.1-cu126.zip.part002',
@@ -102,7 +101,7 @@ test('imports and configures the real local components', async () => {
     expect(status.media.available).toBe(true);
     expect(status.analysis.path).toContain(path.join('analysis-runtime', '3.12.13-2.12.1'));
     expect(status.media.path).toBe(path.join(componentsRoot, 'ffmpeg-8.1', 'bin', 'ffmpeg.exe'));
-    expect(existsSync(path.join(componentsRoot, 'models', 'TrackNet_best.pt'))).toBe(true);
+    expect(existsSync(path.join(projectRoot, 'resources', 'models', 'analyze.pt'))).toBe(true);
     expect(existsSync(path.join(componentsRoot, 'analysis-runtime', '3.12.13-2.12.1', 'cpu', 'python.exe'))).toBe(true);
     expect(existsSync(path.join(componentsRoot, 'ffmpeg-8.1', 'bin', 'ffmpeg.exe'))).toBe(true);
     expect(existsSync(path.join(componentsRoot, '.manifests', 'media-autobuild-2026-07-17-13-22.json'))).toBe(true);

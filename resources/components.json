@@ -1,23 +1,5 @@
 {
   "schema_version": 1,
-  "tracknet_weight": {
-    "filename": "TrackNet_best.pt",
-    "sha256": "ffb5469161c4bd39a5a7e745c3d13f076b2c5e575f33279ea62f1e5803245a52",
-    "source": "Rightsholder weiye; fixed TrackNet weight associated with core commit 40d4d26bc85802d5925ead6b1fd0ad3c6a8a84ba",
-    "redistribution": "redistributable",
-    "downloadable": true,
-    "provider": "WeiyePlayer/TTcut-runtime-assets GitHub Release tracknet-weight-1.0.0",
-    "release_tag": "tracknet-weight-1.0.0",
-    "url": "https://github.com/WeiyePlayer/TTcut-runtime-assets/releases/download/tracknet-weight-1.0.0/TrackNet_best.pt",
-    "size_bytes": 136191005,
-    "install_directory": "models",
-    "rights_evidence": {
-      "path": "rights/tracknet-weight-rights.md",
-      "sha256": "22043bb1750551088f83115a1f7c933d8748f0ff00f9eca742abdbe4b4608034",
-      "rightsholder": "weiye",
-      "grant": "The rightsholder authorizes public redistribution of the fixed weight as a managed TTcut analysis component."
-    }
-  },
   "analysis_runtime": {
     "runtime_id": "3.12.13-2.12.1",
     "python_version": "3.12.13",

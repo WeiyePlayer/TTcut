@@ -35,7 +35,6 @@ async function probe(label, url, expectedSize) {
 }
 
 const probes = [
-  ['tracknet-weight', catalog.tracknet_weight.url, catalog.tracknet_weight.size_bytes],
   ...catalog.analysis_runtime.assets.flatMap((asset) => asset.parts.map((part) => [
     `analysis-${asset.variant}-${part.asset}`,
     part.url,
