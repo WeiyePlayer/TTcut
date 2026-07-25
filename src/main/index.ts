@@ -22,7 +22,7 @@ import { probeVideo } from './probe';
 import { cancelAllTasks, cancelTask, hasActiveTasks } from './processes';
 import { loadSettings, saveSettings } from './settings';
 import { handleSquirrelStartup } from './squirrel-startup';
-import { assertPlatformCompatible, getPlatformCompatibility } from './platform-compatibility';
+import { getPlatformCompatibility } from './platform-compatibility';
 import { COMPONENT_ASSETS_RELEASE_URL } from '../shared/urls';
 
 const squirrelStartup = handleSquirrelStartup();
@@ -68,18 +68,13 @@ function registerIpc(): void {
     const [settings, components, setup, platformCompatibility] = await Promise.all([
       loadSettings(), inspectComponents(), componentSetupInfo(), getPlatformCompatibility(),
     ]);
-    const downloadsAllowed = platformCompatibility.status === 'supported';
     return {
       version: app.getVersion(),
       settings,
       components,
       componentSetup: {
-        analysis_offer: setup.analysis_offer
-          ? { ...setup.analysis_offer, available_for_download: setup.analysis_offer.available_for_download && downloadsAllowed }
-          : null,
-        media_offer: setup.media_offer
-          ? { ...setup.media_offer, available_for_download: setup.media_offer.available_for_download && downloadsAllowed }
-          : null,
+        analysis_offer: setup.analysis_offer,
+        media_offer: setup.media_offer,
       },
       platformCompatibility,
       logsPath: getLogDirectory(),
@@ -93,7 +88,6 @@ function registerIpc(): void {
     await shell.openExternal(catalog.ffmpeg.url);
   });
   ipcMain.handle(IPC.componentsImport, async () => {
-    await assertPlatformCompatible();
     if (e2eHarnessEnabled() && process.env.TTCUT_E2E_COMPONENT_IMPORT_FILES) {
       const filePaths = JSON.parse(process.env.TTCUT_E2E_COMPONENT_IMPORT_FILES) as unknown;
       if (!Array.isArray(filePaths) || !filePaths.every((value): value is string => typeof value === 'string')) {
@@ -110,11 +104,9 @@ function registerIpc(): void {
     return startComponentImport(currentWindow(), result.filePaths);
   });
   ipcMain.handle(IPC.componentsInstallAnalysis, async (_event, consent: unknown) => {
-    await assertPlatformCompatible();
     return startAnalysisComponentInstall(currentWindow(), consent);
   });
   ipcMain.handle(IPC.componentsInstallMedia, async (_event, consent: unknown) => {
-    await assertPlatformCompatible();
     return startMediaComponentInstall(currentWindow(), consent);
   });
   ipcMain.handle(IPC.videoSelect, async () => {
@@ -138,7 +130,6 @@ function registerIpc(): void {
     return probeVideo(value);
   });
   ipcMain.handle(IPC.analysisStart, async (_event, value: unknown) => {
-    await assertPlatformCompatible();
     if (!value || typeof value !== 'object') throw new Error('INVALID_REQUEST');
     const record = value as Record<string, unknown>;
     if (typeof record.videoPath !== 'string') throw new Error('INVALID_REQUEST');
@@ -151,7 +142,6 @@ function registerIpc(): void {
     });
   });
   ipcMain.handle(IPC.exportStart, async (_event, value: unknown) => {
-    await assertPlatformCompatible();
     return startExport(currentWindow(), cutSelectionSchema.parse(value));
   });
   ipcMain.handle(IPC.historyList, async () => {
@@ -270,7 +260,7 @@ async function createWindow(): Promise<void> {
 
 if (!squirrelStartup) app.whenReady().then(async () => {
   const compatibility = await getPlatformCompatibility();
-  await logLine('app', compatibility.status === 'supported' ? 'INFO' : 'WARN', `Platform compatibility: ${JSON.stringify(compatibility)}`)
+  await logLine('app', 'INFO', `Platform compatibility gate disabled: ${JSON.stringify(compatibility)}`)
     .catch(() => undefined);
   try {
     await recoverComponentInstallState();
