@@ -20,12 +20,12 @@ describe('settings migration', () => {
     await rm(state.userData, { recursive: true, force: true });
   });
 
-  it('defaults old settings to manual calibration while preserving language and timing', async () => {
+  it('defaults old settings to automatic calibration while preserving language and timing', async () => {
     await writeFile(path.join(state.userData, 'settings.json'), JSON.stringify({
       language: 'en', pre_roll_seconds: 5, post_roll_seconds: 0.5,
     }), 'utf8');
     await expect(loadSettings()).resolves.toEqual({
-      language: 'en', calibration_method: 'manual', pre_roll_seconds: 5, post_roll_seconds: 0.5,
+      language: 'en', calibration_method: 'automatic', pre_roll_seconds: 5, post_roll_seconds: 0.5,
     });
   });
 

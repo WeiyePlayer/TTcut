@@ -5,7 +5,7 @@ import { appSettingsSchema, type AppSettings } from '../shared/contracts';
 
 const defaults: AppSettings = {
   language: 'zh-CN',
-  calibration_method: 'manual',
+  calibration_method: 'automatic',
   pre_roll_seconds: 2.5,
   post_roll_seconds: 2,
 };

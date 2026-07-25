@@ -217,7 +217,7 @@ function RallyPreviewDialog({ video, videoDuration, rally, translations, onClose
 
 export function App() {
   const [bootstrap, setBootstrap] = useState<BootstrapData | null>(null);
-  const [settings, setSettings] = useState<AppSettings>({ language: 'zh-CN', calibration_method: 'manual', pre_roll_seconds: 2.5, post_roll_seconds: 2 });
+  const [settings, setSettings] = useState<AppSettings>({ language: 'zh-CN', calibration_method: 'automatic', pre_roll_seconds: 2.5, post_roll_seconds: 2 });
   const [view, setView] = useState<View>('auto');
   const [step, setStep] = useState<Step>('select');
   const [video, setVideo] = useState<SelectedVideo | null>(null);
