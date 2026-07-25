@@ -78,14 +78,17 @@ def valid_request():
         "task_id": "22222222-2222-4222-8222-222222222222",
         "video_path": "match.mp4",
         "device": "cpu",
-        "calibration": {
-            "video_width": 1280,
-            "video_height": 720,
-            "points": {
-                "top_left": [695, 303],
-                "top_right": [934, 315],
-                "bottom_right": [831, 413],
-                "bottom_left": [466, 381],
+        "calibration_choice": {
+            "method": "manual",
+            "calibration": {
+                "video_width": 1280,
+                "video_height": 720,
+                "points": {
+                    "top_left": [695, 303],
+                    "top_right": [934, 315],
+                    "bottom_right": [831, 413],
+                    "bottom_left": [466, 381],
+                },
             },
         },
     }
@@ -104,10 +107,16 @@ def test_worker_request_rejects_unknown_fields():
 
 def test_worker_request_rejects_unknown_calibration_points():
     request = valid_request()
-    request["calibration"]["points"]["center"] = [640, 360]
+    request["calibration_choice"]["calibration"]["points"]["center"] = [640, 360]
     try:
         validate_request(request)
     except Exception as exc:
         assert "fields" in str(exc).lower()
     else:
         raise AssertionError("unknown calibration point fields must fail")
+
+
+def test_worker_request_accepts_automatic_calibration_without_points():
+    request = valid_request()
+    request["calibration_choice"] = {"method": "automatic"}
+    assert validate_request(request) == request

@@ -14,7 +14,7 @@ const sourceVideo = process.env.TTCUT_E2E_VIDEO
 const pythonPath = process.env.TTCUT_E2E_PYTHON
   ?? path.join(projectRoot, '.baseline', 'analysis-runtime', 'python.exe');
 const weightsPath = process.env.TTCUT_E2E_WEIGHTS
-  ?? path.join(projectRoot, '.baseline', 'weight-assets', 'TrackNet_best.pt');
+  ?? path.join(projectRoot, 'resources', 'models', 'analyze.pt');
 const ffmpegRoot = process.env.TTCUT_E2E_FFMPEG_ROOT
   ?? path.join(projectRoot, '.baseline', 'components', 'ffmpeg-n8.1.2-22-g94138f6973-win64-lgpl-shared-8.1', 'bin');
 const electronPath = process.env.TTCUT_E2E_ELECTRON
@@ -536,14 +536,13 @@ test('online analysis resume followed by media component install', async ({}, te
     expect(status.analysis.available).toBe(true);
     expect(status.media.available).toBe(true);
     await requireFile(status.analysis.path!);
-    await requireFile(path.join(isolatedComponents, 'models', 'TrackNet_best.pt'));
+    await requireFile(path.join(projectRoot, 'resources', 'models', 'analyze.pt'));
     await requireFile(status.media.path!);
     await requireFile(path.join(path.dirname(status.media.path!), 'ffprobe.exe'));
     expect(rendererErrors).toEqual([]);
 
     const manifests = await readdir(path.join(isolatedComponents, '.manifests'));
     expect(manifests.some((name) => name.startsWith('analysis-cu126-'))).toBe(true);
-    expect(manifests.some((name) => name.startsWith('analysis-weight-'))).toBe(true);
     expect(manifests).toContain('media-autobuild-2026-07-17-13-22.json');
     await testInfo.attach('online-component-manifests', {
       body: Buffer.from(JSON.stringify(manifests, null, 2)),
