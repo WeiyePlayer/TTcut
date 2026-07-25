@@ -139,7 +139,7 @@ npm run test:e2e
 
 - 当前只接受单个 MP4 视频。
 - 板数是弹跳代理值，不是真实击球计数。
-- 支持 Windows 10 22H2 x64（build 19045）和 Windows 11 x64（Client build 22000 及以上）；不支持旧版 Windows 10、x86、ARM64 和 Windows Server。
+- 不再做 Windows build / 系统版本硬拦截；组件与二进制仍以 Windows x64 为主。旧版 Windows、x86、ARM64 能否实际运行取决于本机组件与依赖，不保证可用。
 
 ## 许可
 
