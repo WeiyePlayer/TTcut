@@ -11,9 +11,10 @@ const projectRoot = path.resolve(process.cwd());
 const electronPath = process.env.TTCUT_E2E_ELECTRON
   ?? path.join(projectRoot, '.baseline', 'electron-dev', '43.1.1', 'electron.exe');
 const componentSource = process.env.TTCUT_COMPONENT_IMPORT_SOURCE ?? 'D:\\DOCUMENTS\\test';
+const runId = `${process.pid}-${Date.now()}`;
 const componentsRoot = process.env.TTCUT_COMPONENT_IMPORT_ROOT
-  ?? path.join(projectRoot, '.baseline', 'e2e-component-import-components');
-const userData = path.join(projectRoot, 'output', 'playwright', 'component-import-user-data');
+  ?? path.join(projectRoot, '.baseline', `e2e-component-import-components-${runId}`);
+const userData = path.join(projectRoot, 'output', 'playwright', `component-import-user-data-${runId}`);
 const screenshot = path.join(projectRoot, 'output', 'playwright', 'component-import-settings.png');
 const optionalX264Component = process.env.TTCUT_X264_COMPONENT;
 const importFiles = [
