@@ -23,7 +23,7 @@ TTcut 组合使用多个保留各自许可证的组件。本文件不替代发�
 - OpenCV — Apache License 2.0
 - TrackNetV3-derived source — 见 `worker/SOURCE_MANIFEST.md` 及其记录的上游许可
 
-`TrackNet_best.pt` 的权利人 `weiye` 已明确授权 TTcut 将固定权重作为软件组成部分公开复制和分发。权重不进入 Git 或安装包，而是在用户同意安装分析组件时从固定 Release 资产下载到受管组件目录。固定 URL、大小、哈希和授权证据记录在 `resources/components.json`，授权声明正文位于 `resources/rights/tracknet-weight-rights.md`，并随发行许可中心一并打包。
+`analyze.pt` 和 `table_analyze.pt` 的权利人 `weiye` 已明确授权 TTcut 将固定权重作为软件组成部分公开复制和分发。模型二进制不进入 Git，但会随安装包分发；固定文件名、大小和 SHA-256 记录在 `resources/model-manifest.json`，授权声明正文位于 `resources/rights/tracknet-weight-rights.md`，并随发行许可中心一并打包。
 
 ## Media runtime
 

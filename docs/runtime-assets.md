@@ -48,11 +48,10 @@ CPU 与 cu126 资产固定在 [WeiyePlayer/TTcut-runtime-assets `analysis-3.12.1
 
 ## 固定模型文件
 
-模型不进入普通 Git、源码归档或 TTcut 安装包。它固定在 [WeiyePlayer/TTcut-runtime-assets `tracknet-weight-1.0.0`](https://github.com/WeiyePlayer/TTcut-runtime-assets/releases/tag/tracknet-weight-1.0.0)：
+模型二进制不进入普通 Git 或源码归档，但 `analyze.pt` 和 `table_analyze.pt` 会作为应用资源进入 TTcut 安装包。两个模型的固定文件名、大小和 SHA-256 记录在 `resources/model-manifest.json`，构建前由 `scripts/verify-model-assets.mjs` 严格校验。
 
-- 文件名：`TrackNet_best.pt`
-- 字节数：`136191005`
-- SHA-256：`ffb5469161c4bd39a5a7e745c3d13f076b2c5e575f33279ea62f1e5803245a52`
-- 安装位置：`%LOCALAPPDATA%\TTcutData\components\models\TrackNet_best.pt`
+- `analyze.pt`：`136191005` 字节，SHA-256 `ffb5469161c4bd39a5a7e745c3d13f076b2c5e575f33279ea62f1e5803245a52`
+- `table_analyze.pt`：`99028986` 字节，SHA-256 `160e1a9b2d0236b501dc4a4d38bbfb39315eeef6de5d8c11770452623ff102df`
+- 打包位置：应用资源目录中的 `resources/models`
 
-用户安装“分析组件”时，应用只下载缺失或校验失败的运行时/模型文件。运行时和模型全部通过大小、SHA-256 与自检后，分析组件才进入可用状态。设置页不单独显示模型名称、版本、哈希、URL 或路径。
+用户安装“分析组件”时，应用只下载缺失或校验失败的 Python/PyTorch 运行时文件。运行时自检和内置模型检查全部通过后，分析组件才进入可用状态。设置页不单独显示模型名称、版本、哈希或路径。
