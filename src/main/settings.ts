@@ -6,6 +6,7 @@ import { appSettingsSchema, type AppSettings } from '../shared/contracts';
 const defaults: AppSettings = {
   language: 'zh-CN',
   calibration_method: 'automatic',
+  export_strategy: 'compatible',
   pre_roll_seconds: 2.5,
   post_roll_seconds: 2,
 };
@@ -22,6 +23,9 @@ export async function loadSettings(): Promise<AppSettings> {
       calibration_method: raw.calibration_method === 'automatic' || raw.calibration_method === 'manual'
         ? raw.calibration_method
         : defaults.calibration_method,
+      export_strategy: raw.export_strategy === 'fast_segmented' || raw.export_strategy === 'compatible'
+        ? raw.export_strategy
+        : defaults.export_strategy,
       pre_roll_seconds: [1.5, 2.5, 5].includes(Number(raw.pre_roll_seconds))
         ? raw.pre_roll_seconds
         : defaults.pre_roll_seconds,

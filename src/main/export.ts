@@ -1,4 +1,4 @@
-import { access, open, rename, rm, stat, statfs } from 'node:fs/promises';
+import { access, mkdir, open, rename, rm, stat, statfs, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { dialog, type BrowserWindow } from 'electron';
@@ -11,13 +11,34 @@ import { logLine } from './logger';
 import { getHistoryStore } from './history';
 import {
   buildReencodeArgs,
+  buildConcatArgs,
+  buildConcatManifest,
+  buildSegmentReencodeArgs,
   buildStreamCopyArgs,
   canUseStreamCopy,
   expectedOutputDuration,
+  selectSeekStart,
 } from './media-plan';
 import { registerMediaPath } from './media-protocol';
-import { probeAudioPacketBoundaries, probeKeyframes, probeVideo } from './probe';
-import { hasActiveTasks, spawnTracked } from './processes';
+import {
+  probeAudioPacketBoundaries,
+  probeKeyframes,
+  probeStreamSignature,
+  probeVideo,
+  sameStreamSignature,
+  type StreamSignature,
+} from './probe';
+import {
+  beginTrackedTask,
+  classifyProcessExit,
+  endTrackedTask,
+  getTaskController,
+  hasActiveTasks,
+  markTaskTerminal,
+  spawnTracked,
+} from './processes';
+
+const lastExportProgress = new Map<string, number>();
 
 function send(window: BrowserWindow, event: AppEvent): void {
   if (!window.isDestroyed()) window.webContents.send(IPC.taskEvent, event);
@@ -110,6 +131,7 @@ async function runFfmpeg(
   args: string[],
   totalDuration: number,
   stage: string,
+  detail?: { segmentIndex?: number; seekStart?: number },
 ): Promise<void> {
   await logLine(taskId, 'INFO', `FFmpeg arguments: ${JSON.stringify(args)}`);
   await new Promise<void>((resolve, reject) => {
@@ -127,13 +149,16 @@ async function runFfmpeg(
         if ((key === 'out_time_us' || key === 'out_time_ms') && raw) {
           const seconds = Number(raw) / 1_000_000;
           if (Number.isFinite(seconds)) {
+            const candidate = Math.max(0, Math.min(99.5, seconds / totalDuration * 100));
+            const percent = Math.max(lastExportProgress.get(taskId) ?? 0, candidate);
+            lastExportProgress.set(taskId, percent);
             send(window, {
               type: 'progress',
               data: {
                 taskId,
                 kind: 'export',
                 stage,
-                percent: Math.max(0, Math.min(99.5, seconds / totalDuration * 100)),
+                percent,
               },
             });
           }
@@ -144,10 +169,43 @@ async function runFfmpeg(
       stderrTail = `${stderrTail}${chunk}`.slice(-16_384);
       void logLine(taskId, 'FFMPEG', chunk);
     });
-    child.once('error', reject);
-    child.once('close', (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`FFmpeg exited with code ${code ?? -1}: ${stderrTail.trim()}`));
+    child.once('error', (error) => reject(error));
+    child.once('close', (code, signal) => {
+      const controller = getTaskController(taskId);
+      const cancellation = {
+        requested: controller?.cancelRequested ?? false,
+        reason: controller?.cancelReason ?? null,
+      };
+      const classification = classifyProcessExit(code, signal, cancellation);
+      void logLine(
+        taskId,
+        classification.kind === 'success' ? 'INFO' : 'ERROR',
+        `FFmpeg close: code=${String(code)} signal=${String(signal)} cancelReason=${String(cancellation.reason)}`
+          + (detail?.segmentIndex === undefined ? '' : ` segment=${detail.segmentIndex}`)
+          + (detail?.seekStart === undefined ? '' : ` seekStart=${detail.seekStart.toFixed(6)}`),
+      );
+      if (classification.kind === 'success') {
+        resolve();
+      } else {
+        const error = new Error(
+          `${classification.code}: exitCode=${String(code)} signal=${String(signal)}`
+          + (detail?.segmentIndex === undefined ? '' : ` segment=${detail.segmentIndex}`)
+          + (stderrTail.trim() ? `: ${stderrTail.trim()}` : ''),
+        );
+        (error as Error & {
+          exportCode?: string;
+          exitCode?: number | null;
+          signal?: NodeJS.Signals | null;
+          stderrTail?: string;
+        }).exportCode = classification.code ?? 'EXPORT_FAILED';
+        Object.assign(error, {
+          exitCode: code,
+          signal,
+          stderrTail,
+          segmentIndex: detail?.segmentIndex,
+        });
+        reject(error);
+      }
     });
     child.stdin.end();
   });
@@ -204,11 +262,13 @@ async function streamCopyEligibility(
   videoPath: string,
   groups: readonly CutGroup[],
   metadata: VideoMetadata,
+  ffprobe: string,
 ): Promise<boolean> {
+  if (groups.length !== 1) return false;
   try {
     const [keyframes, audioBoundaries] = await Promise.all([
-      probeKeyframes(videoPath),
-      metadata.audio_codec === null ? Promise.resolve([]) : probeAudioPacketBoundaries(videoPath),
+      probeKeyframes(videoPath, ffprobe),
+      metadata.audio_codec === null ? Promise.resolve([]) : probeAudioPacketBoundaries(videoPath, ffprobe),
     ]);
     return canUseStreamCopy(groups, keyframes, audioBoundaries, metadata);
   } catch {
@@ -216,27 +276,171 @@ async function streamCopyEligibility(
   }
 }
 
-export async function startExport(window: BrowserWindow, rawRequest: ExportRequest): Promise<string> {
-  const request = exportRequestSchema.parse(rawRequest);
-  const selection = request.selection;
-  const record = await getHistoryStore().open(request.analysis_id);
-  const analysis = record.analysis;
-  if (hasActiveTasks()) throw new Error('TASK_BUSY');
-  const groups = createCutGroups(analysis, selection);
-  if (!groups.length) throw new Error('NO_RALLIES');
-  const components = await resolveUsableMediaComponents();
-  if (!components.ffmpeg || !components.ffprobe || components.mediaEncoder === 'unavailable') throw new Error('MEDIA_COMPONENT_MISSING');
-  const highResolution = analysis.video.width > 4096 || analysis.video.height > 2160;
-  const taskId = randomUUID();
-  const output = await chooseOutput(window, analysis.video.path, request);
-  const partial = path.join(path.dirname(output), `.${path.basename(output, '.mp4')}.${taskId}.partial.mp4`);
-  const duration = expectedOutputDuration(groups);
-  send(window, { type: 'progress', data: { taskId, kind: 'export', stage: 'preparing', percent: 0 } });
-  await logLine(taskId, 'INFO', `Export target: ${output}`);
-  await logLine(taskId, 'INFO', `Active media encoder: ${components.mediaEncoder}`);
+function assertExportNotCancelled(taskId: string): void {
+  if (getTaskController(taskId)?.cancelRequested) {
+    const error = new Error('EXPORT_CANCELLED');
+    Object.assign(error, { exportCode: 'EXPORT_CANCELLED' });
+    throw error;
+  }
+}
+
+function exportCode(error: unknown): string | null {
+  if (!(error instanceof Error)) return null;
+  const code = (error as Error & { exportCode?: unknown }).exportCode;
+  return typeof code === 'string' ? code : (/^[A-Z][A-Z0-9_]+$/.test(error.message) ? error.message : null);
+}
+
+function wrapExportError(error: unknown, code: string): Error {
+  const current = exportCode(error);
+  if (
+    current === 'EXPORT_CANCELLED'
+    || current === 'EXPORT_TERMINATED'
+    || current === 'EXPORT_SEGMENT_INCOMPATIBLE'
+  ) return error instanceof Error ? error : new Error(current);
+  const wrapped = new Error(`${code}: ${error instanceof Error ? error.message : String(error)}`);
+  Object.assign(wrapped, { exportCode: code, cause: error });
+  return wrapped;
+}
+
+async function executeFastSegmented(
+  window: BrowserWindow,
+  taskId: string,
+  components: { ffmpeg: string; ffprobe: string; mediaEncoder: MediaEncoder },
+  analysisVideo: VideoMetadata,
+  groups: readonly CutGroup[],
+  partial: string,
+  tempDirectory: string,
+): Promise<void> {
+  const keyframes = await probeKeyframes(analysisVideo.path, components.ffprobe);
+  assertExportNotCancelled(taskId);
+  const signatures: StreamSignature[] = [];
+  const segmentNames: string[] = [];
+  for (const [index, group] of groups.entries()) {
+    assertExportNotCancelled(taskId);
+    const seekStart = selectSeekStart(group.start, keyframes);
+    const segmentName = `segment-${String(index + 1).padStart(6, '0')}.mp4`;
+    const segmentPath = path.join(tempDirectory, segmentName);
+    segmentNames.push(segmentName);
+    await logLine(
+      taskId,
+      'INFO',
+      `Fast segment ${index + 1}/${groups.length}: range=${group.start.toFixed(6)}-${group.end.toFixed(6)}`
+        + ` seekStart=${seekStart.toFixed(6)} encoder=${components.mediaEncoder}`,
+    );
+    try {
+      await runFfmpeg(
+        window,
+        taskId,
+        components.ffmpeg,
+        buildSegmentReencodeArgs(
+          analysisVideo.path,
+          segmentPath,
+          group,
+          seekStart,
+          analysisVideo,
+          components.mediaEncoder,
+        ),
+        group.end - group.start,
+        'cutting-and-exporting',
+        { segmentIndex: index + 1, seekStart },
+      );
+      await validateExportOutput(segmentPath, group.end - group.start, analysisVideo);
+      const signature = await probeStreamSignature(segmentPath, components.ffprobe);
+      if (!signature.video.extradataHash) throw new Error('EXPORT_SEGMENT_FAILED');
+      if (signatures.length > 0 && !sameStreamSignature(signatures[0]!, signature)) {
+        throw new Error('EXPORT_SEGMENT_INCOMPATIBLE');
+      }
+      signatures.push(signature);
+    } catch (error) {
+      throw wrapExportError(error, 'EXPORT_SEGMENT_FAILED');
+    }
+  }
+  assertExportNotCancelled(taskId);
+  const manifest = path.join(tempDirectory, 'segments.ffconcat');
+  await writeFile(manifest, buildConcatManifest(segmentNames), 'utf8');
   try {
-    await assertExportPreconditions(analysis.video.path, path.dirname(output), taskId, duration, analysis.video, components.mediaEncoder);
-    const canCopy = await streamCopyEligibility(analysis.video.path, groups, analysis.video);
+    await runFfmpeg(
+      window,
+      taskId,
+      components.ffmpeg,
+      buildConcatArgs(manifest, partial),
+      expectedOutputDuration(groups),
+      'concatenating',
+    );
+  } catch (error) {
+    throw wrapExportError(error, 'EXPORT_CONCAT_FAILED');
+  }
+}
+
+async function executeFastSingle(
+  window: BrowserWindow,
+  taskId: string,
+  components: { ffmpeg: string; ffprobe: string; mediaEncoder: MediaEncoder },
+  analysisVideo: VideoMetadata,
+  group: CutGroup,
+  partial: string,
+): Promise<void> {
+  const keyframes = await probeKeyframes(analysisVideo.path, components.ffprobe);
+  assertExportNotCancelled(taskId);
+  const seekStart = selectSeekStart(group.start, keyframes);
+  await logLine(
+    taskId,
+    'INFO',
+    `Fast single segment: range=${group.start.toFixed(6)}-${group.end.toFixed(6)}`
+      + ` seekStart=${seekStart.toFixed(6)} encoder=${components.mediaEncoder}`,
+  );
+  try {
+    await runFfmpeg(
+      window,
+      taskId,
+      components.ffmpeg,
+      buildSegmentReencodeArgs(
+        analysisVideo.path,
+        partial,
+        group,
+        seekStart,
+        analysisVideo,
+        components.mediaEncoder,
+      ),
+      group.end - group.start,
+      'cutting-and-exporting',
+      { segmentIndex: 1, seekStart },
+    );
+    await validateExportOutput(partial, group.end - group.start, analysisVideo);
+  } catch (error) {
+    throw wrapExportError(error, 'EXPORT_SEGMENT_FAILED');
+  }
+}
+
+async function executeExport(
+  window: BrowserWindow,
+  taskId: string,
+  request: ExportRequest,
+  record: Awaited<ReturnType<ReturnType<typeof getHistoryStore>['open']>>,
+  components: { ffmpeg: string; ffprobe: string; mediaEncoder: MediaEncoder },
+  groups: readonly CutGroup[],
+  output: string,
+  partial: string,
+  duration: number,
+): Promise<void> {
+  const analysis = record.analysis;
+  const highResolution = analysis.video.width > 4096 || analysis.video.height > 2160;
+  const tempDirectory = path.join(path.dirname(output), `.ttcut-${taskId}-segments`);
+  let terminalSent = false;
+  const sendError = async (code: string, message: string): Promise<void> => {
+    if (terminalSent || !markTaskTerminal(taskId)) return;
+    terminalSent = true;
+    send(window, { type: 'error', taskId, code, message });
+  };
+  try {
+    await mkdir(tempDirectory, { recursive: true });
+    const canCopy = await streamCopyEligibility(
+      analysis.video.path,
+      groups,
+      analysis.video,
+      components.ffprobe,
+    );
+    assertExportNotCancelled(taskId);
     if (!canCopy && highResolution && components.mediaEncoder !== 'libx264') {
       throw new Error('X264_COMPONENT_REQUIRED_FOR_HIGH_RESOLUTION');
     }
@@ -252,11 +456,53 @@ export async function startExport(window: BrowserWindow, rawRequest: ExportReque
         );
         await validateExportOutput(partial, duration, analysis.video);
       } catch (error) {
+        const code = exportCode(error);
+        if (code === 'EXPORT_CANCELLED' || code === 'EXPORT_TERMINATED') throw error;
         await logLine(taskId, 'WARN', `Stream copy rejected; accurate encode follows: ${String(error)}`);
         await rm(partial, { force: true });
-        if (highResolution && components.mediaEncoder !== 'libx264') {
-          throw new Error('X264_COMPONENT_REQUIRED_FOR_HIGH_RESOLUTION');
+        if (request.export_strategy === 'fast_segmented') {
+          await executeFastSingle(
+            window,
+            taskId,
+            components,
+            analysis.video,
+            groups[0]!,
+            partial,
+          );
+        } else {
+          await runFfmpeg(
+            window,
+            taskId,
+            components.ffmpeg,
+            buildReencodeArgs(analysis.video.path, partial, groups, analysis.video, components.mediaEncoder),
+            duration,
+            'cutting-and-exporting',
+          );
+          await validateExportOutput(partial, duration, analysis.video);
         }
+      }
+    } else if (request.export_strategy === 'fast_segmented' && groups.length > 1) {
+      await executeFastSegmented(
+        window,
+        taskId,
+        components,
+        analysis.video,
+        groups,
+        partial,
+        tempDirectory,
+      );
+      await validateExportOutput(partial, duration, analysis.video);
+    } else {
+      if (request.export_strategy === 'fast_segmented') {
+        await executeFastSingle(
+          window,
+          taskId,
+          components,
+          analysis.video,
+          groups[0]!,
+          partial,
+        );
+      } else {
         await runFfmpeg(
           window,
           taskId,
@@ -267,16 +513,6 @@ export async function startExport(window: BrowserWindow, rawRequest: ExportReque
         );
         await validateExportOutput(partial, duration, analysis.video);
       }
-    } else {
-      await runFfmpeg(
-        window,
-        taskId,
-        components.ffmpeg,
-        buildReencodeArgs(analysis.video.path, partial, groups, analysis.video, components.mediaEncoder),
-        duration,
-        'cutting-and-exporting',
-      );
-      await validateExportOutput(partial, duration, analysis.video);
     }
     if (await available(output)) throw new Error('OUTPUT_COLLISION');
     await rename(partial, output);
@@ -288,15 +524,69 @@ export async function startExport(window: BrowserWindow, rawRequest: ExportReque
       mediaUrl: registerMediaPath(output),
     };
     send(window, { type: 'progress', data: { taskId, kind: 'export', stage: 'complete', percent: 100 } });
+    lastExportProgress.set(taskId, 100);
     await getHistoryStore().markVisible(record.id, 'export', output);
-    send(window, { type: 'export-result', taskId, data: result });
-    return taskId;
+    if (!terminalSent && markTaskTerminal(taskId)) {
+      terminalSent = true;
+      send(window, { type: 'export-result', taskId, data: result });
+    }
   } catch (error) {
     await rm(partial, { force: true }).catch(() => undefined);
     const message = error instanceof Error ? error.message : String(error);
-    await logLine(taskId, 'ERROR', message);
-    const code = /^[A-Z][A-Z0-9_]+$/.test(message) ? message : 'EXPORT_FAILED';
-    send(window, { type: 'error', taskId, code, message });
+    const code = exportCode(error) ?? 'EXPORT_FAILED';
+    const controller = getTaskController(taskId);
+    await logLine(
+      taskId,
+      code === 'EXPORT_CANCELLED' && controller?.cancelReason === 'app-exit' ? 'INFO' : 'ERROR',
+      `${code}: ${message}`,
+    );
+    if (!(code === 'EXPORT_CANCELLED' && controller?.cancelReason === 'app-exit')) {
+      await sendError(code, message);
+    } else {
+      markTaskTerminal(taskId);
+    }
+  } finally {
+    await rm(tempDirectory, { recursive: true, force: true }).catch(() => undefined);
+    lastExportProgress.delete(taskId);
+    endTrackedTask(taskId);
+  }
+}
+
+export async function startExport(window: BrowserWindow, rawRequest: ExportRequest): Promise<string> {
+  const request = exportRequestSchema.parse(rawRequest);
+  const selection = request.selection;
+  const record = await getHistoryStore().open(request.analysis_id);
+  const analysis = record.analysis;
+  if (hasActiveTasks()) throw new Error('TASK_BUSY');
+  const groups = [...createCutGroups(analysis, selection)].sort((left, right) => left.start - right.start);
+  if (!groups.length) throw new Error('NO_RALLIES');
+  const components = await resolveUsableMediaComponents();
+  if (!components.ffmpeg || !components.ffprobe || components.mediaEncoder === 'unavailable') throw new Error('MEDIA_COMPONENT_MISSING');
+  const taskId = randomUUID();
+  const output = await chooseOutput(window, analysis.video.path, request);
+  const partial = path.join(path.dirname(output), `.${path.basename(output, '.mp4')}.${taskId}.partial.mp4`);
+  const duration = expectedOutputDuration(groups);
+  beginTrackedTask(taskId);
+  try {
+    await assertExportPreconditions(analysis.video.path, path.dirname(output), taskId, duration, analysis.video, components.mediaEncoder);
+    send(window, { type: 'progress', data: { taskId, kind: 'export', stage: 'preparing', percent: 0 } });
+    await logLine(taskId, 'INFO', `Export target: ${output}`);
+    await logLine(taskId, 'INFO', `Export strategy: ${request.export_strategy}`);
+    await logLine(taskId, 'INFO', `Active media encoder: ${components.mediaEncoder}`);
+    void executeExport(
+      window,
+      taskId,
+      request,
+      record,
+      { ffmpeg: components.ffmpeg!, ffprobe: components.ffprobe!, mediaEncoder: components.mediaEncoder },
+      groups,
+      output,
+      partial,
+      duration,
+    );
     return taskId;
+  } catch (error) {
+    endTrackedTask(taskId);
+    throw error;
   }
 }

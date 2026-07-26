@@ -63,7 +63,7 @@ describe('multi-task clipping', () => {
   });
 
   it('allows each pending video mode to be selected with the mouse', async () => {
-    const { unmount } = render(<MultiTaskPage initialVideos={videos} preRoll={2.5} postRoll={1} onOpenAnalysis={vi.fn()} />);
+    const { unmount } = render(<MultiTaskPage initialVideos={videos} preRoll={2.5} postRoll={1} exportStrategy="compatible" onOpenAnalysis={vi.fn()} />);
     await screen.findByText('first.mp4');
 
     const group = screen.getByRole('group', { name: 'first.mp4 的剪辑模式' });
@@ -80,7 +80,7 @@ describe('multi-task clipping', () => {
   });
 
   it('runs videos serially with automatic calibration and 70/30 progress mapping', async () => {
-    render(<MultiTaskPage initialVideos={videos} preRoll={2.5} postRoll={1} onOpenAnalysis={vi.fn()} />);
+    render(<MultiTaskPage initialVideos={videos} preRoll={2.5} postRoll={1} exportStrategy="compatible" onOpenAnalysis={vi.fn()} />);
     await screen.findByText('first.mp4');
     await screen.findByText('second.mp4');
 
@@ -107,6 +107,7 @@ describe('multi-task clipping', () => {
     expect(startExport).toHaveBeenCalledWith(expect.objectContaining({
       analysis_id: '11111111-1111-4111-8111-111111111111',
       destination: 'source',
+      export_strategy: 'compatible',
       selection: { mode: 'all', pre_roll_seconds: 2.5, post_roll_seconds: 1 },
     }));
     expect(startAnalysis).toHaveBeenCalledTimes(1);
@@ -127,5 +128,37 @@ describe('multi-task clipping', () => {
     }));
     await waitFor(() => expect(startAnalysis).toHaveBeenCalledTimes(2));
     expect(startAnalysis.mock.calls[1]?.[0]).toMatchObject({ videoPath: videos[1]!.path });
+  });
+
+  it('marks an export cancelled from the backend terminal code', async () => {
+    const { container } = render(
+      <MultiTaskPage
+        initialVideos={[videos[0]!]}
+        preRoll={2.5}
+        postRoll={1}
+        exportStrategy="fast_segmented"
+        onOpenAnalysis={vi.fn()}
+      />,
+    );
+    await screen.findByText('first.mp4');
+    fireEvent.click(container.querySelector('.batch-start')!);
+    await waitFor(() => expect(startAnalysis).toHaveBeenCalledTimes(1));
+    act(() => listener?.({
+      type: 'analysis-result',
+      taskId: 'analysis-task-1',
+      analysisId: '11111111-1111-4111-8111-111111111111',
+      calibration,
+      data: analysis(videos[0]!.path),
+    }));
+    await waitFor(() => expect(startExport).toHaveBeenCalledWith(expect.objectContaining({
+      export_strategy: 'fast_segmented',
+    })));
+    act(() => listener?.({
+      type: 'error',
+      taskId: 'export-task-1',
+      code: 'EXPORT_CANCELLED',
+      message: 'EXPORT_CANCELLED',
+    }));
+    await waitFor(() => expect(container.querySelector('.batch-row.cancelled')).not.toBeNull());
   });
 });

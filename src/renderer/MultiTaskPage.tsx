@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { AnalysisResultV1, CutSelectionV1, VideoMetadata } from '../shared/contracts';
+import type { AnalysisResultV1, CutSelectionV1, ExportStrategy, VideoMetadata } from '../shared/contracts';
 import type { AppEvent, SelectedVideo } from '../shared/api';
 import { formatTimestamp } from '../domain/time';
 
@@ -25,6 +25,7 @@ interface MultiTaskPageProps {
   initialVideos: SelectedVideo[];
   preRoll: 1.5 | 2.5 | 5;
   postRoll: 0.5 | 1 | 2 | 4;
+  exportStrategy: ExportStrategy;
   onOpenAnalysis: (analysisId: string) => void;
 }
 
@@ -47,7 +48,7 @@ function modeLabel(item: BatchItem): string {
   return '只分析';
 }
 
-export function MultiTaskPage({ initialVideos, preRoll, postRoll, onOpenAnalysis }: MultiTaskPageProps) {
+export function MultiTaskPage({ initialVideos, preRoll, postRoll, exportStrategy, onOpenAnalysis }: MultiTaskPageProps) {
   const [items, setItems] = useState<BatchItem[]>([]);
   const [activeTask, setActiveTask] = useState<string | null>(null);
   const [activeItem, setActiveItem] = useState<string | null>(null);
@@ -118,6 +119,7 @@ export function MultiTaskPage({ initialVideos, preRoll, postRoll, onOpenAnalysis
           : { mode: 'highlight', highlight_threshold: candidate.threshold, pre_roll_seconds: preRoll, post_roll_seconds: postRoll };
         const taskId = await window.ttcut.startExport({
           analysis_id: candidate.analysisId, selection, destination: 'source', mode_label: modeLabel(candidate),
+          export_strategy: exportStrategy,
         });
         activeRef.current = { taskId, itemId: candidate.id, phase: 'export' };
         setActiveTask(taskId);
@@ -177,7 +179,8 @@ export function MultiTaskPage({ initialVideos, preRoll, postRoll, onOpenAnalysis
       setTimeout(() => void processNext(), 0);
       return;
     }
-    const cancelled = cancelRequested.current;
+    const cancelled = event.code === 'EXPORT_CANCELLED'
+      || (active.phase === 'analysis' && cancelRequested.current);
     updateItem(active.itemId, (item) => ({
       ...item,
       status: cancelled ? 'cancelled' : 'failed',

@@ -11,7 +11,6 @@ import {
   ANALYSIS_RUNTIME_VARIANTS,
   ANALYSIS_TORCH_VERSION,
   analysisRuntimePython,
-  isCudaArchitectureSupported,
   expectedTorchVersion,
   isAnalysisRuntimeVariant,
   type AnalysisRuntimeVariant,
@@ -188,12 +187,7 @@ export async function validateAnalysisRuntime(
     const capability = Array.isArray(value.device_capability) && value.device_capability.length === 2
       ? Number(value.device_capability[0]) + Number(value.device_capability[1]) / 10
       : null;
-    const archList = Array.isArray(value.cuda_arch_list)
-      ? value.cuda_arch_list.filter((item): item is string => typeof item === 'string')
-      : Array.isArray(value.compiled_arch_list)
-        ? value.compiled_arch_list.filter((item): item is string => typeof item === 'string')
-        : [];
-    if (capability === null || !isCudaArchitectureSupported(capability, archList)) throw new Error('CUDA_RUNTIME_UNSUPPORTED_ARCHITECTURE');
+    if (capability === null) throw new Error('CUDA_RUNTIME_UNSUPPORTED_ARCHITECTURE');
     if (value.cuda_smoke !== true) throw new Error('CUDA_RUNTIME_SELF_TEST_FAILED');
   }
   return {
