@@ -8,7 +8,7 @@ TTcut 是一款面向乒乓球爱好者的本地乒乓球视频自动剪辑工�
 
 ## 下载与安装
 
-1. 从 [TTcut v1.1.0-beta Release](https://github.com/WeiyePlayer/TTcut/releases/tag/v1.1.0-beta) 下载 `TTcut-1.1.0-beta-x64-Setup.exe`。
+1. 从 [TTcut Releases](https://github.com/WeiyePlayer/TTcut/releases) 下载最新版本；当前测试版安装包为 `TTcut-1.1.0-beta-x64-Setup.exe`。
 2. 运行安装程序。安装完成后，从桌面或开始菜单的 `TTcut` 快捷方式启动。
 3. 首次启动进入设置，同意后分别安装“分析组件”和“视频处理组件”。
 
