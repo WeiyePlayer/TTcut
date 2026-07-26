@@ -4,6 +4,7 @@ export const DEVICE_VALUES = ['auto', 'cuda', 'cpu'] as const;
 export const PRE_ROLL_VALUES = [1.5, 2.5, 5] as const;
 export const POST_ROLL_VALUES = [0.5, 1, 2, 4] as const;
 export const HIGHLIGHT_VALUES = [3, 5, 7] as const;
+export const EXPORT_STRATEGIES = ['compatible', 'fast_segmented'] as const;
 
 const finiteNumber = z.number().finite();
 const point = z.tuple([finiteNumber, finiteNumber]);
@@ -215,6 +216,7 @@ export const cutSelectionSchema = z.discriminatedUnion('mode', [
 export const appSettingsSchema = z.object({
   language: z.enum(['zh-CN', 'en']),
   calibration_method: z.enum(['manual', 'automatic']),
+  export_strategy: z.enum(EXPORT_STRATEGIES),
   pre_roll_seconds: z.union(PRE_ROLL_VALUES.map((value) => z.literal(value))),
   post_roll_seconds: z.union(POST_ROLL_VALUES.map((value) => z.literal(value))),
 }).strict();
@@ -254,6 +256,7 @@ export const historySummarySchema = z.object({
 export const exportRequestSchema = z.object({
   analysis_id: z.string().uuid(),
   selection: cutSelectionSchema,
+  export_strategy: z.enum(EXPORT_STRATEGIES),
   destination: z.enum(['prompt', 'source']),
   mode_label: z.string().min(1).optional(),
 }).strict();
@@ -327,6 +330,7 @@ export type Rally = z.infer<typeof rallySchema>;
 export type AnalysisResultV1 = z.infer<typeof analysisResultSchema>;
 export type WorkerEventV1 = z.infer<typeof workerEventSchema>;
 export type CutSelectionV1 = z.infer<typeof cutSelectionSchema>;
+export type ExportStrategy = typeof EXPORT_STRATEGIES[number];
 export type AppSettings = z.infer<typeof appSettingsSchema>;
 export type HistorySource = z.infer<typeof historySourceSchema>;
 export type HistoryRecordV1 = z.infer<typeof historyRecordSchema>;

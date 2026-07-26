@@ -114,12 +114,12 @@ export async function startAnalysis(
     void logLine(taskId, 'ERROR', error.message);
     terminalEvent ??= { type: 'error', taskId, code: 'WORKER_EXITED', message: error.message };
   });
-  child.once('close', async (code) => {
+  child.once('close', async (code, signal) => {
     if (stdoutBuffer.trim()) processWorkerLine(stdoutBuffer);
     if (!terminalEvent) {
-      send(window, { type: 'error', taskId, code: 'WORKER_EXITED', message: `Analysis process exited without a terminal event (code ${code ?? -1}).` });
+      send(window, { type: 'error', taskId, code: 'WORKER_EXITED', message: `Analysis process exited without a terminal event (code ${String(code)}, signal ${String(signal)}).` });
     } else if (terminalEvent.type === 'analysis-result' && code !== 0) {
-      send(window, { type: 'error', taskId, code: 'WORKER_EXITED', message: `Analysis process exited with code ${code ?? -1} after reporting a result.` });
+      send(window, { type: 'error', taskId, code: 'WORKER_EXITED', message: `Analysis process exited with code ${String(code)} and signal ${String(signal)} after reporting a result.` });
     } else if (terminalEvent.type === 'analysis-result') {
       try {
         const record = await getHistoryStore().upsert(

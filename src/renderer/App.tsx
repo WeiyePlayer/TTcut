@@ -217,7 +217,10 @@ function RallyPreviewDialog({ video, videoDuration, rally, translations, onClose
 
 export function App() {
   const [bootstrap, setBootstrap] = useState<BootstrapData | null>(null);
-  const [settings, setSettings] = useState<AppSettings>({ language: 'zh-CN', calibration_method: 'automatic', pre_roll_seconds: 2.5, post_roll_seconds: 2 });
+  const [settings, setSettings] = useState<AppSettings>({
+    language: 'zh-CN', calibration_method: 'automatic', export_strategy: 'compatible',
+    pre_roll_seconds: 2.5, post_roll_seconds: 2,
+  });
   const [view, setView] = useState<View>('auto');
   const [step, setStep] = useState<Step>('select');
   const [video, setVideo] = useState<SelectedVideo | null>(null);
@@ -327,6 +330,11 @@ export function App() {
           setStep('calibrate');
           return;
         }
+        if (event.code === 'EXPORT_CANCELLED') {
+          setActiveTask(null);
+          setStep('mode');
+          return;
+        }
         setActiveTask(null);
         setError({ code: event.code });
         setStep('error');
@@ -410,7 +418,12 @@ export function App() {
     else selection = { mode, selected_rally_ids: [...customIds], ...common };
     setStep('cutting'); setProgress({ percent: 0, stage: 'preparing' });
     try {
-      setActiveTask(await window.ttcut.startExport({ analysis_id: analysisId, selection, destination: 'source' }));
+      setActiveTask(await window.ttcut.startExport({
+        analysis_id: analysisId,
+        selection,
+        destination: 'source',
+        export_strategy: settings.export_strategy,
+      }));
     } catch (caught) {
       setError({ code: errorCode(caught) }); setStep('error');
     }
@@ -618,6 +631,7 @@ export function App() {
             initialVideos={multiVideos}
             preRoll={settings.pre_roll_seconds}
             postRoll={settings.post_roll_seconds}
+            exportStrategy={settings.export_strategy}
             onOpenAnalysis={(id) => { multiActiveRef.current = false; void openHistory(id); }}
           />
         ) : view === 'settings' ? (
@@ -640,6 +654,28 @@ export function App() {
                 <div className="segmented">
                   <button className={settings.language === 'zh-CN' ? 'selected' : ''} onClick={() => void changeLanguage('zh-CN')}>{t.chinese}</button>
                   <button className={settings.language === 'en' ? 'selected' : ''} onClick={() => void changeLanguage('en')}>{t.english}</button>
+                </div>
+              </article>
+              <article className="card setting-card">
+                <div>
+                  <h2>{settings.language === 'zh-CN' ? '导出方式' : 'Export strategy'}</h2>
+                  <p>{settings.language === 'zh-CN'
+                    ? '兼容模式保留现有全片滤镜流程；快速分段模式按片段 seek 后编码并使用 concat 合并。'
+                    : 'Compatible mode keeps the existing filter graph; fast segmented mode seeks, encodes, and concatenates each segment.'}</p>
+                </div>
+                <div className="segmented">
+                  <button
+                    className={settings.export_strategy === 'compatible' ? 'selected' : ''}
+                    onClick={() => void saveRolls({ export_strategy: 'compatible' })}
+                  >
+                    {settings.language === 'zh-CN' ? '兼容模式（默认）' : 'Compatible mode (default)'}
+                  </button>
+                  <button
+                    className={settings.export_strategy === 'fast_segmented' ? 'selected' : ''}
+                    onClick={() => void saveRolls({ export_strategy: 'fast_segmented' })}
+                  >
+                    {settings.language === 'zh-CN' ? '快速分段模式' : 'Fast segmented mode'}
+                  </button>
                 </div>
               </article>
               <article className="card setting-card">

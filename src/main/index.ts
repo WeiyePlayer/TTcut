@@ -19,7 +19,7 @@ import { getLogDirectory, logLine } from './logger';
 import { getHistoryStore } from './history';
 import { clearMediaPaths, installMediaProtocol, registerMediaPath } from './media-protocol';
 import { probeVideo } from './probe';
-import { cancelAllTasks, cancelTask, hasActiveTasks } from './processes';
+import { cancelAllTasksAndWait, cancelTask, hasActiveTasks } from './processes';
 import { loadSettings, saveSettings } from './settings';
 import { handleSquirrelStartup } from './squirrel-startup';
 import { getPlatformCompatibility } from './platform-compatibility';
@@ -212,7 +212,7 @@ function registerIpc(): void {
   });
   ipcMain.handle(IPC.taskCancel, (_event, taskId: unknown) => {
     if (typeof taskId !== 'string') throw new Error('INVALID_REQUEST');
-    return cancelTask(taskId);
+    return cancelTask(taskId, 'user');
   });
   ipcMain.handle(IPC.outputReveal, async (_event, value: unknown) => {
     if (typeof value !== 'string') throw new Error('INVALID_REQUEST');
@@ -266,7 +266,7 @@ function registerIpc(): void {
     }
     if (action === 'exit') {
       exitApproved = true;
-      await cancelAllTasks();
+      await cancelAllTasksAndWait('app-exit');
       window.close();
     }
   });
@@ -332,7 +332,7 @@ app.on('before-quit', async (event) => {
   if (!exitApproved && hasActiveTasks()) {
     event.preventDefault();
     exitApproved = true;
-    await cancelAllTasks();
+    await cancelAllTasksAndWait('app-exit');
     app.quit();
   }
 });
