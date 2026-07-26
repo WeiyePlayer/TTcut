@@ -19,20 +19,22 @@ final exports remain in the original video coordinate system.
 ## Model input
 
 TrackNet keeps its sequence length, background mode, batch size, and checkpoint.
-The ROI is resized with the same per-axis scale as the former full-frame
-`512x288` input, rounded up to an 8-pixel-compatible tensor size. Heatmap points
-are mapped through the ROI scale and origin before existing trajectory, bounce,
-and rally processing. The comparison reports CUDA-synchronised model-forward
-time separately from Predictor and post-load end-to-end wall time. Checkpoint
-loading is measured once in `run_config.model_load_seconds` and excluded from
-both variants because both runs share the same loaded checkpoint.
+The ROI starts from the former full-frame `512x288` per-axis scale, then applies
+the adopted `1.25x` multiplier and rounds up to an 8-pixel-compatible tensor
+size. For the Istanbul ROI this produces the production default `280x160`.
+Heatmap points are mapped through the ROI scale and origin before existing
+trajectory, bounce, and rally processing. The comparison reports
+CUDA-synchronised model-forward time separately from Predictor and post-load
+end-to-end wall time. Checkpoint loading is measured once in
+`run_config.model_load_seconds` and excluded from both variants because both
+runs share the same loaded checkpoint.
 
 ## Istanbul 2026 validation
 
 The specified 1920x1080, 20,131-frame video was analysed twice on CUDA with the
 same checkpoint and batch size.
 
-| Measurement | Full frame | Requested 35/25 cm ROI | Conservative 75%/35% comparison* |
+| Measurement | Full frame | Initial 224x128 experiment | Conservative 75%/35% comparison* |
 | --- | ---: | ---: | ---: |
 | Tensor | 512x288 | 224x128 | 360x168 |
 | Tensor pixel ratio | 100% | 19.44% | 41.02% |
@@ -59,6 +61,9 @@ The source video's SHA-256 was
 `9bf7676b1a3a400d3318f26393f263b73fe2c834692d35ac66f4fa33c42083ed`
 before and after both analyses.
 
+The adopted production default is now the `280x160` ROI size from the
+resolution sweep below.
+
 ## Annotated videos
 
 Both diagnostic videos use the original `1920x1080`, `60 FPS`, `20,131`-frame
@@ -68,3 +73,25 @@ source timeline and retain the source audio:
   points and continuous-only trajectory segments.
 - `artifacts/dynamic-roi/dynamic_roi_trajectory.mp4` — dynamic ROI ball points,
   continuous-only trajectory segments, and the ROI outer bounding box.
+
+## ROI resolution sweep
+
+Using the same ROI, checkpoint, CUDA device, batch size, sequence length, and
+background mode, the ROI-only sweep was run at all three tensor sizes. The
+existing `224x128` annotated video was not regenerated; the two larger sizes
+received new annotated videos.
+
+| Tensor | Input pixel ratio | Predictor time | Predictor FPS | Visible frames | Bounce candidates | Rally groups | Predictor reduction vs full frame |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Full-frame `512x288` | 100% | 259.460 s | 77.59 | 5,383 | 151 | 38 | baseline |
+| ROI `224x128` | 19.44% | 105.619 s | 190.60 | 4,824 | 161 | 38 | 59.29% |
+| ROI `280x160` | 30.38% | 125.343 s | 160.61 | 5,135 | 165 | 41 | 51.69% |
+| ROI `336x192` | 43.75% | 148.829 s | 135.26 | 4,837 | 157 | 38 | 42.64% |
+
+Relative to the existing `224x128` run, `280x160` recovered 311 visible
+frames, but also changed the result to 41 rally groups. `336x192` recovered
+only 13 visible frames and kept 38 rally groups, while its median source-point
+difference from `224x128` was 1.41 px and its 95th percentile was 4.24 px.
+These are comparison results, not an accuracy guarantee.
+
+The sweep report is `artifacts/dynamic-roi/resolution_comparison.json`.

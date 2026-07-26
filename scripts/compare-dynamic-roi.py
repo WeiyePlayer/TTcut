@@ -81,6 +81,7 @@ def run_prediction(
     calibration: TableCalibration,
     roi,
     batch_size: int,
+    model_size: tuple[int, int] | None = None,
 ):
     last_progress = [-1]
 
@@ -94,6 +95,7 @@ def run_prediction(
         video,
         progress_callback=progress,
         analysis_roi=roi,
+        model_size=model_size,
     )
     summary = prediction_summary(points, calibration, stats)
     summary["end_to_end_seconds"] = time.perf_counter() - started
@@ -422,6 +424,222 @@ def render_annotated_videos(
         raise RuntimeError("FFmpeg annotation failed: " + "; ".join(failures))
 
 
+def render_annotated_video(
+    video: Path,
+    points: list[TrajectoryPoint],
+    roi,
+    output_video: Path,
+    label: str,
+    ffmpeg: Path,
+) -> None:
+    capture = cv2.VideoCapture(str(video))
+    if not capture.isOpened():
+        raise RuntimeError(f"Unable to open video for annotation: {video}")
+    width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fps = float(capture.get(cv2.CAP_PROP_FPS))
+    if width <= 0 or height <= 0 or fps <= 0:
+        capture.release()
+        raise RuntimeError("Source video metadata is invalid for annotation.")
+    encoder = _start_encoder(
+        ffmpeg,
+        video,
+        output_video,
+        width,
+        height,
+        fps,
+    )
+    frame_index = 0
+    try:
+        while True:
+            ok, frame = capture.read()
+            if not ok or frame is None:
+                break
+            if frame_index >= len(points):
+                raise RuntimeError("Decoded annotation frames exceed prediction count.")
+            annotated = _annotate_frame(
+                frame,
+                points,
+                frame_index,
+                label,
+                roi,
+            )
+            if encoder.stdin is None:
+                raise RuntimeError("FFmpeg annotation pipe is unavailable.")
+            encoder.stdin.write(annotated.tobytes())
+            frame_index += 1
+            if frame_index % 1000 == 0:
+                print(
+                    f"annotated-video-{output_video.stem}: "
+                    f"{frame_index}/{len(points)}",
+                    flush=True,
+                )
+        if frame_index != len(points):
+            raise RuntimeError(
+                f"Annotation frame count mismatch: decoded={frame_index}, "
+                f"predictions={len(points)}",
+            )
+    finally:
+        capture.release()
+        if encoder.stdin is not None:
+            encoder.stdin.close()
+    stderr = encoder.stderr.read().decode("utf-8", errors="replace") if encoder.stderr else ""
+    return_code = encoder.wait()
+    if return_code:
+        raise RuntimeError(
+            f"FFmpeg annotation failed for {output_video.name}: "
+            f"{stderr.strip() or return_code}",
+        )
+
+
+def parse_model_size(value: str) -> tuple[int, int]:
+    try:
+        width_text, height_text = value.lower().split("x", maxsplit=1)
+        width, height = int(width_text), int(height_text)
+    except (TypeError, ValueError) as exc:
+        raise argparse.ArgumentTypeError(
+            "Model size must be WIDTHxHEIGHT, for example 280x160.",
+        ) from exc
+    if width <= 0 or height <= 0 or width % 8 or height % 8:
+        raise argparse.ArgumentTypeError(
+            "Model width and height must be positive multiples of 8.",
+        )
+    return width, height
+
+
+def percent_reduction(value: float, baseline: float) -> float:
+    return (1.0 - value / baseline) * 100 if baseline else 0.0
+
+
+def run_resolution_sweep(
+    args,
+    calibration: TableCalibration,
+    roi,
+    loaded,
+    source_hash_before: str,
+    checkpoint_hash: str,
+    model_load_seconds: float,
+) -> int:
+    baseline_report = json.loads(args.baseline_report.read_text(encoding="utf-8"))
+    baseline_config = baseline_report["run_config"]
+    if (
+        baseline_report["source_sha256_after"].lower() != source_hash_before.lower()
+        or baseline_config["checkpoint_sha256"].lower() != checkpoint_hash.lower()
+        or baseline_config["device"] != str(loaded.device)
+        or int(baseline_config["batch_size"]) != args.batch_size
+        or baseline_report["roi"]["bbox"] != list(roi.bbox)
+    ):
+        raise RuntimeError(
+            "The saved full-frame baseline does not match this resolution sweep.",
+        )
+    render_sizes = set(args.render_sizes or ())
+    unknown_render_sizes = render_sizes - set(args.roi_model_sizes)
+    if unknown_render_sizes:
+        raise RuntimeError(
+            "Every render size must also appear in --roi-model-sizes.",
+        )
+    ffmpeg = resolve_ffmpeg(args.ffmpeg) if render_sizes else None
+    runs: dict[str, dict] = {}
+    point_sets: dict[str, list[TrajectoryPoint]] = {}
+    for model_size in args.roi_model_sizes:
+        key = f"{model_size[0]}x{model_size[1]}"
+        points, _, stats, summary = run_prediction(
+            f"dynamic-roi-{key}",
+            loaded,
+            args.video,
+            calibration,
+            roi,
+            args.batch_size,
+            model_size=model_size,
+        )
+        runs[key] = summary
+        point_sets[key] = points
+        if model_size in render_sizes:
+            render_annotated_video(
+                args.video,
+                points,
+                roi,
+                args.output / f"dynamic_roi_{key}_trajectory.mp4",
+                f"Dynamic ROI {key}",
+                ffmpeg,
+            )
+    reference_key = f"{args.roi_model_sizes[0][0]}x{args.roi_model_sizes[0][1]}"
+    reference_points = point_sets[reference_key]
+    comparisons = {}
+    full_frame = baseline_report["full_frame"]
+    for key, summary in runs.items():
+        comparisons[key] = {
+            "vs_reference_points": point_comparison(reference_points, point_sets[key]),
+            "vs_reference_bounces": frame_set_comparison(
+                runs[reference_key]["bounce_frames"],
+                summary["bounce_frames"],
+            ),
+            "visible_frame_delta_vs_reference": (
+                summary["visible_frames"] - runs[reference_key]["visible_frames"]
+            ),
+            "bounce_count_delta_vs_reference": (
+                summary["bounce_count"] - runs[reference_key]["bounce_count"]
+            ),
+            "rally_count_delta_vs_reference": (
+                summary["rally_count"] - runs[reference_key]["rally_count"]
+            ),
+            "vs_full_frame_time": {
+                "model_forward_reduction_percent": percent_reduction(
+                    summary["stats"]["inference_seconds"],
+                    full_frame["stats"]["inference_seconds"],
+                ),
+                "predictor_reduction_percent": percent_reduction(
+                    summary["stats"]["predictor_seconds"],
+                    full_frame["stats"]["predictor_seconds"],
+                ),
+                "post_load_end_to_end_reduction_percent": percent_reduction(
+                    summary["end_to_end_seconds"],
+                    full_frame["end_to_end_seconds"],
+                ),
+                "predictor_fps_speedup": (
+                    summary["stats"]["average_predictor_fps"]
+                    / full_frame["stats"]["average_predictor_fps"]
+                ),
+            },
+        }
+    source_hash_after = source_sha256(args.video)
+    report = {
+        "video": str(args.video),
+        "source_sha256_before": source_hash_before,
+        "source_sha256_after": source_hash_after,
+        "source_unchanged": source_hash_before == source_hash_after,
+        "run_config": {
+            "checkpoint": str(args.weights),
+            "checkpoint_sha256": checkpoint_hash,
+            "device": str(loaded.device),
+            "batch_size": args.batch_size,
+            "sequence_length": loaded.seq_len,
+            "background_mode": loaded.bg_mode,
+            "model_load_seconds": model_load_seconds,
+            "reference_size": reference_key,
+        },
+        "roi": {
+            "bbox": list(roi.bbox),
+            "width": roi.width,
+            "height": roi.height,
+        },
+        "full_frame_baseline": full_frame,
+        "dynamic_roi_runs": runs,
+        "comparisons": comparisons,
+        "rendered_videos": [
+            str(args.output / f"dynamic_roi_{width}x{height}_trajectory.mp4")
+            for width, height in args.render_sizes or ()
+        ],
+    }
+    report_path = args.output / "resolution_comparison.json"
+    report_path.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Compare TTcut full-frame and dynamic ROI TrackNet analysis.")
     parser.add_argument("--video", type=Path, default=DEFAULT_VIDEO)
@@ -435,6 +653,23 @@ def main() -> int:
     parser.add_argument("--width-margin-ratio", type=float, default=AnalysisRoiConfig().width_margin_ratio)
     parser.add_argument("--render-videos", action="store_true")
     parser.add_argument("--ffmpeg", type=Path)
+    parser.add_argument(
+        "--roi-model-sizes",
+        type=parse_model_size,
+        nargs="+",
+        help="Run an ROI-only resolution sweep, for example 224x128 280x160.",
+    )
+    parser.add_argument(
+        "--render-sizes",
+        type=parse_model_size,
+        nargs="*",
+        help="Resolution-sweep sizes that should receive annotated videos.",
+    )
+    parser.add_argument(
+        "--baseline-report",
+        type=Path,
+        default=DEFAULT_OUTPUT / "metrics.json",
+    )
     args = parser.parse_args()
 
     args.output.mkdir(parents=True, exist_ok=True)
@@ -450,6 +685,16 @@ def main() -> int:
     model_load_started = time.perf_counter()
     loaded = load_tracknet(args.weights, args.device)
     model_load_seconds = time.perf_counter() - model_load_started
+    if args.roi_model_sizes:
+        return run_resolution_sweep(
+            args,
+            calibration,
+            roi,
+            loaded,
+            source_hash_before,
+            checkpoint_hash,
+            model_load_seconds,
+        )
 
     baseline_points, info, baseline_stats, baseline_summary = run_prediction(
         "full-frame", loaded, args.video, calibration, None, args.batch_size,

@@ -9,6 +9,7 @@ from ttcut_worker.errors import AnalysisRoiError
 from ttcut_worker.roi import (
     DEFAULT_HEIGHT_RATIO,
     DEFAULT_LENGTH_MARGIN_RATIO,
+    DEFAULT_ROI_MODEL_SCALE,
     DEFAULT_WIDTH_MARGIN_RATIO,
     AnalysisRoiConfig,
     AnalysisRoi,
@@ -29,6 +30,22 @@ def test_default_roi_config_uses_requested_table_proportions():
     assert DEFAULT_HEIGHT_RATIO == 0.5
     assert DEFAULT_LENGTH_MARGIN_RATIO == pytest.approx(35.0 / 274.0)
     assert DEFAULT_WIDTH_MARGIN_RATIO == pytest.approx(25.0 / 152.5)
+    assert DEFAULT_ROI_MODEL_SCALE == pytest.approx(1.25)
+
+
+def test_default_roi_model_dimensions_use_the_adopted_125_percent_scale():
+    roi = AnalysisRoi(
+        x0=0,
+        y0=0,
+        x1=840,
+        y1=480,
+        projected_polygon=((0.0, 0.0),) * 4,
+        top_padding_pixels=0.0,
+        source_width=1920,
+        source_height=1080,
+    )
+
+    assert model_dimensions(roi, 1920, 1080) == (280, 160)
 
 
 def test_analysis_roi_is_the_outer_bbox_and_extends_above_the_table():

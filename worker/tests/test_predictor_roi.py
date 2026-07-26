@@ -81,12 +81,12 @@ def test_predictor_uses_dynamic_roi_tensor_and_returns_source_coordinates(monkey
         analysis_roi=roi,
     )
 
-    assert model.input_shape == (1, 3, 144, 256)
+    assert model.input_shape == (1, 3, 184, 320)
     assert points[0].visibility == 1
     assert (points[0].x, points[0].y) == (35, 40)
-    assert stats.model_width == 256
-    assert stats.model_height == 144
-    assert stats.input_pixel_ratio == 0.25
+    assert stats.model_width == 320
+    assert stats.model_height == 184
+    assert stats.input_pixel_ratio == pytest.approx(320 * 184 / (512 * 288))
     assert stats.inference_seconds > 0
     assert stats.predictor_seconds >= stats.inference_seconds
     assert stats.average_predictor_fps > 0
@@ -113,5 +113,65 @@ def test_predictor_rejects_roi_from_different_source_dimensions(monkeypatch):
 
     with pytest.raises(Exception) as error:
         TrackNetPredictor(loaded, batch_size=1).predict("fake.mp4", analysis_roi=roi)
+
+    assert getattr(error.value, "code", None) == "ANALYSIS_ROI_FAILED"
+
+
+def test_predictor_accepts_explicit_stride_aligned_roi_model_size(monkeypatch):
+    model = BrightCenterModel()
+    loaded = LoadedTrackNet(
+        model=model,
+        seq_len=1,
+        bg_mode="",
+        device=torch.device("cpu"),
+    )
+    roi = AnalysisRoi(
+        x0=10,
+        y0=20,
+        x1=60,
+        y1=60,
+        projected_polygon=((10.0, 20.0), (60.0, 20.0), (60.0, 60.0), (10.0, 60.0)),
+        top_padding_pixels=0.0,
+        source_width=100,
+        source_height=80,
+    )
+    monkeypatch.setattr("ttcut_worker.predictor.StreamingVideoReader", FakeReader)
+
+    points, _, stats = TrackNetPredictor(loaded, batch_size=1).predict(
+        "fake.mp4",
+        analysis_roi=roi,
+        model_size=(280, 160),
+    )
+
+    assert model.input_shape == (1, 3, 160, 280)
+    assert (points[0].x, points[0].y) == (35, 40)
+    assert (stats.model_width, stats.model_height) == (280, 160)
+
+
+def test_predictor_rejects_model_size_not_aligned_to_stride(monkeypatch):
+    loaded = LoadedTrackNet(
+        model=BrightCenterModel(),
+        seq_len=1,
+        bg_mode="",
+        device=torch.device("cpu"),
+    )
+    roi = AnalysisRoi(
+        x0=10,
+        y0=20,
+        x1=60,
+        y1=60,
+        projected_polygon=((10.0, 20.0), (60.0, 20.0), (60.0, 60.0), (10.0, 60.0)),
+        top_padding_pixels=0.0,
+        source_width=100,
+        source_height=80,
+    )
+    monkeypatch.setattr("ttcut_worker.predictor.StreamingVideoReader", FakeReader)
+
+    with pytest.raises(Exception) as error:
+        TrackNetPredictor(loaded, batch_size=1).predict(
+            "fake.mp4",
+            analysis_roi=roi,
+            model_size=(281, 160),
+        )
 
     assert getattr(error.value, "code", None) == "ANALYSIS_ROI_FAILED"

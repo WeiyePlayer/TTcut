@@ -47,13 +47,27 @@ class TrackNetPredictor:
         video_path: str | Path,
         progress_callback: ProgressCallback | None = None,
         analysis_roi: AnalysisRoi | None = None,
+        model_size: tuple[int, int] | None = None,
     ) -> tuple[list[TrajectoryPoint], VideoInfo, PredictionStats]:
         started = time.perf_counter()
         self._model_inference_seconds = 0.0
         reader = StreamingVideoReader(video_path)
-        model_width, model_height = model_dimensions(
+        default_model_width, default_model_height = model_dimensions(
             analysis_roi, reader.info.width, reader.info.height,
         )
+        model_width, model_height = model_size or (
+            default_model_width,
+            default_model_height,
+        )
+        if (
+            model_width <= 0
+            or model_height <= 0
+            or model_width % 8
+            or model_height % 8
+        ):
+            raise AnalysisRoiError(
+                "TrackNet model dimensions must be positive and aligned to 8 pixels.",
+            )
         median_rgb = (
             self._estimate_median(reader.info, analysis_roi, model_width, model_height)
             if self.loaded.bg_mode

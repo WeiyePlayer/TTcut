@@ -17,6 +17,7 @@ DEFAULT_WIDTH_MARGIN_RATIO = DEFAULT_WIDTH_MARGIN_CM / TABLE_WIDTH_CM
 MODEL_STRIDE = 8
 MODEL_REFERENCE_WIDTH = 512
 MODEL_REFERENCE_HEIGHT = 288
+DEFAULT_ROI_MODEL_SCALE = 1.25
 
 
 @dataclass(frozen=True)
@@ -70,13 +71,25 @@ def model_dimensions(
         )
     if roi.width <= 0 or roi.height <= 0:
         raise AnalysisRoiError("The analysis ROI has no pixels.")
+
+    def scaled_stride_size(raw_size: float) -> int:
+        base_size = math.ceil(raw_size / MODEL_STRIDE) * MODEL_STRIDE
+        scaled_size = base_size * DEFAULT_ROI_MODEL_SCALE
+        nearest_integer = round(scaled_size)
+        if math.isclose(scaled_size, nearest_integer, abs_tol=1e-9):
+            scaled_size = nearest_integer
+        return max(
+            MODEL_STRIDE,
+            math.ceil(scaled_size / MODEL_STRIDE) * MODEL_STRIDE,
+        )
+
     width = max(
         MODEL_STRIDE,
-        math.ceil((roi.width * MODEL_REFERENCE_WIDTH / source_width) / MODEL_STRIDE) * MODEL_STRIDE,
+        scaled_stride_size(roi.width * MODEL_REFERENCE_WIDTH / source_width),
     )
     height = max(
         MODEL_STRIDE,
-        math.ceil((roi.height * MODEL_REFERENCE_HEIGHT / source_height) / MODEL_STRIDE) * MODEL_STRIDE,
+        scaled_stride_size(roi.height * MODEL_REFERENCE_HEIGHT / source_height),
     )
     return int(width), int(height)
 
