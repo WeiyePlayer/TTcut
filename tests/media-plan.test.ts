@@ -134,17 +134,44 @@ describe('media export planning', () => {
     expect(selectSeekStart(8, [9, 12])).toBe(0);
   });
 
-  it('builds a safe relative ffconcat manifest and stream-copy concat command', () => {
+  it('builds a safe relative ffconcat manifest and repairs AAC timestamps without re-encoding video', () => {
     const manifest = buildConcatManifest(['segment-000001.mp4', "nested/segment-'000002.mp4"]);
     expect(manifest).toBe(
       "ffconcat version 1.0\nfile 'segment-000001.mp4'\nfile 'nested/segment-'\\''000002.mp4'\n",
     );
     expect(manifest.charCodeAt(0)).not.toBe(0xfeff);
 
-    const args = buildConcatArgs('segments.ffconcat', 'output.partial.mp4');
+    const args = buildConcatArgs('segments.ffconcat', 'output.partial.mp4', {
+      ...metadata,
+      audio_sample_rate: 44_100,
+      audio_channels: 1,
+      audio_bitrate: 128_000,
+    });
     expect(args).toEqual(expect.arrayContaining([
-      '-f', 'concat', '-safe', '1', '-i', 'segments.ffconcat', '-c', 'copy',
+      '-f', 'concat', '-safe', '1', '-i', 'segments.ffconcat',
+      '-map', '0:v:0', '-map', '0:a?',
+      '-c:v', 'copy',
+      '-c:a', 'aac', '-b:a', '128000', '-ar', '44100', '-ac', '1',
+      '-af', 'aresample=async=1:first_pts=0',
+      '-avoid_negative_ts', 'auto',
     ]));
+    expect(args).not.toEqual(expect.arrayContaining(['-c', 'copy']));
+  });
+
+  it('does not add audio concat options for silent segments', () => {
+    const args = buildConcatArgs('segments.ffconcat', 'silent.partial.mp4', {
+      ...metadata,
+      audio_codec: null,
+      audio_sample_rate: null,
+      audio_channels: null,
+      audio_bitrate: null,
+    });
+    expect(args).toEqual(expect.arrayContaining(['-c:v', 'copy', '-avoid_negative_ts', 'auto']));
+    expect(args).not.toContain('-c:a');
+    expect(args).not.toContain('-b:a');
+    expect(args).not.toContain('-ar');
+    expect(args).not.toContain('-ac');
+    expect(args).not.toContain('-af');
   });
 
   it('omits audio filters and encoding for silent segmented input', () => {
