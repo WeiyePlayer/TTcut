@@ -1,9 +1,20 @@
 import type { CutGroup, VideoMetadata } from '../shared/contracts';
+import type { MediaEncoder } from './components';
 
 const TIME_EPSILON = 0.000_001;
 
 export function expectedOutputDuration(groups: readonly CutGroup[]): number {
   return groups.reduce((sum, group) => sum + group.end - group.start, 0);
+}
+
+export function selectSeekStart(segmentStart: number, keyframes: readonly number[]): number {
+  let selected = 0;
+  for (const keyframe of keyframes) {
+    if (Number.isFinite(keyframe) && keyframe <= segmentStart + TIME_EPSILON && keyframe >= selected) {
+      selected = keyframe;
+    }
+  }
+  return selected;
 }
 
 function hasStableTimeBase(value: string | null | undefined): boolean {
@@ -56,6 +67,60 @@ function normalizedSar(value: string | null | undefined): string {
   const match = /^(\d+):(\d+)$/.exec(value ?? '');
   if (!match || Number(match[1]) <= 0 || Number(match[2]) <= 0) return '1/1';
   return `${match[1]}/${match[2]}`;
+}
+
+function videoEncodingOptions(metadata: VideoMetadata, encoder: MediaEncoder): string[] {
+  const sourceVideoBitrate = metadata.average_bitrate ?? 8_000_000;
+  const videoBitrate = Math.round(Math.max(
+    sourceVideoBitrate,
+    Math.min(sourceVideoBitrate * 2, 50_000_000),
+  ));
+  return encoder === 'libx264'
+    ? ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18']
+    : ['-c:v', 'libopenh264', '-profile:v', 'high', '-b:v', String(videoBitrate)];
+}
+
+function outputPixelFormat(metadata: VideoMetadata, encoder: MediaEncoder): string {
+  const x264PixelFormats = new Set([
+    'yuv420p', 'yuvj420p', 'yuv422p', 'yuvj422p', 'yuv444p', 'yuvj444p',
+    'nv12', 'nv16', 'nv21', 'yuv420p10le', 'yuv422p10le', 'yuv444p10le',
+    'nv20le', 'gray', 'gray10le',
+  ]);
+  return encoder === 'libx264' && metadata.pixel_format && x264PixelFormats.has(metadata.pixel_format)
+    ? metadata.pixel_format
+    : 'yuv420p';
+}
+
+function appendMediaOutputOptions(
+  args: string[],
+  metadata: VideoMetadata,
+  encoder: MediaEncoder,
+  hasAudio: boolean,
+): void {
+  args.push(
+    '-map_metadata', '0', '-sn', '-dn',
+    ...videoEncodingOptions(metadata, encoder),
+    '-pix_fmt', outputPixelFormat(metadata, encoder),
+    '-fps_mode', 'vfr', '-max_muxing_queue_size', '2048',
+  );
+  if (hasAudio) {
+    args.push('-c:a', 'aac', '-b:a', String(Math.round(metadata.audio_bitrate ?? 192_000)));
+    if (metadata.audio_sample_rate) args.push('-ar', String(metadata.audio_sample_rate));
+    if (metadata.audio_channels) args.push('-ac', String(metadata.audio_channels));
+  }
+  if (metadata.rotation !== null && metadata.rotation !== undefined) {
+    args.push('-metadata:s:v:0', `rotate=${metadata.rotation}`);
+  }
+  const colorOptions: Array<[string, string | null | undefined]> = [
+    ['-color_range', metadata.color_range],
+    ['-colorspace', metadata.color_space],
+    ['-color_trc', metadata.color_transfer],
+    ['-color_primaries', metadata.color_primaries],
+  ];
+  for (const [flag, value] of colorOptions) {
+    if (value && value !== 'unknown') args.push(flag, value);
+  }
+  args.push('-movflags', '+faststart', '-progress', 'pipe:1', '-nostats');
 }
 
 export function buildTrimFilter(
@@ -117,42 +182,65 @@ export function buildReencodeArgs(
   output: string,
   groups: readonly CutGroup[],
   metadata: VideoMetadata,
+  encoder: MediaEncoder = 'libopenh264',
 ): string[] {
   const hasAudio = metadata.audio_codec !== null;
   const filter = buildTrimFilter(groups, hasAudio, metadata.sample_aspect_ratio);
-  const sourceVideoBitrate = metadata.average_bitrate ?? 8_000_000;
-  // Re-encoding an already compressed H.264 source at the same nominal bitrate
-  // compounded loss (SSIM 0.9337 on the real baseline). A 2x target was the
-  // lowest tested value with a useful safety margin over the 0.95 release gate.
-  const videoBitrate = Math.round(Math.max(
-    sourceVideoBitrate,
-    Math.min(sourceVideoBitrate * 2, 50_000_000),
-  ));
-  const audioBitrate = Math.round(metadata.audio_bitrate ?? 192_000);
   const args = [
     '-hide_banner', '-y', '-noautorotate', '-i', input,
     '-filter_complex', filter.filter, ...filter.maps,
-    '-map_metadata', '0', '-sn', '-dn',
-    '-c:v', 'libopenh264', '-profile:v', 'high', '-b:v', String(videoBitrate),
-    '-pix_fmt', 'yuv420p', '-fps_mode', 'vfr', '-max_muxing_queue_size', '2048',
   ];
-  if (hasAudio) {
-    args.push('-c:a', 'aac', '-b:a', String(audioBitrate));
-    if (metadata.audio_sample_rate) args.push('-ar', String(metadata.audio_sample_rate));
-    if (metadata.audio_channels) args.push('-ac', String(metadata.audio_channels));
-  }
-  if (metadata.rotation !== null && metadata.rotation !== undefined) {
-    args.push('-metadata:s:v:0', `rotate=${metadata.rotation}`);
-  }
-  const colorOptions: Array<[string, string | null | undefined]> = [
-    ['-color_range', metadata.color_range],
-    ['-colorspace', metadata.color_space],
-    ['-color_trc', metadata.color_transfer],
-    ['-color_primaries', metadata.color_primaries],
-  ];
-  for (const [flag, value] of colorOptions) {
-    if (value && value !== 'unknown') args.push(flag, value);
-  }
-  args.push('-movflags', '+faststart', '-progress', 'pipe:1', '-nostats', output);
+  appendMediaOutputOptions(args, metadata, encoder, hasAudio);
+  args.push(output);
   return args;
+}
+
+export function buildSegmentReencodeArgs(
+  input: string,
+  output: string,
+  group: CutGroup,
+  seekStart: number,
+  metadata: VideoMetadata,
+  encoder: MediaEncoder = 'libopenh264',
+): string[] {
+  const safeSeekStart = Math.max(0, Math.min(seekStart, group.start));
+  const relativeStart = group.start - safeSeekStart;
+  const relativeEnd = group.end - safeSeekStart;
+  const relativeGroup: CutGroup = {
+    ...group,
+    start: relativeStart,
+    end: relativeEnd,
+  };
+  const hasAudio = metadata.audio_codec !== null;
+  const filter = buildTrimFilter([relativeGroup], hasAudio, metadata.sample_aspect_ratio);
+  const args = [
+    '-hide_banner', '-y', '-noautorotate',
+    '-ss', safeSeekStart.toFixed(6),
+    '-t', relativeEnd.toFixed(6),
+    '-i', input,
+    '-filter_complex', filter.filter, ...filter.maps,
+  ];
+  appendMediaOutputOptions(args, metadata, encoder, hasAudio);
+  args.push(output);
+  return args;
+}
+
+function escapeConcatPath(value: string): string {
+  return value.replaceAll('\\', '/').replaceAll("'", "'\\''");
+}
+
+export function buildConcatManifest(relativePaths: readonly string[]): string {
+  return `ffconcat version 1.0\n${relativePaths
+    .map((relativePath) => `file '${escapeConcatPath(relativePath)}'`)
+    .join('\n')}\n`;
+}
+
+export function buildConcatArgs(manifest: string, output: string): string[] {
+  return [
+    '-hide_banner', '-y',
+    '-f', 'concat', '-safe', '1', '-i', manifest,
+    '-map', '0:v:0', '-map', '0:a?', '-c', 'copy',
+    '-movflags', '+faststart',
+    '-progress', 'pipe:1', '-nostats', output,
+  ];
 }

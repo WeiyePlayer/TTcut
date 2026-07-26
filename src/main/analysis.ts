@@ -5,8 +5,8 @@ import {
   analysisRequestSchema,
   analysisResultSchema,
   workerEventSchema,
-  type AnalysisResultV1,
   type Calibration,
+  type CalibrationChoice,
   type WorkerEventV1,
 } from '../shared/contracts';
 import type { AppEvent } from '../shared/api';
@@ -16,44 +16,37 @@ import { logLine } from './logger';
 import { getHistoryStore } from './history';
 import { probeVideo } from './probe';
 import { hasActiveTasks, spawnTracked } from './processes';
-
-let latestResult: AnalysisResultV1 | null = null;
+import { overallAnalysisProgress } from '../domain/analysis-progress';
 
 function send(window: BrowserWindow, event: AppEvent): void {
   if (!window.isDestroyed()) window.webContents.send(IPC.taskEvent, event);
 }
 
-export function getLatestAnalysis(): AnalysisResultV1 | null {
-  return latestResult;
-}
-
-export function clearLatestAnalysis(): void {
-  latestResult = null;
-}
-
-export function activateLatestAnalysis(value: AnalysisResultV1): AnalysisResultV1 {
-  latestResult = analysisResultSchema.parse(value);
-  return latestResult;
-}
-
 export async function startAnalysis(
   window: BrowserWindow,
-  value: { videoPath: string; calibration: Calibration; device: 'auto' | 'cuda' | 'cpu' },
+  value: {
+    videoPath: string;
+    calibrationChoice: CalibrationChoice;
+    device: 'auto' | 'cuda' | 'cpu';
+    historyVisibility: 'visible' | 'deferred';
+  },
 ): Promise<string> {
   if (hasActiveTasks()) throw new Error('TASK_BUSY');
-  const components = await resolveUsableAnalysisComponents(value.device);
-  if (!components.python || !components.weights) throw new Error('RUNTIME_MISSING');
   const metadata = await probeVideo(value.videoPath);
-  if (metadata.width !== value.calibration.video_width || metadata.height !== value.calibration.video_height) {
+  if (value.calibrationChoice.method === 'manual'
+    && (metadata.width !== value.calibrationChoice.calibration.video_width
+      || metadata.height !== value.calibrationChoice.calibration.video_height)) {
     throw new Error('INVALID_CALIBRATION');
   }
   const taskId = randomUUID();
+  const components = await resolveUsableAnalysisComponents(value.device);
+  if (!components.python) throw new Error('RUNTIME_MISSING');
   const request = analysisRequestSchema.parse({
     schema_version: 1,
     task_id: taskId,
     video_path: metadata.path,
     device: value.device,
-    calibration: value.calibration,
+    calibration_choice: value.calibrationChoice,
   });
   const child = spawnTracked(taskId, components.python, ['-m', 'ttcut_worker.worker'], {
     cwd: components.worker,
@@ -61,7 +54,8 @@ export async function startAnalysis(
       ...process.env,
       PYTHONPATH: components.worker,
       PYTHONUTF8: '1',
-      TTCUT_TRACKNET_WEIGHTS: components.weights,
+      TTCUT_TRACKNET_WEIGHTS: components.tracknetWeights,
+      TTCUT_TABLE_ANALYZE_WEIGHTS: components.tableAnalyzeWeights,
     },
   });
   child.stdout.setEncoding('utf8');
@@ -69,9 +63,7 @@ export async function startAnalysis(
   let stdoutBuffer = '';
   let terminalEvent: Extract<AppEvent, { type: 'analysis-result' | 'error' }> | null = null;
   const protocolFailure = (line: string, error: unknown) => {
-    terminalEvent = {
-      type: 'error', taskId, code: 'INVALID_WORKER_OUTPUT', message: 'Worker output was invalid.',
-    };
+    terminalEvent = { type: 'error', taskId, code: 'INVALID_WORKER_OUTPUT', message: 'Worker output was invalid.' };
     void logLine(taskId, 'ERROR', `Invalid worker JSONL: ${line} :: ${String(error)}`);
     child.kill('SIGTERM');
   };
@@ -88,14 +80,19 @@ export async function startAnalysis(
             taskId,
             kind: 'analysis',
             stage: parsed.stage,
-            percent: parsed.stage === 'analysis' ? Math.min(parsed.percent, 99.9) : parsed.percent,
+            percent: overallAnalysisProgress(parsed.stage, parsed.percent, value.calibrationChoice.method),
             current: parsed.current,
             total: parsed.total,
           },
         });
       } else if (parsed.type === 'result') {
         const data = analysisResultSchema.parse({ ...parsed.data, video: metadata });
-        terminalEvent = { type: 'analysis-result', taskId, data };
+        const calibration = data.calibration
+          ?? (value.calibrationChoice.method === 'manual' ? value.calibrationChoice.calibration : null);
+        if (!calibration) throw new Error('Worker did not return calibration.');
+        terminalEvent = {
+          type: 'analysis-result', taskId, analysisId: randomUUID(), calibration, data,
+        };
       } else {
         terminalEvent = {
           type: 'error', taskId, code: parsed.code, message: parsed.message,
@@ -117,26 +114,24 @@ export async function startAnalysis(
     void logLine(taskId, 'ERROR', error.message);
     terminalEvent ??= { type: 'error', taskId, code: 'WORKER_EXITED', message: error.message };
   });
-  child.once('close', async (code) => {
+  child.once('close', async (code, signal) => {
     if (stdoutBuffer.trim()) processWorkerLine(stdoutBuffer);
     if (!terminalEvent) {
-      send(window, {
-        type: 'error', taskId, code: 'WORKER_EXITED',
-        message: `Analysis process exited without a terminal event (code ${code ?? -1}).`,
-      });
+      send(window, { type: 'error', taskId, code: 'WORKER_EXITED', message: `Analysis process exited without a terminal event (code ${String(code)}, signal ${String(signal)}).` });
     } else if (terminalEvent.type === 'analysis-result' && code !== 0) {
-      send(window, {
-        type: 'error', taskId, code: 'WORKER_EXITED',
-        message: `Analysis process exited with code ${code ?? -1} after reporting a result.`,
-      });
+      send(window, { type: 'error', taskId, code: 'WORKER_EXITED', message: `Analysis process exited with code ${String(code)} and signal ${String(signal)} after reporting a result.` });
     } else if (terminalEvent.type === 'analysis-result') {
-      latestResult = terminalEvent.data;
       try {
-        await getHistoryStore().upsert(terminalEvent.data, value.calibration);
+        const record = await getHistoryStore().upsert(
+          terminalEvent.data,
+          terminalEvent.calibration,
+          value.historyVisibility === 'visible' || terminalEvent.data.rallies.length === 0,
+        );
+        send(window, { ...terminalEvent, analysisId: record.id });
       } catch (error) {
-        await logLine(taskId, 'WARN', `Analysis history could not be saved: ${error instanceof Error ? error.stack ?? error.message : String(error)}`).catch(() => undefined);
+        await logLine(taskId, 'ERROR', `Analysis could not be saved: ${error instanceof Error ? error.stack ?? error.message : String(error)}`).catch(() => undefined);
+        send(window, { type: 'error', taskId, code: 'ANALYSIS_SAVE_FAILED', message: String(error) });
       }
-      send(window, terminalEvent);
     } else {
       send(window, terminalEvent);
     }

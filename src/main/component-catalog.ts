@@ -15,31 +15,6 @@ const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
 
 const componentCatalogSchema = z.object({
   schema_version: z.literal(1),
-  tracknet_weight: z.object({
-    filename: z.literal('TrackNet_best.pt'),
-    sha256: sha256Schema,
-    source: z.string().min(1),
-    redistribution: z.enum(['internal-only', 'redistributable']),
-    downloadable: z.boolean(),
-    provider: z.string().min(1),
-    release_tag: z.string().min(1),
-    url: z.string().url().refine((value) => value.startsWith('https://')),
-    size_bytes: z.number().int().positive(),
-    install_directory: z.literal('models'),
-    rights_evidence: z.object({
-      path: z.string().regex(/^rights\/[^/]+\.(?:md|pdf)$/),
-      sha256: sha256Schema,
-      rightsholder: z.string().min(1),
-      grant: z.string().min(1),
-    }).strict().nullable(),
-  }).strict().superRefine((weight, context) => {
-    if (weight.redistribution === 'internal-only' && (weight.downloadable || weight.rights_evidence !== null)) {
-      context.addIssue({ code: 'custom', message: 'Internal-only weights cannot be downloadable or claim rights evidence.' });
-    }
-    if (weight.redistribution === 'redistributable' && weight.rights_evidence === null) {
-      context.addIssue({ code: 'custom', path: ['rights_evidence'], message: 'Redistributable weights require immutable rights evidence.' });
-    }
-  }),
   analysis_runtime: z.object({
     runtime_id: z.literal(ANALYSIS_RUNTIME_ID),
     python_version: z.literal(ANALYSIS_PYTHON_VERSION),
@@ -65,7 +40,7 @@ const componentCatalogSchema = z.object({
       if (asset.parts.reduce((total, part) => total + part.size_bytes, 0) !== asset.size_bytes) {
         context.addIssue({ code: 'custom', path: ['parts'], message: 'Runtime asset part sizes must equal the complete archive size.' });
       }
-    })).max(2),
+    })).length(ANALYSIS_RUNTIME_VARIANTS.length),
   }).strict().superRefine((runtime, context) => {
     const variants = new Set<string>();
     for (const [index, asset] of runtime.assets.entries()) {
@@ -91,6 +66,23 @@ const componentCatalogSchema = z.object({
     required_build_flags: z.array(z.string().min(1)).min(1),
     required_encoders: z.array(z.string().min(1)).min(1),
   }).strict(),
+  ffmpeg_x264: z.object({
+    provider: z.string().min(1),
+    release_tag: z.literal('autobuild-2026-07-22-13-36'),
+    version_line: z.literal('N-125716-g1b1f602699-20260722'),
+    variant: z.literal('win64-gpl'),
+    asset: z.literal('ffmpeg-N-125716-g1b1f602699-win64-gpl.zip'),
+    archive_root: z.literal('ffmpeg-N-125716-g1b1f602699-win64-gpl'),
+    install_directory: z.literal('ffmpeg-x264-N-125716-g1b1f602699'),
+    url: z.string().url().refine((value) => value.startsWith('https://')),
+    license_url: z.string().url().refine((value) => value.startsWith('https://')),
+    source_url: z.string().url().refine((value) => value.startsWith('https://')),
+    size_bytes: z.literal(168_733_210),
+    sha256: z.literal('6dcf685c2fea98221b3f179961165e9c31f55bead576c4479ae4549858fbf826'),
+    required_build_flags: z.array(z.string().min(1)).min(1),
+    required_encoders: z.array(z.string().min(1)).min(1),
+    supported_pixel_formats: z.array(z.string().min(1)).min(1),
+  }).strict(),
 }).strict();
 
 export type ComponentCatalog = z.infer<typeof componentCatalogSchema>;
@@ -108,12 +100,18 @@ export function loadComponentCatalog(): Promise<ComponentCatalog> {
 
 export async function componentSetupInfo(): Promise<ComponentSetupInfo> {
   const catalog = await loadComponentCatalog();
+  const cpuAsset = catalog.analysis_runtime.assets.find((asset) => asset.variant === 'cpu');
+  const largestCudaAsset = Math.max(
+    0,
+    ...catalog.analysis_runtime.assets
+      .filter((asset) => asset.variant !== 'cpu')
+      .map((asset) => asset.size_bytes),
+  );
   return {
     analysis_offer: catalog.analysis_runtime.assets.length === ANALYSIS_RUNTIME_VARIANTS.length ? {
       id: 'analysis',
       version: `${catalog.analysis_runtime.python_version} / ${catalog.analysis_runtime.torch_version}`,
-      download_size_bytes: catalog.tracknet_weight.size_bytes
-        + catalog.analysis_runtime.assets.reduce((total, asset) => total + asset.size_bytes, 0),
+      download_size_bytes: (cpuAsset?.size_bytes ?? 0) + largestCudaAsset,
       license_url: catalog.analysis_runtime.license_url,
       available_for_download: process.platform === 'win32',
     } : null,
@@ -123,6 +121,13 @@ export async function componentSetupInfo(): Promise<ComponentSetupInfo> {
       download_size_bytes: catalog.ffmpeg.size_bytes,
       license_url: catalog.ffmpeg.license_url,
       available_for_download: process.platform === 'win32',
+    },
+    x264_manual_offer: {
+      id: 'media-x264',
+      version: catalog.ffmpeg_x264.version_line,
+      filename: catalog.ffmpeg_x264.asset,
+      download_size_bytes: catalog.ffmpeg_x264.size_bytes,
+      license_url: catalog.ffmpeg_x264.license_url,
     },
   };
 }

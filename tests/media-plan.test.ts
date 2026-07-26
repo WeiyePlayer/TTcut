@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { CutGroup, VideoMetadata } from '../src/shared/contracts';
 import {
+  buildConcatArgs,
+  buildConcatManifest,
   buildReencodeArgs,
+  buildSegmentReencodeArgs,
   buildStreamCopyArgs,
   canUseStreamCopy,
   expectedOutputDuration,
+  selectSeekStart,
 } from '../src/main/media-plan';
 
 const metadata: VideoMetadata = {
@@ -71,6 +75,24 @@ describe('media export planning', () => {
     expect(expectedOutputDuration([oneGroup, second])).toBe(11);
   });
 
+  it('builds x264 veryfast CRF 18 arguments without the OpenH264 bitrate policy', () => {
+    const args = buildReencodeArgs(metadata.path, 'x264.mp4', [oneGroup], metadata, 'libx264');
+    expect(args).toContain('libx264');
+    expect(args).toContain('veryfast');
+    expect(args).toContain('18');
+    expect(args).not.toContain('libopenh264');
+    expect(args).not.toContain('-b:v');
+    expect(args).not.toContain('-profile:v');
+    expect(args[args.indexOf('-pix_fmt') + 1]).toBe('yuv420p');
+  });
+
+  it('keeps supported source pixel formats for x264 and falls back for unknown formats', () => {
+    const tenBit = buildReencodeArgs(metadata.path, 'x264-10bit.mp4', [oneGroup], { ...metadata, pixel_format: 'yuv420p10le' }, 'libx264');
+    expect(tenBit[tenBit.indexOf('-pix_fmt') + 1]).toBe('yuv420p10le');
+    const unknown = buildReencodeArgs(metadata.path, 'x264-unknown.mp4', [oneGroup], { ...metadata, pixel_format: 'gbrp' }, 'libx264');
+    expect(unknown[unknown.indexOf('-pix_fmt') + 1]).toBe('yuv420p');
+  });
+
   it('uses stream copy only for stable, packet-aligned single groups', () => {
     expect(canUseStreamCopy([oneGroup], [0, 8, 14], [0, 8, 14], metadata)).toBe(true);
     expect(canUseStreamCopy([oneGroup, { ...oneGroup, start: 20, end: 22 }], [8, 14, 20, 22], [8, 14, 20, 22], metadata)).toBe(false);
@@ -83,5 +105,72 @@ describe('media export planning', () => {
     expect(args.slice(args.indexOf('-ss'), args.indexOf('-ss') + 4)).toEqual(['-ss', '8.000000', '-to', '14.000000']);
     expect(args).toContain('0:a?');
     expect(args).toContain('copy');
+  });
+
+  it.each(['libopenh264', 'libx264'] as const)(
+    'builds a keyframe-seeked, precisely trimmed segment for %s',
+    (encoder) => {
+      const args = buildSegmentReencodeArgs(
+        metadata.path,
+        'segment-000001.mp4',
+        oneGroup,
+        5,
+        metadata,
+        encoder,
+      );
+      expect(args.slice(0, args.indexOf('-i') + 2)).toEqual([
+        '-hide_banner', '-y', '-noautorotate',
+        '-ss', '5.000000', '-t', '9.000000', '-i', metadata.path,
+      ]);
+      const filter = args[args.indexOf('-filter_complex') + 1];
+      expect(filter).toContain('trim=start=3.000000:end=9.000000');
+      expect(filter).toContain('atrim=start=3.000000:end=9.000000');
+      expect(args).toContain(encoder);
+    },
+  );
+
+  it('selects the nearest keyframe no later than the segment start', () => {
+    expect(selectSeekStart(8, [0, 2.5, 7.75, 9])).toBe(7.75);
+    expect(selectSeekStart(8, [9, 12])).toBe(0);
+  });
+
+  it('builds a safe relative ffconcat manifest and stream-copy concat command', () => {
+    const manifest = buildConcatManifest(['segment-000001.mp4', "nested/segment-'000002.mp4"]);
+    expect(manifest).toBe(
+      "ffconcat version 1.0\nfile 'segment-000001.mp4'\nfile 'nested/segment-'\\''000002.mp4'\n",
+    );
+    expect(manifest.charCodeAt(0)).not.toBe(0xfeff);
+
+    const args = buildConcatArgs('segments.ffconcat', 'output.partial.mp4');
+    expect(args).toEqual(expect.arrayContaining([
+      '-f', 'concat', '-safe', '1', '-i', 'segments.ffconcat', '-c', 'copy',
+    ]));
+  });
+
+  it('omits audio filters and encoding for silent segmented input', () => {
+    const args = buildSegmentReencodeArgs(
+      metadata.path,
+      'silent.mp4',
+      oneGroup,
+      0,
+      { ...metadata, audio_codec: null, audio_bitrate: null, audio_sample_rate: null, audio_channels: null },
+      'libx264',
+    );
+    const filter = args[args.indexOf('-filter_complex') + 1];
+    expect(filter).not.toContain('atrim');
+    expect(args).not.toContain('-c:a');
+  });
+
+  it('preserves VFR output mode for segmented encoding', () => {
+    const args = buildSegmentReencodeArgs(
+      metadata.path,
+      'vfr.mp4',
+      oneGroup,
+      0,
+      { ...metadata, variable_frame_rate: true },
+      'libopenh264',
+    );
+    expect(args.slice(args.indexOf('-fps_mode'), args.indexOf('-fps_mode') + 2)).toEqual(['-fps_mode', 'vfr']);
+    expect(args).not.toContain('-r');
   });
 });

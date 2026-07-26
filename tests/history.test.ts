@@ -98,10 +98,31 @@ describe('analysis history', () => {
     await expect(store.open(first!.id)).rejects.toThrow('HISTORY_SOURCE_CHANGED');
   });
 
-  it('does not store an empty analysis and never deletes the source file', async () => {
+  it('persists deferred analysis without showing it until export completes', async () => {
     const { store, source } = await storeFixture();
-    await expect(store.upsert(analysis(source, 0), calibration)).resolves.toBeNull();
+    const hidden = await store.upsert(analysis(source), calibration, false);
     expect(await store.list()).toEqual([]);
+    expect((await store.findBySource(source))?.id).toBe(hidden.id);
+
+    await store.markVisible(hidden.id, 'export', `${source}.output.mp4`);
+    const entries = await store.list();
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.record).toMatchObject({
+      id: hidden.id,
+      visible_in_history: true,
+      completion_kind: 'export',
+      output_path: `${source}.output.mp4`,
+    });
+  });
+
+  it('stores a zero-rally analysis and never deletes the source file', async () => {
+    const { store, source } = await storeFixture();
+    const emptyRecord = await store.upsert(analysis(source, 0), calibration);
+    expect(emptyRecord?.analysis.rallies).toEqual([]);
+    expect(await store.list()).toHaveLength(1);
+    await store.delete(emptyRecord!.id);
+    expect(await store.list()).toEqual([]);
+    await expect(stat(source)).resolves.toMatchObject({ size: 12 });
 
     const record = await store.upsert(analysis(source), calibration);
     await store.delete(record!.id);

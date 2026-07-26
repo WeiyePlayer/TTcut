@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ComponentCatalog } from '../src/main/component-catalog';
-import { validateImportFiles } from '../src/main/component-import';
+import { cacheAndCollectRuntimeImports, validateImportFiles } from '../src/main/component-import';
 
 const temporaryDirectories: string[] = [];
 
@@ -26,11 +26,6 @@ function testCatalog(): ComponentCatalog {
   const media = 'media-data';
   return {
     schema_version: 1,
-    tracknet_weight: {
-      filename: 'TrackNet_best.pt', sha256: hash('weight-data'), source: 'test', redistribution: 'redistributable', downloadable: true,
-      provider: 'test', release_tag: 'test', url: 'https://example.com/weight', size_bytes: 11, install_directory: 'models',
-      rights_evidence: { path: 'rights/test.md', sha256: hash('rights'), rightsholder: 'test', grant: 'test' },
-    },
     analysis_runtime: {
       runtime_id: '3.12.13-2.12.1', python_version: '3.12.13', torch_version: '2.12.1', license_url: 'https://example.com/license',
       assets: [
@@ -53,6 +48,13 @@ function testCatalog(): ComponentCatalog {
       install_directory: 'ffmpeg-8.1', url: 'https://example.com/ffmpeg', license_url: 'https://example.com/ffmpeg-license', size_bytes: media.length,
       sha256: hash(media), required_build_flags: ['--enable-shared'], required_encoders: ['aac'],
     },
+    ffmpeg_x264: {
+      provider: 'test', release_tag: 'autobuild-2026-07-22-13-36', version_line: 'N-125716-g1b1f602699-20260722', variant: 'win64-gpl',
+      asset: 'ffmpeg-N-125716-g1b1f602699-win64-gpl.zip', archive_root: 'ffmpeg-N-125716-g1b1f602699-win64-gpl', install_directory: 'ffmpeg-x264-N-125716-g1b1f602699',
+      url: 'https://example.com/ffmpeg-x264', license_url: 'https://example.com/ffmpeg-x264-license', source_url: 'https://example.com/ffmpeg-x264-source',
+      size_bytes: 168_733_210, sha256: '6dcf685c2fea98221b3f179961165e9c31f55bead576c4479ae4549858fbf826',
+      required_build_flags: ['--enable-gpl', '--enable-libx264'], required_encoders: ['libx264', 'aac'], supported_pixel_formats: ['yuv420p'],
+    },
   };
 }
 
@@ -61,10 +63,10 @@ afterEach(async () => {
 });
 
 describe('manual component import validation', () => {
-  it('recognizes the fixed model, CPU runtime, CUDA parts, and media archive', async () => {
+  it('recognizes CPU runtime, CUDA parts, and both media archives', async () => {
     const root = await temporaryDirectory();
     const files = [
-      ['TrackNet_best.pt', 'weight-data'], ['cpu.zip', 'cpu-data'], ['cu126.zip.part001', 'cuda-one'], ['cu126.zip.part002', 'cuda-two'],
+      ['cpu.zip', 'cpu-data'], ['cu126.zip.part001', 'cuda-one'], ['cu126.zip.part002', 'cuda-two'],
       ['cu126.zip.part003', 'cuda-three'], ['ffmpeg.zip', 'media-data'],
     ] as const;
     const paths = await Promise.all(files.map(async ([name, content]) => {
@@ -74,11 +76,18 @@ describe('manual component import validation', () => {
     }));
 
     await expect(validateImportFiles(paths, testCatalog())).resolves.toEqual(expect.arrayContaining([
-      expect.objectContaining({ kind: 'weight' }),
       expect.objectContaining({ kind: 'runtime-part', variant: 'cpu' }),
       expect.objectContaining({ kind: 'runtime-part', variant: 'cu126' }),
       expect.objectContaining({ kind: 'media' }),
     ]));
+  });
+
+  it('rejects the floating x264 latest filename', async () => {
+    const root = await temporaryDirectory();
+    const catalog = testCatalog();
+    const floating = path.join(root, 'ffmpeg-master-latest-win64-gpl.zip');
+    await writeFile(floating, 'media-x264-data', 'utf8');
+    await expect(validateImportFiles([floating], catalog)).rejects.toThrow('COMPONENT_IMPORT_UNSUPPORTED_FILE');
   });
 
   it('rejects unknown, wrong-size, and wrong-hash files', async () => {
@@ -91,12 +100,12 @@ describe('manual component import validation', () => {
     await writeFile(wrongSize, 'wrong', 'utf8');
     await expect(validateImportFiles([wrongSize], testCatalog())).rejects.toThrow('COMPONENT_IMPORT_FILE_SIZE_MISMATCH');
 
-    const wrongHash = path.join(root, 'TrackNet_best.pt');
-    await writeFile(wrongHash, 'weight-datX', 'utf8');
+    const wrongHash = path.join(root, 'cpu.zip');
+    await writeFile(wrongHash, 'cpu-datX', 'utf8');
     await expect(validateImportFiles([wrongHash], testCatalog())).rejects.toThrow('COMPONENT_IMPORT_FILE_HASH_MISMATCH');
   });
 
-  it('requires every CUDA runtime part when any CUDA part is selected', async () => {
+  it('persists partial CUDA imports and assembles them after the final part arrives', async () => {
     const root = await temporaryDirectory();
     const selected = await Promise.all(([ 
       ['cu126.zip.part001', 'cuda-one'], ['cu126.zip.part002', 'cuda-two'],
@@ -106,6 +115,48 @@ describe('manual component import validation', () => {
       return file;
     }));
 
-    await expect(validateImportFiles(selected, testCatalog())).rejects.toThrow('COMPONENT_IMPORT_MISSING_PARTS:cu126.zip.part003');
+    const catalog = testCatalog();
+    const first = await validateImportFiles(selected, catalog);
+    const cacheRoot = path.join(root, 'components', '.downloads');
+    const firstResult = await cacheAndCollectRuntimeImports(first, catalog, cacheRoot, 'first-task');
+    expect(firstResult).toEqual([expect.objectContaining({
+      variant: 'cu126',
+      pending: expect.objectContaining({
+        receivedParts: 2,
+        totalParts: 3,
+        missingAssets: ['cu126.zip.part003'],
+      }),
+    })]);
+    expect((await stat(path.join(cacheRoot, 'cu126.zip.part001.download'))).size).toBe('cuda-one'.length);
+
+    const finalPart = path.join(root, 'cu126.zip.part003');
+    await writeFile(finalPart, 'cuda-three', 'utf8');
+    const second = await validateImportFiles([finalPart], catalog);
+    const secondResult = await cacheAndCollectRuntimeImports(second, catalog, cacheRoot, 'second-task');
+    expect(secondResult[0]?.pending).toBeNull();
+    expect(secondResult[0]?.files).toHaveLength(3);
+    expect(await readFile(secondResult[0]!.files[0]!.sourcePath, 'utf8')).toBe('cuda-one');
+  });
+
+  it('does not use a corrupted cached part when completing a later import', async () => {
+    const root = await temporaryDirectory();
+    const catalog = testCatalog();
+    const partPaths = await Promise.all(([
+      ['cu126.zip.part001', 'cuda-one'], ['cu126.zip.part002', 'cuda-two'],
+    ] as const).map(async ([name, content]) => {
+      const file = path.join(root, name);
+      await writeFile(file, content, 'utf8');
+      return file;
+    }));
+    await cacheAndCollectRuntimeImports(await validateImportFiles(partPaths, catalog), catalog, path.join(root, 'cache'), 'first-task');
+    await writeFile(path.join(root, 'cache', 'cu126.zip.part001.download'), 'bad-data', 'utf8');
+    const third = path.join(root, 'cu126.zip.part003');
+    await writeFile(third, 'cuda-three', 'utf8');
+
+    const result = await cacheAndCollectRuntimeImports(await validateImportFiles([third], catalog), catalog, path.join(root, 'cache'), 'second-task');
+    expect(result[0]?.pending).toEqual(expect.objectContaining({
+      receivedParts: 2,
+      missingAssets: ['cu126.zip.part001'],
+    }));
   });
 });

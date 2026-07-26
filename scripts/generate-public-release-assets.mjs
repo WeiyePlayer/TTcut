@@ -6,6 +6,8 @@ const projectRoot = resolve(import.meta.dirname, "..");
 const version = JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8")).version;
 const releaseDirectory = join(projectRoot, "out", "make", "squirrel.windows", "x64");
 const installerPath = join(releaseDirectory, `TTcut-${version}-x64-Setup.exe`);
+const packagePath = join(releaseDirectory, `TTcut-${version}-full.nupkg`);
+const releasesPath = join(releaseDirectory, "RELEASES");
 const sbomSourcePath = join(projectRoot, ".runtime", "release-metadata", "sbom.cdx.json");
 const sbomDestinationPath = join(releaseDirectory, "sbom.cdx.json");
 const sumsPath = join(releaseDirectory, "SHA256SUMS.txt");
@@ -16,10 +18,12 @@ async function sha256(path) {
 }
 
 await stat(installerPath);
+await stat(packagePath);
+await stat(releasesPath);
 await stat(sbomSourcePath);
 await copyFile(sbomSourcePath, sbomDestinationPath);
 
-const releaseFiles = [installerPath, sbomDestinationPath];
+const releaseFiles = [installerPath, packagePath, releasesPath, sbomDestinationPath];
 const lines = [];
 for (const filePath of releaseFiles) {
   lines.push(`${await sha256(filePath)}  ${basename(filePath)}`);

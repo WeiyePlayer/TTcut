@@ -4,9 +4,94 @@ export const DEVICE_VALUES = ['auto', 'cuda', 'cpu'] as const;
 export const PRE_ROLL_VALUES = [1.5, 2.5, 5] as const;
 export const POST_ROLL_VALUES = [0.5, 1, 2, 4] as const;
 export const HIGHLIGHT_VALUES = [3, 5, 7] as const;
+export const EXPORT_STRATEGIES = ['compatible', 'fast_segmented'] as const;
 
 const finiteNumber = z.number().finite();
 const point = z.tuple([finiteNumber, finiteNumber]);
+const tableSampleLabelSchema = z.enum(['first', '25_percent', '50_percent', '75_percent', 'last']);
+const tableKeypointLabelSchema = z.enum([
+  'close_left',
+  'close_right',
+  'center_left',
+  'center_right',
+  'far_left',
+  'far_right',
+  'net_left_bottom',
+  'net_right_bottom',
+  'net_center_bottom',
+  'net_left_top',
+  'net_right_top',
+  'close_center',
+  'far_center',
+]);
+
+const tableSampleKeypointSchema = z.object({
+  keypoint: z.number().int().min(1).max(13),
+  label: tableKeypointLabelSchema,
+  x: finiteNumber,
+  y: finiteNumber,
+  activation: finiteNumber,
+  valid: z.boolean(),
+}).strict();
+
+const tableSampleSchema = z.object({
+  label: tableSampleLabelSchema,
+  frame_index: z.number().int().nonnegative(),
+  time_seconds: finiteNumber.nonnegative(),
+  forward_seconds: finiteNumber.nonnegative(),
+  keypoints: z.array(tableSampleKeypointSchema).length(13),
+}).strict();
+
+const fixedTableKeypointSchema = z.discriminatedUnion('valid', [
+  z.object({
+    keypoint: z.number().int().min(1).max(13),
+    label: tableKeypointLabelSchema,
+    valid: z.literal(false),
+    valid_candidate_count: z.number().int().min(0).max(1),
+  }).strict(),
+  z.object({
+    keypoint: z.number().int().min(1).max(13),
+    label: tableKeypointLabelSchema,
+    valid: z.literal(true),
+    valid_candidate_count: z.number().int().min(2).max(5),
+    selected_samples: z.tuple([tableSampleLabelSchema, tableSampleLabelSchema]),
+    pair_distance_pixels: finiteNumber.nonnegative(),
+    x: finiteNumber,
+    y: finiteNumber,
+    activation: finiteNumber,
+  }).strict(),
+]);
+
+export const tableAnalysisSchema = z.object({
+  schema_version: z.literal(1),
+  model: z.object({
+    id: z.literal('table_analyze'),
+    filename: z.literal('table_analyze.pt'),
+    checkpoint_identifier: z.string().min(1),
+  }).strict(),
+  device: z.enum(['cpu', 'cuda']),
+  model_load_seconds: finiteNumber.nonnegative(),
+  video_info: z.object({
+    width: z.number().int().positive(),
+    height: z.number().int().positive(),
+    fps: finiteNumber.positive(),
+    metadata_frame_count: z.number().int().nonnegative(),
+    decoded_frame_count: z.number().int().positive(),
+    duration_seconds: finiteNumber.positive(),
+  }).strict(),
+  sampling: z.array(tableSampleSchema).length(5).superRefine((samples, context) => {
+    const expected = ['first', '25_percent', '50_percent', '75_percent', 'last'];
+    samples.forEach((sample, index) => {
+      if (sample.label !== expected[index]) context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [index, 'label'],
+        message: 'Table samples must use the fixed five-frame order.',
+      });
+    });
+  }),
+  aggregation_rule: z.literal('closest_valid_pair_mean'),
+  fixed_keypoints: z.array(fixedTableKeypointSchema).length(13),
+}).strict();
 
 export const calibrationSchema = z.object({
   video_width: z.number().int().positive(),
@@ -19,12 +104,17 @@ export const calibrationSchema = z.object({
   }).strict(),
 }).strict();
 
+export const calibrationChoiceSchema = z.discriminatedUnion('method', [
+  z.object({ method: z.literal('manual'), calibration: calibrationSchema }).strict(),
+  z.object({ method: z.literal('automatic') }).strict(),
+]);
+
 export const analysisRequestSchema = z.object({
   schema_version: z.literal(1),
   task_id: z.string().uuid(),
   video_path: z.string().min(1),
   device: z.enum(DEVICE_VALUES),
-  calibration: calibrationSchema,
+  calibration_choice: calibrationChoiceSchema,
 }).strict();
 
 export const videoMetadataSchema = z.object({
@@ -74,6 +164,8 @@ export const analysisResultSchema = z.object({
   schema_version: z.literal(1),
   video: videoMetadataSchema,
   rallies: z.array(rallySchema),
+  calibration: calibrationSchema.optional(),
+  table_analysis: tableAnalysisSchema.optional(),
 }).strict();
 
 const workerBase = z.object({
@@ -83,7 +175,7 @@ const workerBase = z.object({
 export const workerEventSchema = z.discriminatedUnion('type', [
   workerBase.extend({
     type: z.literal('progress'),
-    stage: z.enum(['probe', 'load_model', 'analysis', 'postprocess']),
+    stage: z.enum(['probe', 'table_sampling', 'table_model', 'table_inference', 'load_model', 'analysis', 'postprocess']),
     current: z.number().int().nonnegative(),
     total: z.number().int().nonnegative(),
     percent: finiteNumber.min(0).max(100),
@@ -123,6 +215,8 @@ export const cutSelectionSchema = z.discriminatedUnion('mode', [
 
 export const appSettingsSchema = z.object({
   language: z.enum(['zh-CN', 'en']),
+  calibration_method: z.enum(['manual', 'automatic']),
+  export_strategy: z.enum(EXPORT_STRATEGIES),
   pre_roll_seconds: z.union(PRE_ROLL_VALUES.map((value) => z.literal(value))),
   post_roll_seconds: z.union(POST_ROLL_VALUES.map((value) => z.literal(value))),
 }).strict();
@@ -141,6 +235,9 @@ export const historyRecordSchema = z.object({
   source: historySourceSchema,
   calibration: calibrationSchema,
   analysis: analysisResultSchema,
+  visible_in_history: z.boolean().default(true),
+  completion_kind: z.enum(['analysis', 'export']).default('analysis'),
+  output_path: z.string().min(1).nullable().default(null),
 }).strict();
 
 export const historySummarySchema = z.object({
@@ -148,10 +245,26 @@ export const historySummarySchema = z.object({
   id: z.string().uuid(),
   analyzed_at: z.string().min(1),
   video_name: z.string().min(1),
-  rally_count: z.number().int().positive(),
+  rally_count: z.number().int().nonnegative(),
   duration_seconds: finiteNumber.positive(),
   cover_url: z.string().min(1).nullable(),
   source_status: z.enum(['available', 'missing', 'changed']),
+  completion_kind: z.enum(['analysis', 'export']).default('analysis'),
+  output_path: z.string().min(1).nullable().default(null),
+}).strict();
+
+export const exportRequestSchema = z.object({
+  analysis_id: z.string().uuid(),
+  selection: cutSelectionSchema,
+  export_strategy: z.enum(EXPORT_STRATEGIES),
+  destination: z.enum(['prompt', 'source']),
+  mode_label: z.string().min(1).optional(),
+}).strict();
+
+export const updateStateSchema = z.object({
+  status: z.enum(['idle', 'unsupported', 'checking', 'available', 'downloaded', 'up-to-date', 'error']),
+  version: z.string().min(1).nullable(),
+  message: z.string().nullable(),
 }).strict();
 
 export const componentStatusSchema = z.object({
@@ -166,6 +279,8 @@ export const componentStatusSchema = z.object({
     available: z.boolean(),
     version: z.string().nullable(),
     path: z.string().nullable(),
+    active_encoder: z.enum(['libopenh264', 'libx264', 'unavailable']),
+    x264_available: z.boolean(),
     detail: z.string().nullable(),
   }).strict(),
 }).strict();
@@ -181,6 +296,13 @@ export const managedComponentOfferSchema = z.object({
 export const componentSetupInfoSchema = z.object({
   analysis_offer: managedComponentOfferSchema.nullable(),
   media_offer: managedComponentOfferSchema.nullable(),
+  x264_manual_offer: z.object({
+    id: z.literal('media-x264'),
+    version: z.string().min(1),
+    filename: z.string().endsWith('.zip'),
+    download_size_bytes: z.number().int().positive(),
+    license_url: z.string().url(),
+  }).strict(),
 }).strict();
 
 export const platformCompatibilitySchema = z.object({
@@ -200,12 +322,15 @@ export const platformCompatibilitySchema = z.object({
 }).strict();
 
 export type Calibration = z.infer<typeof calibrationSchema>;
+export type CalibrationChoice = z.infer<typeof calibrationChoiceSchema>;
+export type TableAnalysis = z.infer<typeof tableAnalysisSchema>;
 export type AnalysisRequestV1 = z.infer<typeof analysisRequestSchema>;
 export type VideoMetadata = z.infer<typeof videoMetadataSchema>;
 export type Rally = z.infer<typeof rallySchema>;
 export type AnalysisResultV1 = z.infer<typeof analysisResultSchema>;
 export type WorkerEventV1 = z.infer<typeof workerEventSchema>;
 export type CutSelectionV1 = z.infer<typeof cutSelectionSchema>;
+export type ExportStrategy = typeof EXPORT_STRATEGIES[number];
 export type AppSettings = z.infer<typeof appSettingsSchema>;
 export type HistorySource = z.infer<typeof historySourceSchema>;
 export type HistoryRecordV1 = z.infer<typeof historyRecordSchema>;
@@ -214,6 +339,8 @@ export type ComponentStatus = z.infer<typeof componentStatusSchema>;
 export type ManagedComponentOffer = z.infer<typeof managedComponentOfferSchema>;
 export type ComponentSetupInfo = z.infer<typeof componentSetupInfoSchema>;
 export type PlatformCompatibility = z.infer<typeof platformCompatibilitySchema>;
+export type ExportRequest = z.infer<typeof exportRequestSchema>;
+export type UpdateState = z.infer<typeof updateStateSchema>;
 
 export type CutGroup = {
   rallyIds: string[];
@@ -234,6 +361,7 @@ export type TaskProgress = {
 
 export type ExportResult = {
   taskId: string;
+  analysisId: string;
   outputPath: string;
   outputName: string;
   mediaUrl: string;
