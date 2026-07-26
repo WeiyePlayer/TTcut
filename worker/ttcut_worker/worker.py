@@ -13,6 +13,7 @@ from .calibration import TableCalibration
 from .errors import InvalidRequestError, ModelResourceError, TableModelResourceError, WorkerError
 from .model import load_tracknet
 from .predictor import TrackNetPredictor
+from .roi import AnalysisRoiConfig, build_analysis_roi
 from .rallies import group_rallies
 from .table_analyze import analyze_table
 
@@ -80,6 +81,7 @@ def analyze(request: dict) -> dict:
         calibration = TableCalibration.from_points(
             calibration_value["video_width"], calibration_value["video_height"], calibration_value["points"],
         )
+    analysis_roi = build_analysis_roi(calibration, AnalysisRoiConfig())
     weight_path = os.environ.get("TTCUT_TRACKNET_WEIGHTS", "").strip()
     if not weight_path:
         raise ModelResourceError("Bundled analysis model path is not configured.")
@@ -94,7 +96,11 @@ def analyze(request: dict) -> dict:
             "current": current, "total": total, "percent": round(percent, 4),
         })
 
-    points, info, _stats = TrackNetPredictor(loaded).predict(request["video_path"], progress_callback=progress)
+    points, info, _stats = TrackNetPredictor(loaded).predict(
+        request["video_path"],
+        progress_callback=progress,
+        analysis_roi=analysis_roi,
+    )
     emit({"type": "progress", "task_id": task_id, "stage": "postprocess", "current": 0, "total": 1, "percent": 0.0})
     bounce_frames = detect_bounce_frames(points, calibration)
     rallies = group_rallies(bounce_frames, points)

@@ -15,6 +15,18 @@ application package to execute local analysis.
 The four table-corner coordinates used for a video analysis. Calibration can
 be provided manually or produced automatically from five sampled video frames.
 
+## Analysis ROI
+
+A conservative source-frame rectangle derived from Calibration and used only
+to prepare ball-detection inputs. It never replaces or modifies source media.
+_Avoid_: 3D column, crop video
+
+## Source-frame Trajectory
+
+Ball positions expressed in the original video's pixel coordinate system,
+regardless of the Analysis ROI or model tensor size used for detection.
+_Avoid_: Crop-relative trajectory
+
 ## Batch Task
 
 A serial queue of independent video analyses. A failure for one item does not
