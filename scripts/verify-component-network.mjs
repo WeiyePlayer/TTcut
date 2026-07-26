@@ -35,13 +35,13 @@ async function probe(label, url, expectedSize) {
 }
 
 const probes = [
+  ['tracknet-weight', catalog.tracknet_weight.url, catalog.tracknet_weight.size_bytes],
   ...catalog.analysis_runtime.assets.flatMap((asset) => asset.parts.map((part) => [
     `analysis-${asset.variant}-${part.asset}`,
     part.url,
     part.size_bytes,
   ])),
   ['media-runtime', catalog.ffmpeg.url, catalog.ffmpeg.size_bytes],
-  ['media-x264-runtime', catalog.ffmpeg_x264.url, catalog.ffmpeg_x264.size_bytes],
 ];
 
 for (const [label, url, expectedSize] of probes) await probe(label, url, expectedSize);

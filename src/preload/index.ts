@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { TTcutApi, AppEvent } from '../shared/api';
-import type { AppSettings, CalibrationChoice, ExportRequest } from '../shared/contracts';
+import type { AppSettings, Calibration, CutSelectionV1 } from '../shared/contracts';
 import { IPC } from '../shared/ipc';
 
 const api: TTcutApi = {
@@ -9,22 +9,19 @@ const api: TTcutApi = {
   refreshComponents: () => ipcRenderer.invoke(IPC.componentsRefresh),
   importComponents: () => ipcRenderer.invoke(IPC.componentsImport),
   openComponentDownloads: () => ipcRenderer.invoke(IPC.componentsOpenDownloads),
-  openX264Download: () => ipcRenderer.invoke(IPC.componentsOpenX264Download),
   installAnalysisComponent: (consent: true) => ipcRenderer.invoke(IPC.componentsInstallAnalysis, consent),
   installMediaComponent: (consent: true) => ipcRenderer.invoke(IPC.componentsInstallMedia, consent),
   selectVideo: () => ipcRenderer.invoke(IPC.videoSelect),
-  selectVideos: () => ipcRenderer.invoke(IPC.videosSelect),
   pathForDroppedFile: (file: File) => webUtils.getPathForFile(file),
   acceptDroppedVideo: (path: string) => ipcRenderer.invoke(IPC.videoAcceptDrop, path),
   probeVideo: (path: string) => ipcRenderer.invoke(IPC.videoProbe, path),
-  startAnalysis: (input: { videoPath: string; calibrationChoice: CalibrationChoice; device: 'auto' | 'cuda' | 'cpu'; historyVisibility: 'visible' | 'deferred' }) => (
+  startAnalysis: (input: { videoPath: string; calibration: Calibration; device: 'auto' | 'cuda' | 'cpu' }) => (
     ipcRenderer.invoke(IPC.analysisStart, input)
   ),
-  startExport: (input: ExportRequest) => ipcRenderer.invoke(IPC.exportStart, input),
+  startExport: (selection: CutSelectionV1) => ipcRenderer.invoke(IPC.exportStart, selection),
   listHistory: () => ipcRenderer.invoke(IPC.historyList),
   openHistory: (id: string) => ipcRenderer.invoke(IPC.historyOpen, id),
   deleteHistory: (id: string) => ipcRenderer.invoke(IPC.historyDelete, id),
-  deleteAnalysis: (id: string) => ipcRenderer.invoke(IPC.analysisDelete, id),
   clearHistory: () => ipcRenderer.invoke(IPC.historyClear),
   cancelTask: (taskId: string) => ipcRenderer.invoke(IPC.taskCancel, taskId),
   onTaskEvent: (listener: (event: AppEvent) => void) => {
@@ -36,14 +33,6 @@ const api: TTcutApi = {
   revealLogs: () => ipcRenderer.invoke(IPC.logsReveal),
   openLicenses: () => ipcRenderer.invoke(IPC.licensesOpen),
   openExternalUrl: (url: string) => ipcRenderer.invoke(IPC.externalOpen, url),
-  getUpdateState: () => ipcRenderer.invoke(IPC.updateGetState),
-  checkForUpdates: () => ipcRenderer.invoke(IPC.updateCheck),
-  restartToUpdate: () => ipcRenderer.invoke(IPC.updateInstall),
-  onUpdateState: (listener) => {
-    const wrapped = (_event: Electron.IpcRendererEvent, value: Parameters<typeof listener>[0]) => listener(value);
-    ipcRenderer.on(IPC.updateState, wrapped);
-    return () => ipcRenderer.removeListener(IPC.updateState, wrapped);
-  },
   minimize: () => ipcRenderer.invoke(IPC.windowMinimize),
   toggleMaximize: () => ipcRenderer.invoke(IPC.windowToggleMaximize),
   close: () => ipcRenderer.invoke(IPC.windowClose),

@@ -29,8 +29,8 @@
 ## 数据流
 
 ```text
-MP4 -> ffprobe -> 手动四点或自动五帧球台标定 -> AnalysisRequestV1
-     -> Python Worker -> 球台 13 点数据 + progress JSONL -> AnalysisResultV1
+MP4 -> ffprobe -> 四点标定 -> AnalysisRequestV1
+     -> Python Worker -> progress JSONL -> AnalysisResultV1
      -> 原子保存历史记录 + FFmpeg 提取首帧封面
      -> Main 重新计算选择 -> CutGroup[]
      -> FFmpeg -> .partial.mp4 -> 探测/同步/元数据验证
@@ -44,7 +44,7 @@ Renderer 不能提交任意剪辑时间段；Main 只接受模式、阈值、回
 ## 设置与本地数据
 
 - `userData/settings.json`：经 Zod 校验、临时文件写入后原子替换；损坏文件会备份并恢复默认值。
-- `userData/history/index.json`、`records/`、`covers/`：本地分析摘要、完整结果、自动标定的五帧/13 点结构化数据和首帧 JPEG；同一文件指纹重新分析时替换旧记录，删除历史不会触碰源视频或输出视频。
+- `userData/history/index.json`、`records/`、`covers/`：本地分析摘要、完整结果和首帧 JPEG；同一文件指纹重新分析时替换旧记录，删除历史不会触碰源视频或输出视频。
 - `userData/logs`：技术日志；普通错误页不直接呈现 traceback。
 - `%LOCALAPPDATA%\TTcutData\components`：受管组件、下载缓存和来源清单；独立于 Squirrel 应用安装根。
 - 输入视频、输出视频和真实验证基线不会上传。
