@@ -27,6 +27,11 @@ class CalibrationError(WorkerError):
     code = "INVALID_CALIBRATION"
 
 
+class AnalysisRoiError(WorkerError):
+    code = "ANALYSIS_ROI_FAILED"
+    recoverable = False
+
+
 class AutoCalibrationError(CalibrationError):
     code = "AUTO_CALIBRATION_FAILED"
 
