@@ -11,19 +11,18 @@ const projectRoot = path.resolve(process.cwd());
 const electronPath = process.env.TTCUT_E2E_ELECTRON
   ?? path.join(projectRoot, '.baseline', 'electron-dev', '43.1.1', 'electron.exe');
 const componentSource = process.env.TTCUT_COMPONENT_IMPORT_SOURCE ?? 'D:\\DOCUMENTS\\test';
-const runId = `${process.pid}-${Date.now()}`;
 const componentsRoot = process.env.TTCUT_COMPONENT_IMPORT_ROOT
-  ?? path.join(projectRoot, '.baseline', `e2e-component-import-components-${runId}`);
-const userData = path.join(projectRoot, 'output', 'playwright', `component-import-user-data-${runId}`);
+  ?? path.join(process.env.LOCALAPPDATA ?? '', 'TTcutData', 'components');
+const userData = path.join(projectRoot, 'output', 'playwright', 'component-import-user-data');
 const screenshot = path.join(projectRoot, 'output', 'playwright', 'component-import-settings.png');
-const optionalX264Component = process.env.TTCUT_X264_COMPONENT;
 const importFiles = [
+  'TrackNet_best.pt',
   'ttcut-analysis-3.12.13-2.12.1-cpu.zip',
   'ttcut-analysis-3.12.13-2.12.1-cu126.zip.part001',
   'ttcut-analysis-3.12.13-2.12.1-cu126.zip.part002',
   'ttcut-analysis-3.12.13-2.12.1-cu126.zip.part003',
   'ffmpeg-n8.1.2-22-g94138f6973-win64-lgpl-shared-8.1.zip',
-].map((name) => path.join(componentSource, name)).concat(optionalX264Component ? [path.resolve(optionalX264Component)] : []);
+].map((name) => path.join(componentSource, name));
 
 async function freePort(): Promise<number> {
   const server = createServer();
@@ -94,35 +93,19 @@ test('imports and configures the real local components', async () => {
   try {
     ({ browser, page } = await waitForPage(port, child, stderr));
     await page.waitForLoadState('domcontentloaded');
-    await page.getByRole('button', { name: '设置', exact: true }).click({ timeout: 30_000 });
-    await page.getByRole('button', { name: '导入组件', exact: true }).click({ timeout: 30_000 });
+    await page.getByRole('button', { name: '导入组件', exact: true }).click();
     await expect(page.locator('.setup-progress')).toBeVisible({ timeout: 30_000 });
-    const failedOutcome = page.locator('.setup-outcome.failed');
-    const outcome = await Promise.race([
-      page.locator('.setup-outcome.success').waitFor({ state: 'visible', timeout: 30 * 60 * 1_000 }).then(() => 'success'),
-      failedOutcome.waitFor({ state: 'visible', timeout: 30 * 60 * 1_000 })
-        .then(async () => `failed: ${await failedOutcome.innerText()}`),
-    ]);
-    expect(outcome).toBe('success');
+    await expect(page.locator('.setup-outcome.success')).toBeVisible({ timeout: 30 * 60 * 1_000 });
 
     const status = await page.evaluate(() => window.ttcut.refreshComponents());
     expect(status.analysis.available).toBe(true);
     expect(status.media.available).toBe(true);
     expect(status.analysis.path).toContain(path.join('analysis-runtime', '3.12.13-2.12.1'));
-    expect(status.media.path).toBe(optionalX264Component
-      ? path.join(componentsRoot, 'ffmpeg-x264-N-125716-g1b1f602699', 'bin', 'ffmpeg.exe')
-      : path.join(componentsRoot, 'ffmpeg-8.1', 'bin', 'ffmpeg.exe'));
-    expect(status.media.active_encoder).toBe(optionalX264Component ? 'libx264' : 'libopenh264');
-    expect(status.media.x264_available).toBe(Boolean(optionalX264Component));
-    expect(existsSync(path.join(projectRoot, 'resources', 'models', 'analyze.pt'))).toBe(true);
-    expect(existsSync(path.join(projectRoot, 'resources', 'models', 'table_analyze.pt'))).toBe(true);
+    expect(status.media.path).toBe(path.join(componentsRoot, 'ffmpeg-8.1', 'bin', 'ffmpeg.exe'));
+    expect(existsSync(path.join(componentsRoot, 'models', 'TrackNet_best.pt'))).toBe(true);
     expect(existsSync(path.join(componentsRoot, 'analysis-runtime', '3.12.13-2.12.1', 'cpu', 'python.exe'))).toBe(true);
     expect(existsSync(path.join(componentsRoot, 'ffmpeg-8.1', 'bin', 'ffmpeg.exe'))).toBe(true);
     expect(existsSync(path.join(componentsRoot, '.manifests', 'media-autobuild-2026-07-17-13-22.json'))).toBe(true);
-    if (optionalX264Component) {
-      expect(existsSync(path.join(componentsRoot, 'ffmpeg-x264-N-125716-g1b1f602699', 'bin', 'ffmpeg.exe'))).toBe(true);
-      expect(existsSync(path.join(componentsRoot, '.manifests', 'media-x264-autobuild-2026-07-22-13-36.json'))).toBe(true);
-    }
     await page.screenshot({ path: screenshot, fullPage: true });
   } finally {
     if (page && !page.isClosed()) await page.evaluate(() => window.ttcut.confirmClose('exit')).catch(() => undefined);

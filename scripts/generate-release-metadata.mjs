@@ -42,7 +42,6 @@ await mkdir(path.join(staging, 'licenses', 'tracknet'), { recursive: true });
 
 const packageLock = JSON.parse(await readFile(path.join(root, 'package-lock.json'), 'utf8'));
 const componentCatalog = JSON.parse(await readFile(path.join(root, 'resources', 'components.json'), 'utf8'));
-const modelManifest = JSON.parse(await readFile(path.join(root, 'resources', 'model-manifest.json'), 'utf8'));
 const selected = Object.entries(packageLock.packages ?? {})
   .filter(([lockPath, metadata]) => lockPath.startsWith('node_modules/') && (metadata.dev !== true || lockPath === 'node_modules/electron'));
 const components = [];
@@ -78,6 +77,10 @@ if (missingLicenses.length) {
 }
 
 await cp(path.join(root, 'worker', 'LICENSE.tracknet.txt'), path.join(staging, 'licenses', 'tracknet', 'LICENSE.txt'));
+await cp(
+  path.join(root, 'resources', ...componentCatalog.tracknet_weight.rights_evidence.path.split('/')),
+  path.join(staging, 'licenses', 'tracknet', 'WEIGHT_RIGHTS.md'),
+);
 await cp(path.join(root, 'THIRD_PARTY_NOTICES.md'), path.join(staging, 'THIRD_PARTY_NOTICES.md'));
 components.push({
   type: 'library',
@@ -86,40 +89,18 @@ components.push({
   licenses: [{ license: { id: 'MIT' } }],
   license_files: ['licenses/tracknet/LICENSE.txt'],
 });
-for (const model of modelManifest.models) {
-  components.push({
-    type: 'machine-learning-model',
-    name: model.filename,
-    version: `sha256:${model.sha256}`,
-    hashes: [{ alg: 'SHA-256', content: model.sha256 }],
-    licenses: [{ license: { name: 'NOASSERTION' } }],
-    properties: [
-      { name: 'ttcut:model-id', value: model.model_id },
-      { name: 'ttcut:distribution', value: 'installer-resource' },
-      { name: 'ttcut:installer-bundled', value: 'true' },
-      { name: 'ttcut:resource-path', value: `resources/models/${model.filename}` },
-    ],
-    license_files: ['THIRD_PARTY_NOTICES.md'],
-  });
-}
 components.push({
-  type: 'framework',
-  name: 'FFmpeg libx264 optional media component',
-  version: componentCatalog.ffmpeg_x264.version_line,
-  scope: 'optional',
-  hashes: [{ alg: 'SHA-256', content: componentCatalog.ffmpeg_x264.sha256 }],
-  licenses: [{ license: { id: 'GPL-3.0-only' } }],
-  externalReferences: [
-    { type: 'distribution', url: componentCatalog.ffmpeg_x264.url },
-    { type: 'vcs', url: componentCatalog.ffmpeg_x264.source_url },
-    { type: 'website', url: componentCatalog.ffmpeg_x264.license_url },
-  ],
+  type: 'machine-learning-model',
+  name: componentCatalog.tracknet_weight.filename,
+  version: `sha256:${componentCatalog.tracknet_weight.sha256}`,
+  hashes: [{ alg: 'SHA-256', content: componentCatalog.tracknet_weight.sha256 }],
+  licenses: [{ license: { name: 'Rightsholder redistribution grant' } }],
+  externalReferences: [{ type: 'distribution', url: componentCatalog.tracknet_weight.url }],
   properties: [
-    { name: 'ttcut:distribution', value: 'manual-import-only' },
+    { name: 'ttcut:distribution', value: 'managed-analysis-component-download' },
     { name: 'ttcut:installer-bundled', value: 'false' },
-    { name: 'ttcut:encoder', value: 'libx264' },
   ],
-  license_files: ['THIRD_PARTY_NOTICES.md'],
+  license_files: ['licenses/tracknet/WEIGHT_RIGHTS.md'],
 });
 
 components.sort((left, right) => left.name.localeCompare(right.name));
@@ -145,7 +126,7 @@ const rows = components.map((component) => {
 await writeFile(path.join(staging, 'THIRD_PARTY_NOTICES.html'), `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
 <title>TTcut 第三方许可证</title><style>body{font:14px/1.55 system-ui,sans-serif;max-width:1100px;margin:32px auto;padding:0 24px;color:#222}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:8px;text-align:left;vertical-align:top}th{background:#f3f3f3}code{font-family:ui-monospace,monospace}</style></head>
-<body><h1>TTcut 第三方许可证</h1><p>本页列出桌面应用、随安装器分发的模型资源及受管下载组件的许可证材料。按需下载的 Python、PyTorch、NumPy、OpenCV 与 FFmpeg 组件在各自受管组件目录中保留随包许可证；固定模型随应用安装，并在打包前执行大小和 SHA-256 校验。</p>
+<body><h1>TTcut 第三方许可证</h1><p>本页列出桌面应用及其受管下载组件的许可证正文。按需下载的 Python、PyTorch、NumPy、OpenCV 与 FFmpeg 组件在各自受管组件目录中保留随包许可证；固定模型权重随分析组件下载，不在安装包中。</p>
 <table><thead><tr><th>组件</th><th>版本</th><th>声明的许可证</th><th>许可证正文</th></tr></thead><tbody>${rows}</tbody></table>
 <p>机器可读清单：<a href="sbom.cdx.json">sbom.cdx.json</a> · <a href="licenses/index.json">licenses/index.json</a> · <a href="THIRD_PARTY_NOTICES.md">第三方说明</a></p></body></html>`, 'utf8');
 

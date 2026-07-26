@@ -1,73 +1,13 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 
 export type ProcessResult = { stdout: string; stderr: string; code: number };
-export type TaskCancellationReason = 'user' | 'app-exit';
-export type ProcessExitClassification = {
-  kind: 'success' | 'cancelled' | 'terminated' | 'failed';
-  code: 'EXPORT_CANCELLED' | 'EXPORT_TERMINATED' | 'EXPORT_FAILED' | null;
-  exitCode: number | null;
-  signal: NodeJS.Signals | null;
-  cancelReason: TaskCancellationReason | null;
-};
 
-export type TaskController = {
-  taskId: string;
-  currentProcess: ChildProcessWithoutNullStreams | null;
-  cancelRequested: boolean;
-  cancelReason: TaskCancellationReason | null;
-  terminal: boolean;
-  explicit: boolean;
-};
-
-const controllers = new Map<string, TaskController>();
+const active = new Map<string, ChildProcessWithoutNullStreams>();
 const externalTasks = new Map<string, () => void | Promise<void>>();
-const taskCompletions = new Map<string, { promise: Promise<void>; resolve: () => void }>();
-
-function registerCompletion(taskId: string): void {
-  let resolve: () => void = () => {};
-  const promise = new Promise<void>((done) => { resolve = done; });
-  taskCompletions.set(taskId, { promise, resolve });
-}
-
-function completeTask(taskId: string): void {
-  taskCompletions.get(taskId)?.resolve();
-  taskCompletions.delete(taskId);
-}
 
 function assertTaskSlotAvailable(taskId: string): void {
-  if (controllers.has(taskId) || externalTasks.has(taskId)) throw new Error(`Task ${taskId} is already active.`);
-  if (controllers.size > 0 || externalTasks.size > 0) throw new Error('TASK_BUSY');
-}
-
-export function beginTrackedTask(taskId: string): TaskController {
-  assertTaskSlotAvailable(taskId);
-  const controller: TaskController = {
-    taskId,
-    currentProcess: null,
-    cancelRequested: false,
-    cancelReason: null,
-    terminal: false,
-    explicit: true,
-  };
-  controllers.set(taskId, controller);
-  registerCompletion(taskId);
-  return controller;
-}
-
-export function getTaskController(taskId: string): TaskController | undefined {
-  return controllers.get(taskId);
-}
-
-export function endTrackedTask(taskId: string): void {
-  controllers.delete(taskId);
-  completeTask(taskId);
-}
-
-export function markTaskTerminal(taskId: string): boolean {
-  const controller = controllers.get(taskId);
-  if (!controller || controller.terminal) return false;
-  controller.terminal = true;
-  return true;
+  if (active.has(taskId) || externalTasks.has(taskId)) throw new Error(`Task ${taskId} is already active.`);
+  if (active.size > 0 || externalTasks.size > 0) throw new Error('TASK_BUSY');
 }
 
 export function beginExternalTask(taskId: string, cancel: () => void | Promise<void>): void {
@@ -83,22 +23,7 @@ export function spawnTracked(taskId: string, executable: string, args: readonly 
   cwd?: string;
   env?: NodeJS.ProcessEnv;
 } = {}): ChildProcessWithoutNullStreams {
-  let controller = controllers.get(taskId);
-  if (!controller) {
-    assertTaskSlotAvailable(taskId);
-    controller = {
-      taskId,
-      currentProcess: null,
-      cancelRequested: false,
-      cancelReason: null,
-      terminal: false,
-      explicit: false,
-    };
-    controllers.set(taskId, controller);
-    registerCompletion(taskId);
-  }
-  if (controller.cancelRequested) throw new Error('EXPORT_CANCELLED');
-  if (controller.currentProcess) throw new Error(`Task ${taskId} already has a child process.`);
+  assertTaskSlotAvailable(taskId);
   const child = spawn(executable, [...args], {
     cwd: options.cwd,
     env: options.env,
@@ -106,67 +31,28 @@ export function spawnTracked(taskId: string, executable: string, args: readonly 
     stdio: ['pipe', 'pipe', 'pipe'],
     shell: false,
   });
-  controller.currentProcess = child;
-  child.once('close', () => {
-    if (controller?.currentProcess === child) controller.currentProcess = null;
-    if (controller && !controller.explicit) {
-      controllers.delete(taskId);
-      completeTask(taskId);
-    }
-  });
+  active.set(taskId, child);
+  child.once('close', () => active.delete(taskId));
   return child;
 }
 
-export function classifyProcessExit(
-  exitCode: number | null,
-  signal: NodeJS.Signals | null,
-  cancellation: { requested: boolean; reason: TaskCancellationReason | null },
-): ProcessExitClassification {
-  if (cancellation.requested) {
-    return {
-      kind: 'cancelled',
-      code: 'EXPORT_CANCELLED',
-      exitCode,
-      signal,
-      cancelReason: cancellation.reason,
-    };
-  }
-  if (signal !== null || exitCode === null) {
-    return {
-      kind: 'terminated',
-      code: 'EXPORT_TERMINATED',
-      exitCode,
-      signal,
-      cancelReason: null,
-    };
-  }
-  if (exitCode !== 0) {
-    return {
-      kind: 'failed',
-      code: 'EXPORT_FAILED',
-      exitCode,
-      signal,
-      cancelReason: null,
-    };
-  }
-  return {
-    kind: 'success',
-    code: null,
-    exitCode,
-    signal,
-    cancelReason: null,
-  };
-}
-
 export function hasActiveTasks(): boolean {
-  return controllers.size > 0 || externalTasks.size > 0;
+  return active.size > 0 || externalTasks.size > 0;
 }
 
 export function activeTaskIds(): string[] {
-  return [...new Set([...controllers.keys(), ...externalTasks.keys()])];
+  return [...new Set([...active.keys(), ...externalTasks.keys()])];
 }
 
-async function terminateChild(child: ChildProcessWithoutNullStreams): Promise<void> {
+export async function cancelTask(taskId: string): Promise<void> {
+  const cancelExternal = externalTasks.get(taskId);
+  if (cancelExternal) {
+    await cancelExternal();
+    externalTasks.delete(taskId);
+    return;
+  }
+  const child = active.get(taskId);
+  if (!child) return;
   child.kill('SIGTERM');
   if (process.platform === 'win32' && child.pid) {
     await new Promise<void>((resolve) => {
@@ -177,36 +63,11 @@ async function terminateChild(child: ChildProcessWithoutNullStreams): Promise<vo
       killer.once('error', () => resolve());
     });
   }
+  active.delete(taskId);
 }
 
-export async function cancelTask(taskId: string, reason: TaskCancellationReason = 'user'): Promise<void> {
-  const cancelExternal = externalTasks.get(taskId);
-  if (cancelExternal) {
-    await cancelExternal();
-    externalTasks.delete(taskId);
-    return;
-  }
-  const controller = controllers.get(taskId);
-  if (!controller) return;
-  controller.cancelRequested = true;
-  controller.cancelReason = reason;
-  if (controller.currentProcess) await terminateChild(controller.currentProcess);
-  if (!controller.explicit) {
-    controllers.delete(taskId);
-    completeTask(taskId);
-  }
-}
-
-export async function cancelAllTasks(reason: TaskCancellationReason = 'app-exit'): Promise<void> {
-  await Promise.all(activeTaskIds().map((taskId) => cancelTask(taskId, reason)));
-}
-
-export async function cancelAllTasksAndWait(reason: TaskCancellationReason = 'app-exit'): Promise<void> {
-  const completions = activeTaskIds()
-    .map((taskId) => taskCompletions.get(taskId)?.promise)
-    .filter((value): value is Promise<void> => Boolean(value));
-  await cancelAllTasks(reason);
-  await Promise.all(completions);
+export async function cancelAllTasks(): Promise<void> {
+  await Promise.all(activeTaskIds().map(cancelTask));
 }
 
 export function runProcess(executable: string, args: readonly string[], options: {
@@ -230,15 +91,11 @@ export function runProcess(executable: string, args: readonly string[], options:
     child.stderr.on('data', (chunk: string) => { stderr += chunk; });
     const timer = options.timeoutMs ? setTimeout(() => child.kill(), options.timeoutMs) : null;
     child.once('error', reject);
-    child.once('close', (code, signal) => {
+    child.once('close', (code) => {
       if (timer) clearTimeout(timer);
-      if (code === 0) {
-        resolve({ stdout, stderr, code });
-      } else if (code === null || signal !== null) {
-        reject(new Error(stderr.trim() || `Process terminated by signal ${String(signal)}`));
-      } else {
-        reject(new Error(stderr.trim() || `Process exited with code ${code}`));
-      }
+      const numericCode = code ?? -1;
+      if (numericCode === 0) resolve({ stdout, stderr, code: numericCode });
+      else reject(new Error(stderr.trim() || `Process exited with code ${numericCode}`));
     });
   });
 }

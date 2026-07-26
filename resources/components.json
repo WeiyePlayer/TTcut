@@ -1,5 +1,23 @@
 {
   "schema_version": 1,
+  "tracknet_weight": {
+    "filename": "TrackNet_best.pt",
+    "sha256": "ffb5469161c4bd39a5a7e745c3d13f076b2c5e575f33279ea62f1e5803245a52",
+    "source": "Rightsholder weiye; fixed TrackNet weight associated with core commit 40d4d26bc85802d5925ead6b1fd0ad3c6a8a84ba",
+    "redistribution": "redistributable",
+    "downloadable": true,
+    "provider": "WeiyePlayer/TTcut-runtime-assets GitHub Release tracknet-weight-1.0.0",
+    "release_tag": "tracknet-weight-1.0.0",
+    "url": "https://github.com/WeiyePlayer/TTcut-runtime-assets/releases/download/tracknet-weight-1.0.0/TrackNet_best.pt",
+    "size_bytes": 136191005,
+    "install_directory": "models",
+    "rights_evidence": {
+      "path": "rights/tracknet-weight-rights.md",
+      "sha256": "22043bb1750551088f83115a1f7c933d8748f0ff00f9eca742abdbe4b4608034",
+      "rightsholder": "weiye",
+      "grant": "The rightsholder authorizes public redistribution of the fixed weight as a managed TTcut analysis component."
+    }
+  },
   "analysis_runtime": {
     "runtime_id": "3.12.13-2.12.1",
     "python_version": "3.12.13",
@@ -51,35 +69,6 @@
             "sha256": "8a13c666b9aadbbfdcf3f098bc4ef636dd11d6dc1e9de836ff77b566256af2ce"
           }
         ]
-      },
-      {
-        "variant": "cu132",
-        "provider": "WeiyePlayer/TTcut-runtime-assets GitHub Release analysis-3.12.13-2.12.1-cu132-r1",
-        "asset": "ttcut-analysis-3.12.13-2.12.1-cu132.zip",
-        "archive_root": "ttcut-analysis-3.12.13-2.12.1-cu132",
-        "install_directory": "analysis-runtime/3.12.13-2.12.1/cu132",
-        "size_bytes": 2075620809,
-        "sha256": "a36466c8cb7330804e54151e37af3c6caf4360059ac24b76527095068bac6fbd",
-        "parts": [
-          {
-            "asset": "ttcut-analysis-3.12.13-2.12.1-cu132.zip.part001",
-            "url": "https://github.com/WeiyePlayer/TTcut-runtime-assets/releases/download/analysis-3.12.13-2.12.1-cu132-r1/ttcut-analysis-3.12.13-2.12.1-cu132.zip.part001",
-            "size_bytes": 1000000000,
-            "sha256": "8fa51b17f27246bbbf25870be760806ad98c247c0ffcb7d5b85afd70695efe1c"
-          },
-          {
-            "asset": "ttcut-analysis-3.12.13-2.12.1-cu132.zip.part002",
-            "url": "https://github.com/WeiyePlayer/TTcut-runtime-assets/releases/download/analysis-3.12.13-2.12.1-cu132-r1/ttcut-analysis-3.12.13-2.12.1-cu132.zip.part002",
-            "size_bytes": 1000000000,
-            "sha256": "f80ee962306ec255c79ed8fa17de31ba7f764a608ea723b70d5ee575b0b27d93"
-          },
-          {
-            "asset": "ttcut-analysis-3.12.13-2.12.1-cu132.zip.part003",
-            "url": "https://github.com/WeiyePlayer/TTcut-runtime-assets/releases/download/analysis-3.12.13-2.12.1-cu132-r1/ttcut-analysis-3.12.13-2.12.1-cu132.zip.part003",
-            "size_bytes": 75620809,
-            "sha256": "d8f3cdca7a898f11172db45df457423c8ec29d060bddf72580600538e1fe5aff"
-          }
-        ]
       }
     ]
   },
@@ -104,46 +93,6 @@
     "required_encoders": [
       "libopenh264",
       "aac"
-    ]
-  },
-  "ffmpeg_x264": {
-    "provider": "BtbN/FFmpeg-Builds",
-    "release_tag": "autobuild-2026-07-22-13-36",
-    "version_line": "N-125716-g1b1f602699-20260722",
-    "variant": "win64-gpl",
-    "asset": "ffmpeg-N-125716-g1b1f602699-win64-gpl.zip",
-    "archive_root": "ffmpeg-N-125716-g1b1f602699-win64-gpl",
-    "install_directory": "ffmpeg-x264-N-125716-g1b1f602699",
-    "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-07-22-13-36/ffmpeg-N-125716-g1b1f602699-win64-gpl.zip",
-    "license_url": "https://github.com/BtbN/FFmpeg-Builds/blob/master/LICENSE",
-    "source_url": "https://github.com/BtbN/FFmpeg-Builds/tree/autobuild-2026-07-22-13-36",
-    "size_bytes": 168733210,
-    "sha256": "6dcf685c2fea98221b3f179961165e9c31f55bead576c4479ae4549858fbf826",
-    "required_build_flags": [
-      "--enable-gpl",
-      "--enable-version3",
-      "--enable-libx264"
-    ],
-    "required_encoders": [
-      "libx264",
-      "aac"
-    ],
-    "supported_pixel_formats": [
-      "yuv420p",
-      "yuvj420p",
-      "yuv422p",
-      "yuvj422p",
-      "yuv444p",
-      "yuvj444p",
-      "nv12",
-      "nv16",
-      "nv21",
-      "yuv420p10le",
-      "yuv422p10le",
-      "yuv444p10le",
-      "nv20le",
-      "gray",
-      "gray10le"
     ]
   }
 }

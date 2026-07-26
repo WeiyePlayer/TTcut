@@ -1,13 +1,11 @@
 import path from 'node:path';
 import { videoMetadataSchema, type VideoMetadata } from '../shared/contracts';
-import { resolveUsableMediaComponents } from './components';
+import { resolveComponents } from './components';
 import { runProcess } from './processes';
 
 type ProbeStream = {
   codec_type?: string;
   codec_name?: string;
-  profile?: string;
-  level?: number;
   width?: number;
   height?: number;
   avg_frame_rate?: string;
@@ -21,8 +19,6 @@ type ProbeStream = {
   duration?: string;
   start_time?: string;
   time_base?: string;
-  extradata_hash?: string;
-  channel_layout?: string;
   sample_aspect_ratio?: string;
   display_aspect_ratio?: string;
   color_range?: string;
@@ -99,7 +95,7 @@ async function sampledVfr(ffprobe: string, videoPath: string): Promise<boolean> 
 
 export async function probeVideo(videoPath: string): Promise<VideoMetadata> {
   if (path.extname(videoPath).toLowerCase() !== '.mp4') throw new Error('INVALID_INPUT');
-  const components = await resolveUsableMediaComponents();
+  const components = await resolveComponents();
   if (!components.ffprobe) throw new Error('MEDIA_COMPONENT_MISSING');
   const result = await runProcess(components.ffprobe, [
     '-v', 'error', '-show_format', '-show_streams', '-of', 'json', videoPath,
@@ -157,10 +153,10 @@ export async function probeVideo(videoPath: string): Promise<VideoMetadata> {
   });
 }
 
-export async function probeKeyframes(videoPath: string, ffprobeOverride?: string): Promise<number[]> {
-  const ffprobe = ffprobeOverride ?? (await resolveUsableMediaComponents()).ffprobe;
-  if (!ffprobe) throw new Error('MEDIA_COMPONENT_MISSING');
-  const result = await runProcess(ffprobe, [
+export async function probeKeyframes(videoPath: string): Promise<number[]> {
+  const components = await resolveComponents();
+  if (!components.ffprobe) throw new Error('MEDIA_COMPONENT_MISSING');
+  const result = await runProcess(components.ffprobe, [
     '-v', 'error', '-select_streams', 'v:0', '-skip_frame', 'nokey',
     '-show_frames', '-show_entries', 'frame=best_effort_timestamp_time,pkt_pts_time',
     '-of', 'json', videoPath,
@@ -172,10 +168,10 @@ export async function probeKeyframes(videoPath: string, ffprobeOverride?: string
     .sort((a, b) => a - b);
 }
 
-export async function probeAudioPacketBoundaries(videoPath: string, ffprobeOverride?: string): Promise<number[]> {
-  const ffprobe = ffprobeOverride ?? (await resolveUsableMediaComponents()).ffprobe;
-  if (!ffprobe) throw new Error('MEDIA_COMPONENT_MISSING');
-  const result = await runProcess(ffprobe, [
+export async function probeAudioPacketBoundaries(videoPath: string): Promise<number[]> {
+  const components = await resolveComponents();
+  if (!components.ffprobe) throw new Error('MEDIA_COMPONENT_MISSING');
+  const result = await runProcess(components.ffprobe, [
     '-v', 'error', '-select_streams', 'a:0', '-show_packets',
     '-show_entries', 'packet=pts_time,duration_time', '-of', 'json', videoPath,
   ], { timeoutMs: 120_000 });
@@ -192,59 +188,4 @@ export async function probeAudioPacketBoundaries(videoPath: string, ffprobeOverr
     }
   }
   return [...boundaries].sort((a, b) => a - b);
-}
-
-export type StreamSignature = {
-  video: {
-    codec: string | null;
-    profile: string | null;
-    level: number | null;
-    pixelFormat: string | null;
-    width: number | null;
-    height: number | null;
-    timeBase: string | null;
-    extradataHash: string | null;
-  };
-  audio: {
-    codec: string | null;
-    sampleRate: number | null;
-    channels: number | null;
-    channelLayout: string | null;
-    timeBase: string | null;
-  } | null;
-};
-
-export async function probeStreamSignature(videoPath: string, ffprobeOverride?: string): Promise<StreamSignature> {
-  const ffprobe = ffprobeOverride ?? (await resolveUsableMediaComponents()).ffprobe;
-  if (!ffprobe) throw new Error('MEDIA_COMPONENT_MISSING');
-  const result = await runProcess(ffprobe, [
-    '-v', 'error', '-show_streams', '-show_data_hash', 'sha256', '-of', 'json', videoPath,
-  ], { timeoutMs: 30_000 });
-  const data = parseJson<ProbeData>(result.stdout);
-  const video = data.streams?.find((stream) => stream.codec_type === 'video');
-  const audio = data.streams?.find((stream) => stream.codec_type === 'audio');
-  if (!video) throw new Error('EXPORT_SEGMENT_FAILED');
-  return {
-    video: {
-      codec: video.codec_name ?? null,
-      profile: video.profile ?? null,
-      level: Number.isFinite(video.level) ? video.level! : null,
-      pixelFormat: video.pix_fmt ?? null,
-      width: Number.isInteger(video.width) ? video.width! : null,
-      height: Number.isInteger(video.height) ? video.height! : null,
-      timeBase: video.time_base ?? null,
-      extradataHash: video.extradata_hash ?? null,
-    },
-    audio: audio ? {
-      codec: audio.codec_name ?? null,
-      sampleRate: optionalInteger(audio.sample_rate),
-      channels: Number.isInteger(audio.channels) ? audio.channels! : null,
-      channelLayout: audio.channel_layout ?? null,
-      timeBase: audio.time_base ?? null,
-    } : null,
-  };
-}
-
-export function sameStreamSignature(left: StreamSignature, right: StreamSignature): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
 }

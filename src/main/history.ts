@@ -10,7 +10,7 @@ import {
   type HistoryRecordV1,
   type HistorySource,
 } from '../shared/contracts';
-import { resolveUsableMediaComponents } from './components';
+import { resolveComponents } from './components';
 import { logLine } from './logger';
 import { runProcess } from './processes';
 
@@ -42,19 +42,6 @@ function sameSource(left: HistorySource, right: HistorySource): boolean {
     && left.modified_time_ms === right.modified_time_ms;
 }
 
-function removeLegacyTableDetection(value: unknown): { value: unknown; changed: boolean } {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return { value, changed: false };
-  const record = value as Record<string, unknown>;
-  const analysis = record.analysis;
-  if (!analysis || typeof analysis !== 'object' || Array.isArray(analysis)
-    || !Object.prototype.hasOwnProperty.call(analysis, 'table_detection')) {
-    return { value, changed: false };
-  }
-  const migratedAnalysis = { ...(analysis as Record<string, unknown>) };
-  delete migratedAnalysis.table_detection;
-  return { value: { ...record, analysis: migratedAnalysis }, changed: true };
-}
-
 export function buildHistoryCoverArgs(sourcePath: string, destination: string): string[] {
   return [
     '-v', 'error', '-i', sourcePath,
@@ -65,7 +52,7 @@ export function buildHistoryCoverArgs(sourcePath: string, destination: string): 
 }
 
 async function defaultCreateCover(sourcePath: string, destination: string): Promise<void> {
-  const components = await resolveUsableMediaComponents();
+  const components = await resolveComponents();
   if (!components.ffmpeg) throw new Error('MEDIA_COMPONENT_MISSING');
   await runProcess(components.ffmpeg, buildHistoryCoverArgs(sourcePath, destination), { timeoutMs: 30_000 });
 }
@@ -91,10 +78,7 @@ export class HistoryStore {
 
   private async loadRecord(id: string): Promise<HistoryRecordV1 | null> {
     try {
-      const migration = removeLegacyTableDetection(JSON.parse(await readFile(this.recordPath(id), 'utf8')));
-      const record = historyRecordSchema.parse(migration.value);
-      if (migration.changed) await this.writeJsonAtomic(this.recordPath(id), record);
-      return record;
+      return historyRecordSchema.parse(JSON.parse(await readFile(this.recordPath(id), 'utf8')));
     } catch (error) {
       await logLine('history', 'WARN', `Ignoring invalid history record ${id}: ${String(error)}`).catch(() => undefined);
       return null;
@@ -109,7 +93,7 @@ export class HistoryStore {
       const id = file.name.slice(0, -5);
       if (!z.string().uuid().safeParse(id).success) continue;
       const record = await this.loadRecord(id);
-      if (record?.visible_in_history) entries.push({ id: record.id, analyzed_at: record.analyzed_at });
+      if (record) entries.push({ id: record.id, analyzed_at: record.analyzed_at });
     }
     entries.sort((a, b) => b.analyzed_at.localeCompare(a.analyzed_at));
     const rebuilt: HistoryIndex = { schema_version: 1, entries };
@@ -163,40 +147,25 @@ export class HistoryStore {
     }
   }
 
-  private async sourceFor(videoPath: string): Promise<HistorySource> {
-    const sourceInfo = await stat(videoPath);
+  async upsert(analysis: AnalysisResultV1, calibration: Calibration): Promise<HistoryRecordV1 | null> {
+    if (analysis.rallies.length === 0) return null;
+    const sourceInfo = await stat(analysis.video.path);
     if (!sourceInfo.isFile() || sourceInfo.size <= 0) throw new Error('INPUT_MOVED');
-    return {
-      path: path.resolve(videoPath),
-      name: path.basename(videoPath),
+    const source: HistorySource = {
+      path: path.resolve(analysis.video.path),
+      name: path.basename(analysis.video.path),
       size: sourceInfo.size,
       modified_time_ms: sourceInfo.mtimeMs,
     };
-  }
-
-  private async findMatchingRecord(source: HistorySource): Promise<HistoryRecordV1 | null> {
-    const files = await readdir(this.recordsRoot(), { withFileTypes: true }).catch(() => []);
-    for (const file of files) {
-      if (!file.isFile() || !file.name.endsWith('.json')) continue;
-      const candidate = await this.loadRecord(file.name.slice(0, -5));
-      if (candidate && sameSource(candidate.source, source)) return candidate;
-    }
-    return null;
-  }
-
-  async findBySource(videoPath: string): Promise<HistoryRecordV1 | null> {
-    const source = await this.sourceFor(videoPath);
-    return this.findMatchingRecord(source);
-  }
-
-  async upsert(
-    analysis: AnalysisResultV1,
-    calibration: Calibration,
-    visibleInHistory = true,
-  ): Promise<HistoryRecordV1> {
-    const source = await this.sourceFor(analysis.video.path);
     const index = await this.loadIndex();
-    const existing = await this.findMatchingRecord(source);
+    let existing: HistoryRecordV1 | null = null;
+    for (const entry of index.entries) {
+      const candidate = await this.loadRecord(entry.id);
+      if (candidate && sameSource(candidate.source, source)) {
+        existing = candidate;
+        break;
+      }
+    }
     const record = historyRecordSchema.parse({
       schema_version: 1,
       id: existing?.id ?? randomUUID(),
@@ -204,35 +173,15 @@ export class HistoryStore {
       source,
       calibration,
       analysis,
-      visible_in_history: visibleInHistory,
-      completion_kind: visibleInHistory ? 'analysis' : existing?.completion_kind ?? 'analysis',
-      output_path: visibleInHistory ? null : existing?.output_path ?? null,
     });
     await this.writeJsonAtomic(this.recordPath(record.id), record);
-    await this.saveIndex(visibleInHistory ? [
+    await this.saveIndex([
       { id: record.id, analyzed_at: record.analyzed_at },
       ...index.entries.filter((entry) => entry.id !== record.id),
-    ] : index.entries.filter((entry) => entry.id !== record.id));
+    ]);
     await rm(this.coverPath(record.id), { force: true }).catch(() => undefined);
     await this.ensureCover(record);
     return record;
-  }
-
-  async markVisible(id: string, completionKind: 'analysis' | 'export', outputPath: string | null = null): Promise<void> {
-    const record = await this.open(id);
-    const updated = historyRecordSchema.parse({
-      ...record,
-      analyzed_at: new Date().toISOString(),
-      visible_in_history: true,
-      completion_kind: completionKind,
-      output_path: outputPath,
-    });
-    await this.writeJsonAtomic(this.recordPath(updated.id), updated);
-    const index = await this.loadIndex();
-    await this.saveIndex([
-      { id: updated.id, analyzed_at: updated.analyzed_at },
-      ...index.entries.filter((entry) => entry.id !== updated.id),
-    ]);
   }
 
   async list(retryMissingCovers = false): Promise<StoredHistorySummary[]> {
@@ -240,7 +189,7 @@ export class HistoryStore {
     const summaries: StoredHistorySummary[] = [];
     for (const entry of index.entries) {
       const record = await this.loadRecord(entry.id);
-      if (!record || !record.visible_in_history) continue;
+      if (!record || record.analysis.rallies.length === 0) continue;
       const sourceStatus = await this.sourceStatus(record.source);
       let coverPath = await stat(this.coverPath(record.id)).then((value) => value.isFile() && value.size > 0 ? this.coverPath(record.id) : null).catch(() => null);
       if (!coverPath && retryMissingCovers && sourceStatus === 'available') coverPath = await this.ensureCover(record);

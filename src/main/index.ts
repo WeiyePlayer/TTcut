@@ -8,9 +8,9 @@ import {
   protocol,
   shell,
 } from 'electron';
-import { appSettingsSchema, calibrationChoiceSchema, exportRequestSchema, historySummarySchema } from '../shared/contracts';
+import { analysisResultSchema, appSettingsSchema, calibrationSchema, cutSelectionSchema, historySummarySchema } from '../shared/contracts';
 import { IPC } from '../shared/ipc';
-import { startAnalysis } from './analysis';
+import { activateLatestAnalysis, startAnalysis, clearLatestAnalysis } from './analysis';
 import { componentSetupInfo, loadComponentCatalog } from './component-catalog';
 import { recoverComponentInstallState, startAnalysisComponentInstall, startComponentImport, startMediaComponentInstall } from './component-manager';
 import { inspectComponents } from './components';
@@ -19,12 +19,11 @@ import { getLogDirectory, logLine } from './logger';
 import { getHistoryStore } from './history';
 import { clearMediaPaths, installMediaProtocol, registerMediaPath } from './media-protocol';
 import { probeVideo } from './probe';
-import { cancelAllTasksAndWait, cancelTask, hasActiveTasks } from './processes';
+import { cancelAllTasks, cancelTask, hasActiveTasks } from './processes';
 import { loadSettings, saveSettings } from './settings';
 import { handleSquirrelStartup } from './squirrel-startup';
-import { getPlatformCompatibility } from './platform-compatibility';
-import { COMPONENT_ASSETS_RELEASE_URL, DONATION_URL, GITHUB_URL, RELEASES_URL, WEBSITE_URL } from '../shared/urls';
-import { getUpdater } from './updater';
+import { assertPlatformCompatible, getPlatformCompatibility } from './platform-compatibility';
+import { COMPONENT_ASSETS_RELEASE_URL } from '../shared/urls';
 
 const squirrelStartup = handleSquirrelStartup();
 
@@ -69,14 +68,18 @@ function registerIpc(): void {
     const [settings, components, setup, platformCompatibility] = await Promise.all([
       loadSettings(), inspectComponents(), componentSetupInfo(), getPlatformCompatibility(),
     ]);
+    const downloadsAllowed = platformCompatibility.status === 'supported';
     return {
       version: app.getVersion(),
       settings,
       components,
       componentSetup: {
-        analysis_offer: setup.analysis_offer,
-        media_offer: setup.media_offer,
-        x264_manual_offer: setup.x264_manual_offer,
+        analysis_offer: setup.analysis_offer
+          ? { ...setup.analysis_offer, available_for_download: setup.analysis_offer.available_for_download && downloadsAllowed }
+          : null,
+        media_offer: setup.media_offer
+          ? { ...setup.media_offer, available_for_download: setup.media_offer.available_for_download && downloadsAllowed }
+          : null,
       },
       platformCompatibility,
       logsPath: getLogDirectory(),
@@ -89,11 +92,8 @@ function registerIpc(): void {
     await shell.openExternal(COMPONENT_ASSETS_RELEASE_URL);
     await shell.openExternal(catalog.ffmpeg.url);
   });
-  ipcMain.handle(IPC.componentsOpenX264Download, async () => {
-    const catalog = await loadComponentCatalog();
-    await shell.openExternal(catalog.ffmpeg_x264.url);
-  });
   ipcMain.handle(IPC.componentsImport, async () => {
+    await assertPlatformCompatible();
     if (e2eHarnessEnabled() && process.env.TTCUT_E2E_COMPONENT_IMPORT_FILES) {
       const filePaths = JSON.parse(process.env.TTCUT_E2E_COMPONENT_IMPORT_FILES) as unknown;
       if (!Array.isArray(filePaths) || !filePaths.every((value): value is string => typeof value === 'string')) {
@@ -110,9 +110,11 @@ function registerIpc(): void {
     return startComponentImport(currentWindow(), result.filePaths);
   });
   ipcMain.handle(IPC.componentsInstallAnalysis, async (_event, consent: unknown) => {
+    await assertPlatformCompatible();
     return startAnalysisComponentInstall(currentWindow(), consent);
   });
   ipcMain.handle(IPC.componentsInstallMedia, async (_event, consent: unknown) => {
+    await assertPlatformCompatible();
     return startMediaComponentInstall(currentWindow(), consent);
   });
   ipcMain.handle(IPC.videoSelect, async () => {
@@ -127,22 +129,6 @@ function registerIpc(): void {
     });
     return result.canceled || !result.filePaths[0] ? null : selectedVideo(result.filePaths[0]);
   });
-  ipcMain.handle(IPC.videosSelect, async () => {
-    if (e2eHarnessEnabled()) {
-      const fixtures = process.env.TTCUT_E2E_VIDEOS
-        ? JSON.parse(process.env.TTCUT_E2E_VIDEOS) as unknown
-        : process.env.TTCUT_E2E_VIDEO ? [process.env.TTCUT_E2E_VIDEO] : [];
-      if (!Array.isArray(fixtures) || !fixtures.every((value): value is string => typeof value === 'string')) {
-        throw new Error('TTCUT_E2E_VIDEOS must be a JSON string array.');
-      }
-      return Promise.all(fixtures.map(selectedVideo));
-    }
-    const result = await dialog.showOpenDialog(currentWindow(), {
-      title: 'Select MP4 videos', properties: ['openFile', 'multiSelections'],
-      filters: [{ name: 'MP4 video', extensions: ['mp4'] }],
-    });
-    return result.canceled ? [] : Promise.all(result.filePaths.map(selectedVideo));
-  });
   ipcMain.handle(IPC.videoAcceptDrop, (_event, value: unknown) => {
     if (typeof value !== 'string') throw new Error('INVALID_INPUT');
     return selectedVideo(value);
@@ -152,22 +138,21 @@ function registerIpc(): void {
     return probeVideo(value);
   });
   ipcMain.handle(IPC.analysisStart, async (_event, value: unknown) => {
+    await assertPlatformCompatible();
     if (!value || typeof value !== 'object') throw new Error('INVALID_REQUEST');
     const record = value as Record<string, unknown>;
     if (typeof record.videoPath !== 'string') throw new Error('INVALID_REQUEST');
     const device = record.device;
     if (device !== 'auto' && device !== 'cuda' && device !== 'cpu') throw new Error('INVALID_REQUEST');
-    const historyVisibility = record.historyVisibility;
-    if (historyVisibility !== 'visible' && historyVisibility !== 'deferred') throw new Error('INVALID_REQUEST');
     return startAnalysis(currentWindow(), {
       videoPath: record.videoPath,
-      calibrationChoice: calibrationChoiceSchema.parse(record.calibrationChoice),
+      calibration: calibrationSchema.parse(record.calibration),
       device,
-      historyVisibility,
     });
   });
   ipcMain.handle(IPC.exportStart, async (_event, value: unknown) => {
-    return startExport(currentWindow(), exportRequestSchema.parse(value));
+    await assertPlatformCompatible();
+    return startExport(currentWindow(), cutSelectionSchema.parse(value));
   });
   ipcMain.handle(IPC.historyList, async () => {
     const entries = await getHistoryStore().list(!hasActiveTasks());
@@ -180,8 +165,6 @@ function registerIpc(): void {
       duration_seconds: record.analysis.video.duration_seconds,
       cover_url: coverPath ? registerMediaPath(coverPath, 'image/jpeg') : null,
       source_status: sourceStatus,
-      completion_kind: record.completion_kind,
-      output_path: record.output_path,
     })));
   });
   ipcMain.handle(IPC.historyOpen, async (_event, id: unknown) => {
@@ -189,19 +172,10 @@ function registerIpc(): void {
     if (typeof id !== 'string') throw new Error('INVALID_REQUEST');
     const record = await getHistoryStore().open(id);
     const metadata = await probeVideo(record.source.path);
-    return {
-      analysisId: record.id,
-      video: await selectedVideo(record.source.path),
-      calibration: record.calibration,
-      analysis: { ...record.analysis, video: metadata },
-    };
+    const analysis = activateLatestAnalysis(analysisResultSchema.parse({ ...record.analysis, video: metadata }));
+    return { video: await selectedVideo(record.source.path), analysis };
   });
   ipcMain.handle(IPC.historyDelete, async (_event, id: unknown) => {
-    if (hasActiveTasks()) throw new Error('TASK_BUSY');
-    if (typeof id !== 'string') throw new Error('INVALID_REQUEST');
-    await getHistoryStore().delete(id);
-  });
-  ipcMain.handle(IPC.analysisDelete, async (_event, id: unknown) => {
     if (hasActiveTasks()) throw new Error('TASK_BUSY');
     if (typeof id !== 'string') throw new Error('INVALID_REQUEST');
     await getHistoryStore().delete(id);
@@ -212,7 +186,7 @@ function registerIpc(): void {
   });
   ipcMain.handle(IPC.taskCancel, (_event, taskId: unknown) => {
     if (typeof taskId !== 'string') throw new Error('INVALID_REQUEST');
-    return cancelTask(taskId, 'user');
+    return cancelTask(taskId);
   });
   ipcMain.handle(IPC.outputReveal, async (_event, value: unknown) => {
     if (typeof value !== 'string') throw new Error('INVALID_REQUEST');
@@ -232,25 +206,11 @@ function registerIpc(): void {
   ipcMain.handle(IPC.externalOpen, async (_event, value: unknown) => {
     if (typeof value !== 'string') throw new Error('INVALID_REQUEST');
     const catalog = await loadComponentCatalog();
-    const allowed = new Set([
-      COMPONENT_ASSETS_RELEASE_URL,
-      catalog.analysis_runtime.license_url,
-      catalog.ffmpeg.license_url,
-      catalog.ffmpeg.url,
-      catalog.ffmpeg_x264.license_url,
-      catalog.ffmpeg_x264.source_url,
-      WEBSITE_URL,
-      GITHUB_URL,
-      RELEASES_URL,
-      DONATION_URL,
-    ]);
+    const allowed = new Set([COMPONENT_ASSETS_RELEASE_URL, catalog.analysis_runtime.license_url, catalog.ffmpeg.license_url, catalog.ffmpeg.url]);
     if (!allowed.has(value)) throw new Error('EXTERNAL_URL_REJECTED');
     await shell.openExternal(value);
   });
   ipcMain.handle(IPC.windowMinimize, () => currentWindow().minimize());
-  ipcMain.handle(IPC.updateGetState, () => getUpdater().getState());
-  ipcMain.handle(IPC.updateCheck, () => getUpdater().check());
-  ipcMain.handle(IPC.updateInstall, () => getUpdater().restartToInstall());
   ipcMain.handle(IPC.windowToggleMaximize, () => {
     const window = currentWindow();
     if (window.isMaximized()) window.unmaximize();
@@ -266,7 +226,7 @@ function registerIpc(): void {
     }
     if (action === 'exit') {
       exitApproved = true;
-      await cancelAllTasksAndWait('app-exit');
+      await cancelAllTasks();
       window.close();
     }
   });
@@ -310,7 +270,7 @@ async function createWindow(): Promise<void> {
 
 if (!squirrelStartup) app.whenReady().then(async () => {
   const compatibility = await getPlatformCompatibility();
-  await logLine('app', 'INFO', `Platform compatibility gate disabled: ${JSON.stringify(compatibility)}`)
+  await logLine('app', compatibility.status === 'supported' ? 'INFO' : 'WARN', `Platform compatibility: ${JSON.stringify(compatibility)}`)
     .catch(() => undefined);
   try {
     await recoverComponentInstallState();
@@ -321,7 +281,6 @@ if (!squirrelStartup) app.whenReady().then(async () => {
   installMediaProtocol();
   registerIpc();
   await createWindow();
-  getUpdater().start(mainWindow);
 });
 
 app.on('activate', () => {
@@ -332,12 +291,13 @@ app.on('before-quit', async (event) => {
   if (!exitApproved && hasActiveTasks()) {
     event.preventDefault();
     exitApproved = true;
-    await cancelAllTasksAndWait('app-exit');
+    await cancelAllTasks();
     app.quit();
   }
 });
 
 app.on('window-all-closed', () => {
+  clearLatestAnalysis();
   clearMediaPaths();
   if (process.platform !== 'darwin') app.quit();
 });

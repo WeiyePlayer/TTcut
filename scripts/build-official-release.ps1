@@ -93,7 +93,6 @@ try {
   Remove-Item Env:\WINDOWS_CERTIFICATE_PASSWORD -ErrorAction SilentlyContinue
   Remove-Item Env:\WINDOWS_SIGN_WITH_PARAMS -ErrorAction SilentlyContinue
 
-  Invoke-NodeScript 'scripts\verify-model-assets.mjs'
   Invoke-NodeScript 'scripts\stage-worker.mjs'
   Invoke-NodeScript 'scripts\generate-release-metadata.mjs'
   Invoke-NodeScript 'scripts\make.mjs'

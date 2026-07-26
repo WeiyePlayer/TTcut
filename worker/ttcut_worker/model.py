@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .errors import DeviceError, ModelResourceError, WeightError
+from .errors import DeviceError, WeightError
 
 
 def import_torch():
@@ -108,10 +108,10 @@ class LoadedTrackNet:
 
 
 def load_tracknet(weight_value: str | Path, requested_device: str) -> LoadedTrackNet:
+    torch = import_torch()
     path = Path(weight_value).expanduser()
     if not path.is_file():
-        raise ModelResourceError(f"Bundled analysis model is missing: {path}")
-    torch = import_torch()
+        raise WeightError(f"TrackNet weight is missing: {path}")
     try:
         checkpoint = torch.load(str(path), map_location="cpu", weights_only=False)
         params = checkpoint.get("param_dict")
@@ -128,7 +128,7 @@ def load_tracknet(weight_value: str | Path, requested_device: str) -> LoadedTrac
     except WorkerError:
         raise
     except Exception as exc:
-        raise ModelResourceError(f"Bundled analysis model is invalid: {path}") from exc
+        raise WeightError(f"TrackNet checkpoint is invalid: {path}") from exc
 
 
 from .errors import WorkerError  # noqa: E402
