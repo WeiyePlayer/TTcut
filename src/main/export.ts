@@ -215,6 +215,26 @@ function comparable(value: string | null | undefined): string | null {
   return value && value !== 'unknown' && value !== 'N/A' ? value : null;
 }
 
+function timeBaseSeconds(value: string | null | undefined): number {
+  if (!value) return 0;
+  const [numerator, denominator] = value.split('/').map(Number);
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || !denominator) return 0;
+  return Math.abs(numerator! / denominator!);
+}
+
+function exportTimestampTolerance(metadata: VideoMetadata): number {
+  const videoFrameTolerance = metadata.fps > 0 ? 2 / metadata.fps : 0;
+  const aacFrameTolerance = metadata.audio_sample_rate
+    ? 1024 / metadata.audio_sample_rate
+    : 0;
+  return Math.max(
+    videoFrameTolerance,
+    aacFrameTolerance,
+    timeBaseSeconds(metadata.video_time_base),
+    timeBaseSeconds(metadata.audio_time_base),
+  ) + 0.001;
+}
+
 export async function validateExportOutput(
   output: string,
   wantedDuration: number,
@@ -242,7 +262,16 @@ export async function validateExportOutput(
     && Math.abs(metadata.video_duration_seconds - metadata.audio_duration_seconds) > 0.1) {
     throw new Error('EXPORT_AV_SYNC_MISMATCH');
   }
-  if (Math.abs(metadata.video_start_time_seconds ?? 0) > 1 / metadata.fps + 0.001) {
+  const timestampTolerance = exportTimestampTolerance(metadata);
+  const startTimes = [
+    metadata.video_start_time_seconds,
+    ...(metadata.audio_codec !== null ? [metadata.audio_start_time_seconds] : []),
+  ];
+  if (startTimes.some(
+    (startTime) => startTime !== null
+      && startTime !== undefined
+      && Math.abs(startTime) > timestampTolerance,
+  )) {
     throw new Error('EXPORT_TIMESTAMP_INVALID');
   }
   const fields: Array<keyof Pick<VideoMetadata,
@@ -363,7 +392,7 @@ async function executeFastSegmented(
       window,
       taskId,
       components.ffmpeg,
-      buildConcatArgs(manifest, partial),
+      buildConcatArgs(manifest, partial, analysisVideo),
       expectedOutputDuration(groups),
       'concatenating',
     );

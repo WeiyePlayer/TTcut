@@ -91,6 +91,12 @@ function outputPixelFormat(metadata: VideoMetadata, encoder: MediaEncoder): stri
     : 'yuv420p';
 }
 
+function appendAudioEncodingOptions(args: string[], metadata: VideoMetadata): void {
+  args.push('-c:a', 'aac', '-b:a', String(Math.round(metadata.audio_bitrate ?? 192_000)));
+  if (metadata.audio_sample_rate) args.push('-ar', String(metadata.audio_sample_rate));
+  if (metadata.audio_channels) args.push('-ac', String(metadata.audio_channels));
+}
+
 function appendMediaOutputOptions(
   args: string[],
   metadata: VideoMetadata,
@@ -103,11 +109,7 @@ function appendMediaOutputOptions(
     '-pix_fmt', outputPixelFormat(metadata, encoder),
     '-fps_mode', 'vfr', '-max_muxing_queue_size', '2048',
   );
-  if (hasAudio) {
-    args.push('-c:a', 'aac', '-b:a', String(Math.round(metadata.audio_bitrate ?? 192_000)));
-    if (metadata.audio_sample_rate) args.push('-ar', String(metadata.audio_sample_rate));
-    if (metadata.audio_channels) args.push('-ac', String(metadata.audio_channels));
-  }
+  if (hasAudio) appendAudioEncodingOptions(args, metadata);
   if (metadata.rotation !== null && metadata.rotation !== undefined) {
     args.push('-metadata:s:v:0', `rotate=${metadata.rotation}`);
   }
@@ -235,12 +237,27 @@ export function buildConcatManifest(relativePaths: readonly string[]): string {
     .join('\n')}\n`;
 }
 
-export function buildConcatArgs(manifest: string, output: string): string[] {
-  return [
+export function buildConcatArgs(
+  manifest: string,
+  output: string,
+  metadata: VideoMetadata,
+): string[] {
+  const args = [
     '-hide_banner', '-y',
     '-f', 'concat', '-safe', '1', '-i', manifest,
-    '-map', '0:v:0', '-map', '0:a?', '-c', 'copy',
+    '-map', '0:v:0', '-map', '0:a?',
+    '-c:v', 'copy',
+  ];
+  if (metadata.audio_codec !== null) {
+    appendAudioEncodingOptions(args, metadata);
+    args.push('-af', 'aresample=async=1:first_pts=0');
+  }
+  args.push(
+    // MP4 represents AAC priming with an edit list. make_zero would shift the copied video
+    // forward by the encoder delay; auto keeps both public stream start times at zero.
+    '-avoid_negative_ts', 'auto',
     '-movflags', '+faststart',
     '-progress', 'pipe:1', '-nostats', output,
-  ];
+  );
+  return args;
 }
