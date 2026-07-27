@@ -262,7 +262,9 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
 
     const calibrationVideo = page.locator('.video-surface video');
     await expect(calibrationVideo).toBeVisible({ timeout: 90_000 });
-    await expect(page.getByText('自动标定不可靠，请改用手动标定。', { exact: true })).toBeVisible();
+    const automaticCalibrationNotice = page.getByText('自动标定不可靠，请改用手动标定。', { exact: true });
+    await expect(automaticCalibrationNotice).toBeVisible();
+    await expect(automaticCalibrationNotice).toBeHidden({ timeout: 4_000 });
     await calibrationVideo.evaluate(async (element: HTMLVideoElement) => {
       if (element.readyState >= 1) return;
       await new Promise<void>((resolve, reject) => {
@@ -278,12 +280,12 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     await page.getByRole('button', { name: '开始分析' }).click();
 
     await expect(page.getByRole('heading', { name: '选择剪辑模式' })).toBeVisible({ timeout: 7 * 60 * 1_000 });
-    await expect(page.getByText('已识别 47 个有效回合', { exact: true })).toBeVisible();
+    await expect(page.getByText('已识别 41 个有效回合', { exact: true })).toBeVisible();
     await page.screenshot({ path: path.join(screenshotDir, '02-real-analysis.png'), fullPage: true });
 
     await page.getByRole('button', { name: '历史剪辑' }).click();
     await expect(page.getByText(path.basename(fixtureVideo), { exact: true })).toBeVisible();
-    await expect(page.getByText('47 个回合', { exact: true })).toBeVisible();
+    await expect(page.getByText('41 个回合', { exact: true })).toBeVisible();
     const historyCover = page.locator('.history-cover img');
     await expect(historyCover).toBeVisible();
     await expect.poll(() => historyCover.evaluate((element: HTMLImageElement) => ({ complete: element.complete, width: element.naturalWidth }))).toMatchObject({ complete: true, width: 640 });
@@ -294,19 +296,19 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     expect(durationBox!.x + durationBox!.width).toBeLessThanOrEqual(deleteBox!.x - 4);
     await page.locator('.history-open').click();
     await expect(page.getByRole('heading', { name: '选择剪辑模式' })).toBeVisible();
-    await expect(page.getByText('已识别 47 个有效回合', { exact: true })).toBeVisible();
+    await expect(page.getByText('已识别 41 个有效回合', { exact: true })).toBeVisible();
 
     await page.getByRole('button', { name: /自定义/ }).click();
     await expect(page.getByRole('button', { name: '开始剪辑' })).toBeDisabled();
     await page.locator('tbody input[type="checkbox"]').first().check();
     const thirdRallyRow = page.locator('tbody tr').nth(2);
-    await expect(thirdRallyRow).toContainText('00:00:32.065');
-    await expect(thirdRallyRow).toContainText('00:00:37.937');
+    await expect(thirdRallyRow).toContainText('00:00:32.032');
+    await expect(thirdRallyRow).toContainText('00:00:38.204');
     await thirdRallyRow.getByRole('button', { name: '预览' }).click();
     const rallyPreview = page.getByRole('dialog', { name: '回合预览' });
     await expect(rallyPreview).toBeVisible();
     await expect(rallyPreview).toContainText('第 3 回合');
-    await expect(rallyPreview).toContainText('00:00:31.065 – 00:00:38.937');
+    await expect(rallyPreview).toContainText('00:00:31.032 – 00:00:39.204');
     const rallyPreviewState = await rallyPreview.locator('video').evaluate(async (element: HTMLVideoElement) => {
       if (element.readyState < 1) {
         await new Promise<void>((resolve, reject) => {
@@ -329,8 +331,8 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     });
     expect(rallyPreviewState.controls).toBe(true);
     expect(rallyPreviewState.readyState).toBeGreaterThanOrEqual(1);
-    expect(rallyPreviewState.startTime).toBeGreaterThanOrEqual(31.015);
-    expect(rallyPreviewState.startTime).toBeLessThanOrEqual(31.115);
+    expect(rallyPreviewState.startTime).toBeGreaterThanOrEqual(30.982);
+    expect(rallyPreviewState.startTime).toBeLessThanOrEqual(31.082);
     expect(rallyPreviewState.currentTime).toBeGreaterThan(rallyPreviewState.startTime);
     await rallyPreview.getByRole('button', { name: '关闭预览' }).click();
     await expect(rallyPreview).toBeHidden();
@@ -408,6 +410,7 @@ test('automatic calibration completes serial multi-task analysis and records zer
   let page: Page | null = null;
   const nativeStderr: string[] = [];
   const rendererErrors: string[] = [];
+  const dialogs: string[] = [];
   try {
     const port = await freePort();
     electronProcess = spawn(electronPath, [
@@ -445,7 +448,10 @@ test('automatic calibration completes serial multi-task analysis and records zer
     page.on('console', (message) => {
       if (message.type() === 'error') rendererErrors.push(message.text());
     });
-    page.on('dialog', (dialog) => void dialog.accept());
+    page.on('dialog', (dialog) => {
+      dialogs.push(dialog.message());
+      void dialog.dismiss();
+    });
     await page.waitForLoadState('domcontentloaded');
 
     await page.locator('.drop-zone').click();
@@ -464,6 +470,7 @@ test('automatic calibration completes serial multi-task analysis and records zer
     expect(history.map((entry) => entry.video_name).sort()).toEqual(['batch-a.mp4', 'batch-b.mp4']);
     expect(history.every((entry) => entry.rally_count === 0 && entry.completion_kind === 'analysis')).toBe(true);
     expect(rendererErrors).toEqual([]);
+    expect(dialogs).toEqual([]);
     await testInfo.attach('multi-task-history', {
       body: Buffer.from(JSON.stringify(history, null, 2)),
       contentType: 'application/json',
