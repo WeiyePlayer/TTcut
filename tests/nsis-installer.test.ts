@@ -223,7 +223,7 @@ describe('assisted NSIS installer contract', () => {
   });
 
   it('preserves the desktop shortcut preference during silent updates', async () => {
-    const source = await readFile(installerPath, 'utf8');
+    const source = (await readFile(installerPath, 'utf8')).replaceAll('\r\n', '\n');
     const updateInitializationIndex = source.indexOf(
       '${If} ${isUpdated}\n    StrCpy $TTcutIsRepair "1"',
     );
