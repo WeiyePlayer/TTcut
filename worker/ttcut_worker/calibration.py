@@ -94,6 +94,17 @@ class TableCalibration:
         ], dtype=np.float32)
         return cv2.getPerspectiveTransform(source, target)
 
+    @property
+    def inverse_homography(self):
+        import cv2
+
+        source = np.asarray([
+            [0.0, 0.0], [TABLE_LENGTH_CM, 0.0],
+            [TABLE_LENGTH_CM, TABLE_WIDTH_CM], [0.0, TABLE_WIDTH_CM],
+        ], dtype=np.float32)
+        target = np.asarray(self.points, dtype=np.float32)
+        return cv2.getPerspectiveTransform(source, target)
+
     def image_to_table(self, x: float, y: float) -> tuple[float, float]:
         import cv2
 
@@ -101,3 +112,9 @@ class TableCalibration:
         mapped = cv2.perspectiveTransform(point, self.homography)[0, 0]
         return float(mapped[0]), float(mapped[1])
 
+    def table_to_image(self, x: float, y: float) -> tuple[float, float]:
+        import cv2
+
+        point = np.asarray([[[float(x), float(y)]]], dtype=np.float32)
+        mapped = cv2.perspectiveTransform(point, self.inverse_homography)[0, 0]
+        return float(mapped[0]), float(mapped[1])

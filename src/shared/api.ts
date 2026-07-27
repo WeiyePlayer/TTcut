@@ -2,14 +2,17 @@ import type {
   AnalysisResultV1,
   AppSettings,
   Calibration,
+  CalibrationChoice,
   ComponentStatus,
   ComponentSetupInfo,
   CutSelectionV1,
   ExportResult,
+  ExportRequest,
   HistorySummaryV1,
   PlatformCompatibility,
   TaskProgress,
   VideoMetadata,
+  UpdateState,
 } from './contracts';
 
 export type SelectedVideo = {
@@ -28,16 +31,31 @@ export type BootstrapData = {
   logsPath: string;
 };
 
+export type PendingComponentImport = {
+  variant: 'cpu' | 'cu126' | 'cu132';
+  receivedParts: number;
+  totalParts: number;
+  missingAssets: string[];
+};
+
 export type AppEvent =
   | { type: 'progress'; data: TaskProgress }
-  | { type: 'analysis-result'; taskId: string; data: AnalysisResultV1 }
+  | { type: 'analysis-result'; taskId: string; analysisId: string; calibration: Calibration; data: AnalysisResultV1 }
   | { type: 'export-result'; taskId: string; data: ExportResult }
-  | { type: 'component-result'; taskId: string; data: ComponentStatus; imported: Array<'analysis' | 'media'> }
+  | {
+    type: 'component-result';
+    taskId: string;
+    data: ComponentStatus;
+    imported: Array<'analysis' | 'media'>;
+    pendingImports: PendingComponentImport[];
+  }
   | { type: 'error'; taskId: string; code: string; message: string; logPath?: string };
 
 export type HistoryOpenResultV1 = {
+  analysisId: string;
   video: SelectedVideo;
   analysis: AnalysisResultV1;
+  calibration: Calibration;
 };
 
 export interface TTcutApi {
@@ -46,17 +64,25 @@ export interface TTcutApi {
   refreshComponents(): Promise<ComponentStatus>;
   importComponents(): Promise<string | null>;
   openComponentDownloads(): Promise<void>;
+  openX264Download(): Promise<void>;
   installAnalysisComponent(consent: true): Promise<string>;
   installMediaComponent(consent: true): Promise<string>;
   selectVideo(): Promise<SelectedVideo | null>;
+  selectVideos(): Promise<SelectedVideo[]>;
   pathForDroppedFile(file: File): string;
   acceptDroppedVideo(path: string): Promise<SelectedVideo>;
   probeVideo(path: string): Promise<VideoMetadata>;
-  startAnalysis(input: { videoPath: string; calibration: Calibration; device: 'auto' | 'cuda' | 'cpu' }): Promise<string>;
-  startExport(selection: CutSelectionV1): Promise<string>;
+  startAnalysis(input: {
+    videoPath: string;
+    calibrationChoice: CalibrationChoice;
+    device: 'auto' | 'cuda' | 'cpu';
+    historyVisibility: 'visible' | 'deferred';
+  }): Promise<string>;
+  startExport(input: ExportRequest): Promise<string>;
   listHistory(): Promise<HistorySummaryV1[]>;
   openHistory(id: string): Promise<HistoryOpenResultV1>;
   deleteHistory(id: string): Promise<void>;
+  deleteAnalysis(id: string): Promise<void>;
   clearHistory(): Promise<void>;
   cancelTask(taskId: string): Promise<void>;
   onTaskEvent(listener: (event: AppEvent) => void): () => void;
@@ -64,6 +90,10 @@ export interface TTcutApi {
   revealLogs(): Promise<void>;
   openLicenses(): Promise<void>;
   openExternalUrl(url: string): Promise<void>;
+  getUpdateState(): Promise<UpdateState>;
+  checkForUpdates(): Promise<UpdateState>;
+  restartToUpdate(): Promise<void>;
+  onUpdateState(listener: (state: UpdateState) => void): () => void;
   minimize(): Promise<void>;
   toggleMaximize(): Promise<void>;
   close(): Promise<void>;
