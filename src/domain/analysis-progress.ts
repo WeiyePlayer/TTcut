@@ -6,13 +6,13 @@ const MANUAL_ANALYSIS_RANGES: Record<string, readonly [number, number]> = {
 };
 
 const AUTOMATIC_ANALYSIS_RANGES: Record<string, readonly [number, number]> = {
-  probe: [0, 3],
-  table_sampling: [3, 18],
-  table_model: [18, 25],
-  table_inference: [25, 32],
-  load_model: [32, 40],
-  analysis: [40, 96],
-  postprocess: [96, 100],
+  probe: [0, 0],
+  table_sampling: [0, 2],
+  table_model: [2, 3],
+  table_inference: [3, 5],
+  load_model: [5, 5],
+  analysis: [5, 100],
+  postprocess: [100, 100],
 };
 
 export function overallAnalysisProgress(

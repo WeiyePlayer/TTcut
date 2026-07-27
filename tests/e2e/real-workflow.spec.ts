@@ -262,7 +262,9 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
 
     const calibrationVideo = page.locator('.video-surface video');
     await expect(calibrationVideo).toBeVisible({ timeout: 90_000 });
-    await expect(page.getByText('自动标定不可靠，请改用手动标定。', { exact: true })).toBeVisible();
+    const automaticCalibrationNotice = page.getByText('自动标定不可靠，请改用手动标定。', { exact: true });
+    await expect(automaticCalibrationNotice).toBeVisible();
+    await expect(automaticCalibrationNotice).toBeHidden({ timeout: 4_000 });
     await calibrationVideo.evaluate(async (element: HTMLVideoElement) => {
       if (element.readyState >= 1) return;
       await new Promise<void>((resolve, reject) => {
@@ -408,6 +410,7 @@ test('automatic calibration completes serial multi-task analysis and records zer
   let page: Page | null = null;
   const nativeStderr: string[] = [];
   const rendererErrors: string[] = [];
+  const dialogs: string[] = [];
   try {
     const port = await freePort();
     electronProcess = spawn(electronPath, [
@@ -445,7 +448,10 @@ test('automatic calibration completes serial multi-task analysis and records zer
     page.on('console', (message) => {
       if (message.type() === 'error') rendererErrors.push(message.text());
     });
-    page.on('dialog', (dialog) => void dialog.accept());
+    page.on('dialog', (dialog) => {
+      dialogs.push(dialog.message());
+      void dialog.dismiss();
+    });
     await page.waitForLoadState('domcontentloaded');
 
     await page.locator('.drop-zone').click();
@@ -464,6 +470,7 @@ test('automatic calibration completes serial multi-task analysis and records zer
     expect(history.map((entry) => entry.video_name).sort()).toEqual(['batch-a.mp4', 'batch-b.mp4']);
     expect(history.every((entry) => entry.rally_count === 0 && entry.completion_kind === 'analysis')).toBe(true);
     expect(rendererErrors).toEqual([]);
+    expect(dialogs).toEqual([]);
     await testInfo.attach('multi-task-history', {
       body: Buffer.from(JSON.stringify(history, null, 2)),
       contentType: 'application/json',

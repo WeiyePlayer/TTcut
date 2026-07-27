@@ -348,6 +348,11 @@ export function App() {
 
   useEffect(() => { settingsRef.current = settings; }, [settings]);
   useEffect(() => {
+    if (!toast) return;
+    const timeout = window.setTimeout(() => setToast(null), 3_000);
+    return () => window.clearTimeout(timeout);
+  }, [toast]);
+  useEffect(() => {
     if (updateState.status !== 'downloaded' || promptedUpdateVersion.current === updateState.version) return;
     promptedUpdateVersion.current = updateState.version;
     if (window.confirm(`TTcut ${updateState.version ?? ''} 已下载完成。立即重启安装？\n选择“取消”可稍后重启。`)) {
@@ -378,7 +383,6 @@ export function App() {
       await acceptVideo(selected[0] ?? null);
       return;
     }
-    if (!window.confirm('测试内容，确认以继续')) return;
     multiActiveRef.current = true;
     setMultiVideos(selected);
     setView('multi');
