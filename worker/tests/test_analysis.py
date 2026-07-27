@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import numpy as np
+from pathlib import Path
 
 from ttcut_worker.bounce import detect_bounce_frames
 from ttcut_worker.calibration import TableCalibration
+from ttcut_worker.predictor import PredictionStats
 from ttcut_worker.table_analyze import _order_corners, _select_coherent_corner_pair
 from ttcut_worker.rallies import group_rallies
 from ttcut_worker.types import TrajectoryPoint
-from ttcut_worker.worker import validate_request
+from ttcut_worker.video import VideoInfo
+from ttcut_worker.worker import analyze, validate_request
 
 
 def calibration() -> TableCalibration:
@@ -178,3 +181,38 @@ def test_worker_request_rejects_invalid_video_metadata():
         assert "fields" in str(exc).lower()
     else:
         raise AssertionError("invalid video metadata must fail")
+
+
+def test_worker_analysis_passes_a_validated_roi_to_tracknet(monkeypatch):
+    captured = {}
+
+    class FakePredictor:
+        def __init__(self, loaded):
+            captured["loaded"] = loaded
+
+        def predict(self, video_path, progress_callback=None, analysis_roi=None):
+            captured["video_path"] = video_path
+            captured["roi"] = analysis_roi
+            return (
+                [],
+                VideoInfo(
+                    path=Path(video_path),
+                    width=1280,
+                    height=720,
+                    fps=30.0,
+                    metadata_frame_count=1,
+                    decoded_frame_count=1,
+                    duration=1 / 30,
+                ),
+                PredictionStats(0, 1, 0.01, 100.0, 256, 144, 0.25),
+            )
+
+    monkeypatch.setenv("TTCUT_TRACKNET_WEIGHTS", "fake-tracknet.pt")
+    monkeypatch.setattr("ttcut_worker.worker.load_tracknet", lambda path, device: object())
+    monkeypatch.setattr("ttcut_worker.worker.TrackNetPredictor", FakePredictor)
+
+    result = analyze(valid_request())
+
+    assert result["schema_version"] == 1
+    assert captured["roi"].bbox[2] > captured["roi"].bbox[0]
+    assert captured["roi"].bbox[3] > captured["roi"].bbox[1]
