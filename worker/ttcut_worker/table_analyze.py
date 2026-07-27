@@ -44,101 +44,171 @@ MEAN = np.asarray([0.485, 0.456, 0.406], dtype=np.float32)
 STD = np.asarray([0.229, 0.224, 0.225], dtype=np.float32)
 
 ProgressCallback = Callable[[str, int, int], None]
+SAMPLE_RATIOS = (0.0, 0.25, 0.5, 0.75, 1.0)
+MAX_SEEK_FORWARD_SECONDS = 10.0
 
 
-def _decode_frames_by_index(
-    video_path: str | Path,
-    target_indices: list[int],
+def _capture_position(
+    capture,
     fps: float,
-) -> list[tuple[int, float, np.ndarray]]:
-    targets = set(target_indices)
-    selected: dict[int, tuple[int, float, np.ndarray]] = {}
-    capture = cv2.VideoCapture(str(video_path))
-    frame_index = 0
-    while targets:
+) -> tuple[int, float]:
+    next_frame = float(capture.get(cv2.CAP_PROP_POS_FRAMES))
+    frame_index = max(0, int(round(next_frame)) - 1) if math.isfinite(next_frame) else 0
+    timestamp = float(capture.get(cv2.CAP_PROP_POS_MSEC)) / 1000.0
+    if not math.isfinite(timestamp) or timestamp < 0 or (timestamp == 0 and frame_index > 0):
+        timestamp = frame_index / fps
+    return frame_index, timestamp
+
+
+def _seek_and_decode(
+    capture,
+    *,
+    target_frame_index: int | None,
+    target_time_seconds: float,
+    fps: float,
+) -> tuple[int, float, np.ndarray, int, str, float]:
+    seek_method = "frame" if target_frame_index is not None else "time"
+    seek_property = cv2.CAP_PROP_POS_FRAMES if seek_method == "frame" else cv2.CAP_PROP_POS_MSEC
+    seek_value = (
+        float(target_frame_index)
+        if target_frame_index is not None
+        else target_time_seconds * 1000.0
+    )
+    if not capture.set(seek_property, seek_value):
+        raise AutoCalibrationError(f"Could not seek to automatic calibration sample by {seek_method}.")
+
+    decoded = 0
+    max_forward_frames = max(1, int(math.ceil(fps * MAX_SEEK_FORWARD_SECONDS)))
+    while decoded < max_forward_frames:
         ok, frame = capture.read()
         if not ok or frame is None:
-            break
-        if frame_index in targets:
-            selected[frame_index] = (frame_index, frame_index / fps, frame.copy())
-            targets.remove(frame_index)
-        frame_index += 1
-    capture.release()
-    if targets:
-        raise AutoCalibrationError("Could not decode all representative video frames.")
-    return [selected[index] for index in target_indices]
+            raise AutoCalibrationError("Could not decode an automatic calibration sample.")
+        decoded += 1
+        frame_index, timestamp = _capture_position(capture, fps)
+        if target_frame_index is not None:
+            if frame_index < target_frame_index:
+                continue
+            if frame_index > target_frame_index:
+                raise AutoCalibrationError(
+                    f"Automatic calibration seek overshot frame {target_frame_index} with {frame_index}."
+                )
+            position_error = abs(frame_index - target_frame_index) / fps
+            return frame_index, timestamp, frame, decoded, seek_method, position_error
+
+        half_frame = 0.5 / fps
+        if timestamp + half_frame < target_time_seconds:
+            continue
+        position_error = abs(timestamp - target_time_seconds)
+        if position_error > max(2.0 / fps, 0.05):
+            raise AutoCalibrationError(
+                "Automatic calibration time seek exceeded the allowed position error."
+            )
+        return frame_index, timestamp, frame, decoded, seek_method, position_error
+
+    raise AutoCalibrationError("Automatic calibration seek exceeded the bounded forward decode window.")
 
 
 def _decode_sample_frames(
     video_path: str | Path,
+    video_metadata: dict,
     progress_callback: ProgressCallback,
-) -> tuple[list[tuple[int, float, np.ndarray]], dict]:
+) -> tuple[list[tuple[int, float, np.ndarray, dict]], dict]:
+    sampling_started = time.perf_counter()
     capture = cv2.VideoCapture(str(video_path))
     if not capture.isOpened():
         capture.release()
         raise AutoCalibrationError(f"Could not open video for automatic calibration: {video_path}")
 
-    fps = float(capture.get(cv2.CAP_PROP_FPS))
-    metadata_frames = max(0, int(round(capture.get(cv2.CAP_PROP_FRAME_COUNT))))
+    capture_fps = float(capture.get(cv2.CAP_PROP_FPS))
+    fps = float(video_metadata["fps"])
+    capture_frames = max(0, int(round(capture.get(cv2.CAP_PROP_FRAME_COUNT))))
+    declared_frames = video_metadata.get("frame_count")
+    metadata_frames = int(declared_frames) if declared_frames is not None else capture_frames
     width = int(round(capture.get(cv2.CAP_PROP_FRAME_WIDTH)))
     height = int(round(capture.get(cv2.CAP_PROP_FRAME_HEIGHT)))
-    if not math.isfinite(fps) or fps <= 0 or width <= 0 or height <= 0:
+    duration = float(video_metadata["duration_seconds"])
+    if (
+        not math.isfinite(capture_fps)
+        or capture_fps <= 0
+        or not math.isfinite(fps)
+        or fps <= 0
+        or not math.isfinite(duration)
+        or duration <= 0
+        or width <= 0
+        or height <= 0
+    ):
         capture.release()
         raise AutoCalibrationError("Video metadata is incomplete for automatic calibration.")
 
-    duration = metadata_frames / fps if metadata_frames > 0 else None
-    target_times = [0.0]
-    if duration is not None:
-        target_times.extend(duration * ratio for ratio in (0.25, 0.5, 0.75))
-    else:
-        target_times.extend((math.inf, math.inf, math.inf))
-
-    selected: list[tuple[int, float, np.ndarray] | None] = [None, None, None, None]
-    last_frame = None
-    last_index = -1
-    frame_index = 0
-    next_progress = 0.1
-    progress_callback("table_sampling", 0, metadata_frames)
-    while True:
-        ok, frame = capture.read()
-        if not ok or frame is None:
-            break
-        timestamp = frame_index / fps
-        for target_index, target_time in enumerate(target_times):
-            if selected[target_index] is None and timestamp >= target_time:
-                selected[target_index] = (frame_index, timestamp, frame.copy())
-        last_frame = frame.copy()
-        last_index = frame_index
-        frame_index += 1
-        if metadata_frames > 0 and frame_index / metadata_frames >= next_progress:
-            progress_callback("table_sampling", min(frame_index, metadata_frames), metadata_frames)
-            next_progress += 0.1
-    capture.release()
-
-    if last_frame is None:
-        raise AutoCalibrationError("No decodable frames were found for automatic calibration.")
-    actual_duration = frame_index / fps
-    if duration is None:
-        target_indices = [
-            0,
-            round((frame_index - 1) * 0.25),
-            round((frame_index - 1) * 0.5),
-            round((frame_index - 1) * 0.75),
+    use_frame_seek = metadata_frames > 0 and not bool(video_metadata["variable_frame_rate"])
+    if use_frame_seek:
+        last_index = metadata_frames - 1
+        target_frame_indices: list[int | None] = [
+            0 if ratio == 0 else last_index if ratio == 1 else min(
+                last_index,
+                int(math.ceil(metadata_frames * ratio - 1e-9)),
+            )
+            for ratio in SAMPLE_RATIOS
         ]
-        selected = _decode_frames_by_index(video_path, target_indices, fps)
-    if any(item is None for item in selected):
-        raise AutoCalibrationError("Could not decode all representative video frames.")
+        target_times = [
+            int(index) / fps
+            for index in target_frame_indices
+        ]
+    else:
+        target_frame_indices = [None] * len(SAMPLE_RATIOS)
+        target_times = [
+            0.0 if ratio == 0 else max(0.0, duration - 1.0 / fps) if ratio == 1 else duration * ratio
+            for ratio in SAMPLE_RATIOS
+        ]
 
-    progress_callback("table_sampling", frame_index, frame_index)
-    samples = [item for item in selected if item is not None]
-    samples.append((last_index, last_index / fps, last_frame))
+    samples = []
+    decoded_frame_count = 0
+    progress_callback("table_sampling", 0, len(SAMPLE_LABELS))
+    try:
+        for sample_index, (target_frame_index, target_time) in enumerate(
+            zip(target_frame_indices, target_times),
+            start=1,
+        ):
+            frame_index, timestamp, frame, decoded, seek_method, position_error = _seek_and_decode(
+                capture,
+                target_frame_index=target_frame_index,
+                target_time_seconds=target_time,
+                fps=fps,
+            )
+            decoded_frame_count += decoded
+            samples.append((
+                frame_index,
+                timestamp,
+                frame,
+                {
+                    "target_frame_index": target_frame_index,
+                    "target_time_seconds": target_time,
+                    "seek_method": seek_method,
+                    "position_error_seconds": position_error,
+                },
+            ))
+            progress_callback("table_sampling", sample_index, len(SAMPLE_LABELS))
+    finally:
+        capture.release()
+
+    sample_frame_indices = {sample[0] for sample in samples}
+    sample_timestamps = {round(sample[1], 6) for sample in samples}
+    if (
+        len(sample_frame_indices) != len(SAMPLE_LABELS)
+        or len(sample_timestamps) != len(SAMPLE_LABELS)
+    ):
+        raise AutoCalibrationError("Automatic calibration samples must use distinct video positions.")
+
     return samples, {
         "width": width,
         "height": height,
         "fps": fps,
         "metadata_frame_count": metadata_frames,
-        "decoded_frame_count": frame_index,
-        "duration_seconds": actual_duration,
+        "decoded_frame_count": decoded_frame_count,
+        "duration_seconds": duration,
+        "sampling_seconds": time.perf_counter() - sampling_started,
+        "seek_count": len(samples),
+        "copied_frame_count": 0,
     }
 
 
@@ -200,7 +270,7 @@ def _extract_raw_keypoints(
 def _predict_samples(model, device, samples, width: int, height: int, progress_callback: ProgressCallback):
     predictions = []
     progress_callback("table_inference", 0, len(samples))
-    for sample_index, (label, (frame_index, timestamp, frame)) in enumerate(zip(SAMPLE_LABELS, samples), start=1):
+    for sample_index, (label, (frame_index, timestamp, frame, sample_info)) in enumerate(zip(SAMPLE_LABELS, samples), start=1):
         tensor = _preprocess(frame, device)
         started = time.perf_counter()
         try:
@@ -215,6 +285,7 @@ def _predict_samples(model, device, samples, width: int, height: int, progress_c
             "label": label,
             "frame_index": frame_index,
             "time_seconds": timestamp,
+            **sample_info,
             "points": points,
             "activations": activations,
             "valid": valid,
@@ -313,6 +384,10 @@ def _serializable_prediction(prediction):
         "label": prediction["label"],
         "frame_index": prediction["frame_index"],
         "time_seconds": prediction["time_seconds"],
+        "target_frame_index": prediction["target_frame_index"],
+        "target_time_seconds": prediction["target_time_seconds"],
+        "seek_method": prediction["seek_method"],
+        "position_error_seconds": prediction["position_error_seconds"],
         "forward_seconds": prediction["forward_seconds"],
         "keypoints": [
             {
@@ -332,9 +407,10 @@ def analyze_table(
     video_path: str | Path,
     weight_path: str | Path,
     requested_device: str,
+    video_metadata: dict,
     progress_callback: ProgressCallback,
 ) -> tuple[TableCalibration, dict]:
-    samples, video_info = _decode_sample_frames(video_path, progress_callback)
+    samples, video_info = _decode_sample_frames(video_path, video_metadata, progress_callback)
     progress_callback("table_model", 0, 1)
     model_started = time.perf_counter()
     model, device, identifier = _load_model(weight_path, requested_device)
