@@ -119,6 +119,12 @@ def valid_request():
         "task_id": "22222222-2222-4222-8222-222222222222",
         "video_path": "match.mp4",
         "device": "cpu",
+        "video_metadata": {
+            "duration_seconds": 10.0,
+            "fps": 30.0,
+            "frame_count": 300,
+            "variable_frame_rate": False,
+        },
         "calibration_choice": {
             "method": "manual",
             "calibration": {
@@ -161,3 +167,14 @@ def test_worker_request_accepts_automatic_calibration_without_points():
     request = valid_request()
     request["calibration_choice"] = {"method": "automatic"}
     assert validate_request(request) == request
+
+
+def test_worker_request_rejects_invalid_video_metadata():
+    request = valid_request()
+    request["video_metadata"]["duration_seconds"] = 0
+    try:
+        validate_request(request)
+    except Exception as exc:
+        assert "fields" in str(exc).lower()
+    else:
+        raise AssertionError("invalid video metadata must fail")

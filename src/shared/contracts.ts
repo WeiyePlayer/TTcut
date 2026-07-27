@@ -38,6 +38,10 @@ const tableSampleSchema = z.object({
   label: tableSampleLabelSchema,
   frame_index: z.number().int().nonnegative(),
   time_seconds: finiteNumber.nonnegative(),
+  target_frame_index: z.number().int().nonnegative().nullable().optional(),
+  target_time_seconds: finiteNumber.nonnegative().optional(),
+  seek_method: z.enum(['frame', 'time']).optional(),
+  position_error_seconds: finiteNumber.nonnegative().optional(),
   forward_seconds: finiteNumber.nonnegative(),
   keypoints: z.array(tableSampleKeypointSchema).length(13),
 }).strict();
@@ -78,6 +82,9 @@ export const tableAnalysisSchema = z.object({
     metadata_frame_count: z.number().int().nonnegative(),
     decoded_frame_count: z.number().int().positive(),
     duration_seconds: finiteNumber.positive(),
+    sampling_seconds: finiteNumber.nonnegative().optional(),
+    seek_count: z.number().int().nonnegative().optional(),
+    copied_frame_count: z.number().int().nonnegative().optional(),
   }).strict(),
   sampling: z.array(tableSampleSchema).length(5).superRefine((samples, context) => {
     const expected = ['first', '25_percent', '50_percent', '75_percent', 'last'];
@@ -109,11 +116,19 @@ export const calibrationChoiceSchema = z.discriminatedUnion('method', [
   z.object({ method: z.literal('automatic') }).strict(),
 ]);
 
+const analysisVideoMetadataSchema = z.object({
+  duration_seconds: finiteNumber.positive(),
+  fps: finiteNumber.positive(),
+  frame_count: z.number().int().positive().nullable(),
+  variable_frame_rate: z.boolean(),
+}).strict();
+
 export const analysisRequestSchema = z.object({
   schema_version: z.literal(1),
   task_id: z.string().uuid(),
   video_path: z.string().min(1),
   device: z.enum(DEVICE_VALUES),
+  video_metadata: analysisVideoMetadataSchema,
   calibration_choice: calibrationChoiceSchema,
 }).strict();
 

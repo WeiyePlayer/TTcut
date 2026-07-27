@@ -46,6 +46,12 @@ export async function startAnalysis(
     task_id: taskId,
     video_path: metadata.path,
     device: value.device,
+    video_metadata: {
+      duration_seconds: metadata.duration_seconds,
+      fps: metadata.fps,
+      frame_count: metadata.frame_count ?? null,
+      variable_frame_rate: metadata.variable_frame_rate,
+    },
     calibration_choice: value.calibrationChoice,
   });
   const child = spawnTracked(taskId, components.python, ['-m', 'ttcut_worker.worker'], {

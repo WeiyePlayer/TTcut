@@ -23,7 +23,14 @@ def emit(payload: dict) -> None:
 
 
 def validate_request(value: object) -> dict:
-    expected_fields = {"schema_version", "task_id", "video_path", "device", "calibration_choice"}
+    expected_fields = {
+        "schema_version",
+        "task_id",
+        "video_path",
+        "device",
+        "video_metadata",
+        "calibration_choice",
+    }
     if not isinstance(value, dict) or set(value) != expected_fields or value.get("schema_version") != 1:
         raise InvalidRequestError("Unsupported analysis request schema.")
     try:
@@ -32,6 +39,37 @@ def validate_request(value: object) -> dict:
             raise ValueError("device")
         if not isinstance(value["video_path"], str) or Path(value["video_path"]).suffix.lower() != ".mp4":
             raise ValueError("video_path")
+        metadata = value["video_metadata"]
+        if not isinstance(metadata, dict) or set(metadata) != {
+            "duration_seconds",
+            "fps",
+            "frame_count",
+            "variable_frame_rate",
+        }:
+            raise ValueError("video_metadata")
+        if (
+            not isinstance(metadata["duration_seconds"], (int, float))
+            or isinstance(metadata["duration_seconds"], bool)
+            or not math.isfinite(metadata["duration_seconds"])
+            or metadata["duration_seconds"] <= 0
+        ):
+            raise ValueError("duration_seconds")
+        if (
+            not isinstance(metadata["fps"], (int, float))
+            or isinstance(metadata["fps"], bool)
+            or not math.isfinite(metadata["fps"])
+            or metadata["fps"] <= 0
+        ):
+            raise ValueError("fps")
+        frame_count = metadata["frame_count"]
+        if frame_count is not None and (
+            not isinstance(frame_count, int)
+            or isinstance(frame_count, bool)
+            or frame_count <= 0
+        ):
+            raise ValueError("frame_count")
+        if not isinstance(metadata["variable_frame_rate"], bool):
+            raise ValueError("variable_frame_rate")
         choice = value["calibration_choice"]
         if not isinstance(choice, dict) or choice.get("method") not in {"manual", "automatic"}:
             raise ValueError("calibration_choice")
@@ -73,7 +111,11 @@ def analyze(request: dict) -> dict:
             })
 
         calibration, table_analysis = analyze_table(
-            request["video_path"], table_weight_path, request["device"], table_progress,
+            request["video_path"],
+            table_weight_path,
+            request["device"],
+            request["video_metadata"],
+            table_progress,
         )
     else:
         calibration_value = choice["calibration"]
