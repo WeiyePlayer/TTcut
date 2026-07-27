@@ -1,9 +1,8 @@
-import { autoUpdater, app, type BrowserWindow } from 'electron';
+import { app, type BrowserWindow } from 'electron';
+import { autoUpdater } from 'electron-updater';
 import { updateStateSchema, type UpdateState } from '../shared/contracts';
 import { IPC } from '../shared/ipc';
 import { logLine } from './logger';
-
-const UPDATE_FEED_BASE = 'https://update.electronjs.org/WeiyePlayer/TTcut';
 
 export class AppUpdater {
   private window: BrowserWindow | null = null;
@@ -16,10 +15,10 @@ export class AppUpdater {
 
   constructor() {
     autoUpdater.on('checking-for-update', () => this.setState({ status: 'checking', version: null, message: null }));
-    autoUpdater.on('update-available', () => this.setState({ status: 'available', version: null, message: null }));
+    autoUpdater.on('update-available', (info) => this.setState({ status: 'available', version: info.version, message: null }));
     autoUpdater.on('update-not-available', () => this.setState({ status: 'up-to-date', version: app.getVersion(), message: null }));
-    autoUpdater.on('update-downloaded', (_event, _notes, releaseName) => {
-      this.setState({ status: 'downloaded', version: releaseName || null, message: null });
+    autoUpdater.on('update-downloaded', (info) => {
+      this.setState({ status: 'downloaded', version: info.version, message: null });
     });
     autoUpdater.on('error', (error) => {
       void logLine('updater', 'WARN', error.stack ?? error.message).catch(() => undefined);
@@ -44,7 +43,9 @@ export class AppUpdater {
   start(window: BrowserWindow | null): void {
     this.window = window;
     if (!this.supported()) return;
-    autoUpdater.setFeedURL({ url: `${UPDATE_FEED_BASE}/win32-x64/${encodeURIComponent(app.getVersion())}` });
+    autoUpdater.autoDownload = true;
+    autoUpdater.autoInstallOnAppQuit = true;
+    autoUpdater.allowPrerelease = app.getVersion().includes('-');
     this.timer = setTimeout(() => void this.check(), 10_000);
     this.timer.unref?.();
   }
@@ -65,7 +66,7 @@ export class AppUpdater {
 
   restartToInstall(): void {
     if (this.state.status !== 'downloaded') throw new Error('UPDATE_NOT_READY');
-    autoUpdater.quitAndInstall();
+    autoUpdater.quitAndInstall(true, true);
   }
 }
 

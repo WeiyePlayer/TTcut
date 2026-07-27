@@ -15,10 +15,10 @@ npm run make:official
 `scripts/build-official-release.ps1` 会：
 
 1. 选择当前用户证书存储中唯一可用的 `CN=weiye` Code Signing 证书；不存在时创建三年有效、RSA 3072、SHA-256、私钥不可导出的自签名证书。
-2. 使用证书精确 thumbprint 和 Windows SDK x64 SignTool 签署应用目录内可签名文件、`TTcut.exe` 与 Squirrel Setup。
+2. 使用证书精确 thumbprint 和 Windows SDK x64 SignTool 签署应用目录内可签名文件、`TTcut.exe`、NSIS 卸载器与外层 Setup。
 3. 使用 RFC 3161 SHA-256 时间戳。
 4. 仅在构建验证期间把公钥临时加入当前用户根存储，并在 `finally` 中删除临时信任。
-5. 验证构建目录、Squirrel `.nupkg` 内的 `TTcut.exe` 和最终 Setup，再生成最终哈希与 SBOM。
+5. 验证构建目录中的 `TTcut.exe`、从 Setup 提取的 NSIS 卸载器和最终 Setup，再生成 blockmap、更新元数据、最终哈希与 SBOM。
 
 如存在多个可用证书，必须显式传入 thumbprint：
 

@@ -10,6 +10,29 @@ size, and SHA-256 before packaging.
 The managed Python and PyTorch environment installed separately from the
 application package to execute local analysis.
 
+## Installation Root
+
+The stable user-selected folder that owns one TTcut installation and its managed
+component data. Changing drives requires uninstalling before reinstalling.
+
+## Program Area
+
+The `app` area inside the Installation Root that contains replaceable TTcut
+application files.
+_Avoid_: Installation Root
+
+## Component Store
+
+The `data/components` area inside the Installation Root that contains managed
+runtimes, media tools, downloads, staging, and rollback backups.
+_Avoid_: AppData, Program Area
+
+## Legacy Installation
+
+A previous per-user Squirrel installation under LocalAppData that can be
+replaced only after its Component Store has been copied and verified.
+_Avoid_: Current installation
+
 ## Calibration
 
 The four table-corner coordinates used for a video analysis. Calibration can

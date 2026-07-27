@@ -96,7 +96,7 @@ try {
   Invoke-NodeScript 'scripts\verify-model-assets.mjs'
   Invoke-NodeScript 'scripts\stage-worker.mjs'
   Invoke-NodeScript 'scripts\generate-release-metadata.mjs'
-  Invoke-NodeScript 'scripts\make.mjs'
+  Invoke-NodeScript 'scripts\make-nsis.mjs'
   Invoke-NodeScript 'scripts\verify-release.mjs'
   Invoke-NodeScript 'scripts\generate-public-release-assets.mjs'
   Invoke-NodeScript 'scripts\verify-signatures.mjs'

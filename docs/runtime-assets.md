@@ -5,9 +5,9 @@
 TTcut 的分析运行时固定为 Python 3.12.13、PyTorch 2.12.1、NumPy 2.5.1 和 opencv-python 4.13.0.92。CPU、CUDA 12.6 和 CUDA 13.2 必须构建为三个完整且互不修改的目录。CUDA 13.2 运行时用于包含 `sm_120` 的新架构；CUDA 12.6 资产、URL、哈希和安装目录保持不变：
 
 ```text
-%LOCALAPPDATA%\TTcutData\components\analysis-runtime\3.12.13-2.12.1\cpu\python.exe
-%LOCALAPPDATA%\TTcutData\components\analysis-runtime\3.12.13-2.12.1\cu126\python.exe
-%LOCALAPPDATA%\TTcutData\components\analysis-runtime\3.12.13-2.12.1\cu132\python.exe
+<root>\data\components\analysis-runtime\3.12.13-2.12.1\cpu\python.exe
+<root>\data\components\analysis-runtime\3.12.13-2.12.1\cu126\python.exe
+<root>\data\components\analysis-runtime\3.12.13-2.12.1\cu132\python.exe
 ```
 
 根目录的 `active-runtime.json` 只记录最近一次通过自检的运行时。`device:auto` 优先测试 CUDA；CUDA 不存在或自检失败时选择 CPU。不得在同一环境中通过 pip 原地替换 CPU/CUDA 版 PyTorch。

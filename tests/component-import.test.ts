@@ -31,11 +31,11 @@ function testCatalog(): ComponentCatalog {
       assets: [
         {
           variant: 'cpu', provider: 'test', asset: 'cpu.zip', archive_root: 'cpu-root', install_directory: 'analysis-runtime/3.12.13-2.12.1/cpu',
-          size_bytes: cpu.length, sha256: hash(cpu), parts: [{ asset: 'cpu.zip', url: 'https://example.com/cpu', size_bytes: cpu.length, sha256: hash(cpu) }],
+          size_bytes: cpu.length, installed_size_bytes: cpu.length * 2, sha256: hash(cpu), parts: [{ asset: 'cpu.zip', url: 'https://example.com/cpu', size_bytes: cpu.length, sha256: hash(cpu) }],
         },
         {
           variant: 'cu126', provider: 'test', asset: 'cu126.zip', archive_root: 'cuda-root', install_directory: 'analysis-runtime/3.12.13-2.12.1/cu126',
-          size_bytes: cudaOne.length + cudaTwo.length + cudaThree.length, sha256: hash(`${cudaOne}${cudaTwo}${cudaThree}`), parts: [
+          size_bytes: cudaOne.length + cudaTwo.length + cudaThree.length, installed_size_bytes: (cudaOne.length + cudaTwo.length + cudaThree.length) * 2, sha256: hash(`${cudaOne}${cudaTwo}${cudaThree}`), parts: [
             { asset: 'cu126.zip.part001', url: 'https://example.com/cuda-1', size_bytes: cudaOne.length, sha256: hash(cudaOne) },
             { asset: 'cu126.zip.part002', url: 'https://example.com/cuda-2', size_bytes: cudaTwo.length, sha256: hash(cudaTwo) },
             { asset: 'cu126.zip.part003', url: 'https://example.com/cuda-3', size_bytes: cudaThree.length, sha256: hash(cudaThree) },
@@ -45,14 +45,14 @@ function testCatalog(): ComponentCatalog {
     },
     ffmpeg: {
       provider: 'test', release_tag: 'test', version_line: 'test', variant: 'win64-lgpl-shared-8.1', asset: 'ffmpeg.zip', archive_root: 'ffmpeg-root',
-      install_directory: 'ffmpeg-8.1', url: 'https://example.com/ffmpeg', license_url: 'https://example.com/ffmpeg-license', size_bytes: media.length,
+      install_directory: 'ffmpeg-8.1', url: 'https://example.com/ffmpeg', license_url: 'https://example.com/ffmpeg-license', size_bytes: media.length, installed_size_bytes: media.length * 2,
       sha256: hash(media), required_build_flags: ['--enable-shared'], required_encoders: ['aac'],
     },
     ffmpeg_x264: {
       provider: 'test', release_tag: 'autobuild-2026-07-22-13-36', version_line: 'N-125716-g1b1f602699-20260722', variant: 'win64-gpl',
       asset: 'ffmpeg-N-125716-g1b1f602699-win64-gpl.zip', archive_root: 'ffmpeg-N-125716-g1b1f602699-win64-gpl', install_directory: 'ffmpeg-x264-N-125716-g1b1f602699',
       url: 'https://example.com/ffmpeg-x264', license_url: 'https://example.com/ffmpeg-x264-license', source_url: 'https://example.com/ffmpeg-x264-source',
-      size_bytes: 168_733_210, sha256: '6dcf685c2fea98221b3f179961165e9c31f55bead576c4479ae4549858fbf826',
+      size_bytes: 168_733_210, installed_size_bytes: 450_000_000, sha256: '6dcf685c2fea98221b3f179961165e9c31f55bead576c4479ae4549858fbf826',
       required_build_flags: ['--enable-gpl', '--enable-libx264'], required_encoders: ['libx264', 'aac'], supported_pixel_formats: ['yuv420p'],
     },
   };

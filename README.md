@@ -9,7 +9,7 @@ TTcut 是一款面向乒乓球爱好者的本地乒乓球视频自动剪辑工�
 ## 下载与安装
 
 1. 从 [TTcut v1.1.0-beta Release](https://github.com/WeiyePlayer/TTcut/releases/tag/v1.1.0-beta) 下载 `TTcut-1.1.0-beta-x64-Setup.exe`。
-2. 运行安装程序。安装完成后，从桌面或开始菜单的 `TTcut` 快捷方式启动。
+2. 运行安装向导，选择安装根目录，并决定是否创建桌面快捷方式。程序写入 `<root>\app`，大型运行时、下载和导入暂存写入 `<root>\data\components`；开始菜单快捷方式始终创建。
 3. 首次启动进入设置，同意后分别安装“分析组件”和“视频处理组件”。
 
 分析组件会自动检测 NVIDIA GPU：CUDA 环境安装或自检失败时回退到 CPU。视频处理组件用于读取视频信息、剪辑、合并和验证输出。
@@ -84,7 +84,7 @@ TTcut 是一款面向乒乓球爱好者的本地乒乓球视频自动剪辑工�
 - 三帧/五帧弹跳检测和时间去重。
 - 只基于弹跳事件的回合分组。
 
-运行时组件安装在 `%LOCALAPPDATA%\TTcutData\components`。两个模型随应用安装并在打包前按固定大小和 SHA-256 校验；Python/PyTorch 运行时仍按需下载，支持 CPU、CUDA 12.6 和 CUDA 13.2。
+运行时组件安装在所选安装根的 `<root>\data\components`。两个模型随应用安装并在打包前按固定大小和 SHA-256 校验；Python/PyTorch 运行时仍按需下载，支持 CPU、CUDA 12.6 和 CUDA 13.2。
 
 ## 视频处理组件
 
@@ -135,6 +135,8 @@ npm run verify:release
 npm run make
 npm run make:official
 ```
+
+`npm run make` 保留 Forge 的 Vite 编译、打包与 Fuse 配置，并在 `out\make\nsis\x64` 生成当前版本的未签名 NSIS Setup、blockmap 和更新元数据；它不修改版本，也不上传 Release。`npm run make:official` 继续执行签名门禁。
 
 真实 E2E 不随仓库分发测试视频、模型权重或运行时。运行 `npm run test:e2e` 前，通过以下变量指定本机已验证的文件；`TTCUT_E2E_FFMPEG_ROOT` 指向同时包含 `ffmpeg.exe` 和 `ffprobe.exe` 的目录：
 

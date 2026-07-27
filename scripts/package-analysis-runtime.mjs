@@ -82,6 +82,8 @@ if (packed.status !== 0) throw new Error(`Runtime archive creation failed: ${pac
 
 const hash = createHash('sha256');
 for await (const chunk of createReadStream(archive)) hash.update(chunk);
+const installedSize = (await Promise.all((await walk(source)).map(async (file) => (await stat(file)).size)))
+  .reduce((total, size) => total + size, 0);
 const descriptor = {
   variant,
   provider: 'TTcut release pipeline',
@@ -90,6 +92,7 @@ const descriptor = {
   install_directory: `analysis-runtime/${runtimeId}/${variant}`,
   url: `https://REPLACE-WITH-IMMUTABLE-HOST/${path.basename(archive)}`,
   size_bytes: (await stat(archive)).size,
+  installed_size_bytes: installedSize,
   sha256: hash.digest('hex'),
 };
 await writeFile(`${archive}.json`, `${JSON.stringify(descriptor, null, 2)}\n`, 'utf8');

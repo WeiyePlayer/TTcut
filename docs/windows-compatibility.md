@@ -20,7 +20,7 @@ Bootstrap 仍会返回 `platformCompatibility` 字段，但固定为 `supported`
 .\scripts\capture-windows-compatibility.ps1 `
   -CaseId local-150 `
   -ExpectedScalePercent 150 `
-  -InstallerPath .\out\make\squirrel.windows\x64\TTcut-1.0.0-x64-Setup.exe `
+  -InstallerPath .\out\make\nsis\x64\TTcut-1.1.0-beta-x64-Setup.exe `
   -ExpectedSignerThumbprint <THUMBPRINT> `
   -InstallAndSmoke
 ```

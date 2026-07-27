@@ -1,36 +1,43 @@
-import { createHash } from "node:crypto";
-import { copyFile, readFile, stat, writeFile } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { createHash } from 'node:crypto';
+import { copyFile, readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { basename, join, resolve } from 'node:path';
 
-const projectRoot = resolve(import.meta.dirname, "..");
-const version = JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8")).version;
-const releaseDirectory = join(projectRoot, "out", "make", "squirrel.windows", "x64");
-const installerPath = join(releaseDirectory, `TTcut-${version}-x64-Setup.exe`);
-const packagePath = join(releaseDirectory, `TTcut-${version}-full.nupkg`);
-const releasesPath = join(releaseDirectory, "RELEASES");
-const sbomSourcePath = join(projectRoot, ".runtime", "release-metadata", "sbom.cdx.json");
-const sbomDestinationPath = join(releaseDirectory, "sbom.cdx.json");
-const sumsPath = join(releaseDirectory, "SHA256SUMS.txt");
+const projectRoot = resolve(import.meta.dirname, '..');
+const releaseDirectory = join(projectRoot, 'out', 'make', 'nsis', 'x64');
+const sbomSourcePath = join(projectRoot, '.runtime', 'release-metadata', 'sbom.cdx.json');
+const sbomDestinationPath = join(releaseDirectory, 'sbom.cdx.json');
+const sumsPath = join(releaseDirectory, 'SHA256SUMS.txt');
 
-async function sha256(path) {
-  const data = await readFile(path);
-  return createHash("sha256").update(data).digest("hex");
+async function sha256(filePath) {
+  return createHash('sha256').update(await readFile(filePath)).digest('hex');
 }
 
-await stat(installerPath);
-await stat(packagePath);
-await stat(releasesPath);
+const names = await readdir(releaseDirectory);
+const setupName = names.find((name) => /-Setup\.exe$/i.test(name));
+if (!setupName) throw new Error(`NSIS Setup is missing from ${releaseDirectory}.`);
+
+const requiredNames = [
+  setupName,
+  `${setupName}.blockmap`,
+  names.find((name) => /^(latest|beta)\.yml$/i.test(name)),
+];
+if (requiredNames.some((name) => !name)) {
+  throw new Error('NSIS blockmap or update metadata is missing.');
+}
+if (names.some((name) => /\.nupkg$/i.test(name) || name === 'RELEASES')) {
+  throw new Error('Squirrel artifacts must not be included in the NSIS release contract.');
+}
+
 await stat(sbomSourcePath);
 await copyFile(sbomSourcePath, sbomDestinationPath);
-
-const releaseFiles = [installerPath, packagePath, releasesPath, sbomDestinationPath];
+const releaseFiles = [...requiredNames.map((name) => join(releaseDirectory, name)), sbomDestinationPath];
 const lines = [];
 for (const filePath of releaseFiles) {
   lines.push(`${await sha256(filePath)}  ${basename(filePath)}`);
 }
-await writeFile(sumsPath, `${lines.join("\n")}\n`, "utf8");
+await writeFile(sumsPath, `${lines.join('\n')}\n`, 'utf8');
 
-console.log(`Release assets prepared in ${dirname(installerPath)}`);
+console.log(`NSIS release assets prepared in ${releaseDirectory}`);
 for (const filePath of [...releaseFiles, sumsPath]) {
   const fileStat = await stat(filePath);
   console.log(`${basename(filePath)}: ${fileStat.size} bytes, sha256=${await sha256(filePath)}`);

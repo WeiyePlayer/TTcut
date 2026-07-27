@@ -98,7 +98,12 @@ check(
 );
 const componentManagerSource = await readFile(path.join(root, 'src', 'main', 'component-manager.ts'), 'utf8');
 const componentsSource = await readFile(path.join(root, 'src', 'main', 'components.ts'), 'utf8');
-check(componentsSource.includes("path.join(localAppData, 'TTcutData', 'components')"), 'Managed components share the Squirrel application install root and can be deleted during upgrade.');
+check(componentsSource.includes('resolveInstallationLayout().componentRoot'), 'Managed components do not resolve from the selected installation root.');
+const layoutSource = await readFile(path.join(root, 'src', 'main', 'installation-layout.ts'), 'utf8');
+check(layoutSource.includes("path.join(resolvedRoot, 'app')"), 'Installation layout does not define <root>\\app.');
+check(layoutSource.includes("path.join(resolvedRoot, 'data', 'components')"), 'Installation layout does not define <root>\\data\\components.');
+check(layoutSource.includes('INSTALL_ROOT_REGISTRY_MISSING'), 'Packaged layout does not require the registered installation root.');
+check(layoutSource.includes('INSTALL_ROOT_REGISTRY_MISMATCH'), 'Packaged layout does not cross-check the executable path and registry root.');
 const offlineSurface = (await Promise.all([
   'src/main/index.ts',
   'src/main/component-manager.ts',
@@ -142,6 +147,12 @@ check(componentCatalog.ffmpeg_x264?.size_bytes === 168733210, 'The fixed x264 as
 check(componentCatalog.ffmpeg_x264?.sha256 === '6dcf685c2fea98221b3f179961165e9c31f55bead576c4479ae4549858fbf826', 'The fixed x264 asset hash is incorrect.');
 check(componentCatalog.ffmpeg_x264?.required_build_flags?.includes('--enable-libx264'), 'The x264 encoder build requirement is missing.');
 check(componentCatalog.ffmpeg_x264?.required_encoders?.includes('libx264'), 'The x264 encoder requirement is missing.');
+check(
+  componentCatalog.analysis_runtime?.assets?.every((asset) => Number.isSafeInteger(asset.installed_size_bytes) && asset.installed_size_bytes > 0),
+  'An analysis runtime is missing installed_size_bytes.',
+);
+check(Number.isSafeInteger(componentCatalog.ffmpeg?.installed_size_bytes) && componentCatalog.ffmpeg.installed_size_bytes > 0, 'FFmpeg is missing installed_size_bytes.');
+check(Number.isSafeInteger(componentCatalog.ffmpeg_x264?.installed_size_bytes) && componentCatalog.ffmpeg_x264.installed_size_bytes > 0, 'FFmpeg x264 is missing installed_size_bytes.');
 
 const publicReleaseCandidate = process.env.TTCUT_PUBLIC_RC === '1';
 const officialRelease = process.env.TTCUT_OFFICIAL_RELEASE === '1';
@@ -178,6 +189,15 @@ check(forgeSource.includes('windowsSign'), 'Forge Authenticode integration is mi
 check(forgeSource.includes('electron-v43.1.1-win32-x64.zip'), 'Pinned Electron Windows archive name is missing.');
 check(forgeSource.includes('b4e9995cd3f65785eb8818276aa9020f3165ab11da41b3c762616d4a0ad8c7ad'), 'Pinned Electron Windows archive checksum is missing.');
 
+const builderSource = await readFile(path.join(root, 'electron-builder.config.cjs'), 'utf8');
+check(packageJson.devDependencies?.['electron-builder'] === '26.15.3', 'electron-builder is not pinned to 26.15.3.');
+check(packageJson.devDependencies?.['electron-updater'] === '6.8.9', 'electron-updater is not pinned to 6.8.9.');
+check(!forgeSource.includes('MakerSquirrel'), 'The active Forge configuration still contains MakerSquirrel.');
+check(builderSource.includes("target: 'nsis'"), 'The active installer target is not NSIS.');
+check(builderSource.includes('oneClick: false'), 'The NSIS installer is not assisted mode.');
+check(builderSource.includes('perMachine: false'), 'The NSIS installer is not current-user mode.');
+check(builderSource.includes("include: 'build/installer/installer.nsh'"), 'The branded NSIS include is missing.');
+
 const releaseMetadata = path.join(root, '.runtime', 'release-metadata');
 for (const relative of ['THIRD_PARTY_NOTICES.html', 'THIRD_PARTY_NOTICES.md', 'sbom.cdx.json', 'licenses/index.json', 'licenses/tracknet/LICENSE.txt']) {
   check(existsSync(path.join(releaseMetadata, ...relative.split('/'))), `Generated release metadata is missing ${relative}.`);
@@ -204,6 +224,14 @@ if (existsSync(packagedRoot)) {
   const packagedWorker = path.join(packagedRoot, 'resources', 'worker');
   await auditWorker(packagedWorker, 'packaged Worker');
   const archive = path.join(packagedRoot, 'resources', 'app.asar');
+  const updaterConfig = path.join(packagedRoot, 'resources', 'app-update.yml');
+  check(existsSync(updaterConfig), 'Packaged electron-updater configuration is missing.');
+  if (existsSync(updaterConfig)) {
+    const updaterConfigSource = await readFile(updaterConfig, 'utf8');
+    check(updaterConfigSource.includes('provider: github'), 'Packaged updater provider is not GitHub.');
+    check(updaterConfigSource.includes(packageJson.version.includes('-beta') ? 'channel: beta' : 'channel: latest'), 'Packaged updater channel does not match the application version.');
+    check(updaterConfigSource.includes('publisherName: weiye'), 'Packaged updater publisher is not weiye.');
+  }
   check(existsSync(path.join(packagedRoot, 'resources', 'resources', 'components.json')), 'Packaged component catalog is missing.');
   check(existsSync(path.join(packagedRoot, 'resources', 'release-metadata', 'THIRD_PARTY_NOTICES.html')), 'Packaged third-party license center is missing.');
   check(existsSync(path.join(packagedRoot, 'resources', 'release-metadata', 'sbom.cdx.json')), 'Packaged SBOM is missing.');
@@ -243,10 +271,20 @@ if (existsSync(packagedRoot)) {
   }
 }
 
+const nsisRoot = path.join(root, 'out', 'make', 'nsis', 'x64');
+if (existsSync(nsisRoot)) {
+  const artifacts = await readdir(nsisRoot);
+  const setup = artifacts.find((name) => /-Setup\.exe$/i.test(name));
+  check(Boolean(setup), 'The NSIS Setup artifact is missing.');
+  check(Boolean(setup && artifacts.includes(`${setup}.blockmap`)), 'The NSIS blockmap is missing.');
+  check(artifacts.some((name) => /^(latest|beta)\.yml$/i.test(name)), 'NSIS update metadata is missing.');
+  check(!artifacts.some((name) => /\.nupkg$/i.test(name) || name === 'RELEASES'), 'A Squirrel artifact remains in the active NSIS output.');
+}
+
 if (failures.length) {
   console.error(`Release verification failed (${failures.length}):`);
   for (const failure of failures) console.error(`- ${failure}`);
   process.exitCode = 1;
 } else {
-  console.log('Release verification passed: minimal Worker, production-only E2E gate, secure Renderer, and Forge fuses verified.');
+  console.log('Release verification passed: packaged app, assisted NSIS contract, installation layout, component catalog, and Forge fuses verified.');
 }
