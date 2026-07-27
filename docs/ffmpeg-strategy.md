@@ -46,3 +46,21 @@ ffprobe 读取：容器、时长、视频/音频编码、尺寸、平均和标�
 - 成功条件包括：可探测、H.264、分辨率一致、音频存在性一致、AAC（有音频时）、时长容差、起始时间戳、音画差不超过 100 ms，以及 SAR/色彩/旋转一致。
 - 仅在全部验证通过后原子重命名并显示 100%。
 
+## Fast segmented export
+
+Fast segmented export is opt-in; Compatible Export remains the migrated
+default. A task resolves one media encoder (`libopenh264` or `libx264`) before
+encoding and uses that encoder and matching audio/time-base settings for every
+temporary segment. Segments are encoded serially from the nearest preceding
+keyframe, then closed with relative `trim`/`atrim` filters.
+
+Each task writes ASCII-named segments and an UTF-8 (without BOM)
+`ffconcat version 1.0` manifest in a hidden output-directory subdirectory.
+`-f concat -safe 1 -c copy` is used only after ffprobe confirms equal stream
+signatures, including codec/profile/level, pixel format, dimensions, time base,
+H.264 extradata hash, and audio sample rate/channel layout. A mismatch is
+`EXPORT_SEGMENT_INCOMPATIBLE`; concat failure is `EXPORT_CONCAT_FAILED`.
+Fast mode never silently falls back to Compatible Export.
+
+The concat demuxer requires matching streams and time bases across all files:
+[FFmpeg concat demuxer documentation](https://ffmpeg.org/ffmpeg-formats.html#concat).

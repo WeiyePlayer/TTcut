@@ -1,0 +1,3 @@
+# Use assisted NSIS with a split installation layout
+
+TTcut replaces the Squirrel one-click installer with a current-user assisted NSIS installer so users can choose a stable Installation Root without granting administrator access. The Program Area lives at `<root>\app` and may be replaced by install or update operations, while the Component Store lives at `<root>\data\components` so large runtimes, downloads, imports, staging, and rollback backups follow the selected drive. Because Electron's built-in Windows updater is tied to Squirrel/MSIX, application updates use `electron-updater` and GitHub-hosted NSIS metadata instead; legacy Squirrel data is copied and verified before the legacy uninstaller is invoked.

@@ -1,0 +1,944 @@
+{
+  "video": "D:\\DOCUMENTS\\TrackNetV3_TableTennis\\testvideoes\\Maharu Yoshimura vs Andrej Gacina - MS Final - WTT Feeder Istanbul 2026.mp4",
+  "source_sha256_before": "9bf7676b1a3a400d3318f26393f263b73fe2c834692d35ac66f4fa33c42083ed",
+  "source_sha256_after": "9bf7676b1a3a400d3318f26393f263b73fe2c834692d35ac66f4fa33c42083ed",
+  "source_unchanged": true,
+  "calibration": {
+    "video_width": 1920,
+    "video_height": 1080,
+    "points": {
+      "top_left": [
+        952.2999877929688,
+        435.83929443359375
+      ],
+      "top_right": [
+        1235.5,
+        469.58929443359375
+      ],
+      "bottom_right": [
+        952.2999877929688,
+        652.8035888671875
+      ],
+      "bottom_left": [
+        606.7000122070312,
+        590.125
+      ]
+    }
+  },
+  "roi": {
+    "config": {
+      "height_ratio": 0.5,
+      "length_margin_ratio": 0.75,
+      "width_margin_ratio": 0.35
+    },
+    "bbox": [
+      198,
+      203,
+      1530,
+      829
+    ],
+    "width": 1332,
+    "height": 626,
+    "projected_polygon": [
+      [
+        860.4754638671875,
+        379.45208740234375
+      ],
+      [
+        1529.2918701171875,
+        450.2102355957031
+      ],
+      [
+        1145.680908203125,
+        828.031494140625
+      ],
+      [
+        198.2674560546875,
+        620.145751953125
+      ]
+    ],
+    "top_padding_pixels": 175.61886902279502
+  },
+  "full_frame": {
+    "frames": 20131,
+    "visible_frames": 5383,
+    "visible_ratio": 0.2673985395658437,
+    "bounce_frames": [
+      203,
+      278,
+      566,
+      585,
+      618,
+      698,
+      757,
+      825,
+      853,
+      890,
+      919,
+      976,
+      1254,
+      1277,
+      1309,
+      1326,
+      1353,
+      1376,
+      1679,
+      1740,
+      1793,
+      2117,
+      2156,
+      2195,
+      2507,
+      2530,
+      2557,
+      2889,
+      2946,
+      2956,
+      2988,
+      3017,
+      3055,
+      3085,
+      3103,
+      3351,
+      3374,
+      3399,
+      3425,
+      3460,
+      3730,
+      3762,
+      3780,
+      3809,
+      4188,
+      4216,
+      4554,
+      4588,
+      4837,
+      4858,
+      4904,
+      4936,
+      5215,
+      5655,
+      5684,
+      5986,
+      6010,
+      6056,
+      6355,
+      6373,
+      6995,
+      7025,
+      7051,
+      7329,
+      7382,
+      7418,
+      7440,
+      7466,
+      7494,
+      7806,
+      7829,
+      7843,
+      7864,
+      7889,
+      8286,
+      8337,
+      8402,
+      8765,
+      8785,
+      8823,
+      8880,
+      8903,
+      8912,
+      8921,
+      8939,
+      8968,
+      9196,
+      9225,
+      9609,
+      9650,
+      9853,
+      9955,
+      10247,
+      10262,
+      10313,
+      10659,
+      10702,
+      11073,
+      11381,
+      11404,
+      11434,
+      11485,
+      11515,
+      11548,
+      11567,
+      11780,
+      11853,
+      12233,
+      12598,
+      13001,
+      13062,
+      13491,
+      13506,
+      13530,
+      13545,
+      13555,
+      13678,
+      14041,
+      14611,
+      14631,
+      15046,
+      15139,
+      15514,
+      15543,
+      15590,
+      15641,
+      16051,
+      16122,
+      16517,
+      16527,
+      16540,
+      16781,
+      16804,
+      16874,
+      16894,
+      16937,
+      16978,
+      17005,
+      17290,
+      17669,
+      17693,
+      17749,
+      17780,
+      17810,
+      18116,
+      18140,
+      18164,
+      18504,
+      18520,
+      18561,
+      18605
+    ],
+    "bounce_count": 151,
+    "rallies": [
+      {
+        "start_frame": 203,
+        "end_frame": 278,
+        "start_time": 3.3833333333333333,
+        "end_time": 4.633333333333333,
+        "bounce_count": 2
+      },
+      {
+        "start_frame": 566,
+        "end_frame": 976,
+        "start_time": 9.433333333333334,
+        "end_time": 16.266666666666666,
+        "bounce_count": 10
+      },
+      {
+        "start_frame": 1254,
+        "end_frame": 1376,
+        "start_time": 20.9,
+        "end_time": 22.933333333333334,
+        "bounce_count": 6
+      },
+      {
+        "start_frame": 1679,
+        "end_frame": 1793,
+        "start_time": 27.983333333333334,
+        "end_time": 29.883333333333333,
+        "bounce_count": 3
+      },
+      {
+        "start_frame": 2117,
+        "end_frame": 2195,
+        "start_time": 35.28333333333333,
+        "end_time": 36.583333333333336,
+        "bounce_count": 3
+      },
+      {
+        "start_frame": 2507,
+        "end_frame": 2557,
+        "start_time": 41.78333333333333,
+        "end_time": 42.61666666666667,
+        "bounce_count": 3
+      },
+      {
+        "start_frame": 2889,
+        "end_frame": 3103,
+        "start_time": 48.15,
+        "end_time": 51.71666666666667,
+        "bounce_count": 8
+      },
+      {
+        "start_frame": 3351,
+        "end_frame": 3460,
+        "start_time": 55.85,
+        "end_time": 57.666666666666664,
+        "bounce_count": 5
+      },
+      {
+        "start_frame": 3730,
+        "end_frame": 3809,
+        "start_time": 62.166666666666664,
+        "end_time": 63.483333333333334,
+        "bounce_count": 4
+      },
+      {
+        "start_frame": 4188,
+        "end_frame": 4216,
+        "start_time": 69.8,
+        "end_time": 70.26666666666667,
+        "bounce_count": 2
+      },
+      {
+        "start_frame": 4554,
+        "end_frame": 4588,
+        "start_time": 75.9,
+        "end_time": 76.46666666666667,
+        "bounce_count": 2
+      },
+      {
+        "start_frame": 4837,
+        "end_frame": 4936,
+        "start_time": 80.61666666666666,
+        "end_time": 82.26666666666667,
+        "bounce_count": 4
+      },
+      {
+        "start_frame": 5655,
+        "end_frame": 5684,
+        "start_time": 94.25,
+        "end_time": 94.73333333333333,
+        "bounce_count": 2
+      },
+      {
+        "start_frame": 5986,
+        "end_frame": 6056,
+        "start_time": 99.76666666666667,
+        "end_time": 100.93333333333334,
+        "bounce_count": 3
+      },
+      {
+        "start_frame": 6355,
+        "end_frame": 6373,
+        "start_time": 105.91666666666667,
+        "end_time": 106.21666666666667,
+        "bounce_count": 2
+      },
+      {
+        "start_frame": 6995,
+        "end_frame": 7051,
+        "start_time": 116.58333333333333,
+        "end_time": 117.51666666666667,
+        "bounce_count": 3
+      },
+      {
+        "start_frame": 7329,
+        "end_frame": 7494,
+        "start_time": 122.14999999999999,
+        "end_time": 124.89999999999999,
+        "bounce_count": 6
+      },
+      {
+        "start_frame": 7806,
+        "end_frame": 7889,
+        "start_time": 130.1,
+        "end_time": 131.48333333333332,
+        "bounce_count": 5
+      },
+      {
+        "start_frame": 8286,
+        "end_frame": 8402,
+        "start_time": 138.1,
+        "end_time": 140.03333333333333,
+        "bounce_count": 3
+      },
+      {
+        "start_frame": 8765,
+        "end_frame": 8968,
+        "start_time": 146.08333333333334,
+        "end_time": 149.46666666666667,
+        "bounce_count": 9
+      },
+      {
+        "start_frame": 9196,
+        "end_frame": 9225,
+        "start_time": 153.26666666666665,
+        "end_time": 153.75,
+        "bounce_count": 2
+      },
+      {
+        "start_frame": 9609,
+        "end_frame": 9650,
+        "start_time": 160.15,
+        "end_time": 160.83333333333334,
+        "bounce_count": 2
+      },
+      {
+        "start_frame": 9853,
+        "end_frame": 9955,
+        "start_time": 164.21666666666667,
+        "end_time": 165.91666666666666,
+        "bounce_count": 2
+      },
+      {
+        "start_frame": 10247,
+        "end_frame": 10313,
+        "start_time": 170.78333333333333,
+        "end_time": 171.88333333333333,
+        "bounce_count": 3
+      },
+      {
+        "start_frame": 10659,
+        "end_frame": 10702,
+        "start_time": 177.65,
+        "end_time": 178.36666666666667,
+        "bounce_count": 2
+      },
+      {
+        "start_frame": 11381,
+        "end_frame": 11567,
+        "start_time": 189.68333333333334,
+        "end_time": 192.78333333333333,
+        "bounce_count": 7
+      },
+      {
+        "start_frame": 11780,
+        "end_frame": 11853,
+        "start_time": 196.33333333333334,
+        "end_time": 197.55,
+        "bounce_count": 2
+      },
+      {
+        "start_frame": 13001,
+        "end_frame": 13062,
+        "start_time": 216.68333333333334,
+        "end_time": 217.7,
+        "bounce_count": 2
+      },
+      {
+        "start_frame": 13491,
+        "end_frame": 13678,
+        "start_time": 224.85,
+        "end_time": 227.96666666666667,
+        "bounce_count": 6
+      },
+      {
+        "start_frame": 14611,
+        "end_frame": 14631,
+        "start_time": 243.51666666666665,
+        "end_time": 243.85,
+        "bounce_count": 2
+      },
+      {
+        "start_frame": 15046,
+        "end_frame": 15139,
+        "start_time": 250.76666666666665,
+        "end_time": 252.31666666666666,
+        "bounce_count": 2
+      },
+      {
+        "start_frame": 15514,
+        "end_frame": 15641,
+        "start_time": 258.56666666666666,
+        "end_time": 260.68333333333334,
+        "bounce_count": 4
+      },
+      {
+        "start_frame": 16051,
+        "end_frame": 16122,
+        "start_time": 267.51666666666665,
+        "end_time": 268.7,
+        "bounce_count": 2
+      },
+      {
+        "start_frame": 16517,
+        "end_frame": 16540,
+        "start_time": 275.2833333333333,
+        "end_time": 275.6666666666667,
+        "bounce_count": 3
+      },
+      {
+        "start_frame": 16781,
+        "end_frame": 17005,
+        "start_time": 279.68333333333334,
+        "end_time": 283.4166666666667,
+        "bounce_count": 7
+      },
+      {
+        "start_frame": 17669,
+        "end_frame": 17810,
+        "start_time": 294.48333333333335,
+        "end_time": 296.8333333333333,
+        "bounce_count": 5
+      },
+      {
+        "start_frame": 18116,
+        "end_frame": 18164,
+        "start_time": 301.93333333333334,
+        "end_time": 302.73333333333335,
+        "bounce_count": 3
+      },
+      {
+        "start_frame": 18504,
+        "end_frame": 18605,
+        "start_time": 308.4,
+        "end_time": 310.0833333333333,
+        "bounce_count": 4
+      }
+    ],
+    "rally_count": 38,
+    "stats": {
+      "detected_frames": 5383,
+      "missing_frames": 14748,
+      "inference_seconds": 262.77336939999805,
+      "average_inference_fps": 76.60974186983253,
+      "model_width": 512,
+      "model_height": 288,
+      "input_pixel_ratio": 1.0
+    },
+    "wall_seconds": 262.7754814
+  },
+  "dynamic_roi": {
+    "frames": 20131,
+    "visible_frames": 5219,
+    "visible_ratio": 0.2592519000546421,
+    "bounce_frames": [
+      240,
+      278,
+      566,
+      591,
+      618,
+      642,
+      689,
+      697,
+      754,
+      825,
+      853,
+      889,
+      919,
+      976,
+      1254,
+      1277,
+      1307,
+      1326,
+      1353,
+      1739,
+      1793,
+      2055,
+      2077,
+      2117,
+      2156,
+      2195,
+      2214,
+      2507,
+      2532,
+      2888,
+      2956,
+      2988,
+      3017,
+      3085,
+      3350,
+      3374,
+      3398,
+      3452,
+      3731,
+      3761,
+      3809,
+      3819,
+      4188,
+      4216,
+      4550,
+      4590,
+      4837,
+      4852,
+      4905,
+      4936,
+      5218,
+      5986,
+      6010,
+      6056,
+      6355,
+      6974,
+      6995,
+      7021,
+      7051,
+      7062,
+      7329,
+      7372,
+      7382,
+      7418,
+      7437,
+      7805,
+      7829,
+      7864,
+      7885,
+      8232,
+      8321,
+      8402,
+      8435,
+      8740,
+      8765,
+      8823,
+      8833,
+      8883,
+      8903,
+      8921,
+      8939,
+      9225,
+      9650,
+      9674,
+      9919,
+      9955,
+      9971,
+      10240,
+      10262,
+      10301,
+      10313,
+      10665,
+      10702,
+      11073,
+      11097,
+      11382,
+      11404,
+      11434,
+      11489,
+      11514,
+      11548,
+      11780,
+      11805,
+      12233,
+      12598,
+      12943,
+      12959,
+      13001,
+      13056,
+      13501,
+      13531,
+      13555,
+      13678,
+      13701,
+      14011,
+      14041,
+      14635,
+      14653,
+      15046,
+      15138,
+      15543,
+      15587,
+      15641,
+      16049,
+      16121,
+      16460,
+      16524,
+      16534,
+      16552,
+      16781,
+      16813,
+      16849,
+      16894,
+      16937,
+      16997,
+      17015,
+      17241,
+      17288,
+      17669,
+      17693,
+      17727,
+      17748,
+      17779,
+      17810,
+      18114,
+      18140,
+      18164,
+      18515,
+      18561,
+      18605
+    ],
+    "bounce_count": 150,
+    "rallies": [
+      {
+        "start_frame": 240,
+        "end_frame": 278,
+        "start_time": 4.0,
+        "end_time": 4.633333333333333,
+        "bounce_count": 2
+      },
+      {
+        "start_frame": 566,
+        "end_frame": 976,
+        "start_time": 9.433333333333334,
+        "end_time": 16.266666666666666,
+        "bounce_count": 12
+      },
+      {
+        "start_frame": 1254,
+        "end_frame": 1353,
+        "start_time": 20.9,
+        "end_time": 22.55,
+        "bounce_count": 5
+      },
+      {
+        "start_frame": 1739,
+        "end_frame": 1793,
+        "start_time": 28.983333333333334,
+        "end_time": 29.883333333333333,
+        "bounce_count": 2
+      },
+      {
+        "start_frame": 2055,
+        "end_frame": 2214,
+        "start_time": 34.25,
+        "end_time": 36.9,
+        "bounce_count": 6
+      },
+      {
+        "start_frame": 2507,
+        "end_frame": 2532,
+        "start_time": 41.78333333333333,
+        "end_time": 42.2,
+        "bounce_count": 2
+      },
+      {
+        "start_frame": 2888,
+        "end_frame": 3085,
+        "start_time": 48.13333333333333,
+        "end_time": 51.416666666666664,
+        "bounce_count": 5
+      },
+      {
+        "start_frame": 3350,
+        "end_frame": 3452,
+        "start_time": 55.833333333333336,
+        "end_time": 57.53333333333333,
+        "bounce_count": 4
+      },
+      {
+        "start_frame": 3731,
+        "end_frame": 3819,
+        "start_time": 62.18333333333333,
+        "end_time": 63.65,
+        "bounce_count": 4
+      },
+      {
+        "start_frame": 4188,
+        "end_frame": 4216,
+        "start_time": 69.8,
+        "end_time": 70.26666666666667,
+        "bounce_count": 2
+      },
+      {
+        "start_frame": 4550,
+        "end_frame": 4590,
+        "start_time": 75.83333333333333,
+        "end_time": 76.5,
+        "bounce_count": 2
+      },
+      {
+        "start_frame": 4837,
+        "end_frame": 4936,
+        "start_time": 80.61666666666666,
+        "end_time": 82.26666666666667,
+        "bounce_count": 4
+      },
+      {
+        "start_frame": 5986,
+        "end_frame": 6056,
+        "start_time": 99.76666666666667,
+        "end_time": 100.93333333333334,
+        "bounce_count": 3
+      },
+      {
+        "start_frame": 6974,
+        "end_frame": 7062,
+        "start_time": 116.23333333333333,
+        "end_time": 117.7,
+        "bounce_count": 5
+      },
+      {
+        "start_frame": 7329,
+        "end_frame": 7437,
+        "start_time": 122.14999999999999,
+        "end_time": 123.95,
+        "bounce_count": 5
+      },
+      {
+        "start_frame": 7805,
+        "end_frame": 7885,
+        "start_time": 130.08333333333334,
+        "end_time": 131.41666666666666,
+        "bounce_count": 4
+      },
+      {
+        "start_frame": 8232,
+        "end_frame": 8435,
+        "start_time": 137.2,
+        "end_time": 140.58333333333334,
+        "bounce_count": 4
+      },
+      {
+        "start_frame": 8740,
+        "end_frame": 8939,
+        "start_time": 145.66666666666666,
+        "end_time": 148.98333333333332,
+        "bounce_count": 8
+      },
+      {
+        "start_frame": 9650,
+        "end_frame": 9674,
+        "start_time": 160.83333333333334,
+        "end_time": 161.23333333333332,
+        "bounce_count": 2
+      },
+      {
+        "start_frame": 9919,
+        "end_frame": 9971,
+        "start_time": 165.31666666666666,
+        "end_time": 166.18333333333334,
+        "bounce_count": 3
+      },
+      {
+        "start_frame": 10240,
+        "end_frame": 10313,
+        "start_time": 170.66666666666666,
+        "end_time": 171.88333333333333,
+        "bounce_count": 4
+      },
+      {
+        "start_frame": 10665,
+        "end_frame": 10702,
+        "start_time": 177.75,
+        "end_time": 178.36666666666667,
+        "bounce_count": 2
+      },
+      {
+        "start_frame": 11073,
+        "end_frame": 11097,
+        "start_time": 184.55,
+        "end_time": 184.95,
+        "bounce_count": 2
+      },
+      {
+        "start_frame": 11382,
+        "end_frame": 11548,
+        "start_time": 189.7,
+        "end_time": 192.46666666666667,
+        "bounce_count": 6
+      },
+      {
+        "start_frame": 11780,
+        "end_frame": 11805,
+        "start_time": 196.33333333333334,
+        "end_time": 196.75,
+        "bounce_count": 2
+      },
+      {
+        "start_frame": 12943,
+        "end_frame": 13056,
+        "start_time": 215.71666666666667,
+        "end_time": 217.6,
+        "bounce_count": 4
+      },
+      {
+        "start_frame": 13501,
+        "end_frame": 13701,
+        "start_time": 225.01666666666665,
+        "end_time": 228.35,
+        "bounce_count": 5
+      },
+      {
+        "start_frame": 14011,
+        "end_frame": 14041,
+        "start_time": 233.51666666666665,
+        "end_time": 234.01666666666665,
+        "bounce_count": 2
+      },
+      {
+        "start_frame": 14635,
+        "end_frame": 14653,
+        "start_time": 243.91666666666666,
+        "end_time": 244.21666666666667,
+        "bounce_count": 2
+      },
+      {
+        "start_frame": 15046,
+        "end_frame": 15138,
+        "start_time": 250.76666666666665,
+        "end_time": 252.29999999999998,
+        "bounce_count": 2
+      },
+      {
+        "start_frame": 15543,
+        "end_frame": 15641,
+        "start_time": 259.05,
+        "end_time": 260.68333333333334,
+        "bounce_count": 3
+      },
+      {
+        "start_frame": 16049,
+        "end_frame": 16121,
+        "start_time": 267.48333333333335,
+        "end_time": 268.68333333333334,
+        "bounce_count": 2
+      },
+      {
+        "start_frame": 16460,
+        "end_frame": 16552,
+        "start_time": 274.3333333333333,
+        "end_time": 275.8666666666667,
+        "bounce_count": 4
+      },
+      {
+        "start_frame": 16781,
+        "end_frame": 17015,
+        "start_time": 279.68333333333334,
+        "end_time": 283.5833333333333,
+        "bounce_count": 7
+      },
+      {
+        "start_frame": 17241,
+        "end_frame": 17288,
+        "start_time": 287.35,
+        "end_time": 288.1333333333333,
+        "bounce_count": 2
+      },
+      {
+        "start_frame": 17669,
+        "end_frame": 17810,
+        "start_time": 294.48333333333335,
+        "end_time": 296.8333333333333,
+        "bounce_count": 6
+      },
+      {
+        "start_frame": 18114,
+        "end_frame": 18164,
+        "start_time": 301.9,
+        "end_time": 302.73333333333335,
+        "bounce_count": 3
+      },
+      {
+        "start_frame": 18515,
+        "end_frame": 18605,
+        "start_time": 308.5833333333333,
+        "end_time": 310.0833333333333,
+        "bounce_count": 3
+      }
+    ],
+    "rally_count": 38,
+    "stats": {
+      "detected_frames": 5219,
+      "missing_frames": 14912,
+      "inference_seconds": 150.13864230000036,
+      "average_inference_fps": 134.08273640689472,
+      "model_width": 360,
+      "model_height": 168,
+      "input_pixel_ratio": 0.41015625
+    },
+    "wall_seconds": 150.1401854999931
+  },
+  "point_comparison": {
+    "common_visible_frames": 4668,
+    "mean_source_px": 3.296534021795338,
+    "median_source_px": 1.4142135623730951,
+    "p95_source_px": 4.0
+  },
+  "representative_frame": 10065
+}

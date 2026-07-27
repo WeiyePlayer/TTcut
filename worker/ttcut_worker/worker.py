@@ -10,10 +10,12 @@ from pathlib import Path
 
 from .bounce import detect_bounce_frames
 from .calibration import TableCalibration
-from .errors import InvalidRequestError, WorkerError, WeightError
+from .errors import InvalidRequestError, ModelResourceError, TableModelResourceError, WorkerError
 from .model import load_tracknet
 from .predictor import TrackNetPredictor
+from .roi import AnalysisRoiConfig, build_analysis_roi
 from .rallies import group_rallies
+from .table_analyze import analyze_table
 
 
 def emit(payload: dict) -> None:
@@ -22,7 +24,14 @@ def emit(payload: dict) -> None:
 
 
 def validate_request(value: object) -> dict:
-    expected_fields = {"schema_version", "task_id", "video_path", "device", "calibration"}
+    expected_fields = {
+        "schema_version",
+        "task_id",
+        "video_path",
+        "device",
+        "video_metadata",
+        "calibration_choice",
+    }
     if not isinstance(value, dict) or set(value) != expected_fields or value.get("schema_version") != 1:
         raise InvalidRequestError("Unsupported analysis request schema.")
     try:
@@ -31,16 +40,56 @@ def validate_request(value: object) -> dict:
             raise ValueError("device")
         if not isinstance(value["video_path"], str) or Path(value["video_path"]).suffix.lower() != ".mp4":
             raise ValueError("video_path")
-        calibration = value["calibration"]
-        if not isinstance(calibration, dict) or set(calibration) != {"video_width", "video_height", "points"}:
-            raise ValueError("calibration")
-        if not isinstance(calibration["video_width"], int) or isinstance(calibration["video_width"], bool) or calibration["video_width"] <= 0:
-            raise ValueError("video_width")
-        if not isinstance(calibration["video_height"], int) or isinstance(calibration["video_height"], bool) or calibration["video_height"] <= 0:
-            raise ValueError("video_height")
-        points = calibration["points"]
-        if not isinstance(points, dict) or set(points) != {"top_left", "top_right", "bottom_right", "bottom_left"}:
-            raise ValueError("points")
+        metadata = value["video_metadata"]
+        if not isinstance(metadata, dict) or set(metadata) != {
+            "duration_seconds",
+            "fps",
+            "frame_count",
+            "variable_frame_rate",
+        }:
+            raise ValueError("video_metadata")
+        if (
+            not isinstance(metadata["duration_seconds"], (int, float))
+            or isinstance(metadata["duration_seconds"], bool)
+            or not math.isfinite(metadata["duration_seconds"])
+            or metadata["duration_seconds"] <= 0
+        ):
+            raise ValueError("duration_seconds")
+        if (
+            not isinstance(metadata["fps"], (int, float))
+            or isinstance(metadata["fps"], bool)
+            or not math.isfinite(metadata["fps"])
+            or metadata["fps"] <= 0
+        ):
+            raise ValueError("fps")
+        frame_count = metadata["frame_count"]
+        if frame_count is not None and (
+            not isinstance(frame_count, int)
+            or isinstance(frame_count, bool)
+            or frame_count <= 0
+        ):
+            raise ValueError("frame_count")
+        if not isinstance(metadata["variable_frame_rate"], bool):
+            raise ValueError("variable_frame_rate")
+        choice = value["calibration_choice"]
+        if not isinstance(choice, dict) or choice.get("method") not in {"manual", "automatic"}:
+            raise ValueError("calibration_choice")
+        if choice["method"] == "automatic":
+            if set(choice) != {"method"}:
+                raise ValueError("automatic calibration_choice")
+        else:
+            if set(choice) != {"method", "calibration"}:
+                raise ValueError("manual calibration_choice")
+            calibration = choice["calibration"]
+            if not isinstance(calibration, dict) or set(calibration) != {"video_width", "video_height", "points"}:
+                raise ValueError("calibration")
+            if not isinstance(calibration["video_width"], int) or isinstance(calibration["video_width"], bool) or calibration["video_width"] <= 0:
+                raise ValueError("video_width")
+            if not isinstance(calibration["video_height"], int) or isinstance(calibration["video_height"], bool) or calibration["video_height"] <= 0:
+                raise ValueError("video_height")
+            points = calibration["points"]
+            if not isinstance(points, dict) or set(points) != {"top_left", "top_right", "bottom_right", "bottom_left"}:
+                raise ValueError("points")
     except (KeyError, TypeError, ValueError) as exc:
         raise InvalidRequestError("Analysis request fields are invalid.") from exc
     return value
@@ -48,15 +97,36 @@ def validate_request(value: object) -> dict:
 
 def analyze(request: dict) -> dict:
     task_id = request["task_id"]
-    calibration_value = request["calibration"]
-    calibration = TableCalibration.from_points(
-        calibration_value["video_width"],
-        calibration_value["video_height"],
-        calibration_value["points"],
-    )
+    choice = request["calibration_choice"]
+    table_analysis = None
+    if choice["method"] == "automatic":
+        table_weight_path = os.environ.get("TTCUT_TABLE_ANALYZE_WEIGHTS", "").strip()
+        if not table_weight_path:
+            raise TableModelResourceError("Bundled table analysis model path is not configured.")
+
+        def table_progress(stage: str, current: int, total: int) -> None:
+            percent = min(100.0, current / total * 100) if total else 0.0
+            emit({
+                "type": "progress", "task_id": task_id, "stage": stage,
+                "current": current, "total": total, "percent": round(percent, 4),
+            })
+
+        calibration, table_analysis = analyze_table(
+            request["video_path"],
+            table_weight_path,
+            request["device"],
+            request["video_metadata"],
+            table_progress,
+        )
+    else:
+        calibration_value = choice["calibration"]
+        calibration = TableCalibration.from_points(
+            calibration_value["video_width"], calibration_value["video_height"], calibration_value["points"],
+        )
+    analysis_roi = build_analysis_roi(calibration, AnalysisRoiConfig())
     weight_path = os.environ.get("TTCUT_TRACKNET_WEIGHTS", "").strip()
     if not weight_path:
-        raise WeightError("TTCUT_TRACKNET_WEIGHTS is not configured.")
+        raise ModelResourceError("Bundled analysis model path is not configured.")
     emit({"type": "progress", "task_id": task_id, "stage": "load_model", "current": 0, "total": 1, "percent": 0.0})
     loaded = load_tracknet(weight_path, request["device"])
     emit({"type": "progress", "task_id": task_id, "stage": "load_model", "current": 1, "total": 1, "percent": 100.0})
@@ -68,7 +138,11 @@ def analyze(request: dict) -> dict:
             "current": current, "total": total, "percent": round(percent, 4),
         })
 
-    points, info, _stats = TrackNetPredictor(loaded).predict(request["video_path"], progress_callback=progress)
+    points, info, _stats = TrackNetPredictor(loaded).predict(
+        request["video_path"],
+        progress_callback=progress,
+        analysis_roi=analysis_roi,
+    )
     emit({"type": "progress", "task_id": task_id, "stage": "postprocess", "current": 0, "total": 1, "percent": 0.0})
     bounce_frames = detect_bounce_frames(points, calibration)
     rallies = group_rallies(bounce_frames, points)
@@ -87,7 +161,7 @@ def analyze(request: dict) -> dict:
             "end_time_seconds": round(end, 6),
         })
     emit({"type": "progress", "task_id": task_id, "stage": "postprocess", "current": 1, "total": 1, "percent": 100.0})
-    return {
+    result = {
         "schema_version": 1,
         "video": {
             "path": str(info.path),
@@ -102,11 +176,22 @@ def analyze(request: dict) -> dict:
             "frame_count": info.decoded_frame_count,
         },
         "rallies": normalized,
+        "calibration": {
+            "video_width": calibration.video_width,
+            "video_height": calibration.video_height,
+            "points": {name: list(point) for name, point in zip(
+                ("top_left", "top_right", "bottom_right", "bottom_left"), calibration.points,
+            )},
+        },
     }
+    if table_analysis is not None:
+        result["table_analysis"] = table_analysis
+    return result
 
 
 def main() -> int:
     task_id = "00000000-0000-0000-0000-000000000000"
+    traceback_text = ""
     try:
         line = sys.stdin.readline()
         if not line:
@@ -119,11 +204,13 @@ def main() -> int:
     except json.JSONDecodeError as exc:
         error: Exception = InvalidRequestError("Analysis request is not valid JSON.")
         error.__cause__ = exc
+        traceback_text = "".join(traceback.format_exception(error))
     except Exception as exc:  # Worker boundary converts every failure to one event.
         error = exc
+        traceback_text = traceback.format_exc()
     code = error.code if isinstance(error, WorkerError) else "ANALYSIS_FAILED"
     recoverable = error.recoverable if isinstance(error, WorkerError) else True
-    print(traceback.format_exc(), file=sys.stderr, flush=True)
+    print(traceback_text or f"{type(error).__name__}: {error}", file=sys.stderr, flush=True)
     emit({
         "type": "error", "task_id": task_id, "code": code,
         "message": str(error) or code, "recoverable": recoverable,
