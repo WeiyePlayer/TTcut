@@ -5,9 +5,11 @@ const mock = vi.hoisted(() => {
   return {
     listeners,
     app: { isPackaged: true, getVersion: vi.fn(() => '1.0.1') },
-    setFeedURL: vi.fn(),
     checkForUpdates: vi.fn(() => Promise.resolve()),
     quitAndInstall: vi.fn(),
+    autoDownload: true,
+    autoInstallOnAppQuit: true,
+    allowPrerelease: false,
     on: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
       const current = listeners.get(event) ?? new Set();
       current.add(listener);
@@ -21,48 +23,47 @@ const mock = vi.hoisted(() => {
 
 vi.mock('electron', () => ({
   app: mock.app,
+}));
+
+vi.mock('electron-updater', () => ({
   autoUpdater: {
     on: mock.on,
-    setFeedURL: mock.setFeedURL,
     checkForUpdates: mock.checkForUpdates,
     quitAndInstall: mock.quitAndInstall,
+    autoDownload: mock.autoDownload,
+    autoInstallOnAppQuit: mock.autoInstallOnAppQuit,
+    allowPrerelease: mock.allowPrerelease,
   },
 }));
 
 vi.mock('../src/main/logger', () => ({ logLine: vi.fn(() => Promise.resolve()) }));
-
 import { AppUpdater } from '../src/main/updater';
 
 describe('application updater', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     mock.listeners.clear();
-    mock.setFeedURL.mockClear();
     mock.checkForUpdates.mockReset().mockResolvedValue(undefined);
     mock.quitAndInstall.mockClear();
     mock.app.isPackaged = true;
   });
 
-  it('configures the stable Squirrel feed and publishes updater states', () => {
+  it('configures the NSIS updater and publishes updater states', () => {
     const send = vi.fn();
     const updater = new AppUpdater();
     updater.start({ isDestroyed: () => false, webContents: { send } } as never);
-    expect(mock.setFeedURL).toHaveBeenCalledWith({
-      url: 'https://update.electronjs.org/WeiyePlayer/TTcut/win32-x64/1.0.1',
-    });
-
     mock.emit('checking-for-update');
     expect(updater.getState().status).toBe('checking');
-    mock.emit('update-available');
-    expect(updater.getState().status).toBe('available');
+    mock.emit('update-available', { version: '1.1.0' });
+    expect(updater.getState()).toEqual({ status: 'available', version: '1.1.0', message: null });
     mock.emit('update-not-available');
     expect(updater.getState()).toEqual({ status: 'up-to-date', version: '1.0.1', message: null });
-    mock.emit('update-downloaded', {}, '', '1.1.0');
+    mock.emit('update-downloaded', { version: '1.1.0' });
     expect(updater.getState()).toEqual({ status: 'downloaded', version: '1.1.0', message: null });
     expect(send).toHaveBeenCalled();
 
     updater.restartToInstall();
-    expect(mock.quitAndInstall).toHaveBeenCalledTimes(1);
+    expect(mock.quitAndInstall).toHaveBeenCalledWith(true, true);
   });
 
   it('reports manual check errors without forcing a restart', async () => {

@@ -46,6 +46,12 @@ import {
   validateImportFiles,
   type ImportableComponentFile,
 } from './component-import';
+import {
+  directorySize,
+  ensureComponentSpace,
+  fileSize,
+  remainingDownloadBytes,
+} from './component-space';
 
 const INSTALLABLE_DIRECTORIES = new Set([
   ...ANALYSIS_RUNTIME_VARIANTS.map(analysisRuntimeDirectory),
@@ -384,6 +390,13 @@ async function installOnlineAnalysisRuntime(
   const downloadRoot = path.join(root, '.downloads');
   const download = path.join(downloadRoot, `${asset.asset}.assembled`);
   const staging = path.join(root, '.staging', taskId);
+  const existingSize = await directorySize(path.join(root, ...asset.install_directory.split('/')));
+  let downloadedBytes = 0;
+  for (const part of asset.parts) {
+    downloadedBytes += Math.min(part.size_bytes, await fileSize(path.join(downloadRoot, `${part.asset}.download`)));
+  }
+  const remainingBytes = remainingDownloadBytes(asset.size_bytes, downloadedBytes);
+  await ensureComponentSpace(root, remainingBytes + asset.size_bytes, asset.installed_size_bytes, existingSize);
   await rm(staging, { recursive: true, force: true });
   await mkdir(staging, { recursive: true });
   sendProgress(window, taskId, 'download', progressBase, 0, asset.size_bytes);
@@ -523,6 +536,9 @@ export async function startMediaComponentInstall(window: BrowserWindow, consent:
     const root = managedComponentsRoot();
     const download = path.join(root, '.downloads', `${catalog.ffmpeg.asset}.part`);
     const staging = path.join(root, '.staging', taskId);
+    const existingSize = await directorySize(path.join(root, catalog.ffmpeg.install_directory));
+    const remainingBytes = remainingDownloadBytes(catalog.ffmpeg.size_bytes, await fileSize(download));
+    await ensureComponentSpace(root, remainingBytes, catalog.ffmpeg.installed_size_bytes, existingSize);
     try {
       sendProgress(window, taskId, 'download', 0, 0, catalog.ffmpeg.size_bytes);
       await downloadWithResume(
@@ -640,6 +656,25 @@ export async function startComponentImport(window: BrowserWindow, filePaths: str
       const files = await validateImportFiles(filePaths, catalog, (completed, total) => {
         sendProgress(window, taskId, 'verify', completed / total * 35, completed, total);
       });
+      const importedAssets = new Map<string, { size: number; installedSize: number; installDirectory: string; cached: boolean }>();
+      for (const file of files) {
+        const asset = file.asset;
+        importedAssets.set(asset.install_directory, {
+          size: asset.size_bytes,
+          installedSize: asset.installed_size_bytes,
+          installDirectory: asset.install_directory,
+          cached: file.kind === 'runtime-part',
+        });
+      }
+      let downloadBytes = 0;
+      let installedBytes = 0;
+      let backupBytes = 0;
+      for (const asset of importedAssets.values()) {
+        downloadBytes += asset.cached ? asset.size * 2 : 0;
+        installedBytes += asset.installedSize;
+        backupBytes += await directorySize(path.join(root, ...asset.installDirectory.split('/')));
+      }
+      await ensureComponentSpace(root, downloadBytes, installedBytes, backupBytes);
       if (signal.aborted) throw Object.assign(new Error('SETUP_CANCELLED'), { name: 'AbortError' });
 
       const runtimeImports = await cacheAndCollectRuntimeImports(

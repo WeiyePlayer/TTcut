@@ -21,14 +21,15 @@ import { clearMediaPaths, installMediaProtocol, registerMediaPath } from './medi
 import { probeVideo } from './probe';
 import { cancelAllTasksAndWait, cancelTask, hasActiveTasks } from './processes';
 import { loadSettings, saveSettings } from './settings';
-import { handleSquirrelStartup } from './squirrel-startup';
 import { getPlatformCompatibility } from './platform-compatibility';
 import { COMPONENT_ASSETS_RELEASE_URL, DONATION_URL, GITHUB_URL, RELEASES_URL, WEBSITE_URL } from '../shared/urls';
 import { getUpdater } from './updater';
+import { runInstallerMigrationRequest } from './installer-migration';
 
-const squirrelStartup = handleSquirrelStartup();
+const installerMigrationIndex = process.argv.indexOf('--installer-migrate-components');
+const installerMigrationRequest = installerMigrationIndex >= 0 ? process.argv[installerMigrationIndex + 1] : null;
 
-if (!squirrelStartup) {
+if (!installerMigrationRequest) {
   protocol.registerSchemesAsPrivileged([{
     scheme: 'ttcut-media',
     privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true },
@@ -308,7 +309,12 @@ async function createWindow(): Promise<void> {
   else await mainWindow.loadFile(path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`));
 }
 
-if (!squirrelStartup) app.whenReady().then(async () => {
+if (installerMigrationRequest) {
+  app.whenReady().then(async () => {
+    const exitCode = await runInstallerMigrationRequest(installerMigrationRequest);
+    app.exit(exitCode);
+  });
+} else app.whenReady().then(async () => {
   const compatibility = await getPlatformCompatibility();
   await logLine('app', 'INFO', `Platform compatibility gate disabled: ${JSON.stringify(compatibility)}`)
     .catch(() => undefined);

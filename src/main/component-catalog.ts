@@ -27,6 +27,7 @@ const componentCatalogSchema = z.object({
       archive_root: z.string().regex(/^[A-Za-z0-9._-]+$/),
       install_directory: z.string().min(1),
       size_bytes: z.number().int().positive(),
+      installed_size_bytes: z.number().int().positive(),
       sha256: sha256Schema,
       parts: z.array(z.object({
         asset: z.string().regex(/^[A-Za-z0-9._+-]+$/),
@@ -62,6 +63,7 @@ const componentCatalogSchema = z.object({
     url: z.string().url().refine((value) => value.startsWith('https://')),
     license_url: z.string().url().refine((value) => value.startsWith('https://')),
     size_bytes: z.number().int().positive(),
+    installed_size_bytes: z.number().int().positive(),
     sha256: sha256Schema,
     required_build_flags: z.array(z.string().min(1)).min(1),
     required_encoders: z.array(z.string().min(1)).min(1),
@@ -78,6 +80,7 @@ const componentCatalogSchema = z.object({
     license_url: z.string().url().refine((value) => value.startsWith('https://')),
     source_url: z.string().url().refine((value) => value.startsWith('https://')),
     size_bytes: z.literal(168_733_210),
+    installed_size_bytes: z.number().int().positive(),
     sha256: z.literal('6dcf685c2fea98221b3f179961165e9c31f55bead576c4479ae4549858fbf826'),
     required_build_flags: z.array(z.string().min(1)).min(1),
     required_encoders: z.array(z.string().min(1)).min(1),

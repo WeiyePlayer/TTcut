@@ -13,6 +13,7 @@
         "archive_root": "ttcut-analysis-3.12.13-2.12.1-cpu",
         "install_directory": "analysis-runtime/3.12.13-2.12.1/cpu",
         "size_bytes": 269628039,
+        "installed_size_bytes": 600000000,
         "sha256": "b656c87f6261ad53929d72b6726855ecb5961b378315137de1b1af6ce8fd125b",
         "parts": [
           {
@@ -30,6 +31,7 @@
         "archive_root": "ttcut-analysis-3.12.13-2.12.1-cu126",
         "install_directory": "analysis-runtime/3.12.13-2.12.1/cu126",
         "size_bytes": 2766688555,
+        "installed_size_bytes": 4700000000,
         "sha256": "2fd0f1498153bd77b886d2e50787a7e40ff35e683ab8b6d6a55787ea51d98e0d",
         "parts": [
           {
@@ -59,6 +61,7 @@
         "archive_root": "ttcut-analysis-3.12.13-2.12.1-cu132",
         "install_directory": "analysis-runtime/3.12.13-2.12.1/cu132",
         "size_bytes": 2075620809,
+        "installed_size_bytes": 4000000000,
         "sha256": "a36466c8cb7330804e54151e37af3c6caf4360059ac24b76527095068bac6fbd",
         "parts": [
           {
@@ -94,6 +97,7 @@
     "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-07-17-13-22/ffmpeg-n8.1.2-22-g94138f6973-win64-lgpl-shared-8.1.zip",
     "license_url": "https://github.com/BtbN/FFmpeg-Builds/blob/master/LICENSE",
     "size_bytes": 70511588,
+    "installed_size_bytes": 180000000,
     "sha256": "fcbf0f5c58fec3e516e35ba26d81bc6cbaea09dde76bffd151fa93c0316b0b50",
     "required_build_flags": [
       "--enable-shared",
@@ -118,6 +122,7 @@
     "license_url": "https://github.com/BtbN/FFmpeg-Builds/blob/master/LICENSE",
     "source_url": "https://github.com/BtbN/FFmpeg-Builds/tree/autobuild-2026-07-22-13-36",
     "size_bytes": 168733210,
+    "installed_size_bytes": 450000000,
     "sha256": "6dcf685c2fea98221b3f179961165e9c31f55bead576c4479ae4549858fbf826",
     "required_build_flags": [
       "--enable-gpl",

@@ -1,21 +1,20 @@
 import type { ForgeConfig } from '@electron-forge/shared-types';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { MakerSquirrel } from '@electron-forge/maker-squirrel';
 import { VitePlugin } from '@electron-forge/plugin-vite';
 import { FusesPlugin } from '@electron-forge/plugin-fuses';
 import { FuseV1Options, FuseVersion } from '@electron/fuses';
-import type { SignToolOptions } from '@electron/windows-sign';
 import type { SignToolOptions as EsmSignToolOptions } from '@electron/windows-sign/dist/esm/types';
-import packageJson from './package.json';
 
 const publicReleaseCandidate = process.env.TTCUT_PUBLIC_RC === '1';
 const officialRelease = process.env.TTCUT_OFFICIAL_RELEASE === '1';
 const releaseSigningRequired = publicReleaseCandidate || officialRelease;
+
 function ignoreUnbuiltSource(file: string): boolean {
   if (!file) return false;
   return !file.startsWith('/.vite');
 }
+
 const publisherName = process.env.TTCUT_PUBLISHER_NAME?.trim() || 'weiye';
 const certificateFile = process.env.WINDOWS_CERTIFICATE_FILE?.trim();
 const certificatePassword = process.env.WINDOWS_CERTIFICATE_PASSWORD;
@@ -56,10 +55,6 @@ const packagerWindowsSign = signingConfigured ? {
   ...signingBase,
   hashes: ['sha256'] as NonNullable<EsmSignToolOptions['hashes']>,
 } : undefined;
-const squirrelWindowsSign = signingConfigured ? {
-  ...signingBase,
-  hashes: ['sha256'] as NonNullable<SignToolOptions['hashes']>,
-} : undefined;
 
 const config: ForgeConfig = {
   packagerConfig: {
@@ -81,17 +76,7 @@ const config: ForgeConfig = {
     },
   },
   rebuildConfig: {},
-  makers: [
-    new MakerSquirrel({
-      name: 'TTcut',
-      authors: publisherName,
-      owners: publisherName,
-      copyright: `Copyright © 2026 ${publisherName}`,
-      setupExe: `TTcut-${packageJson.version}-x64-Setup.exe`,
-      noMsi: true,
-      ...(squirrelWindowsSign ? { windowsSign: squirrelWindowsSign } : {}),
-    }),
-  ],
+  makers: [],
   plugins: [
     new VitePlugin({
       build: [

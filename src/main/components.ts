@@ -15,6 +15,7 @@ import {
   isAnalysisRuntimeVariant,
   type AnalysisRuntimeVariant,
 } from './runtime-layout';
+import { resolveInstallationLayout } from './installation-layout';
 
 const ANALYSIS_NUMPY_VERSION = '2.5.1';
 const ANALYSIS_OPENCV_VERSION = '4.13.0';
@@ -53,10 +54,7 @@ export function managedComponentsRoot(): string {
   if (!app.isPackaged && process.env.TTCUT_E2E === '1' && process.env.TTCUT_E2E_COMPONENTS_ROOT) {
     return path.resolve(process.env.TTCUT_E2E_COMPONENTS_ROOT);
   }
-  const localAppData = process.env.LOCALAPPDATA;
-  return localAppData
-    ? path.join(localAppData, 'TTcutData', 'components')
-    : path.join(app.getPath('userData'), 'components');
+  return resolveInstallationLayout().componentRoot;
 }
 
 function requestedVariants(device: 'auto' | 'cuda' | 'cpu'): AnalysisRuntimeVariant[] {
