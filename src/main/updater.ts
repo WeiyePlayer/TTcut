@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 import { app, type BrowserWindow } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import { updateStateSchema, type UpdateState } from '../shared/contracts';
@@ -27,7 +29,10 @@ export class AppUpdater {
   }
 
   private supported(): boolean {
-    return process.platform === 'win32' && process.arch === 'x64' && app.isPackaged;
+    return process.platform === 'win32'
+      && process.arch === 'x64'
+      && app.isPackaged
+      && existsSync(path.join(process.resourcesPath, 'app-update.yml'));
   }
 
   private setState(value: UpdateState): UpdateState {
@@ -42,7 +47,10 @@ export class AppUpdater {
 
   start(window: BrowserWindow | null): void {
     this.window = window;
-    if (!this.supported()) return;
+    if (!this.supported()) {
+      this.setState({ status: 'unsupported', version: null, message: null });
+      return;
+    }
     autoUpdater.autoDownload = true;
     autoUpdater.autoInstallOnAppQuit = true;
     autoUpdater.allowPrerelease = app.getVersion().includes('-');

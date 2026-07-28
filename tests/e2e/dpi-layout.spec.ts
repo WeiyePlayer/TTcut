@@ -160,3 +160,101 @@ for (const scale of [1.25, 1.5, 2] as const) {
     }
   });
 }
+
+test('neutral controls use the shared hover surface without overriding semantic states', async () => {
+  if (!existsSync(electronPath)) throw new Error(`Required Electron runtime is missing: ${electronPath}`);
+  await mkdir(outputRoot, { recursive: true });
+  const isolatedRoot = path.join(projectRoot, '.baseline', 'e2e', `hover-colors-${Date.now()}`);
+  const port = await freePort();
+  const stderr: string[] = [];
+  let child: ChildProcess | null = null;
+  let browser: Browser | null = null;
+  let page: Page | null = null;
+
+  try {
+    child = spawn(electronPath, [
+      `--remote-debugging-port=${port}`,
+      '--remote-allow-origins=*',
+      '--no-sandbox',
+      '--disable-gpu',
+      projectRoot,
+    ], {
+      cwd: projectRoot,
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        TTCUT_E2E: '1',
+        TTCUT_E2E_USER_DATA: path.join(isolatedRoot, 'user-data'),
+        TTCUT_E2E_COMPONENTS_ROOT: path.join(isolatedRoot, 'components'),
+        TTCUT_E2E_DISABLE_DEV_COMPONENTS: '1',
+      },
+    });
+    child.stderr?.setEncoding('utf8');
+    child.stderr?.on('data', (chunk: string) => stderr.push(chunk));
+    await waitForCdp(port, child, stderr);
+    browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
+    page = await appPage(browser);
+    await page.waitForLoadState('domcontentloaded');
+    await expect(page.locator('.settings-page')).toBeVisible();
+
+    await page.locator('.settings-page').evaluate((settingsPage) => {
+      const fixture = document.createElement('section');
+      fixture.id = 'hover-color-fixture';
+      fixture.className = 'card';
+      fixture.setAttribute('style', 'margin-top:14px;padding:18px;display:flex;flex-wrap:wrap;gap:10px;align-items:center');
+      fixture.innerHTML = `
+        <button class="workflow-back" type="button">Back</button>
+        <button class="preview-close" type="button">×</button>
+        <button class="secondary" type="button">Secondary</button>
+        <button class="secondary disabled-probe" type="button" disabled>Disabled</button>
+        <button class="primary" type="button">Primary</button>
+        <button class="primary destructive-confirm" type="button">Delete</button>
+        <div class="about-actions"><button class="secondary donate-button" type="button">Donate</button></div>
+        <button class="drop-zone" type="button" style="width:120px;min-height:60px;margin:0;padding:8px">Drop</button>
+        <button class="mode-card mode-probe" type="button"><span class="radio-dot"></span><strong>Mode</strong><small>Neutral</small></button>
+        <button class="mode-card selected mode-selected-probe" type="button"><span class="radio-dot"></span><strong>Selected</strong><small>Mode</small></button>
+        <div class="segmented"><button class="segmented-probe" type="button">Segment</button><button class="selected segmented-selected-probe" type="button">Selected</button></div>
+        <div class="choice-row"><button class="choice-probe" type="button"><strong>Choice</strong></button><button class="selected choice-selected-probe" type="button"><strong>Selected</strong></button></div>
+        <div class="batch-mode-options"><button class="batch-mode-probe" type="button">Batch</button><button class="selected batch-mode-selected-probe" type="button">Selected</button></div>
+      `;
+      settingsPage.appendChild(fixture);
+    });
+
+    const hoverColor = async (selector: string, expected: string) => {
+      const locator = page!.locator(selector);
+      await locator.hover({ force: true });
+      await expect.poll(() => locator.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe(expected);
+    };
+
+    for (const selector of [
+      '#hover-color-fixture .workflow-back',
+      '#hover-color-fixture .preview-close',
+      '#hover-color-fixture .secondary:not(.disabled-probe):not(.donate-button)',
+      '.sidebar nav button:not(.active):first-child',
+      '.window-controls button[aria-label="Minimize"]',
+      '#hover-color-fixture .mode-probe',
+      '#hover-color-fixture .segmented-probe',
+      '#hover-color-fixture .choice-probe',
+      '#hover-color-fixture .batch-mode-probe',
+    ]) {
+      await hoverColor(selector, 'rgb(231, 232, 232)');
+    }
+
+    await expect.poll(() => page!.locator('.sidebar button.active').evaluate((element) => getComputedStyle(element).backgroundColor)).toBe('rgb(231, 232, 232)');
+    await hoverColor('#hover-color-fixture .disabled-probe', 'rgb(255, 255, 255)');
+    await hoverColor('#hover-color-fixture .mode-selected-probe', 'rgb(248, 251, 255)');
+    await hoverColor('#hover-color-fixture .segmented-selected-probe', 'rgb(255, 255, 255)');
+    await hoverColor('#hover-color-fixture .choice-selected-probe', 'rgb(248, 251, 255)');
+    await hoverColor('#hover-color-fixture .batch-mode-selected-probe', 'rgb(255, 255, 255)');
+    await hoverColor('#hover-color-fixture .primary:not(.destructive-confirm)', 'rgb(35, 105, 216)');
+    await hoverColor('#hover-color-fixture .destructive-confirm', 'rgb(163, 33, 23)');
+    await hoverColor('#hover-color-fixture .donate-button', 'rgb(255, 239, 173)');
+    await hoverColor('.drop-zone', 'rgb(247, 250, 255)');
+    await hoverColor('#hover-color-fixture .secondary:not(.disabled-probe):not(.donate-button)', 'rgb(231, 232, 232)');
+
+    await page.screenshot({ path: path.join(outputRoot, 'neutral-hover-colors.png'), fullPage: true });
+  } finally {
+    await stopElectron(page, browser, child);
+  }
+});
