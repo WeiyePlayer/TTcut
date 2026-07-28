@@ -8,6 +8,7 @@ import { validateCalibration } from '../domain/calibration';
 import { interpolate, messages, type Language, type Messages } from './i18n';
 import { MultiTaskPage } from './MultiTaskPage';
 import packageJson from '../../package.json';
+import captureGuideImage from './assets/pingpong-table-with-pose-mannequins.png';
 
 type View = 'auto' | 'history' | 'settings' | 'multi';
 type Step = 'select' | 'calibrate' | 'analyzing' | 'empty' | 'mode' | 'cutting' | 'complete' | 'error';
@@ -640,7 +641,7 @@ export function App() {
           />
         ) : view === 'settings' ? (
           <section className="page settings-page">
-            <div className="page-heading settings-heading"><p className="eyebrow">TTcut</p><h1>{t.settings}</h1></div>
+            <div className="page-heading settings-heading"><h1>{t.settings}</h1></div>
             <div className="settings-grid">
               <article className="card about-card">
                 <div className="about-brand"><span>TT</span><div><h2>TTcut</h2><p>{settings.language === 'zh-CN' ? `当前版本 ${bootstrap?.version ?? ''}` : `Version ${bootstrap?.version ?? ''}`}</p></div></div>
@@ -740,7 +741,7 @@ export function App() {
           </section>
         ) : view === 'history' ? (
           <section className="page history-page">
-            <div className="history-header"><div className="page-heading"><p className="eyebrow">TTcut</p><h1>{t.history}</h1><p>{t.historyDescription}</p></div><button className="secondary" disabled={historyEntries.length === 0 || Boolean(activeTask || setupTask)} onClick={() => setHistoryConfirmation({ kind: 'clear' })}>{t.clearHistory}</button></div>
+            <div className="history-header"><div className="page-heading"><h1>{t.history}</h1><p>{t.historyDescription}</p></div><button className="secondary" disabled={historyEntries.length === 0 || Boolean(activeTask || setupTask)} onClick={() => setHistoryConfirmation({ kind: 'clear' })}>{t.clearHistory}</button></div>
             {historyError && <div className="history-error" role="alert"><span>{localizedError(historyError, t)}</span><button className="text-button" onClick={() => void loadHistory()}>{t.retry}</button></div>}
             {historyLoading ? (
               <div className="history-loading" role="status">{t.loadingHistory}</div>
@@ -771,7 +772,7 @@ export function App() {
             )}
             {step === 'select' && (
               <div className="center-stage">
-                <div className="page-heading centered"><p className="eyebrow">TTcut</p><h1>{t.selectTitle}</h1><p>{t.selectDescription}</p></div>
+                <div className="page-heading centered"><h1>{t.selectTitle}</h1><p>{t.selectDescription}</p></div>
                 <button
                   type="button"
                   className={`drop-zone ${dragging ? 'dragging' : ''}`}
@@ -848,6 +849,17 @@ export function App() {
         )}
       </main>
 
+      {view === 'auto' && step === 'select' && (
+        <div className="capture-help">
+          <button type="button" className="capture-help-trigger" aria-label={t.captureGuideTitle}>
+            <span aria-hidden="true">?</span>
+          </button>
+          <div className="capture-help-card" role="tooltip">
+            <h2>{t.captureGuideTitle}</h2>
+            <img src={captureGuideImage} alt={t.captureGuideImageAlt} />
+          </div>
+        </div>
+      )}
       {toast && <div className="toast" role="status">{toast}</div>}
       {languageTransition && <div className="language-loader"><span /></div>}
       {previewRally && video && analysis && <RallyPreviewDialog key={`${video.mediaUrl}:${previewRally.id}`} video={video} videoDuration={analysis.video.duration_seconds} rally={previewRally} translations={t} onClose={() => setPreviewRally(null)} />}

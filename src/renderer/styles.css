@@ -70,6 +70,29 @@ button:disabled { cursor: not-allowed !important; opacity: 0.42; transform: none
 .settings-link { margin-top: auto; }
 
 .main-content { position: fixed; inset: 40px 0 0 220px; overflow: auto; background: var(--background); }
+.capture-help { position: fixed; z-index: 40; right: 24px; bottom: 24px; display: flex; align-items: flex-end; }
+.capture-help-trigger {
+  width: 48px; height: 48px; display: grid; place-items: center; border: 0; border-radius: 14px;
+  background: var(--secondary); color: var(--muted); cursor: pointer; box-shadow: 0 5px 18px rgba(30,40,55,.08);
+  transition: background 180ms ease, color 180ms ease, transform 100ms ease, box-shadow 180ms ease;
+}
+.capture-help-trigger:hover { background: var(--secondary-hover); color: var(--text); box-shadow: 0 8px 24px rgba(30,40,55,.12); }
+.capture-help-trigger:active { transform: scale(.96); }
+.capture-help-trigger span {
+  width: 22px; height: 22px; display: grid; place-items: center; border: 2px solid currentColor;
+  border-radius: 50%; font-size: 14px; font-weight: 700; line-height: 1;
+}
+.capture-help-card {
+  position: absolute; right: 0; bottom: calc(100% + 12px); width: min(420px, calc(100vw - 48px)); padding: 14px;
+  border: 1px solid var(--line-strong); border-radius: 14px; background: rgba(255,255,255,.98);
+  box-shadow: 0 18px 50px rgba(30,40,55,.16); opacity: 0; visibility: hidden; transform: translateY(7px);
+  pointer-events: none; transition: opacity 160ms ease, visibility 160ms ease, transform 160ms ease;
+}
+.capture-help:hover .capture-help-card, .capture-help:focus-within .capture-help-card {
+  opacity: 1; visibility: visible; transform: translateY(0); pointer-events: auto;
+}
+.capture-help-card h2 { margin: 0 0 10px; font-size: 16px; }
+.capture-help-card img { display: block; width: 100%; height: auto; border-radius: 10px; background: white; }
 .page { min-height: 100%; padding: 52px clamp(28px, 5vw, 72px) 48px; }
 .auto-page { display: flex; flex-direction: column; }
 .center-stage { flex: 1; display: grid; place-content: center; justify-items: center; min-height: 520px; }

@@ -197,6 +197,24 @@ test('neutral controls use the shared hover surface without overriding semantic 
     page = await appPage(browser);
     await page.waitForLoadState('domcontentloaded');
     await expect(page.locator('.settings-page')).toBeVisible();
+    await expect(page.locator('.settings-heading .eyebrow')).toHaveCount(0);
+    await page.getByRole('button', { name: '历史剪辑' }).click();
+    await expect(page.locator('.history-page')).toBeVisible();
+    await expect(page.locator('.history-header .eyebrow')).toHaveCount(0);
+    await page.getByRole('button', { name: '自动剪辑' }).click();
+    await expect(page.getByRole('heading', { name: '选择比赛视频' })).toBeVisible();
+    await expect(page.locator('.center-stage .eyebrow')).toHaveCount(0);
+    const captureHelp = page.getByRole('button', { name: '推荐视频拍摄视角' });
+    await expect(captureHelp).toBeVisible();
+    await expect(page.locator('.capture-help-card')).toBeHidden();
+    await captureHelp.hover();
+    await expect(page.locator('.capture-help-card')).toBeVisible();
+    await expect(page.locator('.capture-help-card')).toContainText('推荐视频拍摄视角');
+    await expect(page.locator('.capture-help-card img')).toHaveAttribute('alt', '推荐视频拍摄视角示意图');
+    await page.screenshot({ path: path.join(outputRoot, 'capture-guide-open.png'), fullPage: true });
+    await page.screenshot({ path: path.join(outputRoot, 'without-blue-ttcut.png'), fullPage: true });
+    await page.getByRole('button', { name: '设置', exact: true }).click();
+    await expect(page.locator('.settings-page')).toBeVisible();
 
     await page.locator('.settings-page').evaluate((settingsPage) => {
       const fixture = document.createElement('section');

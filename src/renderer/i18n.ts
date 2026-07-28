@@ -3,6 +3,7 @@ export type Language = 'zh-CN' | 'en';
 const zh = {
   autoCut: '自动剪辑', history: '历史剪辑', settings: '设置', back: '返回',
   selectTitle: '选择比赛视频', selectDescription: '选择 MP4 比赛视频开始本地分析，支持多任务批量处理。',
+  captureGuideTitle: '推荐视频拍摄视角', captureGuideImageAlt: '推荐视频拍摄视角示意图',
   chooseVideo: '选择 MP4 视频', dropVideo: '或将 MP4 文件拖到这里',
   fileName: '文件名', filePath: '路径', fileSize: '大小', duration: '时长', resolution: '分辨率', frameRate: '帧率',
   calibrationTitle: '标定球桌', calibrationDescription: '依次标记左上、右上、右下、左下四个角点。拖动标记可修正位置。',
@@ -99,6 +100,7 @@ export type Messages = DeepStrings<typeof zh>;
 const en: Messages = {
   autoCut: 'Auto Cut', history: 'History', settings: 'Settings', back: 'Back',
   selectTitle: 'Choose match videos', selectDescription: 'Choose MP4 match videos for local analysis with multi-task batch processing.',
+  captureGuideTitle: 'Recommended video camera angle', captureGuideImageAlt: 'Recommended video camera angle illustration',
   chooseVideo: 'Choose MP4 videos', dropVideo: 'or drop MP4 files here',
   fileName: 'File', filePath: 'Path', fileSize: 'Size', duration: 'Duration', resolution: 'Resolution', frameRate: 'Frame rate',
   calibrationTitle: 'Calibrate the table', calibrationDescription: 'Mark top-left, top-right, bottom-right, and bottom-left in order. Drag a marker to refine it.',
