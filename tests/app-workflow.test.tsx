@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../src/renderer/App';
 import type { AppEvent, BootstrapData, SelectedVideo, TTcutApi } from '../src/shared/api';
@@ -88,13 +88,24 @@ describe('App workflow notices and multi-task entry', () => {
       }),
       selectVideos,
       probeVideo: vi.fn((path: string) => Promise.resolve(metadata(path))),
+      startAutoCalibration: vi.fn().mockResolvedValue('calibration-task-1'),
     } as unknown as TTcutApi;
     Object.defineProperty(window, 'ttcut', { configurable: true, value: api });
   });
 
   afterEach(() => {
+    cleanup();
     vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  it('presents video selection as a single or multi-task workflow', async () => {
+    render(<App />);
+
+    await screen.findByRole('heading', { name: '选择比赛视频' });
+    expect(screen.getByText('选择 MP4 比赛视频开始本地分析，支持多任务批量处理。')).toBeVisible();
+    expect(screen.getByText('或将 MP4 文件拖到这里')).toBeVisible();
+    expect(screen.queryByText(/单个|一次只能处理一个/)).toBeNull();
   });
 
   it('hides the automatic calibration failure notice after three seconds', async () => {

@@ -11,6 +11,7 @@ import {
 import { appSettingsSchema, calibrationChoiceSchema, exportRequestSchema, historySummarySchema } from '../shared/contracts';
 import { IPC } from '../shared/ipc';
 import { startAnalysis } from './analysis';
+import { startAutoCalibration } from './calibration';
 import { componentSetupInfo, loadComponentCatalog } from './component-catalog';
 import { recoverComponentInstallState, startAnalysisComponentInstall, startComponentImport, startMediaComponentInstall } from './component-manager';
 import { inspectComponents } from './components';
@@ -151,6 +152,17 @@ function registerIpc(): void {
   ipcMain.handle(IPC.videoProbe, (_event, value: unknown) => {
     if (typeof value !== 'string') throw new Error('INVALID_INPUT');
     return probeVideo(value);
+  });
+  ipcMain.handle(IPC.calibrationStart, async (_event, value: unknown) => {
+    if (!value || typeof value !== 'object') throw new Error('INVALID_REQUEST');
+    const record = value as Record<string, unknown>;
+    if (Object.keys(record).length !== 2 || !Object.hasOwn(record, 'videoPath') || !Object.hasOwn(record, 'device')) {
+      throw new Error('INVALID_REQUEST');
+    }
+    if (typeof record.videoPath !== 'string') throw new Error('INVALID_REQUEST');
+    const device = record.device;
+    if (device !== 'auto' && device !== 'cuda' && device !== 'cpu') throw new Error('INVALID_REQUEST');
+    return startAutoCalibration(currentWindow(), { videoPath: record.videoPath, device });
   });
   ipcMain.handle(IPC.analysisStart, async (_event, value: unknown) => {
     if (!value || typeof value !== 'object') throw new Error('INVALID_REQUEST');

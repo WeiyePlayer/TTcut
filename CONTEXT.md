@@ -52,8 +52,10 @@ _Avoid_: Crop-relative trajectory
 
 ## Batch Task
 
-A serial queue of independent video analyses. A failure for one item does not
-prevent later items from running.
+A serial queue that calibrates each video first and only then processes ready
+items. Automatic calibration runs in list order before analysis or export;
+an item that needs manual calibration remains a recoverable queue entry and
+does not block ready items from running.
 
 ## History Record
 
@@ -76,3 +78,15 @@ with the FFmpeg concat demuxer. A task chooses one encoder for all segments.
 Cancellation requested by the user is a terminal `EXPORT_CANCELLED` outcome.
 Application shutdown records `app-exit` and cleans up without showing an error
 page. An unrequested signal or null process exit is `EXPORT_TERMINATED`.
+
+## Draft Release
+
+A private, mutable GitHub Release used to upload and verify the complete
+artifact set before publication.
+_Avoid_: Public Stable Release
+
+## Public Stable Release
+
+A published, non-prerelease GitHub Release whose tag and artifacts are frozen.
+Substantive corrections are delivered as a new patch version.
+_Avoid_: Draft Release

@@ -2,8 +2,9 @@ export type Language = 'zh-CN' | 'en';
 
 const zh = {
   autoCut: '自动剪辑', history: '历史剪辑', settings: '设置', back: '返回',
-  selectTitle: '选择比赛视频', selectDescription: '选择一个 MP4 视频，标定球桌后开始本地分析。',
-  chooseVideo: '选择 MP4 视频', dropVideo: '或将单个 MP4 文件拖到这里', onlyOne: '当前版本一次只能处理一个视频。',
+  selectTitle: '选择比赛视频', selectDescription: '选择 MP4 比赛视频开始本地分析，支持多任务批量处理。',
+  captureGuideTitle: '推荐视频拍摄视角', captureGuideImageAlt: '推荐视频拍摄视角示意图',
+  chooseVideo: '选择 MP4 视频', dropVideo: '或将 MP4 文件拖到这里',
   fileName: '文件名', filePath: '路径', fileSize: '大小', duration: '时长', resolution: '分辨率', frameRate: '帧率',
   calibrationTitle: '标定球桌', calibrationDescription: '依次标记左上、右上、右下、左下四个角点。拖动标记可修正位置。',
   point1: '1 左上', point2: '2 右上', point3: '3 右下', point4: '4 左下', resetPoints: '重置标定',
@@ -40,7 +41,7 @@ const zh = {
   refreshComponents: '重新检测', setupWorking: '正在设置本地组件', setupSuccess: '组件安装和自检已完成。', setupPending: '已保存 CUDA 运行时分片 {{variant}}（{{received}}/{{total}}），等待 {{missing}}；文件齐全后将自动安装。', setupCancelled: '组件设置已取消，可稍后继续。', setupFailed: '组件设置失败。请重试或查看日志。', setupNetworkFailed: '网络连接多次中断。已保留下载部分；检查网络或代理后重试将从断点继续。',
   closeTitle: '任务仍在运行', closeDetail: '退出将中止当前任务并清理临时文件。', exit: '退出', minimize: '最小化',
   errorTitle: '无法完成操作', technicalLog: '技术详情已写入本地日志。', retry: '返回',
-  invalidFile: '请选择一个有效的 MP4 视频。', genericError: '发生了未预期的错误。',
+  invalidFile: '请选择有效的 MP4 视频文件。', genericError: '发生了未预期的错误。',
   errors: {
     PLATFORM_UNSUPPORTED: '系统版本检测已移除。若仍看到此错误，请更新到最新构建。',
     COMPONENT_IMPORT_NO_FILES: '没有选择组件文件。',
@@ -73,7 +74,7 @@ const zh = {
     INVALID_WORKER_OUTPUT: '分析进程返回了无效结果。请重试并查看技术日志。',
     WORKER_EXITED: '分析进程意外退出。请检查组件状态、显存和技术日志。',
     ANALYSIS_FAILED: '视频分析未完成。请重新标定后重试，必要时查看技术日志。',
-    AUTO_CALIBRATION_FAILED: '自动识别球桌失败。单视频可改用手动标定；多任务会跳过此视频并继续处理其他任务。',
+    AUTO_CALIBRATION_FAILED: '自动识别球桌失败，请完成手动标定后继续。',
     NO_RALLIES: '没有可剪辑的有效回合。请重新标定或选择其他视频。',
     NO_HIGHLIGHTS: '没有回合超过当前精彩阈值。请降低阈值或更换模式。',
     NO_CUSTOM_SELECTION: '请至少选择一个回合后再开始剪辑。',
@@ -98,8 +99,9 @@ export type Messages = DeepStrings<typeof zh>;
 
 const en: Messages = {
   autoCut: 'Auto Cut', history: 'History', settings: 'Settings', back: 'Back',
-  selectTitle: 'Choose a match video', selectDescription: 'Choose one MP4 video, calibrate the table, then analyze it locally.',
-  chooseVideo: 'Choose MP4 video', dropVideo: 'or drop one MP4 file here', onlyOne: 'This version processes one video at a time.',
+  selectTitle: 'Choose match videos', selectDescription: 'Choose MP4 match videos for local analysis with multi-task batch processing.',
+  captureGuideTitle: 'Recommended video camera angle', captureGuideImageAlt: 'Recommended video camera angle illustration',
+  chooseVideo: 'Choose MP4 videos', dropVideo: 'or drop MP4 files here',
   fileName: 'File', filePath: 'Path', fileSize: 'Size', duration: 'Duration', resolution: 'Resolution', frameRate: 'Frame rate',
   calibrationTitle: 'Calibrate the table', calibrationDescription: 'Mark top-left, top-right, bottom-right, and bottom-left in order. Drag a marker to refine it.',
   point1: '1 Top left', point2: '2 Top right', point3: '3 Bottom right', point4: '4 Bottom left', resetPoints: 'Reset calibration',
@@ -136,7 +138,7 @@ const en: Messages = {
   refreshComponents: 'Check again', setupWorking: 'Setting up local components', setupSuccess: 'Installation and component self-test completed.', setupPending: 'Saved CUDA runtime parts for {{variant}} ({{received}}/{{total}}). Waiting for {{missing}}; installation will start when all parts are available.', setupCancelled: 'Component setup was canceled. You can continue later.', setupFailed: 'Component setup failed. Retry or open the logs.', setupNetworkFailed: 'The network connection was interrupted repeatedly. Downloaded data was kept; check the network or proxy and retry to resume.',
   closeTitle: 'A task is still running', closeDetail: 'Exiting will stop the task and clean temporary files.', exit: 'Exit', minimize: 'Minimize',
   errorTitle: 'The operation could not be completed', technicalLog: 'Technical details were written to the local log.', retry: 'Back',
-  invalidFile: 'Choose one valid MP4 video.', genericError: 'An unexpected error occurred.',
+  invalidFile: 'Choose valid MP4 video files.', genericError: 'An unexpected error occurred.',
   errors: {
     PLATFORM_UNSUPPORTED: 'OS version gating was removed. If you still see this error, update to a newer build.',
     COMPONENT_IMPORT_NO_FILES: 'No component files were selected.',
@@ -169,7 +171,7 @@ const en: Messages = {
     INVALID_WORKER_OUTPUT: 'The analysis process returned an invalid result. Retry and inspect the technical log.',
     WORKER_EXITED: 'The analysis process exited unexpectedly. Check components, GPU memory, and the technical log.',
     ANALYSIS_FAILED: 'Video analysis did not complete. Recalibrate and retry, then inspect the log if needed.',
-    AUTO_CALIBRATION_FAILED: 'Automatic table recognition failed. Use manual calibration for a single video; multi-task mode skips this item and continues.',
+    AUTO_CALIBRATION_FAILED: 'Automatic table recognition failed. Calibrate the table manually to continue.',
     NO_RALLIES: 'There are no valid rallies to cut. Recalibrate or choose another video.',
     NO_HIGHLIGHTS: 'No rally exceeds the current highlight threshold. Lower it or choose another mode.',
     NO_CUSTOM_SELECTION: 'Select at least one rally before cutting.',

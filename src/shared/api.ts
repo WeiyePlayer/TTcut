@@ -3,6 +3,7 @@ import type {
   AppSettings,
   Calibration,
   CalibrationChoice,
+  TableAnalysis,
   ComponentStatus,
   ComponentSetupInfo,
   CutSelectionV1,
@@ -41,6 +42,7 @@ export type PendingComponentImport = {
 export type AppEvent =
   | { type: 'progress'; data: TaskProgress }
   | { type: 'analysis-result'; taskId: string; analysisId: string; calibration: Calibration; data: AnalysisResultV1 }
+  | { type: 'calibration-result'; taskId: string; calibration: Calibration; tableAnalysis: TableAnalysis }
   | { type: 'export-result'; taskId: string; data: ExportResult }
   | {
     type: 'component-result';
@@ -72,6 +74,10 @@ export interface TTcutApi {
   pathForDroppedFile(file: File): string;
   acceptDroppedVideo(path: string): Promise<SelectedVideo>;
   probeVideo(path: string): Promise<VideoMetadata>;
+  startAutoCalibration(input: {
+    videoPath: string;
+    device: 'auto' | 'cuda' | 'cpu';
+  }): Promise<string>;
   startAnalysis(input: {
     videoPath: string;
     calibrationChoice: CalibrationChoice;

@@ -20,9 +20,12 @@ test("renders the TTcut product page", async () => {
   assert.match(html, /TTcut\.mp4/);
   assert.match(html, /https:\/\/ttcut\.vercel\.app\/og\.png/);
   const visibleHtml = html.replace(/<script[\s\S]*?<\/script>/gi, "");
-  const downloadUrl = "https://github.com/WeiyePlayer/TTcut/releases/download/v1.0.0/TTcut-1.0.0-x64-Setup.exe";
+  const downloadUrl = "https://github.com/WeiyePlayer/TTcut/releases/download/v1.1.1/TTcut-1.1.1-x64-Setup.exe";
   assert.equal(visibleHtml.match(new RegExp(`href="${downloadUrl.replaceAll(".", "\\.")}"`, "g"))?.length, 4);
-  assert.doesNotMatch(visibleHtml, /releases\/tag\/v1\.0\.0/);
+  assert.doesNotMatch(visibleHtml, /releases\/download\/v1\.0\.0/);
+  assert.match(visibleHtml, /自动标定/);
+  assert.match(visibleHtml, /批量任务/);
+  assert.match(visibleHtml, /手动标定/);
   assert.equal(visibleHtml.match(/>前往Github(?:\s|<)/g)?.length, 1);
   assert.match(visibleHtml, /href="https:\/\/github\.com\/WeiyePlayer\/TTcut"[^>]*>前往Github/);
   assert.doesNotMatch(visibleHtml, /1-193\.mp4/);

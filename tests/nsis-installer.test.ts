@@ -1,4 +1,4 @@
-import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, rm, statfs, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,10 +7,21 @@ import { describe, expect, it } from 'vitest';
 const installerPath = path.join(process.cwd(), 'build', 'installer', 'installer.nsh');
 const makeNsisPath = path.join(process.cwd(), 'scripts', 'make-nsis.mjs');
 const compareVersionsPath = path.join(process.cwd(), 'build', 'installer', 'compare-versions.ps1');
+const chooseDefaultRootPath = path.join(process.cwd(), 'build', 'installer', 'choose-default-root.ps1');
+const checkInstallSpacePath = path.join(process.cwd(), 'build', 'installer', 'check-install-space.ps1');
+const commitRegistrationPath = path.join(process.cwd(), 'build', 'installer', 'commit-install-registration.ps1');
 const finalizeLegacyPath = path.join(process.cwd(), 'build', 'installer', 'finalize-legacy-install.ps1');
 const legacyRegistryKey = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\TTcut';
 const legacyRollbackTestUnavailable = process.platform !== 'win32'
   || spawnSync('reg.exe', ['query', legacyRegistryKey]).status === 0;
+const powerShell2Probe = process.platform === 'win32'
+  ? spawnSync('powershell.exe', [
+    '-Version', '2', '-NoProfile', '-NonInteractive',
+    '-Command', '$PSVersionTable.PSVersion.Major',
+  ], { encoding: 'utf8' })
+  : null;
+const powerShell2Unavailable = powerShell2Probe?.status !== 0
+  || powerShell2Probe.stdout.trim() !== '2';
 
 describe('assisted NSIS installer contract', () => {
   it('forces a current-user three-step flow after install-mode initialization', async () => {
@@ -74,12 +85,110 @@ describe('assisted NSIS installer contract', () => {
     expect(source).not.toContain(
       '$$p=[IO.Path]::GetFullPath($$env:TTCUT_INSTALLER_ROOT)',
     );
-    expect(source).toContain('Sort-Object {[int64]$$_.FreeSpace} -Descending');
+    expect(source).toContain(
+      'File /oname=check-install-space.ps1 "${PROJECT_DIR}\\build\\installer\\check-install-space.ps1"',
+    );
     expect(source).toContain('EnableWindow $TTcutRootField 0');
     expect(source).toContain('EnableWindow $TTcutBrowseButton 0');
     expect(source).toContain('CreateShortcut "$SMPROGRAMS\\TTcut.lnk"');
     expect(source).toContain('CreateShortcut "$DESKTOP\\TTcut.lnk"');
     expect(source).toContain('WriteRegStr HKCU "Software\\TTcut\\Install" "PreservedDataRoot"');
+  });
+
+  it('keeps the first-run probes compatible with Windows 7 PowerShell', async () => {
+    const source = await readFile(installerPath, 'utf8');
+    const chooseDefaultRoot = await readFile(chooseDefaultRootPath, 'utf8');
+    const checkInstallSpace = await readFile(checkInstallSpacePath, 'utf8');
+    const commitRegistration = await readFile(commitRegistrationPath, 'utf8');
+    const compareVersions = await readFile(compareVersionsPath, 'utf8');
+
+    expect(source).toContain(
+      'File /oname=choose-default-root.ps1 "${PROJECT_DIR}\\build\\installer\\choose-default-root.ps1"',
+    );
+    expect(source).toContain(
+      'File /oname=check-install-space.ps1 "${PROJECT_DIR}\\build\\installer\\check-install-space.ps1"',
+    );
+    expect(source).not.toContain('Get-CimInstance');
+    expect(source).not.toContain('[IO.DriveInfo]::new');
+    expect(chooseDefaultRoot).toContain('Get-WmiObject');
+    expect(chooseDefaultRoot).not.toContain('Get-CimInstance');
+    expect(checkInstallSpace).toContain(
+      'New-Object -TypeName System.IO.DriveInfo -ArgumentList',
+    );
+    expect(checkInstallSpace).not.toContain('[Parameter(');
+    expect(checkInstallSpace).not.toContain('::new(');
+    expect(checkInstallSpace).not.toMatch(/Get-ChildItem[^\r\n]*-File/);
+    expect(commitRegistration).not.toContain('[ordered]');
+    expect(commitRegistration).not.toContain('[Parameter(');
+    expect(commitRegistration).not.toContain('ConvertTo-Json');
+    expect(commitRegistration).toContain('ConvertTo-TTcutJsonString');
+    expect(compareVersions).not.toContain('[Parameter(');
+    expect(compareVersions).not.toContain('[pscustomobject]');
+    expect(compareVersions).toContain('New-Object -TypeName PSObject -Property');
+  });
+
+  it.skipIf(powerShell2Unavailable)('writes a valid registration failure report in PowerShell 2', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'ttcut-registration-report-'));
+    const installRoot = path.join(root, 'install');
+    const reportPath = path.join(root, 'report.json');
+    try {
+      const result = spawnSync('powershell.exe', [
+        '-Version', '2', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+        '-File', commitRegistrationPath,
+        '-InstallRoot', installRoot,
+        '-AppGuid', 'invalid-guid',
+        '-Version', '1.1.0',
+        '-DesktopShortcut', '1',
+        '-ReportPath', reportPath,
+      ], { encoding: 'utf8' });
+
+      expect(result.status, result.stderr || result.stdout).toBe(11);
+      expect(JSON.parse(await readFile(reportPath, 'utf8'))).toMatchObject({
+        schema_version: 1,
+        status: 'failed',
+        install_root: installRoot,
+        app_guid: 'invalid-guid',
+        version: '1.1.0',
+        desktop_shortcut: 1,
+        error_code: 'INVALID_APP_GUID',
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(powerShell2Unavailable)('distinguishes enough space, low space, and probe failures in PowerShell 2', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'ttcut-space-probe-'));
+    try {
+      const filesystem = await statfs(root, { bigint: true });
+      const available = filesystem.bavail * filesystem.bsize;
+      const reserve = 512n * 1024n * 1024n;
+      const invoke = (installRoot: string, estimatedSizeKb: bigint) => spawnSync(
+        'powershell.exe',
+        [
+          '-Version', '2', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+          '-File', checkInstallSpacePath,
+          '-EstimatedSizeKb', estimatedSizeKb.toString(),
+        ],
+        {
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            TTCUT_INSTALLER_ROOT: installRoot,
+            TTCUT_INSTALLER_LEGACY: '',
+            TTCUT_INSTALLER_LEGACY_APP: '',
+          },
+        },
+      ).status;
+
+      if (available > reserve + 1024n) {
+        expect(invoke(root, 1n)).toBe(0);
+      }
+      expect(invoke(root, (available / 1024n) + 1n)).toBe(1);
+      expect(invoke('', 1n)).toBe(2);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it('commits and activates the new install before transactionally removing the legacy app', async () => {
@@ -195,10 +304,15 @@ describe('assisted NSIS installer contract', () => {
     }
   }, 20_000);
 
-  it.skipIf(process.platform !== 'win32')('blocks semantic-version downgrades, including prerelease downgrades', () => {
+  it.skipIf(powerShell2Unavailable)('blocks semantic-version downgrades in PowerShell 2, including prerelease downgrades', () => {
     const compare = (installed: string, candidate: string) => spawnSync(
       'powershell.exe',
-      ['-NoProfile', '-NonInteractive', '-File', compareVersionsPath, '-InstalledVersion', installed, '-CandidateVersion', candidate],
+      [
+        '-Version', '2', '-NoProfile', '-NonInteractive',
+        '-File', compareVersionsPath,
+        '-InstalledVersion', installed,
+        '-CandidateVersion', candidate,
+      ],
       { encoding: 'utf8' },
     ).status;
 
