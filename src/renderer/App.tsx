@@ -535,7 +535,7 @@ export function App() {
         </div>
       </header>
       <aside className="sidebar">
-        <div className="brand"><span>TTcut</span><small>v{bootstrap?.version ?? '1.0.0'}</small></div>
+        <div className="brand"><span>TTcut</span><small>v{bootstrap?.version ?? '1.1.1'}</small></div>
         <nav aria-label="Primary navigation">
           <button className={view === 'auto' || view === 'multi' ? 'active' : ''} onClick={() => requestView('auto')}><i />{t.autoCut}</button>
           <button className={view === 'history' ? 'active' : ''} onClick={() => requestView('history')}><i />{t.history}</button>

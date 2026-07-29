@@ -78,3 +78,15 @@ with the FFmpeg concat demuxer. A task chooses one encoder for all segments.
 Cancellation requested by the user is a terminal `EXPORT_CANCELLED` outcome.
 Application shutdown records `app-exit` and cleans up without showing an error
 page. An unrequested signal or null process exit is `EXPORT_TERMINATED`.
+
+## Draft Release
+
+A private, mutable GitHub Release used to upload and verify the complete
+artifact set before publication.
+_Avoid_: Public Stable Release
+
+## Public Stable Release
+
+A published, non-prerelease GitHub Release whose tag and artifacts are frozen.
+Substantive corrections are delivered as a new patch version.
+_Avoid_: Draft Release
