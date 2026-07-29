@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 
 $componentRoot = $env:TTCUT_INSTALLER_LEGACY
-if ([string]::IsNullOrWhiteSpace($componentRoot)) {
+if (-not $componentRoot -or $componentRoot.Trim().Length -eq 0) {
   exit 0
 }
 
@@ -12,7 +12,8 @@ $legacyAppPrefix = [IO.Path]::GetFullPath(
 
 function Get-TTcutBusyProcess {
   @(
-    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+    # Get-WmiObject is available in the PowerShell shipped with Windows 7.
+    Get-WmiObject Win32_Process -ErrorAction SilentlyContinue |
       Where-Object {
         $_.ExecutablePath -and (
           (

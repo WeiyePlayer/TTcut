@@ -1,14 +1,10 @@
 param(
-  [Parameter(Mandatory = $true)]
   [string]$LegacyUpdateExe,
 
-  [Parameter(Mandatory = $true)]
   [string]$LegacyInstallRoot,
 
-  [Parameter(Mandatory = $true)]
   [string]$BackupRoot,
 
-  [Parameter(Mandatory = $true)]
   [string]$ReportPath
 )
 
@@ -245,7 +241,8 @@ try {
       $legacyPrefix = $expectedRoot + '\'
       for ($attempt = 0; $attempt -lt 20; $attempt += 1) {
         $busy = @(
-          Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+          # Get-WmiObject is available in the PowerShell shipped with Windows 7.
+          Get-WmiObject Win32_Process -ErrorAction SilentlyContinue |
             Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($legacyPrefix, [StringComparison]::OrdinalIgnoreCase) }
         )
         if ($busy.Count -eq 0 -and (Test-Path -LiteralPath $expectedRoot)) {
