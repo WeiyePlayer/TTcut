@@ -130,6 +130,18 @@ async function createShortVideo(inputPath: string, outputPath: string): Promise<
   if (code !== 0) throw new Error(`Could not create short E2E video (${code}).\n${stderr.join('')}`);
 }
 
+async function createCalibrationFailureVideo(outputPath: string): Promise<void> {
+  const stderr: string[] = [];
+  const child = spawn(path.join(ffmpegRoot, 'ffmpeg.exe'), [
+    '-y', '-f', 'lavfi', '-i', 'color=c=black:s=1280x720:r=30:d=3',
+    '-an', '-c:v', 'libopenh264', '-b:v', '1M', outputPath,
+  ], { cwd: projectRoot, windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
+  child.stderr?.setEncoding('utf8');
+  child.stderr?.on('data', (chunk: string) => stderr.push(chunk));
+  const [code] = await once(child, 'exit');
+  if (code !== 0) throw new Error(`Could not create calibration-failure E2E video (${code}).\n${stderr.join('')}`);
+}
+
 test('real CUDA analysis, single-rally export, and final preview', async ({}, testInfo) => {
   test.slow();
   for (const filePath of [sourceVideo, pythonPath, weightsPath, electronPath, path.join(ffmpegRoot, 'ffmpeg.exe'), path.join(ffmpegRoot, 'ffprobe.exe')]) {
@@ -457,11 +469,53 @@ test('automatic calibration completes serial multi-task analysis and records zer
     await page.locator('.drop-zone').click();
     await expect(page.locator('.multi-task-page')).toBeVisible({ timeout: 30_000 });
     await expect(page.locator('.batch-row')).toHaveCount(2);
+    const rows = page.locator('.batch-row');
+    await expect(rows.nth(0).locator('.batch-cover.processing')).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator('.batch-cover.processing')).toHaveCount(1);
+    await expect(rows.nth(1).locator('.batch-cover.processing')).toBeVisible({ timeout: 2 * 60 * 1_000 });
+    await expect(page.locator('.batch-cover.processing')).toHaveCount(1);
+    await expect(page.locator('.batch-start')).toBeEnabled({ timeout: 2 * 60 * 1_000 });
+    await rows.nth(0).locator('.batch-cover').click();
+    const preview = page.locator('.batch-preview');
+    await expect(preview).toBeVisible();
+    await preview.locator('video').evaluate((video) => {
+      const media = video as HTMLVideoElement;
+      if (media.readyState >= 1) return;
+      return new Promise<void>((resolve) => media.addEventListener('loadedmetadata', () => resolve(), { once: true }));
+    });
+    const previewBox = await preview.boundingBox();
+    const previewMediaBox = await preview.locator('.batch-preview-media').boundingBox();
+    const previewVideoBox = await preview.locator('video').boundingBox();
+    const viewport = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
+    const fixedChrome = await page.evaluate(() => {
+      const sidebar = document.querySelector('.sidebar')?.getBoundingClientRect();
+      const titlebar = document.querySelector('.titlebar')?.getBoundingClientRect();
+      return {
+        sidebarRight: sidebar?.right ?? 0,
+        titlebarBottom: titlebar?.bottom ?? 0,
+      };
+    });
+    const intrinsicRatio = await preview.locator('video').evaluate((video) => {
+      const media = video as HTMLVideoElement;
+      return media.videoWidth / media.videoHeight;
+    });
+    expect(previewBox?.width).toBeGreaterThan(850);
+    expect(previewMediaBox?.width).toBeGreaterThan(800);
+    expect(previewVideoBox?.width).toBeGreaterThan(800);
+    expect(previewBox?.x ?? 0).toBeGreaterThanOrEqual(fixedChrome.sidebarRight);
+    expect(previewMediaBox?.x ?? 0).toBeGreaterThanOrEqual(fixedChrome.sidebarRight);
+    expect(previewBox?.y ?? 0).toBeGreaterThanOrEqual(fixedChrome.titlebarBottom);
+    expect(previewBox ? previewBox.y + previewBox.height : Number.POSITIVE_INFINITY).toBeLessThanOrEqual(viewport.height + 1);
+    expect(previewBox && previewVideoBox ? previewVideoBox.y + previewVideoBox.height : Number.POSITIVE_INFINITY).toBeLessThanOrEqual((previewBox?.y ?? 0) + (previewBox?.height ?? 0));
+    expect(intrinsicRatio).toBeCloseTo(16 / 9, 2);
+    expect(previewMediaBox ? previewMediaBox.width / previewMediaBox.height : 0).toBeCloseTo(intrinsicRatio, 2);
+    expect(previewVideoBox ? previewVideoBox.width / previewVideoBox.height : 0).toBeCloseTo(intrinsicRatio, 2);
+    await expect(preview.locator('video')).toHaveCSS('object-fit', 'contain');
+    await preview.locator('.preview-close').click();
     for (const row of await page.locator('.batch-row').all()) {
       await row.locator('.batch-mode-options button').nth(2).click();
     }
     await page.locator('.batch-start').click();
-    await expect(page.locator('.batch-row.analyzing')).toHaveCount(1, { timeout: 30_000 });
     await expect(page.locator('.batch-row.done')).toHaveCount(2, { timeout: 5 * 60 * 1_000 });
     await expect(page.locator('.batch-row.analyzing')).toHaveCount(0);
 
@@ -478,6 +532,120 @@ test('automatic calibration completes serial multi-task analysis and records zer
   } finally {
     await writeFile(nativeLog, nativeStderr.join(''), { encoding: 'utf8', flag: 'a' }).catch(() => undefined);
     if (existsSync(nativeLog)) await testInfo.attach('multi-task-electron-native-log', { path: nativeLog, contentType: 'text/plain' });
+    await stopElectron(page, browser, electronProcess);
+  }
+});
+
+test('failed batch calibration can be repaired manually and returned to the running queue', async ({}, testInfo) => {
+  test.slow();
+  for (const filePath of [sourceVideo, pythonPath, weightsPath, electronPath, path.join(ffmpegRoot, 'ffmpeg.exe'), path.join(ffmpegRoot, 'ffprobe.exe')]) {
+    await requireFile(filePath);
+  }
+
+  const runId = `multi-task-manual-${Date.now()}`;
+  const isolatedRoot = path.join(fixtureDir, runId);
+  const isolatedUserData = path.join(isolatedRoot, 'user-data');
+  const isolatedComponents = path.join(isolatedRoot, 'components');
+  const failedVideo = path.join(isolatedRoot, 'calibration-failure.mp4');
+  const readyVideo = path.join(isolatedRoot, 'calibration-success.mp4');
+  const nativeLog = path.join(isolatedRoot, 'electron-native.log');
+  await mkdir(isolatedRoot, { recursive: true });
+  await mkdir(isolatedUserData, { recursive: true });
+  await createCalibrationFailureVideo(failedVideo);
+  await createShortVideo(sourceVideo, readyVideo);
+
+  let electronProcess: ChildProcess | null = null;
+  let browser: Browser | null = null;
+  let page: Page | null = null;
+  const nativeStderr: string[] = [];
+  const rendererErrors: string[] = [];
+  const dialogs: string[] = [];
+  try {
+    const port = await freePort();
+    electronProcess = spawn(electronPath, [
+      `--remote-debugging-port=${port}`,
+      '--remote-allow-origins=*',
+      '--no-sandbox',
+      '--disable-gpu',
+      '--enable-logging=file',
+      `--log-file=${nativeLog}`,
+      projectRoot,
+    ], {
+      cwd: projectRoot,
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        PYTHONUTF8: '1',
+        ELECTRON_ENABLE_LOGGING: '1',
+        TTCUT_E2E: '1',
+        TTCUT_E2E_USER_DATA: isolatedUserData,
+        TTCUT_E2E_COMPONENTS_ROOT: isolatedComponents,
+        TTCUT_E2E_VIDEOS: JSON.stringify([failedVideo, readyVideo]),
+        TTCUT_PYTHON: pythonPath,
+        TTCUT_TRACKNET_WEIGHTS: weightsPath,
+        TTCUT_FFMPEG: path.join(ffmpegRoot, 'ffmpeg.exe'),
+        TTCUT_FFPROBE: path.join(ffmpegRoot, 'ffprobe.exe'),
+      },
+    });
+    electronProcess.stderr?.setEncoding('utf8');
+    electronProcess.stderr?.on('data', (chunk: string) => nativeStderr.push(chunk));
+    await waitForCdp(port, electronProcess, nativeStderr);
+    browser = await connectCdp(port, electronProcess, nativeStderr);
+    page = await appPage(browser);
+    page.on('pageerror', (error) => rendererErrors.push(error.message));
+    page.on('console', (message) => {
+      if (message.type() === 'error') rendererErrors.push(message.text());
+    });
+    page.on('dialog', (dialog) => {
+      dialogs.push(dialog.message());
+      void dialog.dismiss();
+    });
+    await page.waitForLoadState('domcontentloaded');
+
+    await page.locator('.drop-zone').click();
+    await expect(page.locator('.multi-task-page')).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText('标定失败')).toBeVisible({ timeout: 2 * 60 * 1_000 });
+    await expect(page.getByText('手动标定')).toBeVisible();
+    await expect(page.getByText('AUTO_CALIBRATION_FAILED')).toHaveCount(0);
+    const failedCoverVideoStyle = await page.getByRole('button', { name: 'calibration-failure.mp4 手动标定' })
+      .locator('video')
+      .evaluate((element) => ({
+        filter: getComputedStyle(element).filter,
+        opacity: getComputedStyle(element).opacity,
+      }));
+    expect(failedCoverVideoStyle.filter).toContain('blur(8px)');
+    expect(failedCoverVideoStyle.opacity).toBe('0.66');
+
+    await page.getByRole('button', { name: 'calibration-failure.mp4 手动标定' }).click();
+    await expect(page.getByRole('heading', { name: '标定球桌' })).toBeVisible();
+    for (const [x, y] of calibrationPoints) await clickSourcePoint(page, x, y);
+    const finishCalibration = page.getByRole('button', { name: '完成标定' });
+    await expect(finishCalibration).toBeEnabled();
+    await finishCalibration.click();
+    await expect(page.getByRole('heading', { name: '多任务剪辑' })).toBeVisible();
+    await expect(page.locator('.batch-start')).toBeEnabled({ timeout: 2 * 60 * 1_000 });
+
+    for (const row of await page.locator('.batch-row').all()) {
+      await row.locator('.batch-mode-options button').nth(2).click();
+    }
+    await page.locator('.batch-start').click();
+    await expect(page.locator('.batch-row.done')).toHaveCount(2, { timeout: 5 * 60 * 1_000 });
+
+    const history = await page.evaluate(() => window.ttcut.listHistory());
+    expect(history.map((entry) => entry.video_name).sort()).toEqual([
+      'calibration-failure.mp4',
+      'calibration-success.mp4',
+    ]);
+    expect(rendererErrors).toEqual([]);
+    expect(dialogs).toEqual([]);
+    await testInfo.attach('multi-task-manual-history', {
+      body: Buffer.from(JSON.stringify(history, null, 2)),
+      contentType: 'application/json',
+    });
+  } finally {
+    await writeFile(nativeLog, nativeStderr.join(''), { encoding: 'utf8', flag: 'a' }).catch(() => undefined);
+    if (existsSync(nativeLog)) await testInfo.attach('multi-task-manual-electron-native-log', { path: nativeLog, contentType: 'text/plain' });
     await stopElectron(page, browser, electronProcess);
   }
 });

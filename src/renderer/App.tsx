@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AnalysisResultV1, AppSettings, Calibration, CutSelectionV1, ExportResult, HistorySummaryV1, Rally, UpdateState, VideoMetadata } from '../shared/contracts';
 import type { AppEvent, BootstrapData, PendingComponentImport, SelectedVideo } from '../shared/api';
 import { DONATION_URL, GITHUB_URL, RELEASES_URL, WEBSITE_URL } from '../shared/urls';
@@ -6,7 +6,8 @@ import { formatTimestamp } from '../domain/time';
 import { rallyPreviewRange } from '../domain/preview';
 import { validateCalibration } from '../domain/calibration';
 import { interpolate, messages, type Language, type Messages } from './i18n';
-import { MultiTaskPage } from './MultiTaskPage';
+import { MultiTaskPage, type MultiLeaveTarget } from './MultiTaskPage';
+import { CalibrationSurface } from './CalibrationSurface';
 import packageJson from '../../package.json';
 import captureGuideImage from './assets/pingpong-table-with-pose-mannequins.png';
 
@@ -30,121 +31,6 @@ function errorCode(error: unknown): string {
 
 function localizedError(code: string, translations: Messages): string {
   return translations.errors[code as keyof typeof translations.errors] ?? translations.errors.UNKNOWN;
-}
-
-function CalibrationSurface({
-  video, metadata, points, onPointsChange,
-}: {
-  video: SelectedVideo;
-  metadata: VideoMetadata;
-  points: Partial<Record<PointName, [number, number]>>;
-  onPointsChange: (points: Partial<Record<PointName, [number, number]>>) => void;
-}) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const surfaceRef = useRef<HTMLDivElement>(null);
-  const [currentTime, setCurrentTime] = useState(0);
-  const dragging = useRef<PointName | null>(null);
-
-  const toSource = useCallback((clientX: number, clientY: number): [number, number] | null => {
-    const element = videoRef.current;
-    if (!element) return null;
-    const rect = element.getBoundingClientRect();
-    const scale = Math.min(rect.width / metadata.width, rect.height / metadata.height);
-    const renderedWidth = metadata.width * scale;
-    const renderedHeight = metadata.height * scale;
-    const offsetX = rect.left + (rect.width - renderedWidth) / 2;
-    const offsetY = rect.top + (rect.height - renderedHeight) / 2;
-    const x = (clientX - offsetX) / scale;
-    const y = (clientY - offsetY) / scale;
-    if (x < 0 || y < 0 || x >= metadata.width || y >= metadata.height) return null;
-    return [Math.max(0, Math.min(metadata.width - 1, x)), Math.max(0, Math.min(metadata.height - 1, y))];
-  }, [metadata]);
-
-  const sourceToPercent = (point: [number, number]) => {
-    const surface = surfaceRef.current;
-    const element = videoRef.current;
-    if (!surface || !element) return { left: '50%', top: '50%' };
-    const rect = element.getBoundingClientRect();
-    const parent = surface.getBoundingClientRect();
-    const scale = Math.min(rect.width / metadata.width, rect.height / metadata.height);
-    const renderedWidth = metadata.width * scale;
-    const renderedHeight = metadata.height * scale;
-    const x = rect.left - parent.left + (rect.width - renderedWidth) / 2 + point[0] * scale;
-    const y = rect.top - parent.top + (rect.height - renderedHeight) / 2 + point[1] * scale;
-    return { left: `${x}px`, top: `${y}px` };
-  };
-
-  const setAtPointer = (event: ReactPointerEvent, name?: PointName) => {
-    const next = toSource(event.clientX, event.clientY);
-    if (!next) return;
-    const target = name ?? pointOrder.find((item) => !points[item]);
-    if (target) onPointsChange({ ...points, [target]: next });
-  };
-
-  useEffect(() => {
-    const element = videoRef.current;
-    if (!element) return;
-    const update = () => setCurrentTime(element.currentTime);
-    element.addEventListener('timeupdate', update);
-    return () => element.removeEventListener('timeupdate', update);
-  }, []);
-
-  return (
-    <div className="calibration-shell">
-      <div
-        className="video-surface"
-        ref={surfaceRef}
-        onPointerDown={(event) => {
-          if ((event.target as HTMLElement).closest('.calibration-point')) return;
-          setAtPointer(event);
-        }}
-        onPointerMove={(event) => {
-          if (dragging.current) setAtPointer(event, dragging.current);
-        }}
-        onPointerUp={() => { dragging.current = null; }}
-      >
-        <video ref={videoRef} src={video.mediaUrl} preload="metadata" muted playsInline />
-        {pointOrder.map((name, index) => points[name] && (
-          <button
-            type="button"
-            key={name}
-            className="calibration-point"
-            style={sourceToPercent(points[name]!)}
-            aria-label={`Calibration point ${index + 1}`}
-            onPointerDown={(event) => {
-              event.currentTarget.setPointerCapture(event.pointerId);
-              dragging.current = name;
-              event.stopPropagation();
-            }}
-            onPointerMove={(event) => {
-              if (dragging.current === name) setAtPointer(event, name);
-            }}
-            onPointerUp={(event) => {
-              event.currentTarget.releasePointerCapture(event.pointerId);
-              dragging.current = null;
-            }}
-          >{index + 1}</button>
-        ))}
-      </div>
-      <div className="scrubber-row">
-        <span>{formatTimestamp(currentTime)}</span>
-        <input
-          aria-label="Video position"
-          type="range"
-          min={0}
-          max={metadata.duration_seconds}
-          step={0.01}
-          value={currentTime}
-          onChange={(event) => {
-            const value = Number(event.target.value);
-            setCurrentTime(value);
-            if (videoRef.current) videoRef.current.currentTime = value;
-          }}
-        />
-        <span>{formatTimestamp(metadata.duration_seconds)}</span>
-      </div>
-    </div>
-  );
 }
 
 function RallyPreviewDialog({ video, videoDuration, rally, translations, onClose }: {
@@ -246,6 +132,7 @@ export function App() {
   const [setupTask, setSetupTask] = useState<string | null>(null);
   const setupTaskRef = useRef<string | null>(null);
   const multiActiveRef = useRef(false);
+  const multiLeaveHandlerRef = useRef<((target: MultiLeaveTarget) => void) | null>(null);
   const settingsRef = useRef(settings);
   const promptedUpdateVersion = useRef<string | null>(null);
   const [setupProgress, setSetupProgress] = useState<{ percent: number; stage: string; current?: number; total?: number } | null>(null);
@@ -300,6 +187,8 @@ export function App() {
         setAnalysis(event.data);
         setPoints(event.calibration.points);
         setStep(event.data.rallies.length ? 'mode' : 'empty');
+      } else if (event.type === 'calibration-result') {
+        return;
       } else if (event.type === 'export-result') {
         setActiveTask(null);
         setExportResult(event.data);
@@ -592,14 +481,38 @@ export function App() {
       && !activeTask
       && !setupTask
   );
-  const returnToSelection = () => {
-    if (view === 'multi') {
-      multiActiveRef.current = false;
-      setMultiVideos([]);
+  const leaveMulti = (target: MultiLeaveTarget) => {
+    multiActiveRef.current = false;
+    setMultiVideos([]);
+    if (target === 'history') {
+      showHistory();
+      return;
+    }
+    if (target === 'settings') {
+      reset();
+      setView('settings');
+      return;
     }
     reset();
     setView('auto');
   };
+  const requestView = (target: MultiLeaveTarget) => {
+    if (view === 'multi') {
+      multiLeaveHandlerRef.current?.(target);
+      return;
+    }
+    if (target === 'history') {
+      showHistory();
+      return;
+    }
+    if (target === 'settings') {
+      setView('settings');
+      return;
+    }
+    reset();
+    setView('auto');
+  };
+  const returnToSelection = () => requestView('auto');
 
   return (
     <div className={`app-shell ${languageTransition ? 'language-changing' : ''}`}>
@@ -624,10 +537,10 @@ export function App() {
       <aside className="sidebar">
         <div className="brand"><span>TTcut</span><small>v{bootstrap?.version ?? '1.0.0'}</small></div>
         <nav aria-label="Primary navigation">
-          <button className={view === 'auto' || view === 'multi' ? 'active' : ''} onClick={() => { multiActiveRef.current = false; setView('auto'); }}><i />{t.autoCut}</button>
-          <button className={view === 'history' ? 'active' : ''} onClick={showHistory}><i />{t.history}</button>
+          <button className={view === 'auto' || view === 'multi' ? 'active' : ''} onClick={() => requestView('auto')}><i />{t.autoCut}</button>
+          <button className={view === 'history' ? 'active' : ''} onClick={() => requestView('history')}><i />{t.history}</button>
         </nav>
-        <button className={`settings-link ${view === 'settings' ? 'active' : ''}`} onClick={() => setView('settings')}><i />{t.settings}</button>
+        <button className={`settings-link ${view === 'settings' ? 'active' : ''}`} onClick={() => requestView('settings')}><i />{t.settings}</button>
       </aside>
 
       <main className="main-content">
@@ -637,6 +550,9 @@ export function App() {
             preRoll={settings.pre_roll_seconds}
             postRoll={settings.post_roll_seconds}
             exportStrategy={settings.export_strategy}
+            language={settings.language}
+            registerLeaveHandler={(handler) => { multiLeaveHandlerRef.current = handler; }}
+            onLeave={leaveMulti}
             onOpenAnalysis={(id) => { multiActiveRef.current = false; void openHistory(id); }}
           />
         ) : view === 'settings' ? (
@@ -684,7 +600,7 @@ export function App() {
                 </div>
               </article>
               <article className="card setting-card">
-                <div><h2>{settings.language === 'zh-CN' ? '球台标定' : 'Table calibration'}</h2><p>{settings.language === 'zh-CN' ? '选择单视频流程使用的球台标定方式。多任务始终使用自动标定。' : 'Choose the calibration method for single videos. Multi-task mode always uses automatic calibration.'}</p></div>
+                <div><h2>{settings.language === 'zh-CN' ? '球台标定' : 'Table calibration'}</h2><p>{settings.language === 'zh-CN' ? '选择单视频流程使用的球台标定方式。多任务会先自动标定，失败项目可手动补充。' : 'Choose the calibration method for single videos. Batch tasks calibrate automatically first, with manual recovery for failed items.'}</p></div>
                 <div className="segmented">
                   <button className={settings.calibration_method === 'manual' ? 'selected' : ''} onClick={() => void saveRolls({ calibration_method: 'manual' })}>{settings.language === 'zh-CN' ? '手动' : 'Manual'}</button>
                   <button className={settings.calibration_method === 'automatic' ? 'selected' : ''} onClick={() => void saveRolls({ calibration_method: 'automatic' })}>{settings.language === 'zh-CN' ? '自动' : 'Automatic'}</button>

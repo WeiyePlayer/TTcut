@@ -88,6 +88,7 @@ describe('App workflow notices and multi-task entry', () => {
       }),
       selectVideos,
       probeVideo: vi.fn((path: string) => Promise.resolve(metadata(path))),
+      startAutoCalibration: vi.fn().mockResolvedValue('calibration-task-1'),
     } as unknown as TTcutApi;
     Object.defineProperty(window, 'ttcut', { configurable: true, value: api });
   });

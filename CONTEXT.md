@@ -52,8 +52,10 @@ _Avoid_: Crop-relative trajectory
 
 ## Batch Task
 
-A serial queue of independent video analyses. A failure for one item does not
-prevent later items from running.
+A serial queue that calibrates each video first and only then processes ready
+items. Automatic calibration runs in list order before analysis or export;
+an item that needs manual calibration remains a recoverable queue entry and
+does not block ready items from running.
 
 ## History Record
 

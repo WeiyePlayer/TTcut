@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { overallAnalysisProgress } from '../src/domain/analysis-progress';
+import { overallAnalysisProgress, overallCalibrationProgress } from '../src/domain/analysis-progress';
 
 describe('analysis progress mapping', () => {
   it('keeps the manual TrackNet analysis mapping unchanged', () => {
@@ -15,5 +15,19 @@ describe('analysis progress mapping', () => {
     expect(overallAnalysisProgress('load_model', 100, 'automatic')).toBe(5);
     expect(overallAnalysisProgress('analysis', 50, 'automatic')).toBe(52.5);
     expect(overallAnalysisProgress('postprocess', 100, 'automatic')).toBe(100);
+  });
+
+  it('treats precalibrated analysis as TrackNet-only work', () => {
+    expect(overallAnalysisProgress('load_model', 100, 'precalibrated')).toBe(10);
+    expect(overallAnalysisProgress('analysis', 50, 'precalibrated')).toBe(53);
+  });
+
+  it('maps the three automatic calibration stages onto one continuous bar', () => {
+    expect(overallCalibrationProgress('table_sampling', 50)).toBe(20);
+    expect(overallCalibrationProgress('table_sampling', 100)).toBe(40);
+    expect(overallCalibrationProgress('table_model', 0)).toBe(40);
+    expect(overallCalibrationProgress('table_model', 100)).toBe(60);
+    expect(overallCalibrationProgress('table_inference', 50)).toBe(80);
+    expect(overallCalibrationProgress('table_inference', 100)).toBe(100);
   });
 });

@@ -22,7 +22,7 @@ The Analysis component detects an NVIDIA GPU automatically and falls back to CPU
 - A per-video analysis ROI is derived from the calibrated table. TrackNet uses the default 1.25x ROI input profile, and detected points are mapped back to source-video coordinates.
 - The CUDA analysis pipeline and progress reporting are bounded and more responsive, without the former test-only intermediate dialog.
 - Metadata-driven frame sampling speeds up automatic calibration on long videos and improves multi-frame consistency checks.
-- Batch tasks process multiple MP4 files serially; a failed item does not stop the remaining queue.
+- Batch tasks calibrate multiple MP4 files in list order before processing. A failed item becomes a manual-calibration entry, while ready items can continue through analysis and export.
 - Rally and table-analysis models are bundled in the installer.
 - In-app update checks, background downloads, and restart-to-install are available.
 - Optional `libx264` support enables H.264 re-encoding above 4K; TTcut falls back to OpenH264 when x264 is unavailable or invalid.
@@ -69,7 +69,7 @@ Completed analyses are saved locally with a first-frame thumbnail, including ana
 
 ### 6. Batch tasks
 
-Select multiple MP4 files in Batch tasks. TTcut uses automatic calibration and processes the queue serially. Outputs are stored beside their source videos; failures are recorded while later tasks continue.
+Select multiple MP4 files in Batch tasks. On entry, TTcut automatically calibrates each video in list order; successful items wait in the ready state. A failed item shows “Calibration failed / Calibrate manually” on its cover and opens the reusable four-point calibration page when clicked. Completing calibration returns to the same queue with its state preserved. “Start analysis and cutting” processes ready items only, so items waiting for manual calibration do not block the rest. Outputs are stored beside their source videos.
 
 ## Cutting rules
 
@@ -120,7 +120,7 @@ npm run make:official
 
 ## Known limitations
 
-- The single-video workflow handles one MP4 at a time; Batch tasks accepts multiple MP4 files and processes them serially.
+- The single-video workflow handles one MP4 at a time; Batch tasks accepts multiple MP4 files and runs a serial “calibrate first, then process” queue with manual recovery for failed items.
 - The displayed count is a bounce-event proxy, not a ground-truth paddle-hit count.
 - Windows x64 is the primary supported build. Removing the Windows build-number gate does not guarantee that every old Windows version, Windows Server edition, x86 system, or ARM64 system can run all dependencies.
 

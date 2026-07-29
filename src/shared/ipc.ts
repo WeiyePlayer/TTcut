@@ -11,6 +11,7 @@ export const IPC = {
   videosSelect: 'videos:select',
   videoAcceptDrop: 'video:accept-drop',
   videoProbe: 'video:probe',
+  calibrationStart: 'calibration:start',
   analysisStart: 'analysis:start',
   exportStart: 'export:start',
   historyList: 'history:list',
