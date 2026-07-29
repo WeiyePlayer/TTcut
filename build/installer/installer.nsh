@@ -43,6 +43,8 @@ LangString TTCUT_PATH_NOT_EMPTY 1033 "Choose an empty folder, or the existing TT
 LangString TTCUT_PATH_NOT_EMPTY 2052 "请选择空文件夹，或已经安装的 TTcut 位置。"
 LangString TTCUT_SPACE_REQUIRED 1033 "The selected drive does not have enough free space for TTcut and its components."
 LangString TTCUT_SPACE_REQUIRED 2052 "所选磁盘的可用空间不足以安装 TTcut 及其组件。"
+LangString TTCUT_SPACE_CHECK_FAILED 1033 "The installer's free-space check could not be completed. Choose another location and try again."
+LangString TTCUT_SPACE_CHECK_FAILED 2052 "无法完成安装器的磁盘空间检查，请选择其他位置后重试。"
 LangString TTCUT_PATH_WRITE 2052 "所选安装位置不可写。"
 LangString TTCUT_MIGRATION_FAILED 1033 "Component migration failed. The old installation and components were left unchanged."
 LangString TTCUT_MIGRATION_FAILED 2052 "组件迁移失败，旧程序和旧组件保持不变。"
@@ -125,11 +127,21 @@ FunctionEnd
 
 Function TTcutChooseDefaultRoot
   StrCpy $TTcutRoot ""
-  nsExec::ExecToStack 'powershell.exe -NoProfile -NonInteractive -Command "$$s=[IO.Path]::GetPathRoot($$env:SystemRoot).TrimEnd(''\'');Get-CimInstance Win32_LogicalDisk|Where-Object DeviceID -ne $$s|Sort-Object {[int64]$$_.FreeSpace} -Descending|ForEach-Object{$$p=$$_.DeviceID+''\TTcut'';try{$$made=!(Test-Path -LiteralPath $$p);if($$made){New-Item -ItemType Directory -Path $$p -ErrorAction Stop|Out-Null}elseif(Get-ChildItem -LiteralPath $$p -Force -ErrorAction Stop|Select-Object -First 1){return};$$t=Join-Path $$p ''.ttcut-write-test'';[IO.File]::WriteAllText($$t,'''');Remove-Item -LiteralPath $$t -Force;if($$made){Remove-Item -LiteralPath $$p -Force};Write-Output $$p;break}catch{if($$made -and (Test-Path -LiteralPath $$p)){Remove-Item -LiteralPath $$p -Force -ErrorAction SilentlyContinue}}}"'
+  InitPluginsDir
+  SetOutPath "$PLUGINSDIR"
+  File /oname=choose-default-root.ps1 "${PROJECT_DIR}\build\installer\choose-default-root.ps1"
+  nsExec::ExecToStack 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\choose-default-root.ps1"'
   Pop $0
   Pop $1
   ${If} $0 == 0
-    StrCpy $TTcutRoot $1
+    ; Never copy an error record (or a diagnostic line) into the path field.
+    StrLen $2 $1
+    ${If} $2 >= 3
+      StrCpy $3 $1 1 1
+      ${If} $3 == ":"
+        StrCpy $TTcutRoot $1
+      ${EndIf}
+    ${EndIf}
   ${EndIf}
 FunctionEnd
 
@@ -378,11 +390,17 @@ Function TTcutOptionsLeave
     System::Call 'kernel32::SetEnvironmentVariableW(w "TTCUT_INSTALLER_LEGACY", w "$TTcutLegacyComponents")i.r1'
   ${EndIf}
   System::Call 'kernel32::SetEnvironmentVariableW(w "TTCUT_INSTALLER_LEGACY_APP", w "$TTcutLegacyUninstall")i.r1'
-  nsExec::ExecToStack 'powershell.exe -NoProfile -NonInteractive -Command "$$root=$$env:TTCUT_INSTALLER_ROOT;$$legacy=$$env:TTCUT_INSTALLER_LEGACY;$$legacyUpdate=$$env:TTCUT_INSTALLER_LEGACY_APP;$$free=[IO.DriveInfo]::new([IO.Path]::GetPathRoot($$root)).AvailableFreeSpace;$$legacyBytes=0;$$legacyAppBytes=0;if(Test-Path -LiteralPath $$legacy){$$legacyBytes=(Get-ChildItem -LiteralPath $$legacy -File -Recurse -Force -ErrorAction Stop|Measure-Object Length -Sum).Sum};if($$legacyUpdate -and (Test-Path -LiteralPath $$legacyUpdate)){$$legacyApp=Split-Path -Parent $$legacyUpdate;$$legacyAppBytes=(Get-ChildItem -LiteralPath $$legacyApp -File -Recurse -Force -ErrorAction Stop|Measure-Object Length -Sum).Sum};$$required=[int64]${ESTIMATED_SIZE}*1024+[int64]$$legacyBytes+[int64]$$legacyAppBytes+536870912;if($$free -lt $$required){exit 1}"'
+  InitPluginsDir
+  SetOutPath "$PLUGINSDIR"
+  File /oname=check-install-space.ps1 "${PROJECT_DIR}\build\installer\check-install-space.ps1"
+  nsExec::ExecToStack 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\check-install-space.ps1" -EstimatedSizeKb "${ESTIMATED_SIZE}"'
   Pop $6
   Pop $7
-  ${If} $6 != 0
+  ${If} $6 == 1
     MessageBox MB_ICONEXCLAMATION "$(TTCUT_SPACE_REQUIRED)"
+    Abort
+  ${ElseIf} $6 != 0
+    MessageBox MB_ICONEXCLAMATION "$(TTCUT_SPACE_CHECK_FAILED)"
     Abort
   ${EndIf}
 
