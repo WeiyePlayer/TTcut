@@ -114,6 +114,7 @@ export const calibrationSchema = z.object({
 export const calibrationChoiceSchema = z.discriminatedUnion('method', [
   z.object({ method: z.literal('manual'), calibration: calibrationSchema }).strict(),
   z.object({ method: z.literal('automatic') }).strict(),
+  z.object({ method: z.literal('precalibrated'), calibration: calibrationSchema, table_analysis: tableAnalysisSchema.optional() }).strict(),
 ]);
 
 const analysisVideoMetadataSchema = z.object({
@@ -183,6 +184,11 @@ export const analysisResultSchema = z.object({
   table_analysis: tableAnalysisSchema.optional(),
 }).strict();
 
+export const calibrationResultSchema = z.object({
+  calibration: calibrationSchema,
+  table_analysis: tableAnalysisSchema,
+}).strict();
+
 const workerBase = z.object({
   task_id: z.string().uuid(),
 });
@@ -197,7 +203,7 @@ export const workerEventSchema = z.discriminatedUnion('type', [
   }).strict(),
   workerBase.extend({
     type: z.literal('result'),
-    data: analysisResultSchema,
+    data: z.union([analysisResultSchema, calibrationResultSchema]),
   }).strict(),
   workerBase.extend({
     type: z.literal('error'),
@@ -343,6 +349,7 @@ export type AnalysisRequestV1 = z.infer<typeof analysisRequestSchema>;
 export type VideoMetadata = z.infer<typeof videoMetadataSchema>;
 export type Rally = z.infer<typeof rallySchema>;
 export type AnalysisResultV1 = z.infer<typeof analysisResultSchema>;
+export type CalibrationResultV1 = z.infer<typeof calibrationResultSchema>;
 export type WorkerEventV1 = z.infer<typeof workerEventSchema>;
 export type CutSelectionV1 = z.infer<typeof cutSelectionSchema>;
 export type ExportStrategy = typeof EXPORT_STRATEGIES[number];
@@ -367,7 +374,7 @@ export type CutGroup = {
 
 export type TaskProgress = {
   taskId: string;
-  kind: 'analysis' | 'export' | 'setup';
+  kind: 'analysis' | 'calibration' | 'export' | 'setup';
   stage: string;
   percent: number;
   current?: number;

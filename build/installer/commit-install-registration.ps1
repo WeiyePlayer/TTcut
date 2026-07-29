@@ -1,22 +1,31 @@
 param(
-  [Parameter(Mandatory = $true)]
   [string]$InstallRoot,
 
-  [Parameter(Mandatory = $true)]
   [string]$AppGuid,
 
-  [Parameter(Mandatory = $true)]
   [string]$Version,
 
-  [Parameter(Mandatory = $true)]
-  [ValidateSet(0, 1)]
   [int]$DesktopShortcut,
 
-  [Parameter(Mandatory = $true)]
   [string]$ReportPath
 )
 
 $ErrorActionPreference = 'Stop'
+
+function ConvertTo-TTcutJsonString {
+  param([string]$Value)
+
+  $escaped = ''
+  if ($null -ne $Value) {
+    $escaped = [string]$Value
+  }
+  $escaped = $escaped.Replace('\', '\\')
+  $escaped = $escaped.Replace('"', '\"')
+  $escaped = $escaped.Replace("`r", '\r')
+  $escaped = $escaped.Replace("`n", '\n')
+  $escaped = $escaped.Replace("`t", '\t')
+  return '"' + $escaped + '"'
+}
 
 function Write-TTcutRegistrationReport {
   param(
@@ -24,22 +33,23 @@ function Write-TTcutRegistrationReport {
     [string]$ErrorCode
   )
 
-  $report = [ordered]@{
-    schema_version = 1
-    status = $Status
-    install_root = $InstallRoot
-    app_guid = $AppGuid
-    version = $Version
-    desktop_shortcut = $DesktopShortcut
-    error_code = $ErrorCode
-  }
+  $fields = @(
+    '"schema_version":1'
+    ('"status":' + (ConvertTo-TTcutJsonString $Status))
+    ('"install_root":' + (ConvertTo-TTcutJsonString $InstallRoot))
+    ('"app_guid":' + (ConvertTo-TTcutJsonString $AppGuid))
+    ('"version":' + (ConvertTo-TTcutJsonString $Version))
+    ('"desktop_shortcut":' + [string]$DesktopShortcut)
+    ('"error_code":' + (ConvertTo-TTcutJsonString $ErrorCode))
+  )
+  $report = '{' + ($fields -join ',') + '}'
 
   $reportDirectory = Split-Path -Parent $ReportPath
   if ($reportDirectory) {
     New-Item -ItemType Directory -Path $reportDirectory -Force | Out-Null
   }
-  $report | ConvertTo-Json -Compress |
-    Set-Content -LiteralPath $ReportPath -Encoding UTF8
+  $utf8 = New-Object -TypeName System.Text.UTF8Encoding
+  [IO.File]::WriteAllText($ReportPath, $report, $utf8)
 }
 
 try {

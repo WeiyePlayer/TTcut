@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { app } from 'electron';
@@ -52,7 +53,10 @@ export function resolveInstallationLayout(): InstallationLayout {
   const registeredRoot = readRegisteredInstallRoot();
   if (!registeredRoot) throw new Error('INSTALL_ROOT_REGISTRY_MISSING');
   if (path.normalize(registeredRoot).toLowerCase() !== path.normalize(derivedRoot).toLowerCase()) {
-    throw new Error('INSTALL_ROOT_REGISTRY_MISMATCH');
+    if (existsSync(path.join(process.resourcesPath, 'app-update.yml'))) {
+      throw new Error('INSTALL_ROOT_REGISTRY_MISMATCH');
+    }
+    return layoutFromRoot(registeredRoot, app.getPath('userData'));
   }
   return layoutFromRoot(derivedRoot, app.getPath('userData'));
 }

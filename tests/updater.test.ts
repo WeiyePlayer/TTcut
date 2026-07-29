@@ -1,4 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mock = vi.hoisted(() => {
   const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
@@ -7,6 +10,7 @@ const mock = vi.hoisted(() => {
     app: { isPackaged: true, getVersion: vi.fn(() => '1.0.1') },
     checkForUpdates: vi.fn(() => Promise.resolve()),
     quitAndInstall: vi.fn(),
+    logLine: vi.fn(() => Promise.resolve()),
     autoDownload: true,
     autoInstallOnAppQuit: true,
     allowPrerelease: false,
@@ -36,16 +40,30 @@ vi.mock('electron-updater', () => ({
   },
 }));
 
-vi.mock('../src/main/logger', () => ({ logLine: vi.fn(() => Promise.resolve()) }));
+vi.mock('../src/main/logger', () => ({ logLine: mock.logLine }));
 import { AppUpdater } from '../src/main/updater';
 
 describe('application updater', () => {
-  beforeEach(() => {
+  let resourcesPath = '';
+
+  beforeEach(async () => {
     vi.useFakeTimers();
     mock.listeners.clear();
     mock.checkForUpdates.mockReset().mockResolvedValue(undefined);
     mock.quitAndInstall.mockClear();
+    mock.logLine.mockClear();
     mock.app.isPackaged = true;
+    resourcesPath = await mkdtemp(path.join(os.tmpdir(), 'ttcut-updater-'));
+    await writeFile(path.join(resourcesPath, 'app-update.yml'), 'provider: github\n', 'utf8');
+    Object.defineProperty(process, 'resourcesPath', {
+      configurable: true,
+      value: resourcesPath,
+    });
+  });
+
+  afterEach(async () => {
+    vi.useRealTimers();
+    await rm(resourcesPath, { recursive: true, force: true });
   });
 
   it('configures the NSIS updater and publishes updater states', () => {
@@ -73,5 +91,17 @@ describe('application updater', () => {
     await expect(updater.check()).resolves.toEqual({ status: 'error', version: null, message: 'offline' });
     expect(() => updater.restartToInstall()).toThrow('UPDATE_NOT_READY');
     expect(mock.quitAndInstall).not.toHaveBeenCalled();
+  });
+
+  it('silently skips automatic and manual checks when the packaged update configuration is absent', async () => {
+    await rm(path.join(resourcesPath, 'app-update.yml'));
+    const updater = new AppUpdater();
+
+    updater.start(null);
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(mock.checkForUpdates).not.toHaveBeenCalled();
+    await expect(updater.check()).resolves.toEqual({ status: 'unsupported', version: null, message: null });
+    expect(mock.logLine).not.toHaveBeenCalled();
   });
 });
