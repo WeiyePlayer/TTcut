@@ -1,11 +1,11 @@
-const downloadUrl = "https://github.com/WeiyePlayer/TTcut/releases/download/v1.0.0/TTcut-1.0.0-x64-Setup.exe";
+const downloadUrl = "https://github.com/WeiyePlayer/TTcut/releases/download/v1.1.1/TTcut-1.1.1-x64-Setup.exe";
 const repositoryUrl = "https://github.com/WeiyePlayer/TTcut";
 
 const features = [
   {
     number: "01",
-    title: "自动识别回合",
-    description: "完成球桌标定后，TTcut 会定位乒乓球、识别弹跳，并把连续事件整理为可剪辑的有效回合。",
+    title: "自动标定与识别",
+    description: "TTcut 默认自动识别球桌，再定位乒乓球、识别弹跳，并把连续事件整理为可剪辑的有效回合。",
   },
   {
     number: "02",
@@ -19,8 +19,8 @@ const features = [
   },
   {
     number: "04",
-    title: "历史分析复用",
-    description: "再次打开同一个视频时，可复用已经完成的分析，直接回到剪辑模式选择。",
+    title: "批量任务与恢复",
+    description: "多个视频可按队列自动标定；失败项目可单独手动标定，已就绪项目继续处理。",
   },
   {
     number: "05",
@@ -37,11 +37,11 @@ const features = [
 const steps = [
   {
     label: "选择视频",
-    copy: "选择一个 MP4 文件。TTcut 会先检查视频是否可读取，并显示时长、画面尺寸与帧率。",
+    copy: "选择一个 MP4 文件，或一次选择多个视频进入批量任务。TTcut 会先检查文件是否可读取。",
   },
   {
-    label: "标定球桌",
-    copy: "依次点击球桌的左上、右上、右下、左下四个角。标记可拖动调整，确认后再开始分析。",
+    label: "自动标定",
+    copy: "TTcut 默认自动识别球桌；识别失败或需要调整时，再进入手动四点标定。",
   },
   {
     label: "挑选回合",
@@ -56,7 +56,7 @@ const steps = [
 const faqs = [
   {
     question: "TTcut 支持什么视频？",
-    answer: "当前一次处理一个 MP4 视频。拖入多个文件或其他格式时，软件会提示重新选择。",
+    answer: "单视频流程一次处理一个 MP4；批量任务可一次选择多个 MP4，并按队列标定和处理。",
   },
   {
     question: "使用时必须联网吗？",
@@ -68,7 +68,7 @@ const faqs = [
   },
   {
     question: "Windows 为什么提示未知发布者？",
-    answer: "v1.0.0 使用 CN=weiye 自签名 Authenticode，但证书不受 Windows 公共信任，因此仍可能触发未知发布者或 SmartScreen。请只从本项目 GitHub Release 下载并核对 SHA-256。",
+    answer: "v1.1.1 使用 CN=weiye 自签名 Authenticode 并带时间戳，但证书不受 Windows 公共信任，因此仍可能触发未知发布者或 SmartScreen。请只从本项目 GitHub Release 下载并核对 SHA-256。",
   },
 ];
 
@@ -87,8 +87,8 @@ export default function Home() {
           <a href="#modes">剪辑模式</a>
           <a href="#faq">常见问题</a>
         </nav>
-        <a className="button button-small" href={downloadUrl} target="_blank" rel="noreferrer" aria-label="下载 TTcut v1.0.0 Windows x64 安装包">
-          下载 <span className="desktop-only">v1.0.0</span><ArrowIcon />
+        <a className="button button-small" href={downloadUrl} target="_blank" rel="noreferrer" aria-label="下载 TTcut v1.1.1 Windows x64 安装包">
+          下载 <span className="desktop-only">v1.1.1</span><ArrowIcon />
         </a>
       </header>
 
@@ -97,10 +97,10 @@ export default function Home() {
           <p className="eyebrow">Windows 10 22H2 / Windows 11 x64 · 本地离线处理</p>
           <h1>识别每个回合，<br />剪出一场好球。</h1>
           <p className="hero-intro">
-            TTcut 为乒乓球视频自动定位有效回合。完成一次球桌标定，即可选择想保留的内容并导出成片。
+            TTcut 默认自动标定球桌并定位有效回合。单个或批量选择视频后，即可分析、挑选并导出成片。
           </p>
           <div className="hero-actions">
-            <a className="button button-primary" href={downloadUrl} target="_blank" rel="noreferrer" aria-label="下载 TTcut v1.0.0 Windows x64 安装包">
+            <a className="button button-primary" href={downloadUrl} target="_blank" rel="noreferrer" aria-label="下载 TTcut v1.1.1 Windows x64 安装包">
               下载 TTcut <ArrowIcon />
             </a>
             <a className="button button-secondary" href={repositoryUrl} target="_blank" rel="noreferrer">前往Github <ArrowIcon /></a>
@@ -191,9 +191,9 @@ export default function Home() {
           </ol>
           <div className="calibration-demo">
             <div className="calibration-copy">
-              <span>球桌标定</span>
-              <h3>四个角，决定识别区域。</h3>
-              <p>按照屏幕顺序点击桌面四角。编号、连线与即时校验会帮助你确认位置；任何标记都能直接拖动修正。</p>
+              <span>手动标定</span>
+              <h3>自动识别不准时，用四个角修正。</h3>
+              <p>需要手动恢复时，按照屏幕顺序点击桌面四角。编号、连线与即时校验会帮助你确认位置；任何标记都能直接拖动修正。</p>
               <div className="point-order"><i>1</i><b>左上</b><i>2</i><b>右上</b><i>3</i><b>右下</b><i>4</i><b>左下</b></div>
             </div>
             <div className="calibration-stage" aria-label="四点标定示意图">
@@ -257,16 +257,16 @@ export default function Home() {
       </section>
 
       <section className="final-cta section-shell">
-        <p className="eyebrow">TTcut v1.0.0 正式版</p>
+        <p className="eyebrow">TTcut v1.1.1 正式版</p>
         <h2>下一场好球，<br />从这里开始。</h2>
         <p>下载 Windows x64 版本，让比赛视频留在本地，让精彩回合更容易被看见。</p>
-        <a className="button button-light" href={downloadUrl} target="_blank" rel="noreferrer" aria-label="下载 TTcut v1.0.0 Windows x64 安装包">下载 TTcut <ArrowIcon /></a>
+        <a className="button button-light" href={downloadUrl} target="_blank" rel="noreferrer" aria-label="下载 TTcut v1.1.1 Windows x64 安装包">下载 TTcut <ArrowIcon /></a>
       </section>
 
       <footer className="site-footer section-shell">
         <a className="brand" href="#top">TTcut</a>
         <p>本地离线乒乓球回合分析与自动剪辑工具。</p>
-        <div><a href={repositoryUrl} target="_blank" rel="noreferrer">GitHub</a><a href={downloadUrl} target="_blank" rel="noreferrer" aria-label="下载 TTcut v1.0.0 Windows x64 安装包">下载</a><a href={`${repositoryUrl}/blob/main/LICENSE`} target="_blank" rel="noreferrer">MIT License</a></div>
+        <div><a href={repositoryUrl} target="_blank" rel="noreferrer">GitHub</a><a href={downloadUrl} target="_blank" rel="noreferrer" aria-label="下载 TTcut v1.1.1 Windows x64 安装包">下载</a><a href={`${repositoryUrl}/blob/main/LICENSE`} target="_blank" rel="noreferrer">MIT License</a></div>
       </footer>
     </main>
   );
