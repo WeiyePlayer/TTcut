@@ -17,6 +17,9 @@ const api: TTcutApi = {
   pathForDroppedFile: (file: File) => webUtils.getPathForFile(file),
   acceptDroppedVideo: (path: string) => ipcRenderer.invoke(IPC.videoAcceptDrop, path),
   probeVideo: (path: string) => ipcRenderer.invoke(IPC.videoProbe, path),
+  startAutoCalibration: (input: { videoPath: string; device: 'auto' | 'cuda' | 'cpu' }) => (
+    ipcRenderer.invoke(IPC.calibrationStart, input)
+  ),
   startAnalysis: (input: { videoPath: string; calibrationChoice: CalibrationChoice; device: 'auto' | 'cuda' | 'cpu'; historyVisibility: 'visible' | 'deferred' }) => (
     ipcRenderer.invoke(IPC.analysisStart, input)
   ),

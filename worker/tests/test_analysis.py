@@ -5,6 +5,7 @@ from pathlib import Path
 
 from ttcut_worker.bounce import detect_bounce_frames
 from ttcut_worker.calibration import TableCalibration
+from ttcut_worker import calibration_worker
 from ttcut_worker.predictor import PredictionStats
 from ttcut_worker.table_analyze import _order_corners, _select_coherent_corner_pair
 from ttcut_worker.rallies import group_rallies
@@ -172,6 +173,42 @@ def test_worker_request_accepts_automatic_calibration_without_points():
     assert validate_request(request) == request
 
 
+def test_worker_request_accepts_precalibrated_table_diagnostics():
+    request = valid_request()
+    request["calibration_choice"] = {
+        "method": "precalibrated",
+        "calibration": valid_request()["calibration_choice"]["calibration"],
+        "table_analysis": {"schema_version": 1, "diagnostic": "preserved"},
+    }
+    assert validate_request(request) == request
+
+
+def test_calibration_worker_runs_table_model_without_tracknet(monkeypatch):
+    request = valid_request()
+    request["calibration_choice"] = {"method": "automatic"}
+    progress = []
+
+    def fake_analyze_table(video_path, weight_path, device, metadata, callback):
+        callback("table_sampling", 5, 5)
+        progress.append((video_path, weight_path, device, metadata))
+        return calibration(), {"schema_version": 1, "diagnostic": "five-frame"}
+
+    monkeypatch.setenv("TTCUT_TABLE_ANALYZE_WEIGHTS", "table.pt")
+    monkeypatch.setattr(calibration_worker, "analyze_table", fake_analyze_table)
+
+    result = calibration_worker.calibrate(request)
+
+    assert progress == [(
+        request["video_path"],
+        "table.pt",
+        "cpu",
+        request["video_metadata"],
+    )]
+    assert result["calibration"]["video_width"] == 274
+    assert result["calibration"]["points"]["bottom_right"] == [273.0, 152.0]
+    assert result["table_analysis"]["diagnostic"] == "five-frame"
+
+
 def test_worker_request_rejects_invalid_video_metadata():
     request = valid_request()
     request["video_metadata"]["duration_seconds"] = 0
@@ -216,3 +253,42 @@ def test_worker_analysis_passes_a_validated_roi_to_tracknet(monkeypatch):
     assert result["schema_version"] == 1
     assert captured["roi"].bbox[2] > captured["roi"].bbox[0]
     assert captured["roi"].bbox[3] > captured["roi"].bbox[1]
+
+
+def test_worker_analysis_reuses_precalibrated_diagnostics_without_table_model(monkeypatch):
+    request = valid_request()
+    request["calibration_choice"] = {
+        "method": "precalibrated",
+        "calibration": request["calibration_choice"]["calibration"],
+        "table_analysis": {"schema_version": 1, "diagnostic": "preserved"},
+    }
+    captured = {}
+
+    class FakePredictor:
+        def __init__(self, loaded):
+            captured["loaded"] = loaded
+
+        def predict(self, video_path, progress_callback=None, analysis_roi=None):
+            return (
+                [],
+                VideoInfo(
+                    path=Path(video_path),
+                    width=1280,
+                    height=720,
+                    fps=30.0,
+                    metadata_frame_count=1,
+                    decoded_frame_count=1,
+                    duration=1 / 30,
+                ),
+                PredictionStats(0, 1, 0.01, 100.0, 256, 144, 0.25),
+            )
+
+    monkeypatch.setenv("TTCUT_TRACKNET_WEIGHTS", "fake-tracknet.pt")
+    monkeypatch.delenv("TTCUT_TABLE_ANALYZE_WEIGHTS", raising=False)
+    monkeypatch.setattr("ttcut_worker.worker.load_tracknet", lambda path, device: object())
+    monkeypatch.setattr("ttcut_worker.worker.TrackNetPredictor", FakePredictor)
+
+    result = analyze(request)
+
+    assert result["table_analysis"] == request["calibration_choice"]["table_analysis"]
+    assert captured["loaded"] is not None
