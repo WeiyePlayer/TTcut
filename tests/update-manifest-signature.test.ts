@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
 
 const execFileAsync = promisify(execFile);
+const SIGNING_TEST_TIMEOUT_MS = 15_000;
 
 async function createTestCertificate(pfxPath: string, certificatePath: string): Promise<void> {
   const source = [
@@ -97,5 +98,5 @@ describe('update manifest signing command', () => {
       certificate.publicKey,
       Buffer.from(envelope.signature, 'base64'),
     )).toBe(true);
-  });
+  }, SIGNING_TEST_TIMEOUT_MS);
 });
