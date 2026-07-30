@@ -47,6 +47,7 @@ interface MultiTaskPageProps {
   exportStrategy: ExportStrategy;
   language?: 'zh-CN' | 'en';
   onOpenAnalysis: (analysisId: string) => void;
+  onCompletableTasksFinished?: () => void;
   registerLeaveHandler?: (handler: ((target: MultiLeaveTarget) => void) | null) => void;
   onLeave?: (target: MultiLeaveTarget) => void;
 }
@@ -94,6 +95,7 @@ export function MultiTaskPage({
   exportStrategy,
   language = 'zh-CN',
   onOpenAnalysis,
+  onCompletableTasksFinished = () => undefined,
   registerLeaveHandler = () => undefined,
   onLeave = () => undefined,
 }: MultiTaskPageProps) {
@@ -223,6 +225,7 @@ export function MultiTaskPage({
     if (!candidate) {
       runningRef.current = false;
       setRunning(false);
+      onCompletableTasksFinished();
       return;
     }
     cancelRequested.current = false;
