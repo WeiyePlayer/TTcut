@@ -14,7 +14,7 @@ const official = process.env.TTCUT_OFFICIAL_RELEASE === '1' || process.env.TTCUT
 const packageJson = require('../package.json');
 const packageVersion = packageJson.version;
 const updatePublisherName = packageJson.author;
-const updateChannel = packageVersion.includes('-beta') ? 'beta' : 'latest';
+const updateChannel = packageVersion.includes('-') ? 'beta' : 'latest';
 
 if (updatePublisherName !== 'weiye') {
   throw new Error('The Windows update publisher must be weiye.');

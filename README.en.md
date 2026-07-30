@@ -110,7 +110,7 @@ npm run make
 npm run make:official
 ```
 
-`npm run make` creates unsigned NSIS artifacts under `out\make\nsis\x64`. `npm run make:official` applies the official signing and release verification gates.
+`npm run make` creates unsigned NSIS artifacts under `out\make\nsis\x64`. `npm run make:official` applies the official signing and release verification gates and emits the pinned-key-signed `update-manifest.json` and `update-manifest.json.sig`.
 
 ## Known limitations
 

@@ -71,6 +71,7 @@ describe('App workflow notices and multi-task entry', () => {
   let selectVideos: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    bootstrap.settings.language = 'zh-CN';
     taskListener = null;
     selectVideos = vi.fn().mockResolvedValue([]);
     const api = {
@@ -86,6 +87,7 @@ describe('App workflow notices and multi-task entry', () => {
         version: null,
         message: null,
       }),
+      openExternalUrl: vi.fn().mockResolvedValue(undefined),
       selectVideos,
       probeVideo: vi.fn((path: string) => Promise.resolve(metadata(path))),
       startAutoCalibration: vi.fn().mockResolvedValue('calibration-task-1'),
@@ -94,9 +96,27 @@ describe('App workflow notices and multi-task entry', () => {
   });
 
   afterEach(() => {
+    bootstrap.settings.language = 'zh-CN';
     cleanup();
     vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  it('shows a safe verification error with a manual-download action', async () => {
+    bootstrap.settings.language = 'en';
+    vi.mocked(window.ttcut.getUpdateState).mockResolvedValue({
+      status: 'error',
+      version: null,
+      message: 'UPDATE_VERIFICATION_FAILED',
+    });
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+
+    expect(await screen.findByText('The downloaded update could not be verified. Download it manually from the official release page.')).toBeVisible();
+    const manualDownload = screen.getByRole('button', { name: 'Download update manually' });
+    fireEvent.click(manualDownload);
+    expect(window.ttcut.openExternalUrl).toHaveBeenCalledWith('https://github.com/WeiyePlayer/TTcut/releases');
   });
 
   it('presents video selection as a single or multi-task workflow', async () => {

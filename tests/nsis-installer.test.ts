@@ -372,4 +372,15 @@ describe('assisted NSIS installer contract', () => {
     expect(source).toContain("const updatePublisherName = packageJson.author;");
     expect(source).toContain('`publisherName: ${updatePublisherName}`');
   });
+
+  it('routes every semantic-version prerelease through the beta update channel', async () => {
+    const [makeNsisSource, builderSource, verifierSource] = await Promise.all([
+      readFile(makeNsisPath, 'utf8'),
+      readFile(path.resolve('electron-builder.config.cjs'), 'utf8'),
+      readFile(path.resolve('scripts/verify-release.mjs'), 'utf8'),
+    ]);
+    expect(makeNsisSource).toContain("packageVersion.includes('-') ? 'beta' : 'latest'");
+    expect(builderSource).toContain("version.includes('-') ? 'beta' : 'latest'");
+    expect(verifierSource).toContain("packageJson.version.includes('-') ? 'channel: beta' : 'channel: latest'");
+  });
 });

@@ -20,9 +20,11 @@ const requiredNames = [
   setupName,
   `${setupName}.blockmap`,
   names.find((name) => /^(latest|beta)\.yml$/i.test(name)),
+  'update-manifest.json',
+  'update-manifest.json.sig',
 ];
 if (requiredNames.some((name) => !name)) {
-  throw new Error('NSIS blockmap or update metadata is missing.');
+  throw new Error('NSIS blockmap or signed update metadata is missing.');
 }
 if (names.some((name) => /\.nupkg$/i.test(name) || name === 'RELEASES')) {
   throw new Error('Squirrel artifacts must not be included in the NSIS release contract.');

@@ -56,67 +56,67 @@ if ($CertificateThumbprint) {
   $normalizedThumbprint = $certificate.Thumbprint.Replace(' ', '').ToUpperInvariant()
 }
 
-$temporaryRoot = Join-Path ([System.IO.Path]::GetTempPath()) "ttcut-signing-$PID-$([guid]::NewGuid().ToString('N'))"
-New-Item -ItemType Directory -Path $temporaryRoot | Out-Null
-$publicCertificate = Join-Path $temporaryRoot 'weiye.cer'
-Export-Certificate -Cert $certificate -FilePath $publicCertificate -Type CERT | Out-Null
-$rootStore = [System.Security.Cryptography.X509Certificates.X509Store]::new(
-  [System.Security.Cryptography.X509Certificates.StoreName]::Root,
-  [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
-)
-$rootStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadOnly)
-try {
-  $existingRootCertificates = @($rootStore.Certificates | Where-Object { $_.Thumbprint -eq $normalizedThumbprint })
-  $temporaryTrustAdded = $existingRootCertificates.Count -eq 0
-} finally {
-  $rootStore.Close()
-}
-
 function Invoke-NodeScript([string]$RelativePath) {
   $script = Join-Path $projectRoot $RelativePath
   & $node $script
   if ($LASTEXITCODE -ne 0) { throw "$RelativePath failed with exit code $LASTEXITCODE." }
 }
 
-try {
-  if ($temporaryTrustAdded) {
-    $rootStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-    try { $rootStore.Add($certificate) } finally { $rootStore.Close() }
-  }
-  $env:TTCUT_OFFICIAL_RELEASE = '1'
-  $env:TTCUT_PUBLIC_RC = '0'
-  $env:TTCUT_PUBLISHER_NAME = 'weiye'
-  $env:WINDOWS_CERTIFICATE_THUMBPRINT = $normalizedThumbprint
-  $env:WINDOWS_SIGNTOOL_PATH = $signTool.FullName
-  $env:WINDOWS_TIMESTAMP_SERVER = $TimestampServer
-  Remove-Item Env:\WINDOWS_CERTIFICATE_FILE -ErrorAction SilentlyContinue
-  Remove-Item Env:\WINDOWS_CERTIFICATE_PASSWORD -ErrorAction SilentlyContinue
-  Remove-Item Env:\WINDOWS_SIGN_WITH_PARAMS -ErrorAction SilentlyContinue
+$env:TTCUT_OFFICIAL_RELEASE = '1'
+$env:TTCUT_PUBLIC_RC = '0'
+$env:TTCUT_PUBLISHER_NAME = 'weiye'
+$env:WINDOWS_CERTIFICATE_THUMBPRINT = $normalizedThumbprint
+$env:WINDOWS_SIGNTOOL_PATH = $signTool.FullName
+$env:WINDOWS_TIMESTAMP_SERVER = $TimestampServer
+Remove-Item Env:\WINDOWS_CERTIFICATE_FILE -ErrorAction SilentlyContinue
+Remove-Item Env:\WINDOWS_CERTIFICATE_PASSWORD -ErrorAction SilentlyContinue
+Remove-Item Env:\WINDOWS_SIGN_WITH_PARAMS -ErrorAction SilentlyContinue
 
-  Invoke-NodeScript 'scripts\verify-model-assets.mjs'
-  Invoke-NodeScript 'scripts\stage-worker.mjs'
-  Invoke-NodeScript 'scripts\generate-release-metadata.mjs'
-  Invoke-NodeScript 'scripts\make-nsis.mjs'
-  Invoke-NodeScript 'scripts\verify-release.mjs'
-  Invoke-NodeScript 'scripts\generate-public-release-assets.mjs'
-  Invoke-NodeScript 'scripts\verify-signatures.mjs'
-
-  Write-Output "TTcut official release assets are ready."
-  Write-Output "Certificate subject: $($certificate.Subject)"
-  Write-Output "Certificate thumbprint: $normalizedThumbprint"
-  Write-Output "Certificate expires: $($certificate.NotAfter.ToUniversalTime().ToString('o'))"
-  Write-Output "SignTool: $($signTool.FullName)"
-} finally {
-  if ($temporaryTrustAdded) {
-    $rootStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-    try {
-      @($rootStore.Certificates | Where-Object { $_.Thumbprint -eq $normalizedThumbprint }) |
-        ForEach-Object { $rootStore.Remove($_) }
-    } finally {
-      $rootStore.Close()
+$updateTrust = Get-Content -LiteralPath (Join-Path $projectRoot 'src\main\update-trust.json') -Raw | ConvertFrom-Json
+$trustedSigner = @(
+  $updateTrust.signers |
+    Where-Object {
+      ([string]$_.subject -eq $certificate.Subject) -and
+      ([string]$_.thumbprint -eq $normalizedThumbprint)
     }
-  }
-  if (Test-Path -LiteralPath $temporaryRoot) {
-    Remove-Item -LiteralPath $temporaryRoot -Recurse -Force
-  }
+)
+if ([int]$updateTrust.schema_version -ne 1 -or $trustedSigner.Count -ne 1) {
+  throw 'The selected release certificate is not pinned in src\main\update-trust.json.'
 }
+
+Invoke-NodeScript 'scripts\verify-model-assets.mjs'
+Invoke-NodeScript 'scripts\stage-worker.mjs'
+Invoke-NodeScript 'scripts\generate-release-metadata.mjs'
+Invoke-NodeScript 'scripts\make-nsis.mjs'
+
+$packageJson = Get-Content -LiteralPath (Join-Path $projectRoot 'package.json') -Raw | ConvertFrom-Json
+$releaseVersion = [string]$packageJson.version
+$releaseChannel = if ($releaseVersion.Contains('-')) { 'beta' } else { 'latest' }
+$releaseDirectory = Join-Path $projectRoot 'out\make\nsis\x64'
+$setupPath = Join-Path $releaseDirectory "TTcut-$releaseVersion-x64-Setup.exe"
+$manifestPath = Join-Path $releaseDirectory 'update-manifest.json'
+$manifestSignaturePath = Join-Path $releaseDirectory 'update-manifest.json.sig'
+& $node (Join-Path $projectRoot 'scripts\generate-update-manifest.mjs') `
+  --installer $setupPath `
+  --output $manifestPath `
+  --version $releaseVersion `
+  --channel $releaseChannel `
+  --signer-subject $certificate.Subject `
+  --signer-thumbprint $normalizedThumbprint
+if ($LASTEXITCODE -ne 0) {
+  throw "scripts\generate-update-manifest.mjs failed with exit code $LASTEXITCODE."
+}
+& (Join-Path $projectRoot 'scripts\sign-update-manifest.ps1') `
+  -ManifestPath $manifestPath `
+  -SignaturePath $manifestSignaturePath `
+  -CertificateThumbprint $normalizedThumbprint
+
+Invoke-NodeScript 'scripts\verify-release.mjs'
+Invoke-NodeScript 'scripts\generate-public-release-assets.mjs'
+Invoke-NodeScript 'scripts\verify-signatures.mjs'
+
+Write-Output "TTcut official release assets are ready."
+Write-Output "Certificate subject: $($certificate.Subject)"
+Write-Output "Certificate thumbprint: $normalizedThumbprint"
+Write-Output "Certificate expires: $($certificate.NotAfter.ToUniversalTime().ToString('o'))"
+Write-Output "SignTool: $($signTool.FullName)"
