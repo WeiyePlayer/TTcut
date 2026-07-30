@@ -38,10 +38,10 @@ def _cv2():
     return cv2
 
 
-def validate_mp4_path(value: str | Path) -> Path:
+def validate_video_path(value: str | Path) -> Path:
     path = Path(value).expanduser()
-    if path.suffix.lower() != ".mp4":
-        raise VideoError("Only one MP4 video is supported.")
+    if path.suffix.lower() not in {".mp4", ".mov"}:
+        raise VideoError("Only one MP4 or MOV video is supported.")
     if not path.is_file():
         raise VideoError(f"Video file does not exist: {path}")
     return path.resolve()
@@ -53,11 +53,11 @@ def _count(value: float) -> int | None:
 
 def probe_video(value: str | Path) -> VideoInfo:
     cv2 = _cv2()
-    path = validate_mp4_path(value)
+    path = validate_video_path(value)
     capture = cv2.VideoCapture(str(path))
     if not capture.isOpened():
         capture.release()
-        raise VideoError("The MP4 video codec cannot be decoded.")
+        raise VideoError("The video codec cannot be decoded.")
     fps_raw = float(capture.get(cv2.CAP_PROP_FPS))
     fps = fps_raw if valid_fps(fps_raw) else None
     width = int(round(capture.get(cv2.CAP_PROP_FRAME_WIDTH)))
@@ -66,7 +66,7 @@ def probe_video(value: str | Path) -> VideoInfo:
     ok, frame = capture.read()
     capture.release()
     if not ok or frame is None or width <= 0 or height <= 0:
-        raise VideoError("The MP4 video is empty or unreadable.")
+        raise VideoError("The video is empty or unreadable.")
     duration = frame_count / fps if frame_count and fps else None
     return VideoInfo(path, width, height, fps, frame_count, None, duration)
 
@@ -83,7 +83,7 @@ class StreamingVideoReader:
         cv2 = _cv2()
         capture = cv2.VideoCapture(str(self.info.path))
         if not capture.isOpened():
-            raise VideoError("The MP4 video cannot be reopened for analysis.")
+            raise VideoError("The video cannot be reopened for analysis.")
         resolver = TimestampResolver(self.info.fps)
         index = 0
         try:
@@ -111,4 +111,3 @@ class StreamingVideoReader:
             duration=self.last_time + (self.last_interval or 0.0),
             time_source_summary=",".join(sorted(self.sources)),
         )
-

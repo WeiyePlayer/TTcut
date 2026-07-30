@@ -5,6 +5,7 @@ import { DONATION_URL, GITHUB_URL, RELEASES_URL, WEBSITE_URL } from '../shared/u
 import { formatTimestamp } from '../domain/time';
 import { rallyPreviewRange } from '../domain/preview';
 import { validateCalibration } from '../domain/calibration';
+import { isSupportedVideoFileName } from '../domain/video-input';
 import { interpolate, messages, type Language, type Messages } from './i18n';
 import { MultiTaskPage, type MultiLeaveTarget } from './MultiTaskPage';
 import { CalibrationSurface } from './CalibrationSurface';
@@ -714,14 +715,14 @@ export function App() {
                   onDragLeave={() => setDragging(false)}
                   onDrop={(event) => {
                     event.preventDefault(); setDragging(false);
-                    const files = [...event.dataTransfer.files].filter((file) => file.name.toLowerCase().endsWith('.mp4'));
+                    const files = [...event.dataTransfer.files].filter((file) => isSupportedVideoFileName(file.name));
                     if (!files.length) { setToast(t.invalidFile); return; }
                     void Promise.all(files.map((file) => window.ttcut.acceptDroppedVideo(window.ttcut.pathForDroppedFile(file)))).then(acceptVideos).catch(() => {
                       setError({ code: 'INVALID_INPUT' }); setStep('error');
                     });
                   }}
                 >
-                  <span className="drop-icon">＋</span><strong>{t.chooseVideo}</strong><span>{t.dropVideo}</span><small>.mp4</small>
+                  <span className="drop-icon">＋</span><strong>{t.chooseVideo}</strong><span>{t.dropVideo}</span><small>.mp4 / .mov</small>
                 </button>
               </div>
             )}

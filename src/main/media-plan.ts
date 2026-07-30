@@ -110,9 +110,7 @@ function appendMediaOutputOptions(
     '-fps_mode', 'vfr', '-max_muxing_queue_size', '2048',
   );
   if (hasAudio) appendAudioEncodingOptions(args, metadata);
-  if (metadata.rotation !== null && metadata.rotation !== undefined) {
-    args.push('-metadata:s:v:0', `rotate=${metadata.rotation}`);
-  }
+  args.push('-metadata:s:v:0', 'rotate=0');
   const colorOptions: Array<[string, string | null | undefined]> = [
     ['-color_range', metadata.color_range],
     ['-colorspace', metadata.color_space],
@@ -189,7 +187,7 @@ export function buildReencodeArgs(
   const hasAudio = metadata.audio_codec !== null;
   const filter = buildTrimFilter(groups, hasAudio, metadata.sample_aspect_ratio);
   const args = [
-    '-hide_banner', '-y', '-noautorotate', '-i', input,
+    '-hide_banner', '-y', '-autorotate', '-i', input,
     '-filter_complex', filter.filter, ...filter.maps,
   ];
   appendMediaOutputOptions(args, metadata, encoder, hasAudio);
@@ -216,7 +214,7 @@ export function buildSegmentReencodeArgs(
   const hasAudio = metadata.audio_codec !== null;
   const filter = buildTrimFilter([relativeGroup], hasAudio, metadata.sample_aspect_ratio);
   const args = [
-    '-hide_banner', '-y', '-noautorotate',
+    '-hide_banner', '-y', '-autorotate',
     '-ss', safeSeekStart.toFixed(6),
     '-t', relativeEnd.toFixed(6),
     '-i', input,

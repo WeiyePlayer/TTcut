@@ -123,8 +123,8 @@ describe('App workflow notices and multi-task entry', () => {
     render(<App />);
 
     await screen.findByRole('heading', { name: '选择比赛视频' });
-    expect(screen.getByText('选择 MP4 比赛视频开始本地分析，支持多任务批量处理。')).toBeVisible();
-    expect(screen.getByText('或将 MP4 文件拖到这里')).toBeVisible();
+    expect(screen.getByText('选择 MP4 或 MOV 比赛视频开始本地分析，支持多任务批量处理。')).toBeVisible();
+    expect(screen.getByText('或将 MP4 / MOV 文件拖到这里')).toBeVisible();
     expect(screen.queryByText(/单个|一次只能处理一个/)).toBeNull();
   });
 
@@ -167,7 +167,7 @@ describe('App workflow notices and multi-task entry', () => {
     render(<App />);
     await screen.findByRole('heading', { name: '选择比赛视频' });
 
-    fireEvent.click(screen.getByRole('button', { name: /选择 MP4 视频/ }));
+    fireEvent.click(screen.getByRole('button', { name: /选择 MP4 \/ MOV 视频/ }));
 
     await screen.findByRole('heading', { name: '多任务剪辑' });
     await waitFor(() => expect(screen.getByText('first.mp4')).toBeVisible());

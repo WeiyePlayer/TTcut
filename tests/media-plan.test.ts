@@ -62,6 +62,10 @@ describe('media export planning', () => {
     expect(args[args.indexOf('-b:v') + 1]).toBe('2000000');
     expect(args).toContain('vfr');
     expect(args).not.toContain('-r');
+    expect(args).toContain('-autorotate');
+    expect(args).not.toContain('-noautorotate');
+    expect(args.slice(args.indexOf('-metadata:s:v:0'), args.indexOf('-metadata:s:v:0') + 2))
+      .toEqual(['-metadata:s:v:0', 'rotate=0']);
     expect(args.join(' ')).toContain('setsar=sar=1/1');
   });
 
@@ -119,7 +123,7 @@ describe('media export planning', () => {
         encoder,
       );
       expect(args.slice(0, args.indexOf('-i') + 2)).toEqual([
-        '-hide_banner', '-y', '-noautorotate',
+        '-hide_banner', '-y', '-autorotate',
         '-ss', '5.000000', '-t', '9.000000', '-i', metadata.path,
       ]);
       const filter = args[args.indexOf('-filter_complex') + 1];

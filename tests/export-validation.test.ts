@@ -90,4 +90,21 @@ describe('export timestamp validation', () => {
 
     await expect(validateExportOutput(output, 2, source)).rejects.toThrow('EXPORT_TIMESTAMP_INVALID');
   });
+
+  it('accepts a physically normalized portrait output without copied rotation metadata', async () => {
+    const rotatedSource: VideoMetadata = {
+      ...source,
+      width: 1080,
+      height: 1920,
+      rotation: -90,
+    };
+    state.probeVideo.mockResolvedValue({
+      ...rotatedSource,
+      path: output,
+      rotation: null,
+    });
+
+    await expect(validateExportOutput(output, 2, rotatedSource, 'normalized')).resolves.toBeDefined();
+    await expect(validateExportOutput(output, 2, rotatedSource)).rejects.toThrow('EXPORT_ROTATION_MISMATCH');
+  });
 });

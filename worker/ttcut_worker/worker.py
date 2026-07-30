@@ -100,7 +100,7 @@ def analyze(request: dict) -> dict:
             "variable_frame_rate": False,
             "video_codec": "unknown",
             "audio_codec": None,
-            "container": "mp4",
+            "container": info.path.suffix.lower().lstrip("."),
             "frame_count": info.decoded_frame_count,
         },
         "rallies": normalized,
