@@ -1,6 +1,7 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../src/renderer/App';
+import { SUPPORT_PROMPT_SNOOZE_MS, SUPPORT_PROMPT_SNOOZE_STORAGE_KEY } from '../src/domain/support-prompt';
 import type { AppEvent, BootstrapData, SelectedVideo, TTcutApi } from '../src/shared/api';
 import type { VideoMetadata } from '../src/shared/contracts';
 
@@ -71,6 +72,8 @@ describe('App workflow notices and multi-task entry', () => {
   let selectVideos: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    bootstrap.settings.language = 'zh-CN';
+    window.localStorage.clear();
     taskListener = null;
     selectVideos = vi.fn().mockResolvedValue([]);
     const api = {
@@ -86,6 +89,7 @@ describe('App workflow notices and multi-task entry', () => {
         version: null,
         message: null,
       }),
+      openExternalUrl: vi.fn().mockResolvedValue(undefined),
       selectVideos,
       probeVideo: vi.fn((path: string) => Promise.resolve(metadata(path))),
       startAutoCalibration: vi.fn().mockResolvedValue('calibration-task-1'),
@@ -94,17 +98,36 @@ describe('App workflow notices and multi-task entry', () => {
   });
 
   afterEach(() => {
+    bootstrap.settings.language = 'zh-CN';
+    window.localStorage.clear();
     cleanup();
     vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  it('shows a safe verification error with a manual-download action', async () => {
+    bootstrap.settings.language = 'en';
+    vi.mocked(window.ttcut.getUpdateState).mockResolvedValue({
+      status: 'error',
+      version: null,
+      message: 'UPDATE_VERIFICATION_FAILED',
+    });
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+
+    expect(await screen.findByText('The downloaded update could not be verified. Download it manually from the official release page.')).toBeVisible();
+    const manualDownload = screen.getByRole('button', { name: 'Download update manually' });
+    fireEvent.click(manualDownload);
+    expect(window.ttcut.openExternalUrl).toHaveBeenCalledWith('https://github.com/WeiyePlayer/TTcut/releases');
   });
 
   it('presents video selection as a single or multi-task workflow', async () => {
     render(<App />);
 
     await screen.findByRole('heading', { name: '选择比赛视频' });
-    expect(screen.getByText('选择 MP4 比赛视频开始本地分析，支持多任务批量处理。')).toBeVisible();
-    expect(screen.getByText('或将 MP4 文件拖到这里')).toBeVisible();
+    expect(screen.getByText('选择 MP4 或 MOV 比赛视频开始本地分析，支持多任务批量处理。')).toBeVisible();
+    expect(screen.getByText('或将 MP4 / MOV 文件拖到这里')).toBeVisible();
     expect(screen.queryByText(/单个|一次只能处理一个/)).toBeNull();
   });
 
@@ -147,10 +170,71 @@ describe('App workflow notices and multi-task entry', () => {
     render(<App />);
     await screen.findByRole('heading', { name: '选择比赛视频' });
 
-    fireEvent.click(screen.getByRole('button', { name: /选择 MP4 视频/ }));
+    fireEvent.click(screen.getByRole('button', { name: /选择 MP4 \/ MOV 视频/ }));
 
     await screen.findByRole('heading', { name: '多任务剪辑' });
     await waitFor(() => expect(screen.getByText('first.mp4')).toBeVisible());
     expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it('keeps the export support prompt visible across pages until it is rejected', async () => {
+    render(<App />);
+    await screen.findByRole('heading', { name: '选择比赛视频' });
+
+    act(() => taskListener?.({
+      type: 'export-result',
+      taskId: 'export-task-1',
+      data: {
+        taskId: 'export-task-1',
+        analysisId: '11111111-1111-4111-8111-111111111111',
+        outputPath: 'C:\\video\\first_TTcut.mp4',
+        outputName: 'first_TTcut.mp4',
+        mediaUrl: 'ttcut-media://output',
+      },
+    }));
+
+    const prompt = await screen.findByRole('region', { name: '使用与赞助提示' });
+    expect(within(prompt).getByText((_content, element) => element?.textContent === (
+      '如果使用中遇到问题请联系作者。\n\n如果软件对您有帮助希望可以赞助我，感谢'
+    ))).toBeVisible();
+
+    fireEvent.click(screen.getByRole('button', { name: '设置' }));
+    expect(prompt).toBeVisible();
+
+    fireEvent.click(within(prompt).getByRole('button', { name: '前往赞助' }));
+    expect(window.ttcut.openExternalUrl).toHaveBeenCalledWith('https://ifdian.net/a/weiye');
+
+    fireEvent.click(within(prompt).getByRole('button', { name: '拒绝' }));
+    expect(screen.queryByRole('region', { name: '使用与赞助提示' })).toBeNull();
+  });
+
+  it('honors the adjacent thirty-day rejection option on later exports', async () => {
+    const now = 1_800_000_000_000;
+    vi.spyOn(Date, 'now').mockReturnValue(now);
+    render(<App />);
+    await screen.findByRole('heading', { name: '选择比赛视频' });
+
+    const finishExport = () => act(() => taskListener?.({
+      type: 'export-result',
+      taskId: 'export-task-1',
+      data: {
+        taskId: 'export-task-1',
+        analysisId: '11111111-1111-4111-8111-111111111111',
+        outputPath: 'C:\\video\\first_TTcut.mp4',
+        outputName: 'first_TTcut.mp4',
+        mediaUrl: 'ttcut-media://output',
+      },
+    }));
+
+    finishExport();
+    const prompt = await screen.findByRole('region', { name: '使用与赞助提示' });
+    fireEvent.click(within(prompt).getByRole('button', { name: '更多拒绝选项' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '30天内不再显示' }));
+
+    expect(window.localStorage.getItem(SUPPORT_PROMPT_SNOOZE_STORAGE_KEY)).toBe(String(now + SUPPORT_PROMPT_SNOOZE_MS));
+    expect(screen.queryByRole('region', { name: '使用与赞助提示' })).toBeNull();
+
+    finishExport();
+    expect(screen.queryByRole('region', { name: '使用与赞助提示' })).toBeNull();
   });
 });

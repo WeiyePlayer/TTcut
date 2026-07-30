@@ -1,14 +1,25 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { app, type BrowserWindow } from 'electron';
-import { autoUpdater } from 'electron-updater';
+import { autoUpdater, type NsisUpdater } from 'electron-updater';
 import { updateStateSchema, type UpdateState } from '../shared/contracts';
 import { IPC } from '../shared/ipc';
 import { logLine } from './logger';
+import { createUpdateCodeSignatureVerifier } from './update-verifier-runtime';
+
+function publicUpdateError(error: unknown): string {
+  const code = typeof error === 'object' && error !== null && 'code' in error
+    ? String(error.code)
+    : '';
+  return code === 'ERR_UPDATER_INVALID_SIGNATURE'
+    ? 'UPDATE_VERIFICATION_FAILED'
+    : 'UPDATE_CHECK_FAILED';
+}
 
 export class AppUpdater {
   private window: BrowserWindow | null = null;
   private timer: NodeJS.Timeout | null = null;
+  private pendingVersion: string | null = null;
   private state: UpdateState = {
     status: process.platform === 'win32' && app.isPackaged ? 'idle' : 'unsupported',
     version: null,
@@ -17,14 +28,20 @@ export class AppUpdater {
 
   constructor() {
     autoUpdater.on('checking-for-update', () => this.setState({ status: 'checking', version: null, message: null }));
-    autoUpdater.on('update-available', (info) => this.setState({ status: 'available', version: info.version, message: null }));
-    autoUpdater.on('update-not-available', () => this.setState({ status: 'up-to-date', version: app.getVersion(), message: null }));
+    autoUpdater.on('update-available', (info) => {
+      this.pendingVersion = info.version;
+      this.setState({ status: 'available', version: info.version, message: null });
+    });
+    autoUpdater.on('update-not-available', () => {
+      this.pendingVersion = null;
+      this.setState({ status: 'up-to-date', version: app.getVersion(), message: null });
+    });
     autoUpdater.on('update-downloaded', (info) => {
       this.setState({ status: 'downloaded', version: info.version, message: null });
     });
     autoUpdater.on('error', (error) => {
       void logLine('updater', 'WARN', error.stack ?? error.message).catch(() => undefined);
-      this.setState({ status: 'error', version: null, message: error.message });
+      this.setState({ status: 'error', version: null, message: publicUpdateError(error) });
     });
   }
 
@@ -54,6 +71,8 @@ export class AppUpdater {
     autoUpdater.autoDownload = true;
     autoUpdater.autoInstallOnAppQuit = true;
     autoUpdater.allowPrerelease = app.getVersion().includes('-');
+    const nsisUpdater = autoUpdater as NsisUpdater;
+    nsisUpdater.verifyUpdateCodeSignature = createUpdateCodeSignatureVerifier(() => this.pendingVersion);
     this.timer = setTimeout(() => void this.check(), 10_000);
     this.timer.unref?.();
   }
@@ -67,7 +86,7 @@ export class AppUpdater {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await logLine('updater', 'WARN', message).catch(() => undefined);
-      return this.setState({ status: 'error', version: null, message });
+      return this.setState({ status: 'error', version: null, message: publicUpdateError(error) });
     }
     return this.state;
   }

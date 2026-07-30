@@ -5,9 +5,12 @@ import { DONATION_URL, GITHUB_URL, RELEASES_URL, WEBSITE_URL } from '../shared/u
 import { formatTimestamp } from '../domain/time';
 import { rallyPreviewRange } from '../domain/preview';
 import { validateCalibration } from '../domain/calibration';
+import { isSupportedVideoFileName } from '../domain/video-input';
+import { isSupportPromptSuppressed, suppressSupportPromptForThirtyDays } from '../domain/support-prompt';
 import { interpolate, messages, type Language, type Messages } from './i18n';
 import { MultiTaskPage, type MultiLeaveTarget } from './MultiTaskPage';
 import { CalibrationSurface } from './CalibrationSurface';
+import { SupportPrompt } from './SupportPrompt';
 import packageJson from '../../package.json';
 import captureGuideImage from './assets/pingpong-table-with-pose-mannequins.png';
 
@@ -31,6 +34,17 @@ function errorCode(error: unknown): string {
 
 function localizedError(code: string, translations: Messages): string {
   return translations.errors[code as keyof typeof translations.errors] ?? translations.errors.UNKNOWN;
+}
+
+function updateErrorMessage(code: string | null, language: Language): string {
+  if (code === 'UPDATE_VERIFICATION_FAILED') {
+    return language === 'zh-CN'
+      ? '下载的更新无法验证，请从官方发布页手动下载安装。'
+      : 'The downloaded update could not be verified. Download it manually from the official release page.';
+  }
+  return language === 'zh-CN'
+    ? '检查更新失败，请检查网络后重试。'
+    : 'Update check failed. Check your network connection and try again.';
 }
 
 function RallyPreviewDialog({ video, videoDuration, rally, translations, onClose }: {
@@ -126,6 +140,7 @@ export function App() {
   const [exportResult, setExportResult] = useState<ExportResult | null>(null);
   const [error, setError] = useState<{ code: string } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [supportPromptVisible, setSupportPromptVisible] = useState(false);
   const [closeDialog, setCloseDialog] = useState(false);
   const [languageTransition, setLanguageTransition] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -155,6 +170,9 @@ export function App() {
       : bootstrap.platformCompatibility.reason === 'probe_failed'
         ? t.platformProbeFailedDetail
         : t.platformUnsupportedDetail;
+  const showSupportPrompt = useCallback(() => {
+    if (!isSupportPromptSuppressed()) setSupportPromptVisible(true);
+  }, []);
 
   useEffect(() => {
     void window.ttcut.bootstrap().then((data) => {
@@ -193,6 +211,7 @@ export function App() {
         setActiveTask(null);
         setExportResult(event.data);
         setStep('complete');
+        showSupportPrompt();
       } else if (event.type === 'component-result') {
         setupTaskRef.current = null;
         setSetupTask(null);
@@ -234,7 +253,7 @@ export function App() {
     const removeUpdate = window.ttcut.onUpdateState(setUpdateState);
     void window.ttcut.getUpdateState().then(setUpdateState);
     return () => { removeTask(); removeClose(); removeUpdate(); };
-  }, []);
+  }, [showSupportPrompt]);
 
   useEffect(() => { settingsRef.current = settings; }, [settings]);
   useEffect(() => {
@@ -535,7 +554,7 @@ export function App() {
         </div>
       </header>
       <aside className="sidebar">
-        <div className="brand"><span>TTcut</span><small>v{bootstrap?.version ?? '1.1.1'}</small></div>
+        <div className="brand"><span>TTcut</span><small>v{bootstrap?.version ?? appVersion}</small></div>
         <nav aria-label="Primary navigation">
           <button className={view === 'auto' || view === 'multi' ? 'active' : ''} onClick={() => requestView('auto')}><i />{t.autoCut}</button>
           <button className={view === 'history' ? 'active' : ''} onClick={() => requestView('history')}><i />{t.history}</button>
@@ -554,6 +573,7 @@ export function App() {
             registerLeaveHandler={(handler) => { multiLeaveHandlerRef.current = handler; }}
             onLeave={leaveMulti}
             onOpenAnalysis={(id) => { multiActiveRef.current = false; void openHistory(id); }}
+            onCompletableTasksFinished={showSupportPrompt}
           />
         ) : view === 'settings' ? (
           <section className="page settings-page">
@@ -567,8 +587,13 @@ export function App() {
                   <button className="secondary" onClick={() => void window.ttcut.openExternalUrl(RELEASES_URL)}>{settings.language === 'zh-CN' ? '更新日志' : 'Release notes'}</button>
                   <button className="secondary donate-button" onClick={() => void window.ttcut.openExternalUrl(DONATION_URL)}>{settings.language === 'zh-CN' ? '打赏作者' : 'Support author'}</button>
                   <button className="secondary" disabled={updateState.status === 'checking'} onClick={() => updateState.status === 'downloaded' ? void window.ttcut.restartToUpdate() : void window.ttcut.checkForUpdates()}>{updateState.status === 'checking' ? (settings.language === 'zh-CN' ? '正在检查…' : 'Checking…') : updateState.status === 'downloaded' ? (settings.language === 'zh-CN' ? '立即重启' : 'Restart now') : (settings.language === 'zh-CN' ? '检查更新' : 'Check updates')}</button>
+                  {updateState.status === 'error' && updateState.message === 'UPDATE_VERIFICATION_FAILED' && (
+                    <button className="secondary" onClick={() => void window.ttcut.openExternalUrl(RELEASES_URL)}>
+                      {settings.language === 'zh-CN' ? '手动下载更新' : 'Download update manually'}
+                    </button>
+                  )}
                 </div>
-                {updateState.status !== 'idle' && <p className="update-detail">{updateState.status === 'up-to-date' ? (settings.language === 'zh-CN' ? '当前已是最新稳定版。' : 'You are using the latest stable version.') : updateState.status === 'available' ? (settings.language === 'zh-CN' ? '发现新版本，正在后台下载。' : 'A new version is downloading in the background.') : updateState.status === 'error' ? (updateState.message ?? (settings.language === 'zh-CN' ? '检查更新失败。' : 'Update check failed.')) : updateState.status === 'unsupported' ? (settings.language === 'zh-CN' ? '开发环境或当前平台不支持自动更新。' : 'Automatic updates are unavailable in this environment.') : ''}</p>}
+                {updateState.status !== 'idle' && <p className="update-detail">{updateState.status === 'up-to-date' ? (settings.language === 'zh-CN' ? '当前已是最新稳定版。' : 'You are using the latest stable version.') : updateState.status === 'available' ? (settings.language === 'zh-CN' ? '发现新版本，正在后台下载。' : 'A new version is downloading in the background.') : updateState.status === 'error' ? updateErrorMessage(updateState.message, settings.language) : updateState.status === 'unsupported' ? (settings.language === 'zh-CN' ? '开发环境或当前平台不支持自动更新。' : 'Automatic updates are unavailable in this environment.') : ''}</p>}
               </article>
               <article className="card setting-card">
                 <div><h2>{t.language}</h2></div>
@@ -698,14 +723,14 @@ export function App() {
                   onDragLeave={() => setDragging(false)}
                   onDrop={(event) => {
                     event.preventDefault(); setDragging(false);
-                    const files = [...event.dataTransfer.files].filter((file) => file.name.toLowerCase().endsWith('.mp4'));
+                    const files = [...event.dataTransfer.files].filter((file) => isSupportedVideoFileName(file.name));
                     if (!files.length) { setToast(t.invalidFile); return; }
                     void Promise.all(files.map((file) => window.ttcut.acceptDroppedVideo(window.ttcut.pathForDroppedFile(file)))).then(acceptVideos).catch(() => {
                       setError({ code: 'INVALID_INPUT' }); setStep('error');
                     });
                   }}
                 >
-                  <span className="drop-icon">＋</span><strong>{t.chooseVideo}</strong><span>{t.dropVideo}</span><small>.mp4</small>
+                  <span className="drop-icon">＋</span><strong>{t.chooseVideo}</strong><span>{t.dropVideo}</span><small>.mp4 / .mov</small>
                 </button>
               </div>
             )}
@@ -775,6 +800,17 @@ export function App() {
             <img src={captureGuideImage} alt={t.captureGuideImageAlt} />
           </div>
         </div>
+      )}
+      {supportPromptVisible && (
+        <SupportPrompt
+          copy={t}
+          onSponsor={() => void window.ttcut.openExternalUrl(DONATION_URL)}
+          onReject={() => setSupportPromptVisible(false)}
+          onSnooze={() => {
+            suppressSupportPromptForThirtyDays();
+            setSupportPromptVisible(false);
+          }}
+        />
       )}
       {toast && <div className="toast" role="status">{toast}</div>}
       {languageTransition && <div className="language-loader"><span /></div>}

@@ -23,6 +23,10 @@ import { probeVideo } from './probe';
 import { cancelAllTasksAndWait, cancelTask, hasActiveTasks } from './processes';
 import { loadSettings, saveSettings } from './settings';
 import { getPlatformCompatibility } from './platform-compatibility';
+import {
+  SUPPORTED_VIDEO_EXTENSIONS,
+  videoContainerFromFileName,
+} from '../domain/video-input';
 import { COMPONENT_ASSETS_RELEASE_URL, DONATION_URL, GITHUB_URL, RELEASES_URL, WEBSITE_URL } from '../shared/urls';
 import { getUpdater } from './updater';
 import { runInstallerMigrationRequest } from './installer-migration';
@@ -55,14 +59,15 @@ function currentWindow(): BrowserWindow {
 }
 
 async function selectedVideo(filePath: string) {
-  if (path.extname(filePath).toLowerCase() !== '.mp4') throw new Error('INVALID_INPUT');
+  const container = videoContainerFromFileName(filePath);
+  if (!container) throw new Error('INVALID_INPUT');
   const info = await stat(filePath);
   if (!info.isFile()) throw new Error('INVALID_INPUT');
   return {
     path: path.resolve(filePath),
     name: path.basename(filePath),
     size: info.size,
-    mediaUrl: registerMediaPath(filePath),
+    mediaUrl: registerMediaPath(filePath, container === 'mov' ? 'video/quicktime' : 'video/mp4'),
   };
 }
 
@@ -124,8 +129,8 @@ function registerIpc(): void {
       return selectedVideo(fixture);
     }
     const result = await dialog.showOpenDialog(currentWindow(), {
-      title: 'Select MP4 video', properties: ['openFile'],
-      filters: [{ name: 'MP4 video', extensions: ['mp4'] }],
+      title: 'Select MP4 or MOV video', properties: ['openFile'],
+      filters: [{ name: 'MP4 or MOV video', extensions: [...SUPPORTED_VIDEO_EXTENSIONS] }],
     });
     return result.canceled || !result.filePaths[0] ? null : selectedVideo(result.filePaths[0]);
   });
@@ -140,8 +145,8 @@ function registerIpc(): void {
       return Promise.all(fixtures.map(selectedVideo));
     }
     const result = await dialog.showOpenDialog(currentWindow(), {
-      title: 'Select MP4 videos', properties: ['openFile', 'multiSelections'],
-      filters: [{ name: 'MP4 video', extensions: ['mp4'] }],
+      title: 'Select MP4 or MOV videos', properties: ['openFile', 'multiSelections'],
+      filters: [{ name: 'MP4 or MOV video', extensions: [...SUPPORTED_VIDEO_EXTENSIONS] }],
     });
     return result.canceled ? [] : Promise.all(result.filePaths.map(selectedVideo));
   });

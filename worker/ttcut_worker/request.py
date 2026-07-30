@@ -22,7 +22,10 @@ def validate_request(value: object) -> dict:
         uuid.UUID(str(value["task_id"]))
         if value["device"] not in {"auto", "cuda", "cpu"}:
             raise ValueError("device")
-        if not isinstance(value["video_path"], str) or Path(value["video_path"]).suffix.lower() != ".mp4":
+        if (
+            not isinstance(value["video_path"], str)
+            or Path(value["video_path"]).suffix.lower() not in {".mp4", ".mov"}
+        ):
             raise ValueError("video_path")
         metadata = value["video_metadata"]
         if not isinstance(metadata, dict) or set(metadata) != {

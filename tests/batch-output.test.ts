@@ -20,4 +20,12 @@ describe('batch output naming', () => {
     await writeFile(first, 'existing');
     await expect(uniqueOutput(source, '精彩回合_5板')).resolves.toBe(path.join(root, '比赛_TTcut_精彩回合_5板_2.mp4'));
   });
+
+  it('exports a MOV source to an MP4 path', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'ttcut-batch-output-'));
+    temporaryDirectories.push(root);
+    const source = path.join(root, '竖屏比赛.MOV');
+    await writeFile(source, 'source');
+    await expect(uniqueOutput(source, '所有回合')).resolves.toBe(path.join(root, '竖屏比赛_TTcut_所有回合.mp4'));
+  });
 });

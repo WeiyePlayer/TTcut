@@ -5,20 +5,30 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mock = vi.hoisted(() => {
   const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
-  return {
-    listeners,
-    app: { isPackaged: true, getVersion: vi.fn(() => '1.0.1') },
-    checkForUpdates: vi.fn(() => Promise.resolve()),
-    quitAndInstall: vi.fn(),
-    logLine: vi.fn(() => Promise.resolve()),
+  const checkForUpdates = vi.fn(() => Promise.resolve());
+  const quitAndInstall = vi.fn();
+  const on = vi.fn((event: string, listener: (...args: unknown[]) => void) => {
+    const current = listeners.get(event) ?? new Set();
+    current.add(listener);
+    listeners.set(event, current);
+  });
+  const updaterApi = {
+    on,
+    checkForUpdates,
+    quitAndInstall,
     autoDownload: true,
     autoInstallOnAppQuit: true,
     allowPrerelease: false,
-    on: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
-      const current = listeners.get(event) ?? new Set();
-      current.add(listener);
-      listeners.set(event, current);
-    }),
+    verifyUpdateCodeSignature: undefined as ((publisherNames: string[], installerPath: string) => Promise<string | null>) | undefined,
+  };
+  return {
+    listeners,
+    app: { isPackaged: true, getVersion: vi.fn(() => '1.0.1') },
+    checkForUpdates,
+    quitAndInstall,
+    logLine: vi.fn(() => Promise.resolve()),
+    on,
+    updaterApi,
     emit(event: string, ...args: unknown[]) {
       for (const listener of listeners.get(event) ?? []) listener(...args);
     },
@@ -30,14 +40,7 @@ vi.mock('electron', () => ({
 }));
 
 vi.mock('electron-updater', () => ({
-  autoUpdater: {
-    on: mock.on,
-    checkForUpdates: mock.checkForUpdates,
-    quitAndInstall: mock.quitAndInstall,
-    autoDownload: mock.autoDownload,
-    autoInstallOnAppQuit: mock.autoInstallOnAppQuit,
-    allowPrerelease: mock.allowPrerelease,
-  },
+  autoUpdater: mock.updaterApi,
 }));
 
 vi.mock('../src/main/logger', () => ({ logLine: mock.logLine }));
@@ -53,6 +56,7 @@ describe('application updater', () => {
     mock.quitAndInstall.mockClear();
     mock.logLine.mockClear();
     mock.app.isPackaged = true;
+    mock.updaterApi.verifyUpdateCodeSignature = undefined;
     resourcesPath = await mkdtemp(path.join(os.tmpdir(), 'ttcut-updater-'));
     await writeFile(path.join(resourcesPath, 'app-update.yml'), 'provider: github\n', 'utf8');
     Object.defineProperty(process, 'resourcesPath', {
@@ -84,13 +88,39 @@ describe('application updater', () => {
     expect(mock.quitAndInstall).toHaveBeenCalledWith(true, true);
   });
 
+  it('installs the signed-release verifier before checking for updates', () => {
+    const updater = new AppUpdater();
+
+    updater.start(null);
+
+    expect(mock.updaterApi.verifyUpdateCodeSignature).toEqual(expect.any(Function));
+  });
+
   it('reports manual check errors without forcing a restart', async () => {
     const updater = new AppUpdater();
     updater.start(null);
     mock.checkForUpdates.mockRejectedValueOnce(new Error('offline'));
-    await expect(updater.check()).resolves.toEqual({ status: 'error', version: null, message: 'offline' });
+    await expect(updater.check()).resolves.toEqual({ status: 'error', version: null, message: 'UPDATE_CHECK_FAILED' });
     expect(() => updater.restartToInstall()).toThrow('UPDATE_NOT_READY');
     expect(mock.quitAndInstall).not.toHaveBeenCalled();
+  });
+
+  it('logs signature diagnostics without exposing raw certificate data to the renderer', () => {
+    const updater = new AppUpdater();
+    updater.start(null);
+    const error = Object.assign(
+      new Error('New version is not signed by the application owner: raw info: PRIVATE_DIAGNOSTIC'),
+      { code: 'ERR_UPDATER_INVALID_SIGNATURE' },
+    );
+
+    mock.emit('error', error);
+
+    expect(updater.getState()).toEqual({
+      status: 'error',
+      version: null,
+      message: 'UPDATE_VERIFICATION_FAILED',
+    });
+    expect(mock.logLine).toHaveBeenCalledWith('updater', 'WARN', expect.stringContaining('PRIVATE_DIAGNOSTIC'));
   });
 
   it('silently skips automatic and manual checks when the packaged update configuration is absent', async () => {

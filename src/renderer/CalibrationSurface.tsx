@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPoi
 import type { Calibration, VideoMetadata } from '../shared/contracts';
 import type { SelectedVideo } from '../shared/api';
 import { formatTimestamp } from '../domain/time';
+import { fittedVideoRectangle } from '../domain/video-input';
 
 type PointName = keyof Calibration['points'];
 
@@ -24,15 +25,16 @@ export function CalibrationSurface({
     const element = videoRef.current;
     if (!element) return null;
     const rect = element.getBoundingClientRect();
-    const scale = Math.min(rect.width / metadata.width, rect.height / metadata.height);
-    const renderedWidth = metadata.width * scale;
-    const renderedHeight = metadata.height * scale;
-    const offsetX = rect.left + (rect.width - renderedWidth) / 2;
-    const offsetY = rect.top + (rect.height - renderedHeight) / 2;
-    const x = (clientX - offsetX) / scale;
-    const y = (clientY - offsetY) / scale;
-    if (x < 0 || y < 0 || x >= metadata.width || y >= metadata.height) return null;
-    return [Math.max(0, Math.min(metadata.width - 1, x)), Math.max(0, Math.min(metadata.height - 1, y))];
+    const intrinsicWidth = element.videoWidth || metadata.width;
+    const intrinsicHeight = element.videoHeight || metadata.height;
+    const fitted = fittedVideoRectangle(rect, intrinsicWidth, intrinsicHeight);
+    const normalizedX = (clientX - fitted.left) / fitted.width;
+    const normalizedY = (clientY - fitted.top) / fitted.height;
+    if (normalizedX < 0 || normalizedY < 0 || normalizedX >= 1 || normalizedY >= 1) return null;
+    return [
+      Math.max(0, Math.min(metadata.width - 1, normalizedX * metadata.width)),
+      Math.max(0, Math.min(metadata.height - 1, normalizedY * metadata.height)),
+    ];
   }, [metadata]);
 
   const sourceToPercent = (point: [number, number]) => {
@@ -41,11 +43,13 @@ export function CalibrationSurface({
     if (!surface || !element) return { left: '50%', top: '50%' };
     const rect = element.getBoundingClientRect();
     const parent = surface.getBoundingClientRect();
-    const scale = Math.min(rect.width / metadata.width, rect.height / metadata.height);
-    const renderedWidth = metadata.width * scale;
-    const renderedHeight = metadata.height * scale;
-    const x = rect.left - parent.left + (rect.width - renderedWidth) / 2 + point[0] * scale;
-    const y = rect.top - parent.top + (rect.height - renderedHeight) / 2 + point[1] * scale;
+    const fitted = fittedVideoRectangle(
+      rect,
+      element.videoWidth || metadata.width,
+      element.videoHeight || metadata.height,
+    );
+    const x = fitted.left - parent.left + point[0] / metadata.width * fitted.width;
+    const y = fitted.top - parent.top + point[1] / metadata.height * fitted.height;
     return { left: `${x}px`, top: `${y}px` };
   };
 

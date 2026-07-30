@@ -1,6 +1,6 @@
 # Windows 自签名发布
 
-TTcut 正式 Windows 安装包使用主题为 `CN=weiye` 的自签名 Authenticode 证书。签名用于固定发布者字段并验证文件在签名后没有被修改；正式构建同时要求 RFC 3161 时间戳。该证书不链接到 Windows 公共信任根，因此普通用户仍可能看到“未知发布者”或 SmartScreen 警告。
+TTcut 正式 Windows 安装包使用主题为 `CN=weiye` 的自签名 Authenticode 证书。签名用于固定发布者字段并验证文件在签名后没有被修改；正式构建同时要求 RFC 3161 时间戳。该证书不链接到 Windows 公共信任根，因此普通用户仍可能看到“未知发布者”或 SmartScreen 警告。自动更新另使用随应用固定的公钥验证签名更新清单，不依赖 Windows 根证书信任。
 
 不得把本方案描述为可信 CA 签名，也不得要求普通用户把项目证书导入“受信任的根证书颁发机构”。
 
@@ -17,8 +17,9 @@ npm run make:official
 1. 选择当前用户证书存储中唯一可用的 `CN=weiye` Code Signing 证书；不存在时创建三年有效、RSA 3072、SHA-256、私钥不可导出的自签名证书。
 2. 使用证书精确 thumbprint 和 Windows SDK x64 SignTool 签署应用目录内可签名文件、`TTcut.exe`、NSIS 卸载器与外层 Setup。
 3. 使用 RFC 3161 SHA-256 时间戳。
-4. 仅在构建验证期间把公钥临时加入当前用户根存储，并在 `finally` 中删除临时信任。
-5. 验证构建目录中的 `TTcut.exe`、从 Setup 提取的 NSIS 卸载器和最终 Setup，再生成 blockmap、更新元数据、最终哈希与 SBOM。
+4. 不修改 Windows Root 或 TrustedPublisher 证书存储；以固定证书指纹检查自签名文件仅有 `UntrustedRoot` 信任错误。
+5. 确认所选证书已固定在 `src/main/update-trust.json`，生成 `update-manifest.json`，并使用同一私钥产生 `update-manifest.json.sig`。
+6. 验证构建目录中的 `TTcut.exe`、从 Setup 提取的 NSIS 卸载器、最终 Setup、清单签名和安装包 SHA-512，再生成 blockmap、更新元数据、最终哈希与 SBOM。
 
 如存在多个可用证书，必须显式传入 thumbprint：
 
@@ -36,3 +37,5 @@ npm run make:official
 - `WINDOWS_TIMESTAMP_SERVER`：RFC 3161 时间戳服务；默认使用 `http://timestamp.digicert.com`。
 
 私钥不写入仓库、构建目录、日志、`.baseline`、Release 或环境文件。由于私钥不可导出，当前 Windows 用户配置损坏后无法继续使用同一自签名证书，必须创建新证书并在后续 Release 中公布新的 thumbprint。
+
+证书轮换不能直接替换 `update-trust.json` 中的旧证书。必须先使用旧证书发布同时信任旧、新两枚公钥的过渡版本，确认用户已升级后，再使用新证书签署后续版本。

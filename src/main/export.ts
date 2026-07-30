@@ -6,6 +6,7 @@ import type { AppEvent } from '../shared/api';
 import { exportRequestSchema, type CutGroup, type ExportRequest, type VideoMetadata } from '../shared/contracts';
 import { IPC } from '../shared/ipc';
 import { createCutGroups } from '../domain/segments';
+import { normalizedVideoRotation } from '../domain/video-input';
 import { resolveUsableMediaComponents, type MediaEncoder } from './components';
 import { logLine } from './logger';
 import { getHistoryStore } from './history';
@@ -55,12 +56,11 @@ async function available(filePath: string): Promise<boolean> {
 
 export async function uniqueOutput(input: string, suffixLabel: string): Promise<string> {
   const directory = path.dirname(input);
-  const extension = path.extname(input);
-  const base = path.basename(input, extension);
+  const base = path.basename(input, path.extname(input));
   let suffix = 1;
   while (true) {
     const stem = `${base}_TTcut_${suffixLabel}`;
-    const name = suffix === 1 ? `${stem}${extension}` : `${stem}_${suffix}${extension}`;
+    const name = suffix === 1 ? `${stem}.mp4` : `${stem}_${suffix}.mp4`;
     const candidate = path.join(directory, name);
     if (!(await available(candidate))) return candidate;
     suffix += 1;
@@ -68,13 +68,12 @@ export async function uniqueOutput(input: string, suffixLabel: string): Promise<
 }
 
 async function chooseOutput(window: BrowserWindow, input: string, request: ExportRequest): Promise<string> {
-  const extension = path.extname(input);
-  const base = path.basename(input, extension);
+  const base = path.basename(input, path.extname(input));
   const label = (request.mode_label ?? request.selection.mode).replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').trim();
   if (request.destination === 'source') return uniqueOutput(input, label || request.selection.mode);
   const result = await dialog.showSaveDialog(window, {
     title: 'Save TTcut video',
-    defaultPath: path.join(path.dirname(input), `${base}_TTcut${extension}`),
+    defaultPath: path.join(path.dirname(input), `${base}_TTcut.mp4`),
     filters: [{ name: 'MP4 video', extensions: ['mp4'] }],
   });
   if (result.canceled || !result.filePath) throw new Error('EXPORT_CANCELLED');
@@ -239,6 +238,7 @@ export async function validateExportOutput(
   output: string,
   wantedDuration: number,
   source: VideoMetadata,
+  orientation: 'preserved' | 'normalized' = 'preserved',
 ): Promise<VideoMetadata> {
   const info = await stat(output);
   if (!info.isFile() || info.size < 1024) throw new Error('EXPORT_INVALID');
@@ -282,8 +282,10 @@ export async function validateExportOutput(
     const expected = comparable(source[field]);
     if (expected && comparable(metadata[field]) !== expected) throw new Error(`EXPORT_METADATA_MISMATCH:${field}`);
   }
-  if (source.rotation !== null && source.rotation !== undefined
-    && metadata.rotation !== source.rotation) throw new Error('EXPORT_ROTATION_MISMATCH');
+  const expectedRotation = orientation === 'normalized' ? 0 : normalizedVideoRotation(source.rotation);
+  if (Math.abs(normalizedVideoRotation(metadata.rotation) - expectedRotation) > 0.001) {
+    throw new Error('EXPORT_ROTATION_MISMATCH');
+  }
   return metadata;
 }
 
@@ -373,7 +375,7 @@ async function executeFastSegmented(
         'cutting-and-exporting',
         { segmentIndex: index + 1, seekStart },
       );
-      await validateExportOutput(segmentPath, group.end - group.start, analysisVideo);
+      await validateExportOutput(segmentPath, group.end - group.start, analysisVideo, 'normalized');
       const signature = await probeStreamSignature(segmentPath, components.ffprobe);
       if (!signature.video.extradataHash) throw new Error('EXPORT_SEGMENT_FAILED');
       if (signatures.length > 0 && !sameStreamSignature(signatures[0]!, signature)) {
@@ -435,7 +437,7 @@ async function executeFastSingle(
       'cutting-and-exporting',
       { segmentIndex: 1, seekStart },
     );
-    await validateExportOutput(partial, group.end - group.start, analysisVideo);
+    await validateExportOutput(partial, group.end - group.start, analysisVideo, 'normalized');
   } catch (error) {
     throw wrapExportError(error, 'EXPORT_SEGMENT_FAILED');
   }
@@ -507,7 +509,7 @@ async function executeExport(
             duration,
             'cutting-and-exporting',
           );
-          await validateExportOutput(partial, duration, analysis.video);
+          await validateExportOutput(partial, duration, analysis.video, 'normalized');
         }
       }
     } else if (request.export_strategy === 'fast_segmented' && groups.length > 1) {
@@ -520,7 +522,7 @@ async function executeExport(
         partial,
         tempDirectory,
       );
-      await validateExportOutput(partial, duration, analysis.video);
+      await validateExportOutput(partial, duration, analysis.video, 'normalized');
     } else {
       if (request.export_strategy === 'fast_segmented') {
         await executeFastSingle(
@@ -540,7 +542,7 @@ async function executeExport(
           duration,
           'cutting-and-exporting',
         );
-        await validateExportOutput(partial, duration, analysis.video);
+        await validateExportOutput(partial, duration, analysis.video, 'normalized');
       }
     }
     if (await available(output)) throw new Error('OUTPUT_COLLISION');
