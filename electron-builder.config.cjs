@@ -1,7 +1,7 @@
 const officialRelease = process.env.TTCUT_OFFICIAL_RELEASE === '1';
 const certificateSha1 = process.env.WINDOWS_CERTIFICATE_THUMBPRINT?.replace(/\s+/g, '').toUpperCase();
 const version = require('./package.json').version;
-const updateChannel = version.includes('-beta') ? 'beta' : 'latest';
+const updateChannel = version.includes('-') ? 'beta' : 'latest';
 
 if (officialRelease && !certificateSha1) {
   throw new Error('TTCUT_OFFICIAL_RELEASE requires WINDOWS_CERTIFICATE_THUMBPRINT.');

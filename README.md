@@ -138,7 +138,7 @@ npm run make
 npm run make:official
 ```
 
-`npm run make` 保留 Forge 的 Vite 编译、打包与 Fuse 配置，并在 `out\make\nsis\x64` 生成当前版本的未签名 NSIS Setup、blockmap 和更新元数据；它不修改版本，也不上传 Release。`npm run make:official` 继续执行签名门禁。
+`npm run make` 保留 Forge 的 Vite 编译、打包与 Fuse 配置，并在 `out\make\nsis\x64` 生成当前版本的未签名 NSIS Setup、blockmap 和更新元数据；它不修改版本，也不上传 Release。`npm run make:official` 继续执行签名门禁，并生成由固定发布私钥签署的 `update-manifest.json` 与 `update-manifest.json.sig`。
 
 真实 E2E 不随仓库分发测试视频、模型权重或运行时。运行 `npm run test:e2e` 前，通过以下变量指定本机已验证的文件；`TTCUT_E2E_FFMPEG_ROOT` 指向同时包含 `ffmpeg.exe` 和 `ffprobe.exe` 的目录：
 

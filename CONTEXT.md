@@ -90,3 +90,23 @@ _Avoid_: Public Stable Release
 A published, non-prerelease GitHub Release whose tag and artifacts are frozen.
 Substantive corrections are delivered as a new patch version.
 _Avoid_: Draft Release
+
+## Signed Update Manifest
+
+The exact `update-manifest.json` bytes and detached RSA-SHA256 signature shipped
+with a Public Stable Release. The manifest binds one version, channel, installer
+filename, size, SHA-512 digest, and Authenticode signer.
+_Avoid_: latest.yml, SHA256SUMS
+
+## Pinned Update Signer
+
+An Authenticode certificate whose public certificate is compiled into the Main
+Process. It verifies the Signed Update Manifest without adding the self-signed
+certificate to a Windows trust store.
+_Avoid_: Windows trusted root, publisher name alone
+
+## Bootstrap Update
+
+The one-time manual installation needed to move a version that only has the
+default Windows trust verifier onto a version that understands Signed Update
+Manifests. Subsequent updates can return to the automatic NSIS flow.

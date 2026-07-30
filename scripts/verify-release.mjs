@@ -229,7 +229,7 @@ if (existsSync(packagedRoot)) {
   if (existsSync(updaterConfig)) {
     const updaterConfigSource = await readFile(updaterConfig, 'utf8');
     check(updaterConfigSource.includes('provider: github'), 'Packaged updater provider is not GitHub.');
-    check(updaterConfigSource.includes(packageJson.version.includes('-beta') ? 'channel: beta' : 'channel: latest'), 'Packaged updater channel does not match the application version.');
+    check(updaterConfigSource.includes(packageJson.version.includes('-') ? 'channel: beta' : 'channel: latest'), 'Packaged updater channel does not match the application version.');
     check(updaterConfigSource.includes('publisherName: weiye'), 'Packaged updater publisher is not weiye.');
   }
   check(existsSync(path.join(packagedRoot, 'resources', 'resources', 'components.json')), 'Packaged component catalog is missing.');
@@ -278,6 +278,15 @@ if (existsSync(nsisRoot)) {
   check(Boolean(setup), 'The NSIS Setup artifact is missing.');
   check(Boolean(setup && artifacts.includes(`${setup}.blockmap`)), 'The NSIS blockmap is missing.');
   check(artifacts.some((name) => /^(latest|beta)\.yml$/i.test(name)), 'NSIS update metadata is missing.');
+  if (releaseSigningRequired) {
+    check(artifacts.includes('update-manifest.json'), 'The signed update manifest is missing.');
+    check(artifacts.includes('update-manifest.json.sig'), 'The detached update manifest signature is missing.');
+  } else {
+    check(
+      artifacts.includes('update-manifest.json') === artifacts.includes('update-manifest.json.sig'),
+      'Unsigned release output contains only one signed-update manifest asset.',
+    );
+  }
   check(!artifacts.some((name) => /\.nupkg$/i.test(name) || name === 'RELEASES'), 'A Squirrel artifact remains in the active NSIS output.');
 }
 
