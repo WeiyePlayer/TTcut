@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { protocol } from 'electron';
 
-type RegisteredMedia = { filePath: string; contentType: 'video/mp4' | 'image/jpeg' };
+type RegisteredMedia = { filePath: string; contentType: 'video/mp4' | 'video/quicktime' | 'image/jpeg' };
 
 const registered = new Map<string, RegisteredMedia>();
 

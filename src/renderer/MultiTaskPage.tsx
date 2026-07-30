@@ -11,6 +11,7 @@ import type { AppEvent, SelectedVideo } from '../shared/api';
 import { formatTimestamp } from '../domain/time';
 import { validateCalibration } from '../domain/calibration';
 import { overallCalibrationProgress } from '../domain/analysis-progress';
+import { isSupportedVideoFileName } from '../domain/video-input';
 import { CalibrationSurface } from './CalibrationSurface';
 
 type BatchMode = 'all' | 'highlight' | 'analyze-only';
@@ -573,7 +574,7 @@ export function MultiTaskPage({
       onDragOver={(event) => event.preventDefault()}
       onDrop={(event) => {
         event.preventDefault();
-        const files = [...event.dataTransfer.files].filter((file) => file.name.toLowerCase().endsWith('.mp4'));
+        const files = [...event.dataTransfer.files].filter((file) => isSupportedVideoFileName(file.name));
         void Promise.all(files.map((file) => window.ttcut.acceptDroppedVideo(window.ttcut.pathForDroppedFile(file))))
           .then(addVideos);
       }}

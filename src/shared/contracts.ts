@@ -143,7 +143,7 @@ export const videoMetadataSchema = z.object({
   variable_frame_rate: z.boolean(),
   video_codec: z.string().min(1),
   audio_codec: z.string().nullable(),
-  container: z.literal('mp4'),
+  container: z.enum(['mp4', 'mov']),
   frame_count: z.number().int().positive().nullable().optional(),
   average_bitrate: z.number().int().positive().nullable().optional(),
   audio_bitrate: z.number().int().positive().nullable().optional(),

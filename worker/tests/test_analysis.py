@@ -156,6 +156,23 @@ def test_worker_request_rejects_unknown_fields():
         raise AssertionError("unknown request fields must fail")
 
 
+def test_worker_request_accepts_mov_video_path():
+    request = valid_request()
+    request["video_path"] = "IMG_0070.MOV"
+    assert validate_request(request) is request
+
+
+def test_worker_request_rejects_unrelated_video_container():
+    request = valid_request()
+    request["video_path"] = "match.avi"
+    try:
+        validate_request(request)
+    except Exception as exc:
+        assert "fields" in str(exc).lower()
+    else:
+        raise AssertionError("unsupported video container must fail")
+
+
 def test_worker_request_rejects_unknown_calibration_points():
     request = valid_request()
     request["calibration_choice"]["calibration"]["points"]["center"] = [640, 360]
