@@ -11,6 +11,7 @@ import type { AppEvent, SelectedVideo } from '../shared/api';
 import { formatTimestamp } from '../domain/time';
 import { validateCalibration } from '../domain/calibration';
 import { overallCalibrationProgress } from '../domain/analysis-progress';
+import { isSupportedVideoFileName } from '../domain/video-input';
 import { CalibrationSurface } from './CalibrationSurface';
 
 type BatchMode = 'all' | 'highlight' | 'analyze-only';
@@ -46,6 +47,7 @@ interface MultiTaskPageProps {
   exportStrategy: ExportStrategy;
   language?: 'zh-CN' | 'en';
   onOpenAnalysis: (analysisId: string) => void;
+  onCompletableTasksFinished?: () => void;
   registerLeaveHandler?: (handler: ((target: MultiLeaveTarget) => void) | null) => void;
   onLeave?: (target: MultiLeaveTarget) => void;
 }
@@ -93,6 +95,7 @@ export function MultiTaskPage({
   exportStrategy,
   language = 'zh-CN',
   onOpenAnalysis,
+  onCompletableTasksFinished = () => undefined,
   registerLeaveHandler = () => undefined,
   onLeave = () => undefined,
 }: MultiTaskPageProps) {
@@ -222,6 +225,7 @@ export function MultiTaskPage({
     if (!candidate) {
       runningRef.current = false;
       setRunning(false);
+      onCompletableTasksFinished();
       return;
     }
     cancelRequested.current = false;
@@ -573,7 +577,7 @@ export function MultiTaskPage({
       onDragOver={(event) => event.preventDefault()}
       onDrop={(event) => {
         event.preventDefault();
-        const files = [...event.dataTransfer.files].filter((file) => file.name.toLowerCase().endsWith('.mp4'));
+        const files = [...event.dataTransfer.files].filter((file) => isSupportedVideoFileName(file.name));
         void Promise.all(files.map((file) => window.ttcut.acceptDroppedVideo(window.ttcut.pathForDroppedFile(file))))
           .then(addVideos);
       }}

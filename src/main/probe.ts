@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { displayVideoDimensions, videoContainerFromFileName } from '../domain/video-input';
 import { videoMetadataSchema, type VideoMetadata } from '../shared/contracts';
 import { resolveUsableMediaComponents } from './components';
 import { runProcess } from './processes';
@@ -98,7 +99,8 @@ async function sampledVfr(ffprobe: string, videoPath: string): Promise<boolean> 
 }
 
 export async function probeVideo(videoPath: string): Promise<VideoMetadata> {
-  if (path.extname(videoPath).toLowerCase() !== '.mp4') throw new Error('INVALID_INPUT');
+  const container = videoContainerFromFileName(videoPath);
+  if (!container) throw new Error('INVALID_INPUT');
   const components = await resolveUsableMediaComponents();
   if (!components.ffprobe) throw new Error('MEDIA_COMPONENT_MISSING');
   const result = await runProcess(components.ffprobe, [
@@ -124,17 +126,18 @@ export async function probeVideo(videoPath: string): Promise<VideoMetadata> {
   }
   const rotation = video.side_data_list?.find((item) => Number.isFinite(item.rotation))?.rotation
     ?? (video.tags?.rotate ? Number(video.tags.rotate) : null);
+  const displayDimensions = displayVideoDimensions(video.width, video.height, rotation);
   return videoMetadataSchema.parse({
     path: path.resolve(videoPath),
     duration_seconds: duration,
-    width: video.width,
-    height: video.height,
+    width: displayDimensions.width,
+    height: displayDimensions.height,
     fps: averageFps,
     nominal_fps: nominalFps > 0 ? nominalFps : null,
     variable_frame_rate: fieldRatesDiffer || packetDurationsDiffer,
     video_codec: video.codec_name ?? 'unknown',
     audio_codec: audio?.codec_name ?? null,
-    container: 'mp4',
+    container,
     frame_count: frameCount,
     average_bitrate: optionalInteger(video.bit_rate ?? data.format?.bit_rate),
     audio_bitrate: optionalInteger(audio?.bit_rate),

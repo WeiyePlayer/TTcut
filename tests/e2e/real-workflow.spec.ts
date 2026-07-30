@@ -251,13 +251,13 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     await expect(page.getByRole('heading', { name: '还没有历史记录' })).toBeVisible();
     await page.getByRole('button', { name: '自动剪辑' }).click();
     await expect(page.getByRole('button', { name: '返回', exact: true })).toHaveCount(0);
-    await page.getByRole('button', { name: /选择 MP4 视频/ }).click();
+    await page.getByRole('button', { name: /选择 MP4 \/ MOV 视频/ }).click();
     await expect(page.getByRole('heading', { name: '标定球桌' })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText('1280 × 720', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: '返回', exact: true }).click();
     await expect(page.getByRole('heading', { name: '选择比赛视频' })).toBeVisible();
     await expect(page.getByRole('button', { name: '返回', exact: true })).toHaveCount(0);
-    await page.getByRole('button', { name: /选择 MP4 视频/ }).click();
+    await page.getByRole('button', { name: /选择 MP4 \/ MOV 视频/ }).click();
     await expect(page.getByRole('heading', { name: '标定球桌' })).toBeVisible({ timeout: 30_000 });
     await expect(page.locator('.automatic-calibration')).toBeVisible();
     await expect(page.locator('.video-surface')).toHaveCount(0);
@@ -301,6 +301,24 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     const historyCover = page.locator('.history-cover img');
     await expect(historyCover).toBeVisible();
     await expect.poll(() => historyCover.evaluate((element: HTMLImageElement) => ({ complete: element.complete, width: element.naturalWidth }))).toMatchObject({ complete: true, width: 640 });
+    const historyCoverLayout = await historyCover.evaluate((element: HTMLImageElement) => {
+      const cover = element.parentElement;
+      if (!cover) throw new Error('History cover container is missing.');
+      const imageRect = element.getBoundingClientRect();
+      const coverRect = cover.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return {
+        objectFit: style.objectFit,
+        position: style.position,
+        imageRect: { x: imageRect.x, y: imageRect.y, width: imageRect.width, height: imageRect.height },
+        coverRect: { x: coverRect.x, y: coverRect.y, width: coverRect.width, height: coverRect.height },
+      };
+    });
+    expect(historyCoverLayout).toMatchObject({ objectFit: 'contain', position: 'absolute' });
+    expect(Math.abs(historyCoverLayout.imageRect.x - historyCoverLayout.coverRect.x)).toBeLessThan(1);
+    expect(Math.abs(historyCoverLayout.imageRect.y - historyCoverLayout.coverRect.y)).toBeLessThan(1);
+    expect(Math.abs(historyCoverLayout.imageRect.width - historyCoverLayout.coverRect.width)).toBeLessThan(1);
+    expect(Math.abs(historyCoverLayout.imageRect.height - historyCoverLayout.coverRect.height)).toBeLessThan(1);
     const durationBox = await page.locator('.history-info > div span:last-child').boundingBox();
     const deleteBox = await page.locator('.history-delete').boundingBox();
     expect(durationBox).not.toBeNull();

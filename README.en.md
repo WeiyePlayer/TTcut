@@ -6,30 +6,29 @@ TTcut is a local automatic table-tennis video cutter for players and enthusiasts
 
 Videos, analysis results, and history stay on the local computer. TTcut requires no account, uploads no video, and collects no telemetry. The analysis models are included in the installer. The analysis runtime and media-processing components require an internet connection during initial setup; after installation, analysis, preview, and cutting can run offline.
 
-> The current stable release is `v1.1.1` for Windows x64. TTcut no longer blocks startup according to a Windows build-number allowlist.
+> The current stable release is `v1.1.2` for Windows x64. TTcut no longer blocks startup according to a Windows build-number allowlist.
 
 ## Download and installation
 
-1. Download `TTcut-1.1.1-x64-Setup.exe` from the [TTcut v1.1.1 Release](https://github.com/WeiyePlayer/TTcut/releases/tag/v1.1.1).
+1. Download `TTcut-1.1.2-x64-Setup.exe` from the [TTcut v1.1.2 Release](https://github.com/WeiyePlayer/TTcut/releases/tag/v1.1.2).
 2. Run the installer, choose the installation root, and decide whether to create a desktop shortcut. Application files are written under `<root>\app`; large runtimes, downloads, and import staging are stored under `<root>\data\components`. A Start menu shortcut is always created.
 3. On first launch, open Settings and install the Analysis component and Video processing component after reviewing the prompts.
 
 The Analysis component detects an NVIDIA GPU automatically and falls back to CPU if CUDA installation or self-test fails. The Video processing component reads media information, cuts and joins segments, and validates exported files.
 
-## What's new in v1.1.1
+## What's new in v1.1.2
 
-- Packaged builds now distinguish a configured updater from local packages and resolve the registered installation root more reliably.
-- The upload page accepts multiple MP4 files for Batch tasks and includes a capture-angle guide before analysis.
-- Batch tasks calibrate items in queue order. Failed items can enter manual four-corner calibration without blocking ready items.
-- Installer helper scripts use syntax available in PowerShell 2. This improves installation compatibility in older environments but does not guarantee full support for every older Windows release.
+- Signed update manifests and a pinned release public key restore secure automatic updates for later self-signed releases. Users on `v1.1.0` or `v1.1.1` must install this version manually once.
+- Single-video and Batch task workflows support MP4 and MOV. Portrait and rotation-tagged videos now fit correctly during calibration, previews, history browsing, and MP4 export.
+- A non-blocking support prompt appears after a single export or after the batch exhausts its currently completable tasks. It can be dismissed or suppressed for 30 days.
 
-See the [v1.1.1 release notes](docs/release-notes-v1.1.1.en.md) for the full patch summary.
+See the [v1.1.2 release notes](docs/release-notes-v1.1.2.en.md) for the full patch summary.
 
 ## Usage
 
 ### 1. Select a video and calibrate the table
 
-- In Automatic cutting, select or drag in one `.mp4` file.
+- In Automatic cutting, select or drag in one `.mp4` or `.mov` file.
 - Automatic calibration samples the video and detects the table by default.
 - Switch to manual calibration when adjustment is needed, then select a clear frame on the timeline.
 - Click the four corners in this order: top-left, top-right, bottom-right, bottom-left. Drag numbered points to correct them.
@@ -53,7 +52,7 @@ The analysis page reports real processing progress. A running task can be cancel
 
 Choose the pre-roll and post-roll duration in Settings, return to the cutting mode, and export. Results are stored beside the source video:
 
-- `match.mp4` becomes `match_ttcut.mp4`.
+- `match.mp4` or `match.mov` becomes `match_ttcut.mp4`.
 - Existing names are preserved; TTcut uses `match_ttcut_2.mp4`, `match_ttcut_3.mp4`, and so on.
 - After export, play the result directly or reveal it in File Explorer.
 
@@ -63,7 +62,7 @@ Completed analyses are saved locally with a first-frame thumbnail, including ana
 
 ### 6. Batch tasks
 
-Select multiple MP4 files in Batch tasks. On entry, TTcut automatically calibrates each video in list order; successful items wait in the ready state. A failed item shows “Calibration failed / Calibrate manually” on its cover and opens the reusable four-point calibration page when clicked. Completing calibration returns to the same queue with its state preserved. “Start analysis and cutting” processes ready items only, so items waiting for manual calibration do not block the rest. Outputs are stored beside their source videos.
+Select multiple MP4 or MOV files in Batch tasks. On entry, TTcut automatically calibrates each video in list order; successful items wait in the ready state. A failed item shows “Calibration failed / Calibrate manually” on its cover and opens the reusable four-point calibration page when clicked. Completing calibration returns to the same queue with its state preserved. “Start analysis and cutting” processes ready items only, so items waiting for manual calibration do not block the rest. Outputs are stored beside their source videos.
 
 ## Cutting rules
 
@@ -85,7 +84,7 @@ The runtime is installed under `<root>\data\components`. CPU, CUDA 12.6, and CUD
 
 ## Video processing component
 
-The managed FFmpeg/ffprobe component validates MP4 metadata and streams, creates and joins cut segments, preserves source geometry and colour information, and validates the final output. Safe boundaries use stream copy; other cuts use accurate re-encoding.
+The managed FFmpeg/ffprobe component validates MP4/MOV metadata, rotation, and streams; creates and joins cut segments; preserves or normalises source orientation as required; and validates the final output. Safe boundaries use stream copy; other cuts use accurate re-encoding.
 
 OpenH264 remains the default encoder. An optional x264 component can be downloaded and imported from Settings for high-resolution re-encoding. A valid x264 installation uses `libx264`, `veryfast`, and `CRF 18`; invalid or missing x264 falls back to OpenH264. Lower-resolution videos are never upscaled.
 
@@ -110,11 +109,11 @@ npm run make
 npm run make:official
 ```
 
-`npm run make` creates unsigned NSIS artifacts under `out\make\nsis\x64`. `npm run make:official` applies the official signing and release verification gates.
+`npm run make` creates unsigned NSIS artifacts under `out\make\nsis\x64`. `npm run make:official` applies the official signing and release verification gates and emits the pinned-key-signed `update-manifest.json` and `update-manifest.json.sig`.
 
 ## Known limitations
 
-- The single-video workflow handles one MP4 at a time; Batch tasks accepts multiple MP4 files and runs a serial “calibrate first, then process” queue with manual recovery for failed items.
+- The single-video workflow handles one MP4 or MOV at a time; Batch tasks accepts multiple MP4/MOV files and runs a serial “calibrate first, then process” queue with manual recovery for failed items.
 - The displayed count is a bounce-event proxy, not a ground-truth paddle-hit count.
 - Windows x64 is the primary supported build. Removing the Windows build-number gate does not guarantee that every old Windows version, Windows Server edition, x86 system, or ARM64 system can run all dependencies.
 
