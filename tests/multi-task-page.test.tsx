@@ -214,6 +214,55 @@ describe('multi-task clipping', () => {
     expect(startAnalysis.mock.calls[0]?.[0].videoPath).toBe(videos[1]!.path);
   });
 
+  it('notifies once after every currently completable batch cut has ended', async () => {
+    const onCompletableTasksFinished = vi.fn();
+    render(
+      <MultiTaskPage
+        initialVideos={videos}
+        preRoll={2.5}
+        postRoll={1}
+        exportStrategy="compatible"
+        onOpenAnalysis={vi.fn()}
+        onCompletableTasksFinished={onCompletableTasksFinished}
+      />,
+    );
+    await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledTimes(1));
+    act(() => listener?.({
+      type: 'error',
+      taskId: 'calibration-task-1',
+      code: 'AUTO_CALIBRATION_FAILED',
+      message: 'AUTO_CALIBRATION_FAILED',
+    }));
+    await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledTimes(2));
+    await finishCalibration('calibration-task-2');
+    expect(onCompletableTasksFinished).not.toHaveBeenCalled();
+
+    fireEvent.click(await screen.findByRole('button', { name: '开始分析剪辑' }));
+    await waitFor(() => expect(startAnalysis).toHaveBeenCalledTimes(1));
+    act(() => listener?.({
+      type: 'analysis-result',
+      taskId: 'analysis-task-1',
+      analysisId: '22222222-2222-4222-8222-222222222222',
+      calibration,
+      data: analysis(videos[1]!.path),
+    }));
+    await waitFor(() => expect(startExport).toHaveBeenCalledTimes(1));
+    act(() => listener?.({
+      type: 'export-result',
+      taskId: 'export-task-1',
+      data: {
+        taskId: 'export-task-1',
+        analysisId: '22222222-2222-4222-8222-222222222222',
+        outputPath: 'C:\\video\\second_TTcut_所有回合.mp4',
+        outputName: 'second_TTcut_所有回合.mp4',
+        mediaUrl: 'ttcut-media://second-output',
+      },
+    }));
+
+    await waitFor(() => expect(onCompletableTasksFinished).toHaveBeenCalledTimes(1));
+    expect(screen.getByText('标定失败')).toBeVisible();
+  });
+
   it('turns all remaining items into manual calibration when the model is unavailable', async () => {
     render(<MultiTaskPage initialVideos={videos} preRoll={2.5} postRoll={1} exportStrategy="compatible" onOpenAnalysis={vi.fn()} />);
     await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledTimes(1));

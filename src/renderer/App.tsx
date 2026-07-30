@@ -6,9 +6,11 @@ import { formatTimestamp } from '../domain/time';
 import { rallyPreviewRange } from '../domain/preview';
 import { validateCalibration } from '../domain/calibration';
 import { isSupportedVideoFileName } from '../domain/video-input';
+import { isSupportPromptSuppressed, suppressSupportPromptForThirtyDays } from '../domain/support-prompt';
 import { interpolate, messages, type Language, type Messages } from './i18n';
 import { MultiTaskPage, type MultiLeaveTarget } from './MultiTaskPage';
 import { CalibrationSurface } from './CalibrationSurface';
+import { SupportPrompt } from './SupportPrompt';
 import packageJson from '../../package.json';
 import captureGuideImage from './assets/pingpong-table-with-pose-mannequins.png';
 
@@ -138,6 +140,7 @@ export function App() {
   const [exportResult, setExportResult] = useState<ExportResult | null>(null);
   const [error, setError] = useState<{ code: string } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [supportPromptVisible, setSupportPromptVisible] = useState(false);
   const [closeDialog, setCloseDialog] = useState(false);
   const [languageTransition, setLanguageTransition] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -167,6 +170,9 @@ export function App() {
       : bootstrap.platformCompatibility.reason === 'probe_failed'
         ? t.platformProbeFailedDetail
         : t.platformUnsupportedDetail;
+  const showSupportPrompt = useCallback(() => {
+    if (!isSupportPromptSuppressed()) setSupportPromptVisible(true);
+  }, []);
 
   useEffect(() => {
     void window.ttcut.bootstrap().then((data) => {
@@ -205,6 +211,7 @@ export function App() {
         setActiveTask(null);
         setExportResult(event.data);
         setStep('complete');
+        showSupportPrompt();
       } else if (event.type === 'component-result') {
         setupTaskRef.current = null;
         setSetupTask(null);
@@ -246,7 +253,7 @@ export function App() {
     const removeUpdate = window.ttcut.onUpdateState(setUpdateState);
     void window.ttcut.getUpdateState().then(setUpdateState);
     return () => { removeTask(); removeClose(); removeUpdate(); };
-  }, []);
+  }, [showSupportPrompt]);
 
   useEffect(() => { settingsRef.current = settings; }, [settings]);
   useEffect(() => {
@@ -566,6 +573,7 @@ export function App() {
             registerLeaveHandler={(handler) => { multiLeaveHandlerRef.current = handler; }}
             onLeave={leaveMulti}
             onOpenAnalysis={(id) => { multiActiveRef.current = false; void openHistory(id); }}
+            onCompletableTasksFinished={showSupportPrompt}
           />
         ) : view === 'settings' ? (
           <section className="page settings-page">
@@ -792,6 +800,17 @@ export function App() {
             <img src={captureGuideImage} alt={t.captureGuideImageAlt} />
           </div>
         </div>
+      )}
+      {supportPromptVisible && (
+        <SupportPrompt
+          copy={t}
+          onSponsor={() => void window.ttcut.openExternalUrl(DONATION_URL)}
+          onReject={() => setSupportPromptVisible(false)}
+          onSnooze={() => {
+            suppressSupportPromptForThirtyDays();
+            setSupportPromptVisible(false);
+          }}
+        />
       )}
       {toast && <div className="toast" role="status">{toast}</div>}
       {languageTransition && <div className="language-loader"><span /></div>}

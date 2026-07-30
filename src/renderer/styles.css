@@ -384,6 +384,37 @@ td input { accent-color: var(--blue); }
 .history-delete { position: absolute; right: 9px; bottom: 10px; width: 28px; height: 28px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; font-size: 18px; }
 .history-delete:hover { color: #a1261f; background: #fff0ef; }
 
+.support-prompt {
+  position: fixed; z-index: 90; top: 56px; right: 20px; width: min(390px, calc(100vw - 40px)); padding: 17px 20px;
+  border: 1px solid var(--line-strong); border-radius: 15px; background: rgba(255,255,255,.98);
+  box-shadow: 0 18px 54px rgba(30,40,55,.18); animation: support-prompt-in 200ms ease-out; -webkit-app-region: no-drag;
+}
+.support-prompt-message { margin: 0; color: var(--text); font-size: 13px; line-height: 1.68; white-space: pre-line; }
+.support-prompt-actions { margin-top: 15px; display: flex; align-items: center; justify-content: flex-end; gap: 9px; }
+.support-prompt-actions button { min-height: 35px; cursor: pointer; font-size: 12px; font-weight: 650; }
+.support-sponsor-button {
+  padding: 0 15px; border: 1px solid #e5c968; border-radius: 9px; background: #fff3ba; color: #684a08;
+  transition: background 150ms ease, border-color 150ms ease, transform 100ms ease;
+}
+.support-sponsor-button:hover { border-color: #d7b94e; background: #ffe99b; }
+.support-sponsor-button:active, .support-reject-group > button:active { transform: scale(.98); }
+.support-reject-group {
+  position: relative; display: grid; grid-template-columns: auto 34px; border: 1px solid var(--line-strong);
+  border-radius: 9px; background: var(--secondary); isolation: isolate;
+}
+.support-reject-group > button { border: 0; background: transparent; transition: background 150ms ease, transform 100ms ease; }
+.support-reject-group > button:hover { background: var(--secondary-hover); }
+.support-reject-button { padding: 0 13px; border-radius: 8px 0 0 8px !important; }
+.support-reject-more { width: 34px; display: grid; place-items: center; border-left: 1px solid var(--line-strong) !important; border-radius: 0 8px 8px 0; }
+.support-chevron { width: 7px; height: 7px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg) translate(-1px, -1px); }
+.support-reject-menu {
+  position: absolute; z-index: 2; top: calc(100% + 7px); right: 0; min-width: 184px; padding: 5px;
+  border: 1px solid var(--line-strong); border-radius: 10px; background: white; box-shadow: 0 12px 32px rgba(30,40,55,.16);
+}
+.support-reject-menu button { width: 100%; min-height: 34px; padding: 0 10px; border: 0; border-radius: 7px; background: transparent; text-align: left; white-space: nowrap; }
+.support-reject-menu button:hover { background: var(--secondary-hover); }
+@keyframes support-prompt-in { from { opacity: 0; transform: translateY(-8px) scale(.985); } }
+
 .toast { position: fixed; z-index: 80; left: calc(50% + 110px); bottom: 32px; transform: translateX(-50%); padding: 10px 16px; border: 1px solid var(--line); border-radius: 10px; background: rgba(30,30,32,.92); color: white; box-shadow: var(--shadow); font-size: 12px; animation: toast-in 180ms ease-out; }
 @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 8px); } }
 .modal-backdrop { position: fixed; z-index: 100; inset: 0; display: grid; place-items: center; background: rgba(20,22,28,.32); backdrop-filter: blur(3px); }
