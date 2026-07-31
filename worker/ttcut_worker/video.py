@@ -9,6 +9,8 @@ from .errors import VideoError
 from .timestamp import TimestampResolver, valid_fps
 from .types import TimeSource
 
+MINIMUM_DECODE_COMPLETION_RATIO = 0.9
+
 
 @dataclass(frozen=True)
 class VideoInfo:
@@ -49,6 +51,22 @@ def validate_video_path(value: str | Path) -> Path:
 
 def _count(value: float) -> int | None:
     return int(round(value)) if math.isfinite(value) and value > 0 else None
+
+
+def _validate_decode_completion(
+    decoded_frame_count: int,
+    metadata_frame_count: int | None,
+) -> None:
+    if decoded_frame_count <= 0:
+        raise VideoError("No frames were decoded.")
+    if (
+        metadata_frame_count is not None
+        and decoded_frame_count < metadata_frame_count * MINIMUM_DECODE_COMPLETION_RATIO
+    ):
+        raise VideoError(
+            "Video decoding stopped before the expected end "
+            f"({decoded_frame_count} of {metadata_frame_count} frames).",
+        )
 
 
 def probe_video(value: str | Path) -> VideoInfo:
@@ -101,8 +119,10 @@ class StreamingVideoReader:
                 index += 1
         finally:
             capture.release()
-        if not self.decoded_frame_count:
-            raise VideoError("No frames were decoded.")
+        _validate_decode_completion(
+            self.decoded_frame_count,
+            self.info.metadata_frame_count,
+        )
 
     def final_info(self) -> VideoInfo:
         return replace(
