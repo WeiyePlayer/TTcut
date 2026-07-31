@@ -33,7 +33,7 @@ def point(frame: int, time: float, x: int, y: int, visible: int = 1) -> Trajecto
     )
 
 
-def test_three_frame_v_bounce_and_minimum_interval():
+def test_three_frame_v_bounce_and_default_minimum_interval():
     points = [
         point(0, 0.00, 100, 20),
         point(1, 0.05, 101, 40),
@@ -42,6 +42,43 @@ def test_three_frame_v_bounce_and_minimum_interval():
         point(4, 0.20, 104, 20),
     ]
     assert detect_bounce_frames(points, calibration()) == [1]
+
+
+def test_minimum_interval_compares_with_the_last_counted_bounce():
+    points = [
+        point(0, 0.0, 100, 20),
+        point(1, 0.1, 101, 40),
+        point(2, 0.2, 102, 20),
+        point(3, 0.3, 103, 42),
+        point(4, 0.4, 104, 20),
+        point(5, 0.5, 105, 44),
+        point(6, 0.6, 106, 20),
+    ]
+
+    assert detect_bounce_frames(points, calibration()) == [1, 5]
+    assert detect_bounce_frames(
+        points, calibration(), minimum_interval_seconds=0.12,
+    ) == [1, 3, 5]
+
+
+def test_minimum_interval_is_strictly_less_than_0_315_seconds():
+    exact_boundary = [
+        point(0, 0.00, 100, 20),
+        point(1, 0.05, 101, 40),
+        point(2, 0.10, 102, 20),
+        point(3, 0.365, 103, 42),
+        point(4, 0.40, 104, 20),
+    ]
+    below_boundary = [
+        point(0, 0.00, 100, 20),
+        point(1, 0.05, 101, 40),
+        point(2, 0.10, 102, 20),
+        point(3, 0.364999, 103, 42),
+        point(4, 0.40, 104, 20),
+    ]
+
+    assert detect_bounce_frames(exact_boundary, calibration()) == [1, 3]
+    assert detect_bounce_frames(below_boundary, calibration()) == [1]
 
 
 def test_five_frame_window_tolerates_missing_middle_points():
