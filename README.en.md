@@ -6,23 +6,23 @@ TTcut is a local automatic table-tennis video cutter for players and enthusiasts
 
 Videos, analysis results, and history stay on the local computer. TTcut requires no account, uploads no video, and collects no telemetry. The analysis models are included in the installer. The analysis runtime and media-processing components require an internet connection during initial setup; after installation, analysis, preview, and cutting can run offline.
 
-> The current stable release is `v1.1.2` for Windows x64. TTcut no longer blocks startup according to a Windows build-number allowlist.
+> The current stable release is `v1.1.3` for Windows x64. TTcut no longer blocks startup according to a Windows build-number allowlist.
 
 ## Download and installation
 
-1. Download `TTcut-1.1.2-x64-Setup.exe` from the [TTcut v1.1.2 Release](https://github.com/WeiyePlayer/TTcut/releases/tag/v1.1.2).
+1. Download `TTcut-1.1.3-x64-Setup.exe` from the [TTcut v1.1.3 Release](https://github.com/WeiyePlayer/TTcut/releases/tag/v1.1.3).
 2. Run the installer, choose the installation root, and decide whether to create a desktop shortcut. Application files are written under `<root>\app`; large runtimes, downloads, and import staging are stored under `<root>\data\components`. A Start menu shortcut is always created.
 3. On first launch, open Settings and install the Analysis component and Video processing component after reviewing the prompts.
 
 The Analysis component detects an NVIDIA GPU automatically and falls back to CPU if CUDA installation or self-test fails. The Video processing component reads media information, cuts and joins segments, and validates exported files.
 
-## What's new in v1.1.2
+## What's new in v1.1.3
 
-- Signed update manifests and a pinned release public key restore secure automatic updates for later self-signed releases. Users on `v1.1.0` or `v1.1.1` must install this version manually once.
-- Single-video and Batch task workflows support MP4 and MOV. Portrait and rotation-tagged videos now fit correctly during calibration, previews, history browsing, and MP4 export.
-- A non-blocking support prompt appears after a single export or after the batch exhausts its currently completable tasks. It can be dismissed or suppressed for 30 days.
+- The default bounce debounce interval is now 0.315 seconds and compares against the last retained event, reducing inflated bounce counts within rallies caused by closely spaced duplicate candidates.
+- Analysis and calibration Workers better decode GoPro HEVC files and other MP4 files with additional audio, timecode, telemetry, or descriptor streams.
+- Materially truncated decoding now reports an explicit video error instead of a misleading “no valid rallies” result.
 
-See the [v1.1.2 release notes](docs/release-notes-v1.1.2.en.md) for the full patch summary.
+See the [v1.1.3 release notes](docs/release-notes-v1.1.3.en.md) for the full patch summary.
 
 ## Usage
 
