@@ -7,6 +7,9 @@ from .calibration import TABLE_LENGTH_CM, TABLE_WIDTH_CM, TableCalibration
 from .types import TrajectoryPoint
 
 
+DEFAULT_MINIMUM_BOUNCE_INTERVAL_SECONDS = 0.315
+
+
 def _valid_window(window: Sequence[TrajectoryPoint]) -> bool:
     first_frame = window[0].frame
     return (
@@ -32,7 +35,7 @@ def _add_candidate(
 
 def detect_bounce_frames(
     points: Sequence[TrajectoryPoint], calibration: TableCalibration,
-    *, minimum_interval_seconds: float = 0.12,
+    *, minimum_interval_seconds: float = DEFAULT_MINIMUM_BOUNCE_INTERVAL_SECONDS,
     table_length_margin_cm: float = 35.0, table_width_margin_cm: float = 25.0,
 ) -> list[int]:
     candidates: dict[int, TrajectoryPoint] = {}
@@ -63,4 +66,3 @@ def detect_bounce_frames(
             bounces.append(landing.frame)
             last_time = landing.time
     return bounces
-

@@ -17,6 +17,7 @@ import { getHistoryStore } from './history';
 import { probeVideo } from './probe';
 import { hasActiveTasks, spawnTracked } from './processes';
 import { overallAnalysisProgress } from '../domain/analysis-progress';
+import { analysisProcessEnvironment } from './analysis-environment';
 
 function send(window: BrowserWindow, event: AppEvent): void {
   if (!window.isDestroyed()) window.webContents.send(IPC.taskEvent, event);
@@ -57,7 +58,7 @@ export async function startAnalysis(
   const child = spawnTracked(taskId, components.python, ['-m', 'ttcut_worker.worker'], {
     cwd: components.worker,
     env: {
-      ...process.env,
+      ...analysisProcessEnvironment(process.env),
       PYTHONPATH: components.worker,
       PYTHONUTF8: '1',
       TTCUT_TRACKNET_WEIGHTS: components.tracknetWeights,

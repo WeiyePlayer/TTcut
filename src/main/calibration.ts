@@ -13,6 +13,7 @@ import { resolveUsableAnalysisComponents } from './components';
 import { logLine } from './logger';
 import { probeVideo } from './probe';
 import { hasActiveTasks, spawnTracked } from './processes';
+import { analysisProcessEnvironment } from './analysis-environment';
 
 function send(window: BrowserWindow, event: AppEvent): void {
   if (!window.isDestroyed()) window.webContents.send(IPC.taskEvent, event);
@@ -46,7 +47,7 @@ export async function startAutoCalibration(
   const child = spawnTracked(taskId, components.python, ['-m', 'ttcut_worker.calibration_worker'], {
     cwd: components.worker,
     env: {
-      ...process.env,
+      ...analysisProcessEnvironment(process.env),
       PYTHONPATH: components.worker,
       PYTHONUTF8: '1',
       TTCUT_TRACKNET_WEIGHTS: components.tracknetWeights,
