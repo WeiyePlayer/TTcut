@@ -18,3 +18,7 @@ resources/models/
 .tasks/
 *.partial.mp4
 .learnings/
+artifacts/dual-ball-ab/
+artifacts/dual-ball-ab-bgr/
+artifacts/dual-ball-ab-refined/
+artifacts/manual-import/

@@ -11,6 +11,8 @@ from .bounce import detect_bounce_frames
 from .calibration import TableCalibration
 from .errors import InvalidRequestError, ModelResourceError, TableModelResourceError, WorkerError
 from .model import load_tracknet
+from .dual_models import load_dual_models
+from .dual_predictor import UpliftingDualPredictor
 from .predictor import TrackNetPredictor
 from .roi import AnalysisRoiConfig, build_analysis_roi
 from .rallies import group_rallies
@@ -52,11 +54,21 @@ def analyze(request: dict) -> dict:
             calibration_value["video_width"], calibration_value["video_height"], calibration_value["points"],
         )
     analysis_roi = build_analysis_roi(calibration, AnalysisRoiConfig())
-    weight_path = os.environ.get("TTCUT_TRACKNET_WEIGHTS", "").strip()
-    if not weight_path:
-        raise ModelResourceError("Bundled analysis model path is not configured.")
+    profile = request.get("ball_model_profile", "tracknet_v1")
     emit({"type": "progress", "task_id": task_id, "stage": "load_model", "current": 0, "total": 1, "percent": 0.0})
-    loaded = load_tracknet(weight_path, request["device"])
+    if profile == "tracknet_v1":
+        weight_path = os.environ.get("TTCUT_TRACKNET_WEIGHTS", "").strip()
+        if not weight_path:
+            raise ModelResourceError("Bundled analysis model path is not configured.")
+        loaded = load_tracknet(weight_path, request["device"])
+        predictor = TrackNetPredictor(loaded)
+    else:
+        main_path = os.environ.get("TTCUT_DUAL_BALL_MAIN_WEIGHTS", "").strip()
+        aux_path = os.environ.get("TTCUT_DUAL_BALL_AUX_WEIGHTS", "").strip()
+        if not main_path or not aux_path:
+            raise ModelResourceError("Dual ball model paths are not configured.")
+        loaded = load_dual_models(main_path, aux_path, request["device"])
+        predictor = UpliftingDualPredictor(loaded, batch_size=2)
     emit({"type": "progress", "task_id": task_id, "stage": "load_model", "current": 1, "total": 1, "percent": 100.0})
 
     def progress(current: int, total: int) -> None:
@@ -66,7 +78,7 @@ def analyze(request: dict) -> dict:
             "current": current, "total": total, "percent": round(percent, 4),
         })
 
-    points, info, _stats = TrackNetPredictor(loaded).predict(
+    points, info, stats = predictor.predict(
         request["video_path"],
         progress_callback=progress,
         analysis_roi=analysis_roi,
@@ -110,6 +122,24 @@ def analyze(request: dict) -> dict:
             "points": {name: list(point) for name, point in zip(
                 ("top_left", "top_right", "bottom_right", "bottom_left"), calibration.points,
             )},
+        },
+        "model_provenance": {
+            "profile": profile,
+            "component_version": loaded.component_version if profile == "uplifting_dual_v1" else None,
+            "roi": {
+                "x": analysis_roi.x0,
+                "y": analysis_roi.y0,
+                "width": analysis_roi.width,
+                "height": analysis_roi.height,
+            },
+            "main_input": {
+                "width": stats.main_width if profile == "uplifting_dual_v1" else stats.model_width,
+                "height": stats.main_height if profile == "uplifting_dual_v1" else stats.model_height,
+            },
+            "aux_input": ({
+                "width": stats.aux_width,
+                "height": stats.aux_height,
+            } if profile == "uplifting_dual_v1" else None),
         },
     }
     if table_analysis is None and choice["method"] == "precalibrated":

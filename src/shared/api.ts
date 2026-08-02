@@ -1,6 +1,7 @@
 import type {
   AnalysisResultV1,
   AppSettings,
+  BallModelProfile,
   Calibration,
   CalibrationChoice,
   TableAnalysis,
@@ -48,7 +49,7 @@ export type AppEvent =
     type: 'component-result';
     taskId: string;
     data: ComponentStatus;
-    imported: Array<'analysis' | 'media'>;
+    imported: Array<'analysis' | 'media' | 'dual_ball_models'>;
     pendingImports: PendingComponentImport[];
   }
   | { type: 'error'; taskId: string; code: string; message: string; logPath?: string };
@@ -69,6 +70,7 @@ export interface TTcutApi {
   openX264Download(): Promise<void>;
   installAnalysisComponent(consent: true): Promise<string>;
   installMediaComponent(consent: true): Promise<string>;
+  installDualBallModels(consent: true): Promise<string>;
   selectVideo(): Promise<SelectedVideo | null>;
   selectVideos(): Promise<SelectedVideo[]>;
   pathForDroppedFile(file: File): string;
@@ -83,6 +85,7 @@ export interface TTcutApi {
     calibrationChoice: CalibrationChoice;
     device: 'auto' | 'cuda' | 'cpu';
     historyVisibility: 'visible' | 'deferred';
+    ballModelProfile: BallModelProfile;
   }): Promise<string>;
   startExport(input: ExportRequest): Promise<string>;
   listHistory(): Promise<HistorySummaryV1[]>;

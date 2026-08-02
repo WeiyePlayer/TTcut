@@ -8,7 +8,7 @@ from .errors import InvalidRequestError
 
 
 def validate_request(value: object) -> dict:
-    expected_fields = {
+    base_fields = {
         "schema_version",
         "task_id",
         "video_path",
@@ -16,12 +16,19 @@ def validate_request(value: object) -> dict:
         "video_metadata",
         "calibration_choice",
     }
-    if not isinstance(value, dict) or set(value) != expected_fields or value.get("schema_version") != 1:
+    if not isinstance(value, dict) or value.get("schema_version") not in {1, 2}:
         raise InvalidRequestError("Unsupported analysis request schema.")
+    expected_fields = base_fields if value["schema_version"] == 1 else base_fields | {"ball_model_profile"}
+    if set(value) != expected_fields:
+        raise InvalidRequestError("Unsupported analysis request schema fields.")
     try:
         uuid.UUID(str(value["task_id"]))
         if value["device"] not in {"auto", "cuda", "cpu"}:
             raise ValueError("device")
+        if value.get("ball_model_profile", "tracknet_v1") not in {"tracknet_v1", "uplifting_dual_v1"}:
+            raise ValueError("ball_model_profile")
+        if value.get("ball_model_profile") == "uplifting_dual_v1" and value["device"] != "cuda":
+            raise ValueError("uplifting_dual_v1 requires cuda")
         if (
             not isinstance(value["video_path"], str)
             or Path(value["video_path"]).suffix.lower() not in {".mp4", ".mov"}

@@ -4,6 +4,7 @@ import type {
   Calibration,
   CutSelectionV1,
   ExportStrategy,
+  BallModelProfile,
   TableAnalysis,
   VideoMetadata,
 } from '../shared/contracts';
@@ -45,6 +46,7 @@ interface MultiTaskPageProps {
   preRoll: 1.5 | 2.5 | 5;
   postRoll: 0.5 | 1 | 2 | 4;
   exportStrategy: ExportStrategy;
+  ballModelProfile?: BallModelProfile;
   language?: 'zh-CN' | 'en';
   onOpenAnalysis: (analysisId: string) => void;
   onCompletableTasksFinished?: () => void;
@@ -93,6 +95,7 @@ export function MultiTaskPage({
   preRoll,
   postRoll,
   exportStrategy,
+  ballModelProfile = 'tracknet_v1',
   language = 'zh-CN',
   onOpenAnalysis,
   onCompletableTasksFinished = () => undefined,
@@ -294,6 +297,7 @@ export function MultiTaskPage({
       calibrationChoice,
       device: 'auto',
       historyVisibility: candidate.mode === 'analyze-only' ? 'visible' : 'deferred',
+      ballModelProfile,
     });
     pendingTaskStartRef.current = startPromise;
     void startPromise.then((taskId) => {

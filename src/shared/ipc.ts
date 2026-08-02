@@ -7,6 +7,7 @@ export const IPC = {
   componentsOpenX264Download: 'components:open-x264-download',
   componentsInstallAnalysis: 'components:install-analysis',
   componentsInstallMedia: 'components:install-media',
+  componentsInstallDualBallModels: 'components:install-dual-ball-models',
   videoSelect: 'video:select',
   videosSelect: 'videos:select',
   videoAcceptDrop: 'video:accept-drop',

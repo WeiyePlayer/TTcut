@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Literal
 
-PointSource = Literal["tracknet", "missing"]
+PointSource = Literal["tracknet", "uplifting_dual", "missing"]
 TimeSource = Literal["decoder", "fps_estimation"]
 
 
@@ -26,7 +26,7 @@ class TrajectoryPoint:
             visibility=1,
             x=min(max(int(round(self.x)), 0), max(width - 1, 0)),
             y=min(max(int(round(self.y)), 0), max(height - 1, 0)),
-            source="tracknet",
+            source=self.source,
         )
 
 
