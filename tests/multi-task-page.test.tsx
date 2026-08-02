@@ -138,6 +138,7 @@ describe('multi-task clipping', () => {
       calibrationChoice: { method: 'precalibrated', calibration, table_analysis: tableAnalysis },
       device: 'auto',
       historyVisibility: 'deferred',
+      ballModelProfile: 'tracknet_v1',
     });
 
     act(() => listener?.({

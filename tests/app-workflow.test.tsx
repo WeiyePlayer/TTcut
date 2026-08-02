@@ -10,6 +10,7 @@ const bootstrap: BootstrapData = {
   settings: {
     language: 'zh-CN',
     calibration_method: 'automatic',
+    ball_model_profile: 'tracknet_v1',
     export_strategy: 'compatible',
     pre_roll_seconds: 2.5,
     post_roll_seconds: 2,
@@ -30,10 +31,17 @@ const bootstrap: BootstrapData = {
       x264_available: false,
       detail: null,
     },
+    dual_ball_models: {
+      available: false,
+      version: null,
+      path: 'C:\\models\\dual-ball-models\\1.0.0',
+      detail: 'DUAL_BALL_MODELS_MISSING',
+    },
   },
   componentSetup: {
     analysis_offer: null,
     media_offer: null,
+    dual_ball_models_offer: null,
     x264_manual_offer: {
       id: 'media-x264',
       version: 'N-125716-g1b1f602699',
@@ -93,12 +101,18 @@ describe('App workflow notices and multi-task entry', () => {
       selectVideos,
       probeVideo: vi.fn((path: string) => Promise.resolve(metadata(path))),
       startAutoCalibration: vi.fn().mockResolvedValue('calibration-task-1'),
+      saveSettings: vi.fn((settings) => Promise.resolve(settings)),
+      installDualBallModels: vi.fn().mockResolvedValue('dual-setup-task'),
     } as unknown as TTcutApi;
     Object.defineProperty(window, 'ttcut', { configurable: true, value: api });
   });
 
   afterEach(() => {
     bootstrap.settings.language = 'zh-CN';
+    bootstrap.settings.ball_model_profile = 'tracknet_v1';
+    bootstrap.components.dual_ball_models = {
+      available: false, version: null, path: 'C:\\models\\dual-ball-models\\1.0.0', detail: 'DUAL_BALL_MODELS_MISSING',
+    };
     window.localStorage.clear();
     cleanup();
     vi.useRealTimers();
@@ -129,6 +143,47 @@ describe('App workflow notices and multi-task entry', () => {
     expect(screen.getByText('选择 MP4 或 MOV 比赛视频开始本地分析，支持多任务批量处理。')).toBeVisible();
     expect(screen.getByText('或将 MP4 / MOV 文件拖到这里')).toBeVisible();
     expect(screen.queryByText(/单个|一次只能处理一个/)).toBeNull();
+  });
+
+  it('shows the simplified ball model profile copy', async () => {
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: '设置' }));
+
+    expect(screen.getByRole('button', { name: '默认模型速度快，精准度一般。' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '新模型速度慢，准确度很高。' })).toBeVisible();
+    expect(screen.queryByText('单视频和多任务统一使用所选档位。板数仍表示落台反弹数。')).toBeNull();
+  });
+
+  it('persists the dual profile only after both downloaded models are installed', async () => {
+    bootstrap.settings.language = 'en';
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+    fireEvent.click(screen.getByRole('button', { name: /New model/ }));
+    expect(window.ttcut.installDualBallModels).toHaveBeenCalledWith(true);
+    expect(window.ttcut.saveSettings).not.toHaveBeenCalled();
+
+    act(() => taskListener?.({
+      type: 'component-result', taskId: 'dual-setup-task', imported: ['dual_ball_models'], pendingImports: [],
+      data: {
+        ...bootstrap.components,
+        dual_ball_models: { available: true, version: '1.0.0', path: 'C:\\models\\dual-ball-models\\1.0.0', detail: null },
+      },
+    }));
+
+    await waitFor(() => expect(window.ttcut.saveSettings).toHaveBeenCalledWith(expect.objectContaining({
+      ball_model_profile: 'uplifting_dual_v1',
+    })));
+  });
+
+  it('keeps TrackNet selected when first-use dual model setup is cancelled', async () => {
+    bootstrap.settings.language = 'en';
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+    fireEvent.click(screen.getByRole('button', { name: /New model/ }));
+    act(() => taskListener?.({
+      type: 'error', taskId: 'dual-setup-task', code: 'SETUP_CANCELLED', message: 'SETUP_CANCELLED',
+    }));
+    expect(window.ttcut.saveSettings).not.toHaveBeenCalled();
   });
 
   it('hides the automatic calibration failure notice after three seconds', async () => {

@@ -1,12 +1,14 @@
 {
   "name": "ttcut",
   "productName": "TTcut",
-  "version": "1.1.4",
+  "version": "1.2.0-beta.1",
   "description": "Local table-tennis rally cutter for Windows",
   "author": "weiye",
   "private": true,
   "main": ".vite/build/main.js",
   "scripts": {
+    "prepare:dual-model-assets": "node scripts/prepare-dual-ball-model-assets.mjs",
+    "verify:dual-model-assets": "node scripts/verify-dual-ball-model-assets.mjs",
     "start": "electron-forge start",
     "stage:worker": "node scripts/stage-worker.mjs",
     "stage:release": "node scripts/verify-model-assets.mjs && node scripts/stage-worker.mjs && node scripts/generate-release-metadata.mjs",

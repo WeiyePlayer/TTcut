@@ -20,7 +20,7 @@ vi.mock('node:child_process', async (importOriginal) => ({
   spawnSync: mock.spawnSync,
 }));
 
-import { layoutFromRoot, parseRegistryString, resolveInstallationLayout } from '../src/main/installation-layout';
+import { isLocalForgePackage, layoutFromRoot, parseRegistryString, resolveInstallationLayout } from '../src/main/installation-layout';
 
 describe('installation layout', () => {
   const originalExecPath = process.execPath;
@@ -69,6 +69,19 @@ describe('installation layout', () => {
       value: 'D:\\DOCUMENTS\\TTcut\\out\\TTcut-win32-x64\\TTcut.exe',
     });
 
+    expect(resolveInstallationLayout().componentRoot).toBe('E:\\TTcut\\data\\components');
+  });
+
+  it('recognizes Forge unpacked output even after local NSIS preparation adds update configuration', async () => {
+    mock.app.isPackaged = true;
+    mock.spawnSync.mockReturnValue({ status: 0, stdout: 'E:\\TTcut\r\n' });
+    Object.defineProperty(process, 'execPath', {
+      configurable: true,
+      value: 'D:\\DOCUMENTS\\TTcut\\out\\TTcut-win32-x64\\TTcut.exe',
+    });
+    await writeFile(path.join(resourcesPath, 'app-update.yml'), 'provider: github\n', 'utf8');
+
+    expect(isLocalForgePackage(path.dirname(process.execPath))).toBe(true);
     expect(resolveInstallationLayout().componentRoot).toBe('E:\\TTcut\\data\\components');
   });
 

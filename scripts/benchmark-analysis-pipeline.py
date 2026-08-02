@@ -19,6 +19,8 @@ if str(WORKER_ROOT) not in sys.path:
 from ttcut_worker.bounce import detect_bounce_frames  # noqa: E402
 from ttcut_worker.calibration import TableCalibration  # noqa: E402
 from ttcut_worker.model import load_tracknet  # noqa: E402
+from ttcut_worker.dual_models import load_dual_models  # noqa: E402
+from ttcut_worker.dual_predictor import UpliftingDualPredictor  # noqa: E402
 from ttcut_worker.rallies import group_rallies  # noqa: E402
 from ttcut_worker.roi import build_analysis_roi  # noqa: E402
 
@@ -105,6 +107,9 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--device", choices=("cuda", "cpu"), default="cuda")
     parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--profile", choices=("tracknet_v1", "uplifting_dual_v1"), default="tracknet_v1")
+    parser.add_argument("--dual-main-weights", type=Path)
+    parser.add_argument("--dual-aux-weights", type=Path)
     parser.add_argument("--model-size", default="280x160")
     parser.add_argument(
         "--predictor-source-ref",
@@ -120,16 +125,27 @@ def main() -> int:
     calibration = read_calibration(args.calibration)
     roi = build_analysis_roi(calibration)
     source_before = sha256(args.video)
-    model_hash = sha256(args.weights)
+    source_size_before = args.video.stat().st_size
+    model_hash = sha256(args.weights) if args.profile == "tracknet_v1" else None
 
     import cv2
     import numpy as np
     import torch
 
-    load_started = time.perf_counter()
-    loaded = load_tracknet(args.weights, args.device)
+    if args.device == "cuda":
+        torch.cuda.reset_peak_memory_stats()
+    analysis_started = time.perf_counter()
+    load_started = analysis_started
+    if args.profile == "tracknet_v1":
+        loaded = load_tracknet(args.weights, args.device)
+        Predictor = predictor_class(args.predictor_source_ref)
+        predictor = Predictor(loaded, batch_size=args.batch_size)
+    else:
+        if args.device != "cuda" or args.batch_size != 2 or not args.dual_main_weights or not args.dual_aux_weights:
+            parser.error("uplifting_dual_v1 requires CUDA, batch size 2, and both dual weight paths")
+        loaded = load_dual_models(args.dual_main_weights, args.dual_aux_weights, args.device)
+        predictor = UpliftingDualPredictor(loaded, batch_size=2)
     model_load_seconds = time.perf_counter() - load_started
-    Predictor = predictor_class(args.predictor_source_ref)
     last_progress = [-1]
 
     def progress(current: int, total: int) -> None:
@@ -137,12 +153,14 @@ def main() -> int:
             print(f"predictor: {current}/{total}", flush=True)
             last_progress[0] = current
 
-    points, info, stats = Predictor(loaded, batch_size=args.batch_size).predict(
-        args.video,
-        progress_callback=progress,
-        analysis_roi=roi,
-        model_size=model_size,
-    )
+    if args.profile == "tracknet_v1":
+        points, info, stats = predictor.predict(
+            args.video, progress_callback=progress, analysis_roi=roi, model_size=model_size,
+        )
+    else:
+        points, info, stats = predictor.predict(
+            args.video, progress_callback=progress, analysis_roi=roi,
+        )
     point_rows = [asdict(point) for point in points]
     canonical = json.dumps(
         point_rows,
@@ -152,6 +170,7 @@ def main() -> int:
     ).encode("utf-8")
     bounces = detect_bounce_frames(points, calibration)
     rallies = group_rallies(bounces, points)
+    complete_analysis_seconds = time.perf_counter() - analysis_started
     payload = {
         "environment": {
             "windows": platform.platform(),
@@ -166,18 +185,27 @@ def main() -> int:
             "video": str(args.video.resolve()),
             "video_sha256_before": source_before,
             "video_sha256_after": sha256(args.video),
-            "weights": str(args.weights.resolve()),
-            "weights_sha256": model_hash,
+            "video_size_before": source_size_before,
+            "video_size_after": args.video.stat().st_size,
+            "profile": args.profile,
+            "weights": str(args.weights.resolve()) if args.profile == "tracknet_v1" else {
+                "main": str(args.dual_main_weights.resolve()), "aux": str(args.dual_aux_weights.resolve()),
+            },
+            "weights_sha256": model_hash if args.profile == "tracknet_v1" else {
+                "main": sha256(args.dual_main_weights), "aux": sha256(args.dual_aux_weights),
+            },
             "calibration": str(args.calibration.resolve()),
             "batch_size": args.batch_size,
-            "sequence_length": loaded.seq_len,
-            "background_mode": loaded.bg_mode,
+            "sequence_length": loaded.seq_len if args.profile == "tracknet_v1" else 3,
+            "background_mode": loaded.bg_mode if args.profile == "tracknet_v1" else None,
             "analysis_roi": asdict(roi),
             "model_size": list(model_size) if model_size else "auto",
             "predictor_source_ref": args.predictor_source_ref,
         },
         "timing": {
             "model_load_seconds": model_load_seconds,
+            "complete_analysis_seconds": complete_analysis_seconds,
+            "peak_cuda_memory_bytes": int(torch.cuda.max_memory_allocated()) if args.device == "cuda" else 0,
             **asdict(stats),
         },
         "output": {
@@ -185,6 +213,7 @@ def main() -> int:
             "visible_frames": sum(point.visibility for point in points),
             "trajectory_sha256": hashlib.sha256(canonical).hexdigest(),
             "confidences": [point.confidence for point in points],
+            "trajectory": point_rows,
             "bounce_frames": bounces,
             "rallies": [asdict(rally) for rally in rallies],
         },

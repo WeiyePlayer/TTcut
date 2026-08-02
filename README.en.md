@@ -4,7 +4,7 @@
 
 TTcut is a local automatic table-tennis video cutter for players and enthusiasts. It locates the ball, detects bounce events and valid rallies, then exports edited clips using the selected cutting mode.
 
-Videos, analysis results, and history stay on the local computer. TTcut requires no account, uploads no video, and collects no telemetry. The analysis models are included in the installer. The analysis runtime and media-processing components require an internet connection during initial setup; after installation, analysis, preview, and cutting can run offline.
+Videos, analysis results, and history stay on the local computer. TTcut requires no account, uploads no video, and collects no telemetry. The default analysis models are included in the installer; the optional new ball models are downloaded on demand. The analysis runtime and media-processing components require an internet connection during initial setup; after installation, analysis, preview, and cutting can run offline.
 
 > The current stable release is `v1.1.4` for Windows x64. TTcut no longer blocks startup according to a Windows build-number allowlist.
 
@@ -15,6 +15,15 @@ Videos, analysis results, and history stay on the local computer. TTcut requires
 3. On first launch, open Settings and install the Analysis component and Video processing component after reviewing the prompts.
 
 The Analysis component detects an NVIDIA GPU automatically and falls back to CPU if CUDA installation or self-test fails. The Video processing component reads media information, cuts and joins segments, and validates exported files.
+
+## v1.2.0-beta.1 prerelease
+
+- Settings now offers a Default model and a CUDA-only New model. The new profile filters a SegFormer++ B2 main model through a WASB auxiliary model.
+- The new profile preserves the dynamic ROI and derives both input sizes from the decoded video resolution. Its two weights total about 105 MB and are downloaded and verified only on first selection.
+- Fixed the new profile's colour preprocessing, short trajectory gaps, and bounce-plateau counting while retaining the existing rally grouping and `bounce_count` output.
+- This is an isolated Beta update channel: existing stable installations do not receive it automatically, while Beta installations remain eligible for later Beta and stable updates.
+
+See the [v1.2.0-beta.1 Release](https://github.com/WeiyePlayer/TTcut/releases/tag/v1.2.0-beta.1) and [release notes](docs/release-notes-v1.2.0-beta.1.en.md) for downloads and details.
 
 ## What's new in v1.1.4
 

@@ -6,6 +6,7 @@ import { appSettingsSchema, type AppSettings } from '../shared/contracts';
 const defaults: AppSettings = {
   language: 'zh-CN',
   calibration_method: 'automatic',
+  ball_model_profile: 'tracknet_v1',
   export_strategy: 'compatible',
   pre_roll_seconds: 2.5,
   post_roll_seconds: 2,
@@ -23,6 +24,9 @@ export async function loadSettings(): Promise<AppSettings> {
       calibration_method: raw.calibration_method === 'automatic' || raw.calibration_method === 'manual'
         ? raw.calibration_method
         : defaults.calibration_method,
+      ball_model_profile: raw.ball_model_profile === 'uplifting_dual_v1'
+        ? raw.ball_model_profile
+        : defaults.ball_model_profile,
       export_strategy: raw.export_strategy === 'fast_segmented' || raw.export_strategy === 'compatible'
         ? raw.export_strategy
         : defaults.export_strategy,

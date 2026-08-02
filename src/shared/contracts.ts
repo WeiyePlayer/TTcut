@@ -5,6 +5,7 @@ export const PRE_ROLL_VALUES = [1.5, 2.5, 5] as const;
 export const POST_ROLL_VALUES = [0.5, 1, 2, 4] as const;
 export const HIGHLIGHT_VALUES = [3, 5, 7] as const;
 export const EXPORT_STRATEGIES = ['compatible', 'fast_segmented'] as const;
+export const BALL_MODEL_PROFILES = ['tracknet_v1', 'uplifting_dual_v1'] as const;
 
 const finiteNumber = z.number().finite();
 const point = z.tuple([finiteNumber, finiteNumber]);
@@ -124,7 +125,7 @@ const analysisVideoMetadataSchema = z.object({
   variable_frame_rate: z.boolean(),
 }).strict();
 
-export const analysisRequestSchema = z.object({
+export const analysisRequestV1Schema = z.object({
   schema_version: z.literal(1),
   task_id: z.string().uuid(),
   video_path: z.string().min(1),
@@ -132,6 +133,18 @@ export const analysisRequestSchema = z.object({
   video_metadata: analysisVideoMetadataSchema,
   calibration_choice: calibrationChoiceSchema,
 }).strict();
+
+export const analysisRequestV2Schema = z.object({
+  schema_version: z.literal(2),
+  task_id: z.string().uuid(),
+  video_path: z.string().min(1),
+  device: z.enum(DEVICE_VALUES),
+  ball_model_profile: z.enum(BALL_MODEL_PROFILES),
+  video_metadata: analysisVideoMetadataSchema,
+  calibration_choice: calibrationChoiceSchema,
+}).strict();
+
+export const analysisRequestSchema = z.union([analysisRequestV1Schema, analysisRequestV2Schema]);
 
 export const videoMetadataSchema = z.object({
   path: z.string().min(1),
@@ -182,6 +195,18 @@ export const analysisResultSchema = z.object({
   rallies: z.array(rallySchema),
   calibration: calibrationSchema.optional(),
   table_analysis: tableAnalysisSchema.optional(),
+  model_provenance: z.object({
+    profile: z.enum(BALL_MODEL_PROFILES),
+    component_version: z.string().min(1).nullable(),
+    roi: z.object({
+      x: z.number().int().nonnegative(),
+      y: z.number().int().nonnegative(),
+      width: z.number().int().positive(),
+      height: z.number().int().positive(),
+    }).strict(),
+    main_input: z.object({ width: z.number().int().positive(), height: z.number().int().positive() }).strict(),
+    aux_input: z.object({ width: z.number().int().positive(), height: z.number().int().positive() }).strict().nullable(),
+  }).strict().optional(),
 }).strict();
 
 export const calibrationResultSchema = z.object({
@@ -237,6 +262,7 @@ export const cutSelectionSchema = z.discriminatedUnion('mode', [
 export const appSettingsSchema = z.object({
   language: z.enum(['zh-CN', 'en']),
   calibration_method: z.enum(['manual', 'automatic']),
+  ball_model_profile: z.enum(BALL_MODEL_PROFILES),
   export_strategy: z.enum(EXPORT_STRATEGIES),
   pre_roll_seconds: z.union(PRE_ROLL_VALUES.map((value) => z.literal(value))),
   post_roll_seconds: z.union(POST_ROLL_VALUES.map((value) => z.literal(value))),
@@ -304,6 +330,12 @@ export const componentStatusSchema = z.object({
     x264_available: z.boolean(),
     detail: z.string().nullable(),
   }).strict(),
+  dual_ball_models: z.object({
+    available: z.boolean(),
+    version: z.string().nullable(),
+    path: z.string().nullable(),
+    detail: z.string().nullable(),
+  }).strict(),
 }).strict();
 
 export const managedComponentOfferSchema = z.object({
@@ -317,6 +349,12 @@ export const managedComponentOfferSchema = z.object({
 export const componentSetupInfoSchema = z.object({
   analysis_offer: managedComponentOfferSchema.nullable(),
   media_offer: managedComponentOfferSchema.nullable(),
+  dual_ball_models_offer: z.object({
+    id: z.literal('dual_ball_models'),
+    version: z.string().min(1),
+    download_size_bytes: z.number().int().positive(),
+    available_for_download: z.boolean(),
+  }).strict().nullable(),
   x264_manual_offer: z.object({
     id: z.literal('media-x264'),
     version: z.string().min(1),
@@ -345,7 +383,10 @@ export const platformCompatibilitySchema = z.object({
 export type Calibration = z.infer<typeof calibrationSchema>;
 export type CalibrationChoice = z.infer<typeof calibrationChoiceSchema>;
 export type TableAnalysis = z.infer<typeof tableAnalysisSchema>;
-export type AnalysisRequestV1 = z.infer<typeof analysisRequestSchema>;
+export type BallModelProfile = typeof BALL_MODEL_PROFILES[number];
+export type AnalysisRequestV1 = z.infer<typeof analysisRequestV1Schema>;
+export type AnalysisRequestV2 = z.infer<typeof analysisRequestV2Schema>;
+export type AnalysisRequest = z.infer<typeof analysisRequestSchema>;
 export type VideoMetadata = z.infer<typeof videoMetadataSchema>;
 export type Rally = z.infer<typeof rallySchema>;
 export type AnalysisResultV1 = z.infer<typeof analysisResultSchema>;
