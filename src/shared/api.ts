@@ -9,6 +9,7 @@ import type {
   ComponentSetupInfo,
   CutSelectionV1,
   ExportResult,
+  ExportTimingInfo,
   ExportRequest,
   HistorySummaryV1,
   PlatformCompatibility,
@@ -16,6 +17,8 @@ import type {
   VideoMetadata,
   UpdateState,
 } from './contracts';
+
+export type { ExportTimingInfo } from './contracts';
 
 export type SelectedVideo = {
   path: string;
@@ -52,7 +55,15 @@ export type AppEvent =
     imported: Array<'analysis' | 'media' | 'dual_ball_models'>;
     pendingImports: PendingComponentImport[];
   }
-  | { type: 'error'; taskId: string; code: string; message: string; logPath?: string };
+  | {
+    type: 'error';
+    taskId: string;
+    code: string;
+    message: string;
+    logPath?: string;
+    recoveredOutputPath?: string;
+    timing?: ExportTimingInfo;
+  };
 
 export type HistoryOpenResultV1 = {
   analysisId: string;

@@ -11,7 +11,6 @@ const bootstrap: BootstrapData = {
     language: 'zh-CN',
     calibration_method: 'automatic',
     ball_model_profile: 'tracknet_v1',
-    export_strategy: 'compatible',
     pre_roll_seconds: 2.5,
     post_roll_seconds: 2,
   },
@@ -98,6 +97,8 @@ describe('App workflow notices and multi-task entry', () => {
         message: null,
       }),
       openExternalUrl: vi.fn().mockResolvedValue(undefined),
+      revealLogs: vi.fn().mockResolvedValue(undefined),
+      revealOutput: vi.fn().mockResolvedValue(undefined),
       selectVideos,
       probeVideo: vi.fn((path: string) => Promise.resolve(metadata(path))),
       startAutoCalibration: vi.fn().mockResolvedValue('calibration-task-1'),
@@ -134,6 +135,16 @@ describe('App workflow notices and multi-task entry', () => {
     const manualDownload = screen.getByRole('button', { name: 'Download update manually' });
     fireEvent.click(manualDownload);
     expect(window.ttcut.openExternalUrl).toHaveBeenCalledWith('https://github.com/WeiyePlayer/TTcut/releases');
+  });
+
+  it('does not expose an export strategy setting', async () => {
+    bootstrap.settings.language = 'en';
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+
+    expect(screen.queryByRole('heading', { name: 'Export strategy' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Compatible mode|Fast segmented mode/ })).toBeNull();
   });
 
   it('presents video selection as a single or multi-task workflow', async () => {
@@ -245,9 +256,17 @@ describe('App workflow notices and multi-task entry', () => {
         outputPath: 'C:\\video\\first_TTcut.mp4',
         outputName: 'first_TTcut.mp4',
         mediaUrl: 'ttcut-media://output',
+        timing: {
+          targetSeconds: 100,
+          actualSeconds: 102.128,
+          driftSeconds: 2.128,
+          allowedDriftSeconds: 3.4,
+          segmentCount: 73,
+        },
       },
     }));
 
+    expect(await screen.findByRole('status')).toHaveTextContent('+2.13');
     const prompt = await screen.findByRole('region', { name: '使用与赞助提示' });
     expect(within(prompt).getByText((_content, element) => element?.textContent === (
       '如果使用中遇到问题请联系作者。\n\n如果软件对您有帮助希望可以赞助我，感谢'
@@ -278,6 +297,13 @@ describe('App workflow notices and multi-task entry', () => {
         outputPath: 'C:\\video\\first_TTcut.mp4',
         outputName: 'first_TTcut.mp4',
         mediaUrl: 'ttcut-media://output',
+        timing: {
+          targetSeconds: 100,
+          actualSeconds: 100.05,
+          driftSeconds: 0.05,
+          allowedDriftSeconds: 0.1,
+          segmentCount: 1,
+        },
       },
     }));
 
@@ -291,5 +317,30 @@ describe('App workflow notices and multi-task entry', () => {
 
     finishExport();
     expect(screen.queryByRole('region', { name: '使用与赞助提示' })).toBeNull();
+  });
+
+  it('offers the retained file when duration is the only failed validation', async () => {
+    bootstrap.settings.language = 'en';
+    render(<App />);
+    await screen.findByRole('heading', { name: 'Choose match videos' });
+
+    act(() => taskListener?.({
+      type: 'error',
+      taskId: 'export-task-1',
+      code: 'EXPORT_DURATION_MISMATCH',
+      message: 'duration mismatch',
+      recoveredOutputPath: 'C:\\video\\first_TTcut_duration_mismatch.mp4',
+      timing: {
+        targetSeconds: 100,
+        actualSeconds: 102.128,
+        driftSeconds: 2.128,
+        allowedDriftSeconds: 0.1,
+        segmentCount: 1,
+      },
+    }));
+
+    expect(await screen.findByText('C:\\video\\first_TTcut_duration_mismatch.mp4')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Open retained file location' }));
+    expect(window.ttcut.revealOutput).toHaveBeenCalledWith('C:\\video\\first_TTcut_duration_mismatch.mp4');
   });
 });

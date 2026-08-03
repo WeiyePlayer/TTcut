@@ -77,7 +77,7 @@ describe('export timestamp validation', () => {
       audio_start_time_seconds: 0,
     });
 
-    await expect(validateExportOutput(output, 2, source)).resolves.toBeDefined();
+    await expect(validateExportOutput(output, { targetSeconds: 2, segmentCount: 1 }, source)).resolves.toBeDefined();
   });
 
   it('accepts output duration drift within the domain tolerance', async () => {
@@ -87,7 +87,11 @@ describe('export timestamp validation', () => {
       duration_seconds: 3.99,
     });
 
-    await expect(validateExportOutput(output, 2, source)).resolves.toBeDefined();
+    await expect(validateExportOutput(
+      output,
+      { targetSeconds: 2, segmentCount: 73 },
+      source,
+    )).resolves.toBeDefined();
   });
 
   it('rejects output duration drift beyond the domain tolerance', async () => {
@@ -97,7 +101,11 @@ describe('export timestamp validation', () => {
       duration_seconds: 4.01,
     });
 
-    await expect(validateExportOutput(output, 2, source)).rejects.toThrow('EXPORT_DURATION_MISMATCH');
+    await expect(validateExportOutput(
+      output,
+      { targetSeconds: 2, segmentCount: 1 },
+      source,
+    )).rejects.toThrow('EXPORT_DURATION_MISMATCH');
   });
 
   it('rejects an audio start timestamp beyond the frame-based tolerance', async () => {
@@ -108,7 +116,11 @@ describe('export timestamp validation', () => {
       audio_start_time_seconds: -0.1,
     });
 
-    await expect(validateExportOutput(output, 2, source)).rejects.toThrow('EXPORT_TIMESTAMP_INVALID');
+    await expect(validateExportOutput(
+      output,
+      { targetSeconds: 2, segmentCount: 1 },
+      source,
+    )).rejects.toThrow('EXPORT_TIMESTAMP_INVALID');
   });
 
   it('accepts a physically normalized portrait output without copied rotation metadata', async () => {
@@ -124,7 +136,31 @@ describe('export timestamp validation', () => {
       rotation: null,
     });
 
-    await expect(validateExportOutput(output, 2, rotatedSource, 'normalized')).resolves.toBeDefined();
-    await expect(validateExportOutput(output, 2, rotatedSource)).rejects.toThrow('EXPORT_ROTATION_MISMATCH');
+    await expect(validateExportOutput(
+      output,
+      { targetSeconds: 2, segmentCount: 1 },
+      rotatedSource,
+      'normalized',
+    )).resolves.toBeDefined();
+    await expect(validateExportOutput(
+      output,
+      { targetSeconds: 2, segmentCount: 1 },
+      rotatedSource,
+    )).rejects.toThrow('EXPORT_ROTATION_MISMATCH');
+  });
+
+  it('reports a structural codec failure before an excessive duration drift', async () => {
+    state.probeVideo.mockResolvedValue({
+      ...source,
+      path: output,
+      duration_seconds: 20,
+      video_codec: 'hevc',
+    });
+
+    await expect(validateExportOutput(
+      output,
+      { targetSeconds: 2, segmentCount: 100 },
+      source,
+    )).rejects.toThrow('EXPORT_CODEC_UNSUPPORTED');
   });
 });

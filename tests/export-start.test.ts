@@ -85,7 +85,6 @@ const request: ExportRequest = {
     pre_roll_seconds: 2.5,
     post_roll_seconds: 2,
   },
-  export_strategy: 'fast_segmented',
   destination: 'source',
 };
 
