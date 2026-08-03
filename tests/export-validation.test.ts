@@ -123,6 +123,28 @@ describe('export timestamp validation', () => {
     )).rejects.toThrow('EXPORT_TIMESTAMP_INVALID');
   });
 
+  it('reports A/V durations and preserves the synchronization error code', async () => {
+    state.probeVideo.mockResolvedValue({
+      ...source,
+      path: output,
+      duration_seconds: 2.25,
+      video_duration_seconds: 2.25,
+      audio_duration_seconds: 2,
+    });
+
+    const validation = validateExportOutput(
+      output,
+      { targetSeconds: 2, segmentCount: 1 },
+      source,
+    );
+    await expect(validation).rejects.toMatchObject({
+      exportCode: 'EXPORT_AV_SYNC_MISMATCH',
+    });
+    await expect(validation).rejects.toThrow(
+      'EXPORT_AV_SYNC_MISMATCH: video=2.250000 audio=2.000000 delta=0.250000 allowed=0.100000',
+    );
+  });
+
   it('accepts a physically normalized portrait output without copied rotation metadata', async () => {
     const rotatedSource: VideoMetadata = {
       ...source,

@@ -134,7 +134,7 @@ export function buildTrimFilter(
     const group = groups[0]!;
     parts.push(
       `[0:v:0]trim=start=${group.start.toFixed(6)}:end=${group.end.toFixed(6)},`
-      + `setpts=PTS-STARTPTS,setsar=sar=${sar}[vout]`,
+      + `setpts=PTS-STARTPTS:strip_fps=1,setsar=sar=${sar}[vout]`,
     );
     if (hasAudio) {
       parts.push(
@@ -152,7 +152,7 @@ export function buildTrimFilter(
     groups.forEach((group, index) => {
       parts.push(
         `[vsrc${index}]trim=start=${group.start.toFixed(6)}:end=${group.end.toFixed(6)},`
-        + `setpts=PTS-STARTPTS[v${index}]`,
+        + `setpts=PTS-STARTPTS:strip_fps=1[v${index}]`,
       );
       if (hasAudio) {
         parts.push(
@@ -229,9 +229,18 @@ function escapeConcatPath(value: string): string {
   return value.replaceAll('\\', '/').replaceAll("'", "'\\''");
 }
 
-export function buildConcatManifest(relativePaths: readonly string[]): string {
+export function buildConcatManifest(
+  relativePaths: readonly string[],
+  durationsSeconds?: readonly number[],
+): string {
+  if (durationsSeconds && durationsSeconds.length !== relativePaths.length) {
+    throw new Error('CONCAT_DURATION_COUNT_MISMATCH');
+  }
   return `ffconcat version 1.0\n${relativePaths
-    .map((relativePath) => `file '${escapeConcatPath(relativePath)}'`)
+    .flatMap((relativePath, index) => [
+      `file '${escapeConcatPath(relativePath)}'`,
+      ...(durationsSeconds ? [`duration ${durationsSeconds[index]!.toFixed(6)}`] : []),
+    ])
     .join('\n')}\n`;
 }
 
