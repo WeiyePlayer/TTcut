@@ -28,6 +28,10 @@ const cases = [
     ffprobe: process.env.TTCUT_X264_FFPROBE_INTEGRATION,
   },
 ];
+const syntheticFfmpeg = process.env.TTCUT_X264_FFMPEG_INTEGRATION;
+const syntheticFfprobe = process.env.TTCUT_X264_FFPROBE_INTEGRATION;
+const syntheticEnabled = Boolean(syntheticFfmpeg && syntheticFfprobe);
+const nullDevice = process.platform === 'win32' ? 'NUL' : '/dev/null';
 
 const groups: CutGroup[] = [
   { rallyIds: ['rally_001'], rawStart: 8, rawEnd: 10, start: 6.108, end: 10.108 },
@@ -120,6 +124,41 @@ function expectMonotonic(values: readonly number[]): void {
   for (let index = 1; index < values.length; index += 1) {
     expect(values[index]!).toBeGreaterThanOrEqual(values[index - 1]!);
   }
+}
+
+function expectStrictlyIncreasing(values: readonly number[]): void {
+  for (let index = 1; index < values.length; index += 1) {
+    expect(values[index]!).toBeGreaterThan(values[index - 1]!);
+  }
+}
+
+function probeVideoPacketDurations(ffprobe: string, file: string): number[] {
+  const data = JSON.parse(run(ffprobe, [
+    '-v', 'error', '-select_streams', 'v:0', '-show_packets',
+    '-show_entries', 'packet=duration_time', '-of', 'json', file,
+  ])) as { packets?: Array<{ duration_time?: string }> };
+  return (data.packets ?? [])
+    .map((packet) => Number(packet.duration_time))
+    .filter(Number.isFinite);
+}
+
+function streamDuration(data: ReturnType<typeof probe>, type: 'video' | 'audio'): number {
+  return Number(data.streams.find((stream) => stream.codec_type === type)?.duration);
+}
+
+function createAbnormalFrameDurationSource(ffmpeg: string, output: string): void {
+  run(ffmpeg, [
+    '-hide_banner', '-y',
+    '-f', 'lavfi', '-i', 'testsrc2=size=320x240:rate=30:duration=4',
+    '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000:duration=4',
+    '-filter_complex',
+    "[0:v]setpts='if(eq(N,0),0,PREV_OUTPTS+if(eq(mod(N,9),0),0.2665/TB,0.0001/TB))'[v]",
+    '-map', '[v]', '-map', '1:a:0',
+    '-fps_mode', 'vfr',
+    '-c:v', 'libx264', '-preset', 'ultrafast', '-g', '60',
+    '-c:a', 'aac', '-b:a', '128k', '-ar', '48000', '-ac', '2',
+    '-shortest', output,
+  ]);
 }
 
 function verifyVfr73IntervalExport(
@@ -251,11 +290,81 @@ describe.each(cases)('fast segmented export with $encoder', ({ encoder, ffmpeg, 
     if (!ffmpeg || !ffprobe) throw new Error('Integration environment is incomplete.');
     verifyVfr73IntervalExport(encoder, ffmpeg, ffprobe);
   }, 240_000);
-});
 
-const syntheticFfmpeg = process.env.TTCUT_X264_FFMPEG_INTEGRATION;
-const syntheticFfprobe = process.env.TTCUT_X264_FFPROBE_INTEGRATION;
-const syntheticEnabled = Boolean(syntheticFfmpeg && syntheticFfprobe);
+  it.skipIf(!syntheticFfmpeg || !syntheticFfprobe || !ffmpeg || !ffprobe)(
+    'clears abnormal frame durations before encoding',
+    () => {
+      if (!syntheticFfmpeg || !syntheticFfprobe || !ffmpeg || !ffprobe) {
+        throw new Error('Integration environment is incomplete.');
+      }
+      const directory = mkdtempSync(path.join(tmpdir(), `ttcut-frame-duration-${encoder}-`));
+      try {
+        const source = path.join(directory, 'source-abnormal-duration.mp4');
+        createAbnormalFrameDurationSource(syntheticFfmpeg, source);
+        const sourceDurations = probeVideoPacketDurations(syntheticFfprobe, source);
+        expect(Math.min(...sourceDurations)).toBeLessThanOrEqual(1 / 30 + 0.001);
+        expect(Math.max(...sourceDurations)).toBeGreaterThanOrEqual(0.19);
+
+        const metadata = {
+          ...sourceMetadata(source, probe(syntheticFfprobe, source)),
+          variable_frame_rate: true,
+        };
+        const group: CutGroup = {
+          rallyIds: ['rally_001'], rawStart: 0, rawEnd: 0.3, start: 0, end: 0.3,
+        };
+        const fixedOutput = path.join(directory, 'fixed.mp4');
+        const fixedArgs = buildSegmentReencodeArgs(
+          source,
+          fixedOutput,
+          group,
+          0,
+          metadata,
+          encoder,
+        );
+        const filterIndex = fixedArgs.indexOf('-filter_complex') + 1;
+        expect(fixedArgs[filterIndex]).toContain('setpts=PTS-STARTPTS:strip_fps=1');
+
+        const legacyOutput = path.join(directory, 'legacy.mp4');
+        const legacyArgs = [...fixedArgs];
+        legacyArgs[filterIndex] = legacyArgs[filterIndex]!.replace(':strip_fps=1', '');
+        legacyArgs[legacyArgs.length - 1] = legacyOutput;
+        run(ffmpeg, legacyArgs);
+        const legacy = probe(ffprobe, legacyOutput);
+        expect(Math.abs(streamDuration(legacy, 'video') - streamDuration(legacy, 'audio')))
+          .toBeGreaterThan(0.1);
+
+        run(ffmpeg, fixedArgs);
+        const fixed = probe(ffprobe, fixedOutput);
+        const video = fixed.streams.find((stream) => stream.codec_type === 'video');
+        const audio = fixed.streams.find((stream) => stream.codec_type === 'audio');
+        expect(video?.codec_name).toBe('h264');
+        expect(audio?.codec_name).toBe('aac');
+        expect(video?.width).toBe(320);
+        expect(video?.height).toBe(240);
+        expect(Math.abs(Number(fixed.format.duration) - (group.end - group.start)))
+          .toBeLessThanOrEqual(0.1);
+        expect(Math.abs(streamDuration(fixed, 'video') - streamDuration(fixed, 'audio')))
+          .toBeLessThanOrEqual(0.1);
+
+        const videoPackets = probePacketTimes(ffprobe, fixedOutput, 'v:0');
+        const audioPackets = probePacketTimes(ffprobe, fixedOutput, 'a:0');
+        expectStrictlyIncreasing(videoPackets.map((packet) => packet.dts));
+        expectStrictlyIncreasing(audioPackets.map((packet) => packet.dts));
+        run(ffmpeg, [
+          '-hide_banner', '-v', 'error', '-i', fixedOutput,
+          '-map', '0:v:0', '-an', '-pix_fmt', 'yuv420p', '-f', 'rawvideo', nullDevice,
+        ]);
+        run(ffmpeg, [
+          '-hide_banner', '-v', 'error', '-i', fixedOutput,
+          '-map', '0:a:0', '-vn', '-c:a', 'pcm_s16le', '-f', 's16le', nullDevice,
+        ]);
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    },
+    180_000,
+  );
+});
 
 describe.skipIf(!syntheticEnabled)('fast segmented timestamp repair with generated media', () => {
   it('joins separately encoded 44.1 kHz AAC segments without DTS regressions', () => {
@@ -407,7 +516,11 @@ describe.skipIf(!syntheticEnabled)('fast segmented timestamp repair with generat
       });
       const manifest = path.join(directory, 'segments.ffconcat');
       const output = path.join(directory, 'joined.mp4');
-      writeFileSync(manifest, buildConcatManifest(names), 'utf8');
+      writeFileSync(
+        manifest,
+        buildConcatManifest(names, selectedGroups.map((group) => group.end - group.start)),
+        'utf8',
+      );
       const concat = runWithStderr(
         syntheticFfmpeg,
         buildConcatArgs(manifest, output, metadata),

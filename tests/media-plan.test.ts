@@ -72,10 +72,11 @@ describe('media export planning', () => {
   it('builds a single concat graph for multiple groups', () => {
     const second = { ...oneGroup, rallyIds: ['rally_002'], rawStart: 20, rawEnd: 22, start: 19, end: 24 };
     const args = buildReencodeArgs(metadata.path, 'out.mp4', [oneGroup, second], metadata);
-    const filter = args[args.indexOf('-filter_complex') + 1];
+    const filter = args[args.indexOf('-filter_complex') + 1]!;
     expect(filter).toContain('split=2');
     expect(filter).toContain('asplit=2');
     expect(filter).toContain('concat=n=2:v=1:a=1');
+    expect(filter.match(/setpts=PTS-STARTPTS:strip_fps=1/g)).toHaveLength(2);
     expect(expectedOutputDuration([oneGroup, second])).toBe(11);
   });
 
@@ -128,8 +129,12 @@ describe('media export planning', () => {
       ]);
       const filter = args[args.indexOf('-filter_complex') + 1];
       expect(filter).toContain('trim=start=3.000000:end=9.000000');
+      expect(filter).toContain('setpts=PTS-STARTPTS:strip_fps=1');
       expect(filter).toContain('atrim=start=3.000000:end=9.000000');
       expect(args).toContain(encoder);
+      expect(args.slice(args.indexOf('-fps_mode'), args.indexOf('-fps_mode') + 2))
+        .toEqual(['-fps_mode', 'vfr']);
+      expect(args).not.toContain('-r');
     },
   );
 
@@ -160,6 +165,14 @@ describe('media export planning', () => {
       '-avoid_negative_ts', 'auto',
     ]));
     expect(args).not.toEqual(expect.arrayContaining(['-c', 'copy']));
+  });
+
+  it('writes explicit durations for silent segment concatenation', () => {
+    expect(buildConcatManifest(['one.mp4', 'two.mp4'], [1, 2.5])).toBe(
+      "ffconcat version 1.0\nfile 'one.mp4'\nduration 1.000000\n"
+      + "file 'two.mp4'\nduration 2.500000\n",
+    );
+    expect(() => buildConcatManifest(['one.mp4'], [])).toThrow('CONCAT_DURATION_COUNT_MISMATCH');
   });
 
   it('does not add audio concat options for silent segments', () => {
