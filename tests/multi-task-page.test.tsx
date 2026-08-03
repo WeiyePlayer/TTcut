@@ -73,6 +73,7 @@ describe('multi-task clipping', () => {
       shutdownSystem: vi.fn().mockResolvedValue(undefined),
       deleteAnalysis: vi.fn().mockResolvedValue(undefined),
       revealOutput: vi.fn().mockResolvedValue(undefined),
+      revealLogs: vi.fn().mockResolvedValue(undefined),
     } as unknown as TTcutApi;
     Object.defineProperty(window, 'ttcut', { configurable: true, value: api });
   });
@@ -222,7 +223,7 @@ describe('multi-task clipping', () => {
     expect(startAnalysis.mock.calls[0]?.[0].videoPath).toBe(videos[1]!.path);
   });
 
-  it('retains a duration-mismatch output and continues the remaining batch', async () => {
+  it('marks a usable warning output as done and continues the remaining batch', async () => {
     render(<MultiTaskPage initialVideos={videos} preRoll={2.5} postRoll={1} language="en" onOpenAnalysis={vi.fn()} />);
     await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledTimes(1));
     await finishCalibration('calibration-task-1');
@@ -241,23 +242,32 @@ describe('multi-task clipping', () => {
     await waitFor(() => expect(startExport).toHaveBeenCalledTimes(1));
 
     act(() => listener?.({
-      type: 'error',
+      type: 'export-result',
       taskId: 'export-task-1',
-      code: 'EXPORT_DURATION_MISMATCH',
-      message: 'duration mismatch',
-      recoveredOutputPath: 'C:\\video\\first_TTcut_duration_mismatch.mp4',
-      timing: {
-        targetSeconds: 100,
-        actualSeconds: 102.128,
-        driftSeconds: 2.128,
-        allowedDriftSeconds: 0.1,
-        segmentCount: 1,
+      data: {
+        taskId: 'export-task-1',
+        analysisId: '11111111-1111-4111-8111-111111111111',
+        outputPath: 'C:\\video\\first_TTcut.mp4',
+        outputName: 'first_TTcut.mp4',
+        mediaUrl: 'ttcut-media://first-output',
+        timing: {
+          targetSeconds: 100,
+          actualSeconds: 102.128,
+          driftSeconds: 2.128,
+          allowedDriftSeconds: 0.1,
+          segmentCount: 1,
+        },
+        warning: {
+          code: 'EXPORT_DURATION_MISMATCH',
+          message: 'duration mismatch',
+        },
       },
     }));
 
-    const openRetained = await screen.findByRole('button', { name: 'Open retained file' });
-    fireEvent.click(openRetained);
-    expect(window.ttcut.revealOutput).toHaveBeenCalledWith('C:\\video\\first_TTcut_duration_mismatch.mp4');
+    expect(await screen.findByText('Exported with warning')).toBeVisible();
+    expect(screen.getByText('EXPORT_DURATION_MISMATCH')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Open logs' }));
+    expect(window.ttcut.revealLogs).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(startAnalysis).toHaveBeenCalledTimes(2));
     expect(startAnalysis.mock.calls[1]?.[0]).toMatchObject({ videoPath: videos[1]!.path });
   });

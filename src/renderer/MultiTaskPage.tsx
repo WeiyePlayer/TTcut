@@ -4,6 +4,7 @@ import type {
   Calibration,
   CutSelectionV1,
   BallModelProfile,
+  ExportWarning,
   TableAnalysis,
   VideoMetadata,
 } from '../shared/contracts';
@@ -36,6 +37,7 @@ type BatchItem = {
   outputPath: string | null;
   outputMediaUrl: string | null;
   recoveredOutputPath: string | null;
+  exportWarning: ExportWarning | null;
   error: string | null;
 };
 
@@ -73,6 +75,7 @@ async function createItems(videos: SelectedVideo[]): Promise<BatchItem[]> {
     outputPath: null,
     outputMediaUrl: null,
     recoveredOutputPath: null,
+    exportWarning: null,
     error: null,
   })));
 }
@@ -137,6 +140,8 @@ export function MultiTaskPage({
     analyzeOnly: isEnglish ? 'Analyze only' : '只分析',
     remove: isEnglish ? 'Remove' : '删除',
     openRecovered: isEnglish ? 'Open retained file' : '打开保留文件',
+    warning: isEnglish ? 'Exported with warning' : '已导出，但存在异常',
+    logs: isEnglish ? 'Open logs' : '打开日志',
     preview: isEnglish ? 'Preview' : '预览',
     cancel: isEnglish ? 'Cancel' : '取消',
     start: isEnglish ? 'Start analysis and cutting' : '开始分析剪辑',
@@ -393,6 +398,7 @@ export function MultiTaskPage({
         outputPath: event.data.outputPath,
         outputMediaUrl: event.data.mediaUrl,
         recoveredOutputPath: null,
+        exportWarning: event.data.warning ?? null,
         error: null,
       }));
       finishActive();
@@ -433,6 +439,7 @@ export function MultiTaskPage({
       analysisId: active.phase === 'analysis' ? null : item.analysisId,
       analysis: active.phase === 'analysis' ? null : item.analysis,
       recoveredOutputPath: event.recoveredOutputPath ?? null,
+      exportWarning: null,
       error: cancelled ? null : event.code,
     }));
     if (cancelled) {
@@ -612,6 +619,12 @@ export function MultiTaskPage({
                 <strong title={item.video.name}>{item.video.name}</strong>
                 <span>{formatTimestamp(item.metadata.duration_seconds)} · {item.metadata.width} × {item.metadata.height} · {item.metadata.fps.toFixed(3)} fps</span>
                 {item.error && !manualRequired && <small>{item.error}</small>}
+                {item.exportWarning && (
+                  <div className="batch-export-warning" role="alert">
+                    <span><b>{text.warning}</b><code>{item.exportWarning.code}</code></span>
+                    <button className="text-button" type="button" onClick={() => void window.ttcut.revealLogs()}>{text.logs}</button>
+                  </div>
+                )}
               </div>
               {done ? (
                 <div className="batch-actions">
