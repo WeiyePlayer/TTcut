@@ -229,6 +229,16 @@ td input { accent-color: var(--blue); }
 .output-details > div { display: grid; grid-template-columns: 120px 1fr; gap: 18px; padding: 13px 16px; border-top: 1px solid var(--line); }
 .output-details > div:first-child { border-top: 0; }
 .output-details strong { overflow-wrap: anywhere; font-size: 12px; }
+.export-warning { margin-top: 6px; padding: 16px 0 0; border-top: 1px solid #e6b85c; }
+.export-warning-heading { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 12px; }
+.export-warning-heading > span { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%; background: #fff3d8; color: #8a5a00; font-weight: 800; }
+.export-warning-heading strong { display: block; font-size: 14px; }
+.export-warning-heading p { margin: 3px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.export-warning-summary { margin: 12px 0 0 46px; display: flex; align-items: center; gap: 10px; color: #6f4b08; font-size: 12px; }
+.export-warning-summary code { padding: 4px 7px; border-radius: 6px; background: #fff3d8; color: #7a4c00; }
+.export-warning details { margin: 10px 0 0 46px; color: var(--muted); font-size: 12px; }
+.export-warning summary { width: max-content; cursor: pointer; }
+.export-warning pre { max-height: 130px; margin: 8px 0 0; padding: 10px 12px; overflow: auto; border-radius: 6px; background: #f6f6f6; color: #5c3600; white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.55 "Cascadia Mono", Consolas, monospace; }
 
 .settings-page { width: min(900px, 100%); margin: 0 auto; }
 .settings-heading h1 { font-size: var(--page-title-size); }
@@ -314,6 +324,10 @@ td input { accent-color: var(--blue); }
 .batch-info strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .batch-info span { color: var(--muted); font-size: 11px; line-height: 1.5; }
 .batch-info small { color: #a1261f; overflow-wrap: anywhere; }
+.batch-export-warning { display: flex; align-items: center; gap: 8px; color: #7a4c00; font-size: 11px; }
+.batch-export-warning > span { display: flex; min-width: 0; align-items: center; gap: 7px; color: inherit; }
+.batch-export-warning code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.batch-export-warning .text-button { flex: 0 0 auto; padding: 0; font-size: 11px; }
 .batch-mode { display: grid; gap: 10px; }
 .batch-mode-options {
   position: relative; z-index: 1; min-width: 0; padding: 3px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3px;

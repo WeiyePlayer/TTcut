@@ -426,6 +426,11 @@ export type ExportTimingInfo = {
   segmentCount: number;
 };
 
+export type ExportWarning = {
+  code: string;
+  message: string;
+};
+
 export type ExportResult = {
   taskId: string;
   analysisId: string;
@@ -433,4 +438,5 @@ export type ExportResult = {
   outputName: string;
   mediaUrl: string;
   timing: ExportTimingInfo;
+  warning?: ExportWarning;
 };
