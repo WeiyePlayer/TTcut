@@ -118,5 +118,6 @@ export interface TTcutApi {
   toggleMaximize(): Promise<void>;
   close(): Promise<void>;
   confirmClose(action: 'exit' | 'minimize' | 'cancel'): Promise<void>;
+  shutdownSystem(): Promise<void>;
   onCloseRequested(listener: () => void): () => void;
 }

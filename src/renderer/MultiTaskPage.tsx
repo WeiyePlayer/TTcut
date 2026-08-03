@@ -20,8 +20,6 @@ type ProcessingStatus = 'waiting' | 'analyzing' | 'exporting' | 'cancelled' | 'f
 type ActivePhase = 'calibration' | 'analysis' | 'export';
 type PointName = keyof Calibration['points'];
 
-export type MultiLeaveTarget = 'auto' | 'history' | 'settings';
-
 type BatchItem = {
   id: string;
   video: SelectedVideo;
@@ -49,8 +47,7 @@ interface MultiTaskPageProps {
   language?: 'zh-CN' | 'en';
   onOpenAnalysis: (analysisId: string) => void;
   onCompletableTasksFinished?: () => void;
-  registerLeaveHandler?: (handler: ((target: MultiLeaveTarget) => void) | null) => void;
-  onLeave?: (target: MultiLeaveTarget) => void;
+  onTaskStateChange?: (active: boolean) => void;
 }
 
 const pointOrder: PointName[] = ['top_left', 'top_right', 'bottom_right', 'bottom_left'];
@@ -90,6 +87,15 @@ function hasPendingCalibration(items: BatchItem[]): boolean {
   return items.some((item) => item.calibrationStatus === 'pending' || item.calibrationStatus === 'calibrating');
 }
 
+function hasOpenBatchWork(items: BatchItem[]): boolean {
+  return items.some((item) => (
+    item.calibrationStatus === 'pending'
+    || item.calibrationStatus === 'calibrating'
+    || (item.calibrationStatus === 'ready'
+      && ['waiting', 'analyzing', 'exporting'].includes(item.processingStatus))
+  ));
+}
+
 export function MultiTaskPage({
   initialVideos,
   preRoll,
@@ -98,10 +104,10 @@ export function MultiTaskPage({
   language = 'zh-CN',
   onOpenAnalysis,
   onCompletableTasksFinished = () => undefined,
-  registerLeaveHandler = () => undefined,
-  onLeave = () => undefined,
+  onTaskStateChange = () => undefined,
 }: MultiTaskPageProps) {
   const [items, setItems] = useState<BatchItem[]>([]);
+  const [initialized, setInitialized] = useState(false);
   const [activeItem, setActiveItem] = useState<string | null>(null);
   const [activePhase, setActivePhase] = useState<ActivePhase | null>(null);
   const [running, setRunning] = useState(false);
@@ -109,18 +115,18 @@ export function MultiTaskPage({
   const [manualItemId, setManualItemId] = useState<string | null>(null);
   const [manualPoints, setManualPoints] = useState<Partial<Record<PointName, [number, number]>>>({});
   const [systemNotice, setSystemNotice] = useState<string | null>(null);
+  const [shutdownAfterCompletion, setShutdownAfterCompletion] = useState(false);
   const itemsRef = useRef(items);
   const activeRef = useRef<{ taskId: string | null; itemId: string; phase: ActivePhase } | null>(null);
   const runningRef = useRef(false);
   const cancelRequested = useRef(false);
-  const leavingRef = useRef(false);
   const autoCalibrationAvailableRef = useRef(true);
+  const shutdownAfterCompletionRef = useRef(false);
   const pendingTaskStartRef = useRef<Promise<string> | null>(null);
   const scheduleRef = useRef<() => void>(() => undefined);
   const rowRefs = useRef(new Map<string, HTMLElement>());
   const previousRects = useRef(new Map<string, DOMRect>());
-  const optionsRef = useRef({ preRoll, postRoll });
-  optionsRef.current = { preRoll, postRoll };
+  const optionsRef = useRef({ preRoll, postRoll, ballModelProfile });
 
   const isEnglish = language === 'en';
   const text = {
@@ -136,6 +142,8 @@ export function MultiTaskPage({
     start: isEnglish ? 'Start analysis and cutting' : '开始分析剪辑',
     calibrating: isEnglish ? 'Calibrating tables' : '正在自动标定',
     running: isEnglish ? 'Processing serially' : '正在串行处理',
+    shutdownAfterTask: isEnglish ? 'Shut down after this task' : '完成本任务后关机',
+    shutdownFailed: isEnglish ? 'Automatic shutdown failed. Please shut down manually.' : '自动关机失败，请手动关机。',
     calibrationTitle: isEnglish ? 'Calibrate the table' : '标定球桌',
     calibrationDescription: isEnglish
       ? 'Mark top-left, top-right, bottom-right, and bottom-left in order.'
@@ -147,9 +155,6 @@ export function MultiTaskPage({
     modelUnavailable: isEnglish
       ? 'The automatic calibration model is unavailable. Uncalibrated videos can be calibrated manually.'
       : '自动标定模型不可用，尚未标定的视频可改用手动标定。',
-    leaveConfirm: isEnglish
-      ? 'A batch task is still running. Cancel it and leave this page?'
-      : '多任务仍在运行，确定取消当前任务并离开吗？',
     invalidCalibration: isEnglish
       ? 'The four points must form a valid table quadrilateral.'
       : '四个点无法组成有效的球台区域，请重新标定。',
@@ -160,6 +165,8 @@ export function MultiTaskPage({
 
   useEffect(() => { itemsRef.current = items; }, [items]);
   useEffect(() => { runningRef.current = running; }, [running]);
+  const batchTaskActive = !initialized || running || hasOpenBatchWork(items);
+  useEffect(() => onTaskStateChange(batchTaskActive), [batchTaskActive, onTaskStateChange]);
 
   const replaceItems = (updater: (current: BatchItem[]) => BatchItem[]) => {
     const next = updater(itemsRef.current);
@@ -178,7 +185,7 @@ export function MultiTaskPage({
   };
 
   const schedule = () => {
-    if (leavingRef.current || activeRef.current) return;
+    if (activeRef.current) return;
     const calibrationCandidate = itemsRef.current.find((item) => item.calibrationStatus === 'pending');
     if (calibrationCandidate) {
       if (!autoCalibrationAvailableRef.current) {
@@ -199,14 +206,7 @@ export function MultiTaskPage({
       pendingTaskStartRef.current = startPromise;
       void startPromise
         .then((taskId) => {
-          if (activeRef.current?.itemId !== itemId || activeRef.current.phase !== 'calibration') {
-            if (leavingRef.current) void window.ttcut.cancelTask(taskId);
-            return;
-          }
-          if (leavingRef.current) {
-            void window.ttcut.cancelTask(taskId);
-            return;
-          }
+          if (activeRef.current?.itemId !== itemId || activeRef.current.phase !== 'calibration') return;
           activeRef.current = { taskId, itemId, phase: 'calibration' };
         })
         .catch((caught) => {
@@ -223,12 +223,19 @@ export function MultiTaskPage({
     if (!runningRef.current) return;
     const candidate = itemsRef.current.find((item) => (
       item.calibrationStatus === 'ready'
-      && ['waiting', 'cancelled'].includes(item.processingStatus)
+      && item.processingStatus === 'waiting'
     ));
     if (!candidate) {
+      const completedSuccessfully = itemsRef.current.length > 0
+        && itemsRef.current.every((item) => item.processingStatus === 'done');
       runningRef.current = false;
       setRunning(false);
       onCompletableTasksFinished();
+      if (completedSuccessfully && shutdownAfterCompletionRef.current) {
+        shutdownAfterCompletionRef.current = false;
+        setShutdownAfterCompletion(false);
+        void window.ttcut.shutdownSystem().catch(() => setSystemNotice(text.shutdownFailed));
+      }
       return;
     }
     cancelRequested.current = false;
@@ -248,14 +255,7 @@ export function MultiTaskPage({
       });
       pendingTaskStartRef.current = startPromise;
       void startPromise.then((taskId) => {
-        if (activeRef.current?.itemId !== candidate.id || activeRef.current.phase !== 'export') {
-          if (leavingRef.current) void window.ttcut.cancelTask(taskId);
-          return;
-        }
-        if (leavingRef.current) {
-          void window.ttcut.cancelTask(taskId);
-          return;
-        }
+        if (activeRef.current?.itemId !== candidate.id || activeRef.current.phase !== 'export') return;
         activeRef.current = { taskId, itemId: candidate.id, phase: 'export' };
       }).catch((caught) => {
         if (activeRef.current?.itemId !== candidate.id || activeRef.current.phase !== 'export') return;
@@ -296,18 +296,11 @@ export function MultiTaskPage({
       calibrationChoice,
       device: 'auto',
       historyVisibility: candidate.mode === 'analyze-only' ? 'visible' : 'deferred',
-      ballModelProfile,
+      ballModelProfile: optionsRef.current.ballModelProfile,
     });
     pendingTaskStartRef.current = startPromise;
     void startPromise.then((taskId) => {
-      if (activeRef.current?.itemId !== candidate.id || activeRef.current.phase !== 'analysis') {
-        if (leavingRef.current) void window.ttcut.cancelTask(taskId);
-        return;
-      }
-      if (leavingRef.current) {
-        void window.ttcut.cancelTask(taskId);
-        return;
-      }
+      if (activeRef.current?.itemId !== candidate.id || activeRef.current.phase !== 'analysis') return;
       activeRef.current = { taskId, itemId: candidate.id, phase: 'analysis' };
     }).catch((caught) => {
       if (activeRef.current?.itemId !== candidate.id || activeRef.current.phase !== 'analysis') return;
@@ -327,7 +320,10 @@ export function MultiTaskPage({
       if (cancelled) return;
       itemsRef.current = created;
       setItems(created);
+      setInitialized(true);
       setTimeout(() => scheduleRef.current(), 0);
+    }).catch(() => {
+      if (!cancelled) setInitialized(true);
     });
     return () => { cancelled = true; };
   }, [initialVideos]);
@@ -455,7 +451,6 @@ export function MultiTaskPage({
     const unique = videos.filter((video) => !existing.has(video.path.toLowerCase()));
     if (!unique.length) return;
     const created = await createItems(unique);
-    if (leavingRef.current) return;
     const added = autoCalibrationAvailableRef.current
       ? created
       : created.map((item) => ({ ...item, calibrationStatus: 'manual-required' as const }));
@@ -477,6 +472,11 @@ export function MultiTaskPage({
     runningRef.current = true;
     setRunning(true);
     scheduleRef.current();
+  };
+
+  const toggleShutdownAfterCompletion = (enabled: boolean) => {
+    shutdownAfterCompletionRef.current = enabled;
+    setShutdownAfterCompletion(enabled);
   };
 
   const cancel = async () => {
@@ -520,31 +520,6 @@ export function MultiTaskPage({
     setManualPoints({});
     setTimeout(() => scheduleRef.current(), 0);
   };
-
-  const leave = async (target: MultiLeaveTarget) => {
-    if (leavingRef.current) return;
-    leavingRef.current = true;
-    runningRef.current = false;
-    setRunning(false);
-    const active = activeRef.current;
-    const pendingStart = pendingTaskStartRef.current;
-    finishActive();
-    let taskId = active?.taskId ?? null;
-    if (!taskId && pendingStart) {
-      taskId = await pendingStart.catch(() => null);
-    }
-    if (taskId) await window.ttcut.cancelTask(taskId);
-    onLeave(target);
-  };
-
-  useEffect(() => {
-    const handler = (target: MultiLeaveTarget) => {
-      if ((runningRef.current || activeRef.current) && !window.confirm(text.leaveConfirm)) return;
-      void leave(target);
-    };
-    registerLeaveHandler(handler);
-    return () => registerLeaveHandler(null);
-  }, [registerLeaveHandler, onLeave, text.leaveConfirm]);
 
   if (manualItem) {
     return (
@@ -640,7 +615,7 @@ export function MultiTaskPage({
               </div>
               {done ? (
                 <div className="batch-actions">
-                  <button className="secondary" type="button" onClick={() => item.outputMediaUrl ? setPreview({
+                  <button className="secondary" type="button" disabled={!item.outputMediaUrl && batchTaskActive} onClick={() => item.outputMediaUrl ? setPreview({
                     source: item.outputMediaUrl,
                     name: item.video.name,
                     width: item.metadata.width,
@@ -683,14 +658,26 @@ export function MultiTaskPage({
           );
         })}
       </div>
-      <button
-        className="batch-start primary"
-        type="button"
-        disabled={running || calibrationBusy || !canStart}
-        onClick={start}
-      >
-        {activePhase === 'calibration' ? text.calibrating : running ? text.running : text.start}
-      </button>
+      <div className={`batch-launcher ${shutdownAfterCompletion ? 'shutdown-armed' : ''}`}>
+        <label className="batch-shutdown-option">
+          <input
+            type="checkbox"
+            checked={shutdownAfterCompletion}
+            disabled={!batchTaskActive}
+            onChange={(event) => toggleShutdownAfterCompletion(event.target.checked)}
+          />
+          <span>{text.shutdownAfterTask}</span>
+        </label>
+        <button
+          className="batch-start primary"
+          type="button"
+          disabled={running || calibrationBusy || !canStart}
+          onClick={start}
+        >
+          {activePhase === 'calibration' ? text.calibrating : running ? text.running : text.start}
+          {shutdownAfterCompletion && <span className="batch-shutdown-indicator" aria-hidden="true">⏻</span>}
+        </button>
+      </div>
       {preview && (
         <div className="modal-backdrop batch-preview-backdrop" onPointerDown={(event) => { if (event.target === event.currentTarget) setPreview(null); }}>
           <div className="modal batch-preview">

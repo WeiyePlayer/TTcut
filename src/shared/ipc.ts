@@ -29,6 +29,7 @@ export const IPC = {
   windowClose: 'window:close',
   windowConfirmClose: 'window:confirm-close',
   windowCloseRequested: 'window:close-requested',
+  systemShutdown: 'system:shutdown',
   logsReveal: 'logs:reveal',
   licensesOpen: 'licenses:open',
   externalOpen: 'external:open',
