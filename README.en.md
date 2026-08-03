@@ -6,23 +6,23 @@ TTcut is a local automatic table-tennis video cutter for players and enthusiasts
 
 Videos, analysis results, and history stay on the local computer. TTcut requires no account, uploads no video, and collects no telemetry. The analysis models are included in the installer. The analysis runtime and media-processing components require an internet connection during initial setup; after installation, analysis, preview, and cutting can run offline.
 
-> The current stable release is `v1.1.4` for Windows x64. TTcut no longer blocks startup according to a Windows build-number allowlist.
+> The current stable release is `v1.1.5` for Windows x64. TTcut no longer blocks startup according to a Windows build-number allowlist.
 
 ## Download and installation
 
-1. Download `TTcut-1.1.4-x64-Setup.exe` from the [TTcut v1.1.4 Release](https://github.com/WeiyePlayer/TTcut/releases/tag/v1.1.4).
+1. Download `TTcut-1.1.5-x64-Setup.exe` from the [TTcut v1.1.5 Release](https://github.com/WeiyePlayer/TTcut/releases/tag/v1.1.5).
 2. Run the installer, choose the installation root, and decide whether to create a desktop shortcut. Application files are written under `<root>\app`; large runtimes, downloads, and import staging are stored under `<root>\data\components`. A Start menu shortcut is always created.
 3. On first launch, open Settings and install the Analysis component and Video processing component after reviewing the prompts.
 
 The Analysis component detects an NVIDIA GPU automatically and falls back to CPU if CUDA installation or self-test fails. The Video processing component reads media information, cuts and joins segments, and validates exported files.
 
-## What's new in v1.1.4
+## What's new in v1.1.5
 
-- Fixed expired download links for the Video processing component and the optional x264 encoding component, restoring first-time installation and reinstallation.
-- The new URLs point to verified archives in the TTcut runtime-asset repository; file names, sizes, SHA-256 digests, versions, and installation layouts remain unchanged.
-- Existing installed components are unaffected and do not need to be downloaded again for this update.
+- Fixed valid video exports being rejected with an export-duration mismatch failure.
+- Export validation now consistently uses the existing two-second domain tolerance: drift up to two seconds is accepted, while larger mismatches are still rejected.
+- Other export checks for resolution, codecs, audio, timestamps, rotation, and output-file integrity remain unchanged.
 
-See the [v1.1.4 release notes](docs/release-notes-v1.1.4.en.md) for the full patch summary.
+See the [v1.1.5 release notes](docs/release-notes-v1.1.5.en.md) for the full patch summary.
 
 ## Usage
 
