@@ -128,30 +128,36 @@ export async function uniqueOutput(input: string, suffixLabel: string): Promise<
   }
 }
 
-async function uniqueDurationMismatchOutput(output: string): Promise<string> {
+async function uniqueWarningOutput(output: string): Promise<string> {
   const directory = path.dirname(output);
   const base = path.basename(output, path.extname(output));
   let suffix = 1;
   while (true) {
-    const stem = `${base}_duration_mismatch`;
+    const stem = `${base}_with_warning`;
     const candidate = path.join(directory, suffix === 1 ? `${stem}.mp4` : `${stem}_${suffix}.mp4`);
     if (!(await available(candidate))) return candidate;
     suffix += 1;
   }
 }
 
-export async function retainDurationMismatchOutput(
+export async function retainUsableExportOutput(
   partial: string,
   output: string,
-): Promise<{ path: string; renamed: boolean }> {
-  const candidate = await uniqueDurationMismatchOutput(output);
-  try {
-    await rename(partial, candidate);
-    return { path: candidate, renamed: true };
-  } catch (error) {
-    if (await available(partial)) return { path: partial, renamed: false };
-    throw error;
+  isUsable: (candidate: string) => Promise<boolean>,
+): Promise<{ path: string; renamed: boolean } | null> {
+  if (await available(partial)) {
+    if (!(await isUsable(partial))) return null;
+    const candidate = await available(output) ? await uniqueWarningOutput(output) : output;
+    try {
+      await rename(partial, candidate);
+      return { path: candidate, renamed: true };
+    } catch (error) {
+      if (await available(partial)) return { path: partial, renamed: false };
+      throw error;
+    }
   }
+  if (await available(output) && await isUsable(output)) return { path: output, renamed: false };
+  return null;
 }
 
 async function chooseOutput(window: BrowserWindow, input: string, request: ExportRequest): Promise<string> {
@@ -516,10 +522,15 @@ async function executeFastSegmented(
   }
   assertExportNotCancelled(taskId);
   const manifest = path.join(tempDirectory, 'segments.ffconcat');
-  const silentSegmentDurations = analysisVideo.audio_codec === null
-    ? groups.map((group) => group.end - group.start)
-    : undefined;
-  await writeFile(manifest, buildConcatManifest(segmentNames, silentSegmentDurations), 'utf8');
+  const durationGuardSeconds = Math.max(
+    timeBaseSeconds(signatures[0]?.video.timeBase),
+    0.000_001,
+  );
+  await writeFile(
+    manifest,
+    buildConcatManifest(segmentNames, encodedSegmentDurations, durationGuardSeconds),
+    'utf8',
+  );
   try {
     await runFfmpeg(
       window,
@@ -598,14 +609,10 @@ async function executeExport(
   const tempDirectory = path.join(path.dirname(output), `.ttcut-${taskId}-segments`);
   let terminalSent = false;
   let finalTiming: ExportTimingAssessment | null = null;
-  const sendError = async (
-    code: string,
-    message: string,
-    details?: { recoveredOutputPath?: string; timing?: ExportTimingInfo },
-  ): Promise<void> => {
+  const sendError = async (code: string, message: string): Promise<void> => {
     if (terminalSent || !markTaskTerminal(taskId)) return;
     terminalSent = true;
-    send(window, { type: 'error', taskId, code, message, ...details });
+    send(window, { type: 'error', taskId, code, message });
   };
   try {
     await mkdir(tempDirectory, { recursive: true });
@@ -667,20 +674,15 @@ async function executeExport(
         (total, segmentDuration) => total + segmentDuration,
         0,
       );
-      let concatValidation: ExportValidationResult;
-      try {
-        concatValidation = await validateExportOutput(
-          partial,
-          {
-            targetSeconds: encodedSegmentDuration,
-            segmentCount: 1,
-          },
-          analysis.video,
-          'normalized',
-        );
-      } catch (error) {
-        throw wrapExportError(error, 'EXPORT_CONCAT_FAILED');
-      }
+      const concatValidation = await validateExportOutput(
+        partial,
+        {
+          targetSeconds: encodedSegmentDuration,
+          segmentCount: 1,
+        },
+        analysis.video,
+        'normalized',
+      );
       await logExportTiming(taskId, 'Fast concat timing', concatValidation.timing, analysis.video);
       const requestedTiming = assessFastConcatDuration(
         concatValidation.metadata.duration_seconds,
@@ -721,38 +723,65 @@ async function executeExport(
       send(window, { type: 'export-result', taskId, data: result });
     }
   } catch (error) {
-    let recoveredOutputPath: string | undefined;
-    let recoveredTiming: ExportTimingInfo | undefined;
-    if (error instanceof ExportDurationMismatchError && await available(partial)) {
-      recoveredTiming = timingInfo(error.timing);
-      try {
-        const retained = await retainDurationMismatchOutput(partial, output);
-        recoveredOutputPath = retained.path;
-        if (!retained.renamed) {
-          await logLine(taskId, 'WARN', 'Could not rename duration-mismatch output; original partial retained');
-        }
-      } catch (recoveryError) {
-        await logLine(taskId, 'WARN', `Could not rename duration-mismatch output: ${String(recoveryError)}`);
-        if (await available(partial)) recoveredOutputPath = partial;
-      }
-    }
-    if (!recoveredOutputPath) await rm(partial, { force: true }).catch(() => undefined);
     const message = error instanceof Error ? error.message : String(error);
     const code = exportCode(error) ?? 'EXPORT_FAILED';
     const controller = getTaskController(taskId);
-    await logLine(
-      taskId,
-      code === 'EXPORT_CANCELLED' && controller?.cancelReason === 'app-exit' ? 'INFO' : 'ERROR',
-      `${code}: ${message}`,
-    );
-    if (recoveredOutputPath) {
-      await logLine(taskId, 'WARN', `Retained duration-mismatch output: ${recoveredOutputPath}`);
+    const cancelledForExit = code === 'EXPORT_CANCELLED' && controller?.cancelReason === 'app-exit';
+    await logLine(taskId, cancelledForExit ? 'INFO' : 'ERROR', `${code}: ${message}`);
+
+    if (code !== 'EXPORT_CANCELLED') {
+      try {
+        const retained = await retainUsableExportOutput(partial, output, async (candidate) => {
+          try {
+            await probeVideo(candidate);
+            return true;
+          } catch (probeError) {
+            await logLine(taskId, 'WARN', `Generated output is not playable and will not be retained: ${String(probeError)}`);
+            return false;
+          }
+        });
+        if (retained) {
+          const recoveredMetadata = await probeVideo(retained.path);
+          const recoveredTiming = error instanceof ExportDurationMismatchError
+            ? error.timing
+            : finalTiming ?? assessExportDuration(
+              recoveredMetadata.duration_seconds,
+              duration,
+              groups.length,
+              analysis.video,
+            );
+          if (!retained.renamed && retained.path === partial) {
+            await logLine(taskId, 'WARN', 'Could not rename usable warning output; original partial retained');
+          }
+          await logLine(taskId, 'WARN', `Retained usable output after ${code}: ${retained.path}`);
+          await getHistoryStore().markVisible(record.id, 'export', retained.path).catch(async (historyError) => {
+            await logLine(taskId, 'WARN', `Could not update export history after recovery: ${String(historyError)}`);
+          });
+          const result = {
+            taskId,
+            analysisId: record.id,
+            outputPath: retained.path,
+            outputName: path.basename(retained.path),
+            mediaUrl: registerMediaPath(retained.path),
+            timing: timingInfo(recoveredTiming),
+            warning: { code, message },
+          };
+          send(window, { type: 'progress', data: { taskId, kind: 'export', stage: 'complete', percent: 100 } });
+          lastExportProgress.set(taskId, 100);
+          if (!terminalSent && markTaskTerminal(taskId)) {
+            terminalSent = true;
+            send(window, { type: 'export-result', taskId, data: result });
+          }
+          return;
+        }
+      } catch (recoveryError) {
+        await logLine(taskId, 'WARN', `Could not retain usable warning output: ${String(recoveryError)}`);
+      }
     }
-    if (!(code === 'EXPORT_CANCELLED' && controller?.cancelReason === 'app-exit')) {
-      await sendError(code, message, {
-        ...(recoveredOutputPath ? { recoveredOutputPath } : {}),
-        ...(recoveredTiming ? { timing: recoveredTiming } : {}),
-      });
+
+    await rm(partial, { force: true }).catch(() => undefined);
+    if (!cancelledForExit) {
+      await sendError(code, message);
     } else {
       markTaskTerminal(taskId);
     }
