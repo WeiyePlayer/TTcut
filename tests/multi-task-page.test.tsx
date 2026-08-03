@@ -414,30 +414,87 @@ describe('multi-task clipping', () => {
     expect(startAnalysis.mock.calls[1]?.[0]).toMatchObject({ videoPath: videos[1]!.path });
   });
 
-  it('confirms and cancels the active worker before leaving the batch', async () => {
-    let leaveHandler: ((target: 'auto' | 'history' | 'settings') => void) | null = null;
-    const onLeave = vi.fn();
-    const registerLeaveHandler = (handler: typeof leaveHandler) => { leaveHandler = handler; };
+  it('continues the batch after cancellation without retrying the cancelled item', async () => {
+    const onTaskStateChange = vi.fn();
     render(
       <MultiTaskPage
         initialVideos={videos}
         preRoll={2.5}
         postRoll={1}
         onOpenAnalysis={vi.fn()}
-        registerLeaveHandler={registerLeaveHandler}
-        onLeave={onLeave}
+        onTaskStateChange={onTaskStateChange}
       />,
     );
     await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(document.querySelector('.batch-cover.processing')).not.toBeNull());
+    await finishCalibration('calibration-task-1');
+    await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledTimes(2));
+    await finishCalibration('calibration-task-2');
 
-    vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
-    act(() => leaveHandler?.('history'));
-    expect(window.ttcut.cancelTask).not.toHaveBeenCalled();
-    expect(onLeave).not.toHaveBeenCalled();
+    for (const group of screen.getAllByRole('group')) {
+      fireEvent.click(within(group).getAllByRole('button')[2]!);
+    }
+    fireEvent.click(document.querySelector('.batch-start')!);
+    await waitFor(() => expect(startAnalysis).toHaveBeenCalledTimes(1));
+    fireEvent.click(document.querySelector('.batch-cover.processing')!);
+    await waitFor(() => expect(window.ttcut.cancelTask).toHaveBeenCalledWith('analysis-task-1'));
 
-    act(() => leaveHandler?.('history'));
-    await waitFor(() => expect(window.ttcut.cancelTask).toHaveBeenCalledWith('calibration-task-1'));
-    await waitFor(() => expect(onLeave).toHaveBeenCalledWith('history'));
+    act(() => listener?.({
+      type: 'error', taskId: 'analysis-task-1', code: 'WORKER_EXITED', message: 'cancelled',
+    }));
+    await waitFor(() => expect(startAnalysis).toHaveBeenCalledTimes(2));
+    act(() => listener?.({
+      type: 'analysis-result',
+      taskId: 'analysis-task-2',
+      analysisId: '22222222-2222-4222-8222-222222222222',
+      calibration,
+      data: analysis(videos[1]!.path),
+    }));
+
+    await waitFor(() => expect(onTaskStateChange).toHaveBeenLastCalledWith(false));
+    expect(startAnalysis).toHaveBeenCalledTimes(2);
+  });
+
+  it('freezes processing settings for the lifetime of a batch', async () => {
+    const view = render(
+      <MultiTaskPage
+        initialVideos={videos}
+        preRoll={2.5}
+        postRoll={1}
+        exportStrategy="compatible"
+        ballModelProfile="tracknet_v1"
+        onOpenAnalysis={vi.fn()}
+      />,
+    );
+    await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledTimes(1));
+    await finishCalibration('calibration-task-1');
+    await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledTimes(2));
+    await finishCalibration('calibration-task-2');
+
+    view.rerender(
+      <MultiTaskPage
+        initialVideos={videos}
+        preRoll={5}
+        postRoll={4}
+        exportStrategy="fast_segmented"
+        ballModelProfile="uplifting_dual_v1"
+        onOpenAnalysis={vi.fn()}
+      />,
+    );
+    fireEvent.click(document.querySelector('.batch-start')!);
+    await waitFor(() => expect(startAnalysis).toHaveBeenCalledTimes(1));
+    expect(startAnalysis.mock.calls[0]?.[0]).toMatchObject({ ballModelProfile: 'tracknet_v1' });
+
+    act(() => listener?.({
+      type: 'analysis-result',
+      taskId: 'analysis-task-1',
+      analysisId: '11111111-1111-4111-8111-111111111111',
+      calibration,
+      data: analysis(videos[0]!.path),
+    }));
+    await waitFor(() => expect(startExport).toHaveBeenCalledTimes(1));
+    expect(startExport.mock.calls[0]?.[0]).toMatchObject({
+      export_strategy: 'compatible',
+      selection: { pre_roll_seconds: 2.5, post_roll_seconds: 1 },
+    });
   });
 });

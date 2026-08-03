@@ -74,6 +74,17 @@ function metadata(path: string): VideoMetadata {
   };
 }
 
+const calibration = {
+  video_width: 1280,
+  video_height: 720,
+  points: {
+    top_left: [300, 200] as [number, number],
+    top_right: [900, 200] as [number, number],
+    bottom_right: [1000, 600] as [number, number],
+    bottom_left: [200, 600] as [number, number],
+  },
+};
+
 describe('App workflow notices and multi-task entry', () => {
   let taskListener: ((event: AppEvent) => void) | null;
   let selectVideos: ReturnType<typeof vi.fn>;
@@ -102,6 +113,10 @@ describe('App workflow notices and multi-task entry', () => {
       selectVideos,
       probeVideo: vi.fn((path: string) => Promise.resolve(metadata(path))),
       startAutoCalibration: vi.fn().mockResolvedValue('calibration-task-1'),
+      startAnalysis: vi.fn().mockResolvedValue('analysis-task-1'),
+      startExport: vi.fn().mockResolvedValue('export-task-1'),
+      cancelTask: vi.fn().mockResolvedValue(undefined),
+      listHistory: vi.fn().mockResolvedValue([]),
       saveSettings: vi.fn((settings) => Promise.resolve(settings)),
       installDualBallModels: vi.fn().mockResolvedValue('dual-setup-task'),
     } as unknown as TTcutApi;
@@ -241,6 +256,110 @@ describe('App workflow notices and multi-task entry', () => {
     await screen.findByRole('heading', { name: '多任务剪辑' });
     await waitFor(() => expect(screen.getByText('first.mp4')).toBeVisible());
     expect(confirm).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: '设置' }));
+    expect(await screen.findByRole('heading', { name: '设置' })).toBeVisible();
+    expect(screen.getByText('first.mp4')).not.toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '自动剪辑' }));
+    expect(await screen.findByText('first.mp4')).toBeVisible();
+    expect(window.ttcut.cancelTask).not.toHaveBeenCalled();
+  });
+
+  it('returns to an active single-video process across history and settings', async () => {
+    bootstrap.settings.language = 'en';
+    selectVideos.mockResolvedValue([{
+      path: 'C:\\video\\first.mp4', name: 'first.mp4', size: 100, mediaUrl: 'ttcut-media://first',
+    }]);
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: /Choose MP4 \/ MOV videos/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start analysis' }));
+    expect(await screen.findByRole('heading', { name: 'Analyzing video' })).toBeVisible();
+
+    fireEvent.click(screen.getByRole('button', { name: 'History' }));
+    expect(await screen.findByRole('heading', { name: 'History' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Auto Cut' }));
+    expect(await screen.findByRole('heading', { name: 'Analyzing video' })).toBeVisible();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    expect(await screen.findByRole('heading', { name: 'Settings' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Auto Cut' }));
+    expect(await screen.findByRole('heading', { name: 'Analyzing video' })).toBeVisible();
+    expect(window.ttcut.startAnalysis).toHaveBeenCalledTimes(1);
+    expect(window.ttcut.cancelTask).not.toHaveBeenCalled();
+  });
+
+  it('returns home when analysis finishes while another page is open', async () => {
+    bootstrap.settings.language = 'en';
+    const selected = {
+      path: 'C:\\video\\first.mp4', name: 'first.mp4', size: 100, mediaUrl: 'ttcut-media://first',
+    };
+    selectVideos.mockResolvedValue([selected]);
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: /Choose MP4 \/ MOV videos/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start analysis' }));
+    await screen.findByRole('heading', { name: 'Analyzing video' });
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+
+    act(() => taskListener?.({
+      type: 'analysis-result',
+      taskId: 'analysis-task-1',
+      analysisId: '11111111-1111-4111-8111-111111111111',
+      calibration,
+      data: {
+        schema_version: 1,
+        video: metadata(selected.path),
+        rallies: [{ id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 1, end_time_seconds: 5 }],
+        calibration,
+      },
+    }));
+    fireEvent.click(screen.getByRole('button', { name: 'Auto Cut' }));
+
+    expect(await screen.findByRole('heading', { name: 'Choose match videos' })).toBeVisible();
+    expect(screen.queryByRole('heading', { name: 'Choose a cutting mode' })).toBeNull();
+  });
+
+  it('returns to active cutting but goes home after export completes', async () => {
+    bootstrap.settings.language = 'en';
+    const selected = {
+      path: 'C:\\video\\first.mp4', name: 'first.mp4', size: 100, mediaUrl: 'ttcut-media://first',
+    };
+    selectVideos.mockResolvedValue([selected]);
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: /Choose MP4 \/ MOV videos/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start analysis' }));
+    act(() => taskListener?.({
+      type: 'analysis-result',
+      taskId: 'analysis-task-1',
+      analysisId: '11111111-1111-4111-8111-111111111111',
+      calibration,
+      data: {
+        schema_version: 1,
+        video: metadata(selected.path),
+        rallies: [{ id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 1, end_time_seconds: 5 }],
+        calibration,
+      },
+    }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start cutting' }));
+    expect(await screen.findByRole('heading', { name: 'Preparing' })).toBeVisible();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Auto Cut' }));
+    expect(await screen.findByRole('heading', { name: 'Preparing' })).toBeVisible();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    act(() => taskListener?.({
+      type: 'export-result',
+      taskId: 'export-task-1',
+      data: {
+        taskId: 'export-task-1',
+        analysisId: '11111111-1111-4111-8111-111111111111',
+        outputPath: 'C:\\video\\first_TTcut.mp4',
+        outputName: 'first_TTcut.mp4',
+        mediaUrl: 'ttcut-media://output',
+      },
+    }));
+    fireEvent.click(screen.getByRole('button', { name: 'Auto Cut' }));
+    expect(await screen.findByRole('heading', { name: 'Choose match videos' })).toBeVisible();
   });
 
   it('keeps the export support prompt visible across pages until it is rejected', async () => {

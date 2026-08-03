@@ -8,7 +8,7 @@ import { validateCalibration } from '../domain/calibration';
 import { isSupportedVideoFileName } from '../domain/video-input';
 import { isSupportPromptSuppressed, suppressSupportPromptForThirtyDays } from '../domain/support-prompt';
 import { interpolate, messages, type Language, type Messages } from './i18n';
-import { MultiTaskPage, type MultiLeaveTarget } from './MultiTaskPage';
+import { MultiTaskPage } from './MultiTaskPage';
 import { CalibrationSurface } from './CalibrationSurface';
 import { SupportPrompt } from './SupportPrompt';
 import packageJson from '../../package.json';
@@ -16,6 +16,7 @@ import captureGuideImage from './assets/pingpong-table-with-pose-mannequins.png'
 
 type View = 'auto' | 'history' | 'settings' | 'multi';
 type Step = 'select' | 'calibrate' | 'analyzing' | 'empty' | 'mode' | 'cutting' | 'complete' | 'error';
+type VideoTaskOwner = 'single' | 'multi' | null;
 type PointName = keyof Calibration['points'];
 
 const appVersion = packageJson.version;
@@ -137,6 +138,8 @@ export function App() {
   const [customIds, setCustomIds] = useState<Set<string>>(new Set());
   const [progress, setProgress] = useState({ percent: 0, stage: 'probe' });
   const [activeTask, setActiveTask] = useState<string | null>(null);
+  const [videoTaskOwner, setVideoTaskOwnerState] = useState<VideoTaskOwner>(null);
+  const videoTaskOwnerRef = useRef<VideoTaskOwner>(null);
   const [exportResult, setExportResult] = useState<ExportResult | null>(null);
   const [error, setError] = useState<{ code: string; recoveredOutputPath?: string } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -148,7 +151,6 @@ export function App() {
   const setupTaskRef = useRef<string | null>(null);
   const pendingBallProfileRef = useRef<'uplifting_dual_v1' | null>(null);
   const multiActiveRef = useRef(false);
-  const multiLeaveHandlerRef = useRef<((target: MultiLeaveTarget) => void) | null>(null);
   const settingsRef = useRef(settings);
   const promptedUpdateVersion = useRef<string | null>(null);
   const [setupProgress, setSetupProgress] = useState<{ percent: number; stage: string; current?: number; total?: number } | null>(null);
@@ -161,6 +163,10 @@ export function App() {
   const [historyConfirmation, setHistoryConfirmation] = useState<{ kind: 'delete'; id: string } | { kind: 'clear' } | null>(null);
   const [missingComponents, setMissingComponents] = useState<string[] | null>(null);
   const [previewRally, setPreviewRally] = useState<Rally | null>(null);
+  const updateVideoTaskOwner = useCallback((owner: VideoTaskOwner) => {
+    videoTaskOwnerRef.current = owner;
+    setVideoTaskOwnerState(owner);
+  }, []);
   const t = messages(settings.language as Language);
   const platformSupported = bootstrap?.platformCompatibility.status === 'supported';
   const ballProfileReady = settings.ball_model_profile === 'tracknet_v1'
@@ -206,6 +212,7 @@ export function App() {
         setProgress({ percent: event.data.percent, stage: event.data.stage });
       } else if (event.type === 'analysis-result') {
         setActiveTask(null);
+        if (videoTaskOwnerRef.current === 'single') updateVideoTaskOwner(null);
         setAnalysisId(event.analysisId);
         setAnalysis(event.data);
         setPoints(event.calibration.points);
@@ -214,6 +221,7 @@ export function App() {
         return;
       } else if (event.type === 'export-result') {
         setActiveTask(null);
+        if (videoTaskOwnerRef.current === 'single') updateVideoTaskOwner(null);
         setExportResult(event.data);
         setStep('complete');
         showSupportPrompt();
@@ -248,6 +256,7 @@ export function App() {
         if (settingsRef.current.calibration_method === 'automatic'
           && ['AUTO_CALIBRATION_FAILED', 'TABLE_MODEL_RESOURCE_ERROR'].includes(event.code)) {
           setActiveTask(null);
+          if (videoTaskOwnerRef.current === 'single') updateVideoTaskOwner(null);
           setForceManual(true);
           setToast(event.code === 'TABLE_MODEL_RESOURCE_ERROR'
             ? (settingsRef.current.language === 'zh-CN' ? '自动标定模型不可用，请改用手动标定。' : 'The automatic calibration model is unavailable. Please calibrate manually.')
@@ -257,10 +266,12 @@ export function App() {
         }
         if (event.code === 'EXPORT_CANCELLED') {
           setActiveTask(null);
+          if (videoTaskOwnerRef.current === 'single') updateVideoTaskOwner(null);
           setStep('mode');
           return;
         }
         setActiveTask(null);
+        if (videoTaskOwnerRef.current === 'single') updateVideoTaskOwner(null);
         setError({
           code: event.code,
           ...(event.recoveredOutputPath ? { recoveredOutputPath: event.recoveredOutputPath } : {}),
@@ -272,7 +283,7 @@ export function App() {
     const removeUpdate = window.ttcut.onUpdateState(setUpdateState);
     void window.ttcut.getUpdateState().then(setUpdateState);
     return () => { removeTask(); removeClose(); removeUpdate(); };
-  }, [showSupportPrompt]);
+  }, [showSupportPrompt, updateVideoTaskOwner]);
 
   useEffect(() => { settingsRef.current = settings; }, [settings]);
   useEffect(() => {
@@ -293,7 +304,8 @@ export function App() {
     setStep('select'); setVideo(null); setMetadata(null); setPoints({}); setAnalysis(null); setAnalysisId(null); setForceManual(false);
     setMode('all'); setThreshold(5); setCustomIds(new Set()); setProgress({ percent: 0, stage: 'probe' });
     setActiveTask(null); setExportResult(null); setError(null);
-  }, []);
+    if (videoTaskOwnerRef.current === 'single') updateVideoTaskOwner(null);
+  }, [updateVideoTaskOwner]);
 
   const acceptVideo = async (selected: SelectedVideo | null) => {
     if (!selected) return;
@@ -312,6 +324,7 @@ export function App() {
       return;
     }
     multiActiveRef.current = true;
+    updateVideoTaskOwner('multi');
     setMultiVideos(selected);
     setView('multi');
   };
@@ -328,6 +341,7 @@ export function App() {
 
   const startAnalysis = async () => {
     if (!video || !metadata || (useManualCalibration && (!calibrationValue || calibrationIssue)) || !platformSupported || !bootstrap?.components.analysis.available || !ballProfileReady) return;
+    updateVideoTaskOwner('single');
     setStep('analyzing'); setProgress({ percent: 0, stage: 'load_model' });
     try {
       setActiveTask(await window.ttcut.startAnalysis({
@@ -338,6 +352,7 @@ export function App() {
         ballModelProfile: settings.ball_model_profile,
       }));
     } catch (caught) {
+      if (videoTaskOwnerRef.current === 'single') updateVideoTaskOwner(null);
       setError({ code: errorCode(caught) }); setStep('error');
     }
   };
@@ -349,6 +364,7 @@ export function App() {
     if (mode === 'all') selection = { mode, ...common };
     else if (mode === 'highlight') selection = { mode, highlight_threshold: threshold, ...common };
     else selection = { mode, selected_rally_ids: [...customIds], ...common };
+    updateVideoTaskOwner('single');
     setStep('cutting'); setProgress({ percent: 0, stage: 'preparing' });
     try {
       setActiveTask(await window.ttcut.startExport({
@@ -357,6 +373,7 @@ export function App() {
         destination: 'source',
       }));
     } catch (caught) {
+      if (videoTaskOwnerRef.current === 'single') updateVideoTaskOwner(null);
       setError({ code: errorCode(caught) }); setStep('error');
     }
   };
@@ -398,6 +415,7 @@ export function App() {
   };
 
   const openHistory = async (id: string) => {
+    if (videoTaskOwnerRef.current) return;
     try {
       const opened = await window.ttcut.openHistory(id);
       setVideo(opened.video);
@@ -421,7 +439,7 @@ export function App() {
 
   const confirmHistoryAction = async () => {
     const confirmation = historyConfirmation;
-    if (!confirmation) return;
+    if (!confirmation || videoTaskOwnerRef.current) return;
     setHistoryConfirmation(null);
     setHistoryError(null);
     try {
@@ -447,6 +465,7 @@ export function App() {
   };
 
   const importComponents = async () => {
+    if (videoTaskOwnerRef.current) return;
     setSetupOutcome(null);
     setSetupFailureCode(null);
     setSetupPendingImports([]);
@@ -467,6 +486,7 @@ export function App() {
   };
 
   const installMediaComponent = async () => {
+    if (videoTaskOwnerRef.current) return;
     setSetupOutcome(null);
     setSetupFailureCode(null);
     if (!platformSupported) {
@@ -485,6 +505,7 @@ export function App() {
   };
 
   const installAnalysisComponent = async () => {
+    if (videoTaskOwnerRef.current) return;
     setSetupOutcome(null);
     setSetupFailureCode(null);
     if (!platformSupported) {
@@ -503,6 +524,7 @@ export function App() {
   };
 
   const installDualBallModels = async (selectAfterInstall = false) => {
+    if (videoTaskOwnerRef.current) return;
     setSetupOutcome(null);
     setSetupFailureCode(null);
     if (!platformSupported || bootstrap?.components.analysis.acceleration !== 'cuda') {
@@ -546,7 +568,7 @@ export function App() {
     received: pending.receivedParts,
     total: pending.totalParts,
   })).join(' ');
-  const canReturnToSelection = view === 'multi' || (
+  const canReturnToSelection = (view === 'multi' && videoTaskOwner !== 'multi') || (
     view === 'auto'
       && step !== 'select'
       && step !== 'analyzing'
@@ -555,26 +577,16 @@ export function App() {
       && !activeTask
       && !setupTask
   );
-  const leaveMulti = (target: MultiLeaveTarget) => {
+  const discardMulti = () => {
     multiActiveRef.current = false;
     setMultiVideos([]);
-    if (target === 'history') {
-      showHistory();
-      return;
-    }
-    if (target === 'settings') {
-      reset();
-      setView('settings');
-      return;
-    }
-    reset();
-    setView('auto');
+    if (videoTaskOwnerRef.current === 'multi') updateVideoTaskOwner(null);
   };
-  const requestView = (target: MultiLeaveTarget) => {
-    if (view === 'multi') {
-      multiLeaveHandlerRef.current?.(target);
-      return;
-    }
+  const handleMultiTaskStateChange = (active: boolean) => {
+    if (active && videoTaskOwnerRef.current !== 'multi') updateVideoTaskOwner('multi');
+    if (!active && videoTaskOwnerRef.current === 'multi') updateVideoTaskOwner(null);
+  };
+  const requestView = (target: Exclude<View, 'multi'>) => {
     if (target === 'history') {
       showHistory();
       return;
@@ -583,6 +595,15 @@ export function App() {
       setView('settings');
       return;
     }
+    if (videoTaskOwnerRef.current === 'single') {
+      setView('auto');
+      return;
+    }
+    if (videoTaskOwnerRef.current === 'multi') {
+      setView('multi');
+      return;
+    }
+    if (multiVideos.length > 0) discardMulti();
     reset();
     setView('auto');
   };
@@ -618,19 +639,21 @@ export function App() {
       </aside>
 
       <main className="main-content">
-        {view === 'multi' ? (
-          <MultiTaskPage
-            initialVideos={multiVideos}
-            preRoll={settings.pre_roll_seconds}
-            postRoll={settings.post_roll_seconds}
-            ballModelProfile={settings.ball_model_profile}
-            language={settings.language}
-            registerLeaveHandler={(handler) => { multiLeaveHandlerRef.current = handler; }}
-            onLeave={leaveMulti}
-            onOpenAnalysis={(id) => { multiActiveRef.current = false; void openHistory(id); }}
-            onCompletableTasksFinished={showSupportPrompt}
-          />
-        ) : view === 'settings' ? (
+        {multiVideos.length > 0 && (
+          <div hidden={view !== 'multi'}>
+            <MultiTaskPage
+              initialVideos={multiVideos}
+              preRoll={settings.pre_roll_seconds}
+              postRoll={settings.post_roll_seconds}
+              ballModelProfile={settings.ball_model_profile}
+              language={settings.language}
+              onTaskStateChange={handleMultiTaskStateChange}
+              onOpenAnalysis={(id) => { discardMulti(); void openHistory(id); }}
+              onCompletableTasksFinished={showSupportPrompt}
+            />
+          </div>
+        )}
+        {view !== 'multi' && (view === 'settings' ? (
           <section className="page settings-page">
             <div className="page-heading settings-heading"><h1>{t.settings}</h1></div>
             <div className="settings-grid">
@@ -661,7 +684,7 @@ export function App() {
                 <div><h2>{settings.language === 'zh-CN' ? '球识别模型' : 'Ball recognition model'}</h2></div>
                 <div className="model-profile-options">
                   <button className={settings.ball_model_profile === 'tracknet_v1' ? 'selected' : ''} onClick={() => void selectBallModelProfile('tracknet_v1')}><strong>{settings.language === 'zh-CN' ? '默认模型' : 'Default model'}</strong><span>{settings.language === 'zh-CN' ? '速度快，精准度一般。' : 'Fast, with average accuracy.'}</span></button>
-                  <button disabled={bootstrap?.components.analysis.acceleration !== 'cuda' || Boolean(setupTask)} className={settings.ball_model_profile === 'uplifting_dual_v1' ? 'selected' : ''} onClick={() => void selectBallModelProfile('uplifting_dual_v1')}><strong>{settings.language === 'zh-CN' ? '新模型' : 'New model'}</strong><span>{settings.language === 'zh-CN' ? '速度慢，准确度很高。' : 'Slower, with very high accuracy.'}</span></button>
+                  <button disabled={bootstrap?.components.analysis.acceleration !== 'cuda' || Boolean(setupTask) || Boolean(videoTaskOwner && !bootstrap?.components.dual_ball_models.available)} className={settings.ball_model_profile === 'uplifting_dual_v1' ? 'selected' : ''} onClick={() => void selectBallModelProfile('uplifting_dual_v1')}><strong>{settings.language === 'zh-CN' ? '新模型' : 'New model'}</strong><span>{settings.language === 'zh-CN' ? '速度慢，准确度很高。' : 'Slower, with very high accuracy.'}</span></button>
                 </div>
               </article>
               <article className="card setting-card">
@@ -698,20 +721,20 @@ export function App() {
                 ) : (
                   <div className="setup-options">
                     {bootstrap?.componentSetup.analysis_offer && !bootstrap.components.analysis.available && (
-                      <div className="setup-option"><div><strong>{t.analysisOffer}</strong><span>{t.analysisOfferDetail}</span><small>{interpolate(t.downloadUpTo, { size: fileSize(bootstrap.componentSetup.analysis_offer.download_size_bytes) })}</small><small className="setup-network-hint">{t.networkHint}</small></div><div><button className="text-button" onClick={() => void window.ttcut.openExternalUrl(bootstrap.componentSetup.analysis_offer!.license_url)}>{t.viewLicense}</button><button className="primary" disabled={!platformSupported || !bootstrap.componentSetup.analysis_offer.available_for_download} onClick={() => void installAnalysisComponent()}>{t.consentInstall}</button></div></div>
+                      <div className="setup-option"><div><strong>{t.analysisOffer}</strong><span>{t.analysisOfferDetail}</span><small>{interpolate(t.downloadUpTo, { size: fileSize(bootstrap.componentSetup.analysis_offer.download_size_bytes) })}</small><small className="setup-network-hint">{t.networkHint}</small></div><div><button className="text-button" onClick={() => void window.ttcut.openExternalUrl(bootstrap.componentSetup.analysis_offer!.license_url)}>{t.viewLicense}</button><button className="primary" disabled={!platformSupported || !bootstrap.componentSetup.analysis_offer.available_for_download || Boolean(videoTaskOwner)} onClick={() => void installAnalysisComponent()}>{t.consentInstall}</button></div></div>
                     )}
                     {bootstrap?.componentSetup.media_offer && !bootstrap.components.media.available && (
-                      <div className="setup-option"><div><strong>{t.mediaOffer}</strong><span>{t.mediaOfferDetail}</span><small>{interpolate(t.downloadSize, { size: fileSize(bootstrap.componentSetup.media_offer.download_size_bytes) })}</small></div><div><button className="text-button" onClick={() => void window.ttcut.openExternalUrl(bootstrap.componentSetup.media_offer!.license_url)}>{t.viewLicense}</button><button className="primary" disabled={!platformSupported || !bootstrap.componentSetup.media_offer.available_for_download} onClick={() => void installMediaComponent()}>{t.consentInstall}</button></div></div>
+                      <div className="setup-option"><div><strong>{t.mediaOffer}</strong><span>{t.mediaOfferDetail}</span><small>{interpolate(t.downloadSize, { size: fileSize(bootstrap.componentSetup.media_offer.download_size_bytes) })}</small></div><div><button className="text-button" onClick={() => void window.ttcut.openExternalUrl(bootstrap.componentSetup.media_offer!.license_url)}>{t.viewLicense}</button><button className="primary" disabled={!platformSupported || !bootstrap.componentSetup.media_offer.available_for_download || Boolean(videoTaskOwner)} onClick={() => void installMediaComponent()}>{t.consentInstall}</button></div></div>
                     )}
                     {bootstrap?.componentSetup.dual_ball_models_offer && !bootstrap.components.dual_ball_models.available && (
-                      <div className="setup-option optional-component"><div><strong>{settings.language === 'zh-CN' ? '安装 Uplifting 双球模型' : 'Install Uplifting dual ball models'}</strong><span>{settings.language === 'zh-CN' ? '两个固定权重，下载后逐文件校验并原子安装；仅 CUDA 可用。' : 'Two pinned weights, verified per file and installed atomically; CUDA only.'}</span><small>{interpolate(t.downloadSize, { size: fileSize(bootstrap.componentSetup.dual_ball_models_offer.download_size_bytes) })}</small></div><div><button className="primary" disabled={bootstrap.components.analysis.acceleration !== 'cuda' || Boolean(setupTask)} onClick={() => void installDualBallModels(false)}>{t.consentInstall}</button></div></div>
+                      <div className="setup-option optional-component"><div><strong>{settings.language === 'zh-CN' ? '安装 Uplifting 双球模型' : 'Install Uplifting dual ball models'}</strong><span>{settings.language === 'zh-CN' ? '两个固定权重，下载后逐文件校验并原子安装；仅 CUDA 可用。' : 'Two pinned weights, verified per file and installed atomically; CUDA only.'}</span><small>{interpolate(t.downloadSize, { size: fileSize(bootstrap.componentSetup.dual_ball_models_offer.download_size_bytes) })}</small></div><div><button className="primary" disabled={bootstrap.components.analysis.acceleration !== 'cuda' || Boolean(setupTask) || Boolean(videoTaskOwner)} onClick={() => void installDualBallModels(false)}>{t.consentInstall}</button></div></div>
                     )}
                     {bootstrap?.componentSetup.x264_manual_offer && !bootstrap.components.media.x264_available && (
                       <div className="setup-option optional-component"><div><strong>{t.x264ManualOffer}</strong><span>{t.x264ManualDetail}</span><small>{interpolate(t.downloadSize, { size: fileSize(bootstrap.componentSetup.x264_manual_offer.download_size_bytes) })}</small></div><div><button className="secondary" disabled={Boolean(setupTask)} onClick={() => void window.ttcut.openX264Download()}>{t.goToDownload}</button></div></div>
                     )}
                     <div className="setup-manual">
                       <div><strong>{t.manualDownload}</strong></div>
-                      <div className="setup-manual-actions"><button className="text-button" disabled={Boolean(setupTask)} onClick={() => void window.ttcut.openComponentDownloads()}>{t.goToDownload}</button><button className="secondary" disabled={!platformSupported || Boolean(setupTask)} onClick={() => void importComponents()}>{t.importComponents}</button></div>
+                      <div className="setup-manual-actions"><button className="text-button" disabled={Boolean(setupTask)} onClick={() => void window.ttcut.openComponentDownloads()}>{t.goToDownload}</button><button className="secondary" disabled={!platformSupported || Boolean(setupTask) || Boolean(videoTaskOwner)} onClick={() => void importComponents()}>{t.importComponents}</button></div>
                     </div>
                   </div>
                 )}
@@ -726,22 +749,22 @@ export function App() {
           </section>
         ) : view === 'history' ? (
           <section className="page history-page">
-            <div className="history-header"><div className="page-heading"><h1>{t.history}</h1><p>{t.historyDescription}</p></div><button className="secondary" disabled={historyEntries.length === 0 || Boolean(activeTask || setupTask)} onClick={() => setHistoryConfirmation({ kind: 'clear' })}>{t.clearHistory}</button></div>
+            <div className="history-header"><div className="page-heading"><h1>{t.history}</h1><p>{t.historyDescription}</p></div><button className="secondary" disabled={historyEntries.length === 0 || Boolean(activeTask || setupTask || videoTaskOwner)} onClick={() => setHistoryConfirmation({ kind: 'clear' })}>{t.clearHistory}</button></div>
             {historyError && <div className="history-error" role="alert"><span>{localizedError(historyError, t)}</span><button className="text-button" onClick={() => void loadHistory()}>{t.retry}</button></div>}
             {historyLoading ? (
               <div className="history-loading" role="status">{t.loadingHistory}</div>
             ) : historyEntries.length === 0 ? (
-              <div className="empty-state history-empty"><span>○</span><h1>{t.noHistory}</h1><p>{t.noHistoryDetail}</p><button className="primary" onClick={() => { reset(); setView('auto'); }}>{t.startFirstAnalysis}</button></div>
+              <div className="empty-state history-empty"><span>○</span><h1>{t.noHistory}</h1><p>{t.noHistoryDetail}</p><button className="primary" onClick={() => requestView('auto')}>{t.startFirstAnalysis}</button></div>
             ) : (
               <div className="history-grid">
                 {historyEntries.map((entry) => {
                   const unavailable = entry.source_status !== 'available';
                   return <article className={`history-card card ${unavailable ? 'unavailable' : ''}`} key={entry.id}>
-                    <button className="history-open" disabled={unavailable || Boolean(activeTask || setupTask)} onClick={() => void openHistory(entry.id)}>
+                    <button className="history-open" disabled={unavailable || Boolean(activeTask || setupTask || videoTaskOwner)} onClick={() => void openHistory(entry.id)}>
                       <div className="history-cover">{entry.cover_url ? <img src={entry.cover_url} alt="" /> : <span>{t.coverUnavailable}</span>}</div>
                       <div className="history-info"><strong title={entry.video_name}>{entry.video_name}</strong><div><span>{interpolate(t.historyRallies, { count: entry.rally_count })}</span><span>{formatTimestamp(entry.duration_seconds)}</span></div>{unavailable && <small>{entry.source_status === 'missing' ? t.historyMissing : t.historyChanged}</small>}</div>
                     </button>
-                    <button className="history-delete" disabled={Boolean(activeTask || setupTask)} aria-label={interpolate(t.deleteHistoryItem, { name: entry.video_name })} onClick={() => setHistoryConfirmation({ kind: 'delete', id: entry.id })}>×</button>
+                    <button className="history-delete" disabled={Boolean(activeTask || setupTask || videoTaskOwner)} aria-label={interpolate(t.deleteHistoryItem, { name: entry.video_name })} onClick={() => setHistoryConfirmation({ kind: 'delete', id: entry.id })}>×</button>
                   </article>;
                 })}
               </div>
@@ -853,7 +876,7 @@ export function App() {
               </div>
             )}
           </section>
-        )}
+        ))}
       </main>
 
       {view === 'auto' && step === 'select' && (
