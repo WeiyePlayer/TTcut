@@ -222,24 +222,13 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
 
     await page.getByRole('button', { name: '设置' }).click();
     await expect(page.getByRole('heading', { name: '设置', exact: true })).toBeVisible();
-    const compatibleExport = page.getByRole('button', { name: '兼容模式（默认）', exact: true });
-    const fastSegmentedExport = page.getByRole('button', { name: '快速分段模式', exact: true });
-    await expect(compatibleExport).toHaveClass(/selected/);
-    await fastSegmentedExport.click();
-    await expect(fastSegmentedExport).toHaveClass(/selected/);
-    await expect.poll(async () => {
-      const saved = JSON.parse(await readFile(path.join(isolatedUserData, 'settings.json'), 'utf8')) as {
-        export_strategy?: string;
-      };
-      return saved.export_strategy;
-    }).toBe('fast_segmented');
-    await compatibleExport.click();
-    await expect(compatibleExport).toHaveClass(/selected/);
+    await expect(page.getByRole('heading', { name: '导出方式', exact: true })).toHaveCount(0);
     await expect(page.getByText('可用', { exact: true })).toHaveCount(2, { timeout: 60_000 });
     await expect(page.getByText('GPU 加速', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'English' }).click();
     await expect(page.locator('.language-loader')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Export strategy', exact: true })).toHaveCount(0);
     await page.getByRole('button', { name: '简体中文' }).click();
     await expect(page.getByRole('heading', { name: '设置', exact: true })).toBeVisible();
     await expect(page.getByRole('heading', { name: '回合前时间' })).toBeVisible();

@@ -3,16 +3,25 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { dialog, type BrowserWindow } from 'electron';
 import type { AppEvent } from '../shared/api';
-import { exportRequestSchema, type CutGroup, type ExportRequest, type VideoMetadata } from '../shared/contracts';
+import {
+  exportRequestSchema,
+  type CutGroup,
+  type ExportRequest,
+  type ExportTimingInfo,
+  type VideoMetadata,
+} from '../shared/contracts';
 import { IPC } from '../shared/ipc';
-import { isExportDurationWithinTolerance } from '../domain/export-duration';
+import {
+  assessFastConcatDuration,
+  assessExportDuration,
+  type ExportTimingAssessment,
+} from '../domain/export-duration';
 import { createCutGroups } from '../domain/segments';
 import { normalizedVideoRotation } from '../domain/video-input';
 import { resolveUsableMediaComponents, type MediaEncoder } from './components';
 import { logLine } from './logger';
 import { getHistoryStore } from './history';
 import {
-  buildReencodeArgs,
   buildConcatArgs,
   buildConcatManifest,
   buildSegmentReencodeArgs,
@@ -42,6 +51,41 @@ import {
 
 const lastExportProgress = new Map<string, number>();
 
+type ExportTimingExpectation = {
+  targetSeconds: number;
+  segmentCount: number;
+};
+
+type ExportValidationResult = {
+  metadata: VideoMetadata;
+  timing: ExportTimingAssessment;
+};
+
+class ExportDurationMismatchError extends Error {
+  readonly exportCode = 'EXPORT_DURATION_MISMATCH';
+
+  constructor(readonly timing: ExportTimingAssessment) {
+    super(
+      `EXPORT_DURATION_MISMATCH: target=${timing.targetSeconds.toFixed(6)}`
+      + ` actual=${timing.actualSeconds.toFixed(6)}`
+      + ` drift=${timing.driftSeconds.toFixed(6)}`
+      + ` allowed=${timing.allowedDriftSeconds.toFixed(6)}`
+      + ` segments=${timing.segmentCount}`,
+    );
+    this.name = 'ExportDurationMismatchError';
+  }
+}
+
+function timingInfo(timing: ExportTimingAssessment): ExportTimingInfo {
+  return {
+    targetSeconds: timing.targetSeconds,
+    actualSeconds: timing.actualSeconds,
+    driftSeconds: timing.driftSeconds,
+    allowedDriftSeconds: timing.allowedDriftSeconds,
+    segmentCount: timing.segmentCount,
+  };
+}
+
 function send(window: BrowserWindow, event: AppEvent): void {
   if (!window.isDestroyed()) window.webContents.send(IPC.taskEvent, event);
 }
@@ -65,6 +109,32 @@ export async function uniqueOutput(input: string, suffixLabel: string): Promise<
     const candidate = path.join(directory, name);
     if (!(await available(candidate))) return candidate;
     suffix += 1;
+  }
+}
+
+async function uniqueDurationMismatchOutput(output: string): Promise<string> {
+  const directory = path.dirname(output);
+  const base = path.basename(output, path.extname(output));
+  let suffix = 1;
+  while (true) {
+    const stem = `${base}_duration_mismatch`;
+    const candidate = path.join(directory, suffix === 1 ? `${stem}.mp4` : `${stem}_${suffix}.mp4`);
+    if (!(await available(candidate))) return candidate;
+    suffix += 1;
+  }
+}
+
+export async function retainDurationMismatchOutput(
+  partial: string,
+  output: string,
+): Promise<{ path: string; renamed: boolean }> {
+  const candidate = await uniqueDurationMismatchOutput(output);
+  try {
+    await rename(partial, candidate);
+    return { path: candidate, renamed: true };
+  } catch (error) {
+    if (await available(partial)) return { path: partial, renamed: false };
+    throw error;
   }
 }
 
@@ -237,16 +307,13 @@ function exportTimestampTolerance(metadata: VideoMetadata): number {
 
 export async function validateExportOutput(
   output: string,
-  wantedDuration: number,
+  expectation: ExportTimingExpectation,
   source: VideoMetadata,
   orientation: 'preserved' | 'normalized' = 'preserved',
-): Promise<VideoMetadata> {
+): Promise<ExportValidationResult> {
   const info = await stat(output);
   if (!info.isFile() || info.size < 1024) throw new Error('EXPORT_INVALID');
   const metadata = await probeVideo(output);
-  if (!isExportDurationWithinTolerance(metadata.duration_seconds, wantedDuration)) {
-    throw new Error('EXPORT_DURATION_MISMATCH');
-  }
   if (metadata.width !== source.width || metadata.height !== source.height) {
     throw new Error('EXPORT_RESOLUTION_MISMATCH');
   }
@@ -286,7 +353,36 @@ export async function validateExportOutput(
   if (Math.abs(normalizedVideoRotation(metadata.rotation) - expectedRotation) > 0.001) {
     throw new Error('EXPORT_ROTATION_MISMATCH');
   }
-  return metadata;
+  const timing = assessExportDuration(
+    metadata.duration_seconds,
+    expectation.targetSeconds,
+    expectation.segmentCount,
+    source,
+  );
+  if (!timing.withinTolerance) throw new ExportDurationMismatchError(timing);
+  return { metadata, timing };
+}
+
+async function logExportTiming(
+  taskId: string,
+  label: string,
+  timing: ExportTimingAssessment,
+  source: VideoMetadata,
+): Promise<void> {
+  await logLine(
+    taskId,
+    timing.absoluteDriftSeconds > 0.1 ? 'WARN' : 'INFO',
+    `${label}: target=${timing.targetSeconds.toFixed(6)}`
+      + ` actual=${timing.actualSeconds.toFixed(6)}`
+      + ` drift=${timing.driftSeconds.toFixed(6)}`
+      + ` allowed=${timing.allowedDriftSeconds.toFixed(6)}`
+      + ` quantum=${timing.quantumSeconds.toFixed(6)}`
+      + ` segments=${timing.segmentCount}`
+      + ` fps=${source.fps.toFixed(6)}`
+      + ` nominalFps=${source.nominal_fps?.toFixed(6) ?? 'null'}`
+      + ` vfr=${source.variable_frame_rate}`
+      + ` audioSampleRate=${source.audio_sample_rate ?? 'null'}`,
+  );
 }
 
 async function streamCopyEligibility(
@@ -341,11 +437,12 @@ async function executeFastSegmented(
   groups: readonly CutGroup[],
   partial: string,
   tempDirectory: string,
-): Promise<void> {
+): Promise<number[]> {
   const keyframes = await probeKeyframes(analysisVideo.path, components.ffprobe);
   assertExportNotCancelled(taskId);
   const signatures: StreamSignature[] = [];
   const segmentNames: string[] = [];
+  const encodedSegmentDurations: number[] = [];
   for (const [index, group] of groups.entries()) {
     assertExportNotCancelled(taskId);
     const seekStart = selectSeekStart(group.start, keyframes);
@@ -375,7 +472,14 @@ async function executeFastSegmented(
         'cutting-and-exporting',
         { segmentIndex: index + 1, seekStart },
       );
-      await validateExportOutput(segmentPath, group.end - group.start, analysisVideo, 'normalized');
+      const validation = await validateExportOutput(
+        segmentPath,
+        { targetSeconds: group.end - group.start, segmentCount: 1 },
+        analysisVideo,
+        'normalized',
+      );
+      encodedSegmentDurations.push(validation.metadata.duration_seconds);
+      await logExportTiming(taskId, `Fast segment ${index + 1} timing`, validation.timing, analysisVideo);
       const signature = await probeStreamSignature(segmentPath, components.ffprobe);
       if (!signature.video.extradataHash) throw new Error('EXPORT_SEGMENT_FAILED');
       if (signatures.length > 0 && !sameStreamSignature(signatures[0]!, signature)) {
@@ -401,6 +505,7 @@ async function executeFastSegmented(
   } catch (error) {
     throw wrapExportError(error, 'EXPORT_CONCAT_FAILED');
   }
+  return encodedSegmentDurations;
 }
 
 async function executeFastSingle(
@@ -410,7 +515,7 @@ async function executeFastSingle(
   analysisVideo: VideoMetadata,
   group: CutGroup,
   partial: string,
-): Promise<void> {
+): Promise<ExportValidationResult> {
   const keyframes = await probeKeyframes(analysisVideo.path, components.ffprobe);
   assertExportNotCancelled(taskId);
   const seekStart = selectSeekStart(group.start, keyframes);
@@ -437,10 +542,17 @@ async function executeFastSingle(
       'cutting-and-exporting',
       { segmentIndex: 1, seekStart },
     );
-    await validateExportOutput(partial, group.end - group.start, analysisVideo, 'normalized');
   } catch (error) {
     throw wrapExportError(error, 'EXPORT_SEGMENT_FAILED');
   }
+  const validation = await validateExportOutput(
+    partial,
+    { targetSeconds: group.end - group.start, segmentCount: 1 },
+    analysisVideo,
+    'normalized',
+  );
+  await logExportTiming(taskId, 'Fast single timing', validation.timing, analysisVideo);
+  return validation;
 }
 
 async function executeExport(
@@ -458,13 +570,20 @@ async function executeExport(
   const highResolution = analysis.video.width > 4096 || analysis.video.height > 2160;
   const tempDirectory = path.join(path.dirname(output), `.ttcut-${taskId}-segments`);
   let terminalSent = false;
-  const sendError = async (code: string, message: string): Promise<void> => {
+  let finalTiming: ExportTimingAssessment | null = null;
+  const sendError = async (
+    code: string,
+    message: string,
+    details?: { recoveredOutputPath?: string; timing?: ExportTimingInfo },
+  ): Promise<void> => {
     if (terminalSent || !markTaskTerminal(taskId)) return;
     terminalSent = true;
-    send(window, { type: 'error', taskId, code, message });
+    send(window, { type: 'error', taskId, code, message, ...details });
   };
   try {
     await mkdir(tempDirectory, { recursive: true });
+    const requestedBudget = assessExportDuration(duration, duration, groups.length, analysis.video);
+    await logExportTiming(taskId, 'Export timing budget (fast segmented)', requestedBudget, analysis.video);
     const canCopy = await streamCopyEligibility(
       analysis.video.path,
       groups,
@@ -485,35 +604,30 @@ async function executeExport(
           duration,
           'cutting',
         );
-        await validateExportOutput(partial, duration, analysis.video);
+        const validation = await validateExportOutput(
+          partial,
+          { targetSeconds: duration, segmentCount: 1 },
+          analysis.video,
+        );
+        finalTiming = validation.timing;
+        await logExportTiming(taskId, 'Stream-copy final timing', validation.timing, analysis.video);
       } catch (error) {
         const code = exportCode(error);
         if (code === 'EXPORT_CANCELLED' || code === 'EXPORT_TERMINATED') throw error;
         await logLine(taskId, 'WARN', `Stream copy rejected; accurate encode follows: ${String(error)}`);
         await rm(partial, { force: true });
-        if (request.export_strategy === 'fast_segmented') {
-          await executeFastSingle(
-            window,
-            taskId,
-            components,
-            analysis.video,
-            groups[0]!,
-            partial,
-          );
-        } else {
-          await runFfmpeg(
-            window,
-            taskId,
-            components.ffmpeg,
-            buildReencodeArgs(analysis.video.path, partial, groups, analysis.video, components.mediaEncoder),
-            duration,
-            'cutting-and-exporting',
-          );
-          await validateExportOutput(partial, duration, analysis.video, 'normalized');
-        }
+        const validation = await executeFastSingle(
+          window,
+          taskId,
+          components,
+          analysis.video,
+          groups[0]!,
+          partial,
+        );
+        finalTiming = validation.timing;
       }
-    } else if (request.export_strategy === 'fast_segmented' && groups.length > 1) {
-      await executeFastSegmented(
+    } else if (groups.length > 1) {
+      const encodedSegmentDurations = await executeFastSegmented(
         window,
         taskId,
         components,
@@ -522,29 +636,46 @@ async function executeExport(
         partial,
         tempDirectory,
       );
-      await validateExportOutput(partial, duration, analysis.video, 'normalized');
-    } else {
-      if (request.export_strategy === 'fast_segmented') {
-        await executeFastSingle(
-          window,
-          taskId,
-          components,
-          analysis.video,
-          groups[0]!,
+      const encodedSegmentDuration = encodedSegmentDurations.reduce(
+        (total, segmentDuration) => total + segmentDuration,
+        0,
+      );
+      let concatValidation: ExportValidationResult;
+      try {
+        concatValidation = await validateExportOutput(
           partial,
+          {
+            targetSeconds: encodedSegmentDuration,
+            segmentCount: 1,
+          },
+          analysis.video,
+          'normalized',
         );
-      } else {
-        await runFfmpeg(
-          window,
-          taskId,
-          components.ffmpeg,
-          buildReencodeArgs(analysis.video.path, partial, groups, analysis.video, components.mediaEncoder),
-          duration,
-          'cutting-and-exporting',
-        );
-        await validateExportOutput(partial, duration, analysis.video, 'normalized');
+      } catch (error) {
+        throw wrapExportError(error, 'EXPORT_CONCAT_FAILED');
       }
+      await logExportTiming(taskId, 'Fast concat timing', concatValidation.timing, analysis.video);
+      const requestedTiming = assessFastConcatDuration(
+        concatValidation.metadata.duration_seconds,
+        encodedSegmentDurations,
+        duration,
+        analysis.video,
+      ).requestedClips;
+      if (!requestedTiming.withinTolerance) throw new ExportDurationMismatchError(requestedTiming);
+      finalTiming = requestedTiming;
+      await logExportTiming(taskId, 'Fast final requested timing', requestedTiming, analysis.video);
+    } else {
+      const validation = await executeFastSingle(
+        window,
+        taskId,
+        components,
+        analysis.video,
+        groups[0]!,
+        partial,
+      );
+      finalTiming = validation.timing;
     }
+    if (!finalTiming) throw new Error('EXPORT_INVALID');
     if (await available(output)) throw new Error('OUTPUT_COLLISION');
     await rename(partial, output);
     const result = {
@@ -553,6 +684,7 @@ async function executeExport(
       outputPath: output,
       outputName: path.basename(output),
       mediaUrl: registerMediaPath(output),
+      timing: timingInfo(finalTiming),
     };
     send(window, { type: 'progress', data: { taskId, kind: 'export', stage: 'complete', percent: 100 } });
     lastExportProgress.set(taskId, 100);
@@ -562,7 +694,22 @@ async function executeExport(
       send(window, { type: 'export-result', taskId, data: result });
     }
   } catch (error) {
-    await rm(partial, { force: true }).catch(() => undefined);
+    let recoveredOutputPath: string | undefined;
+    let recoveredTiming: ExportTimingInfo | undefined;
+    if (error instanceof ExportDurationMismatchError && await available(partial)) {
+      recoveredTiming = timingInfo(error.timing);
+      try {
+        const retained = await retainDurationMismatchOutput(partial, output);
+        recoveredOutputPath = retained.path;
+        if (!retained.renamed) {
+          await logLine(taskId, 'WARN', 'Could not rename duration-mismatch output; original partial retained');
+        }
+      } catch (recoveryError) {
+        await logLine(taskId, 'WARN', `Could not rename duration-mismatch output: ${String(recoveryError)}`);
+        if (await available(partial)) recoveredOutputPath = partial;
+      }
+    }
+    if (!recoveredOutputPath) await rm(partial, { force: true }).catch(() => undefined);
     const message = error instanceof Error ? error.message : String(error);
     const code = exportCode(error) ?? 'EXPORT_FAILED';
     const controller = getTaskController(taskId);
@@ -571,8 +718,14 @@ async function executeExport(
       code === 'EXPORT_CANCELLED' && controller?.cancelReason === 'app-exit' ? 'INFO' : 'ERROR',
       `${code}: ${message}`,
     );
+    if (recoveredOutputPath) {
+      await logLine(taskId, 'WARN', `Retained duration-mismatch output: ${recoveredOutputPath}`);
+    }
     if (!(code === 'EXPORT_CANCELLED' && controller?.cancelReason === 'app-exit')) {
-      await sendError(code, message);
+      await sendError(code, message, {
+        ...(recoveredOutputPath ? { recoveredOutputPath } : {}),
+        ...(recoveredTiming ? { timing: recoveredTiming } : {}),
+      });
     } else {
       markTaskTerminal(taskId);
     }
@@ -602,7 +755,7 @@ export async function startExport(window: BrowserWindow, rawRequest: ExportReque
     await assertExportPreconditions(analysis.video.path, path.dirname(output), taskId, duration, analysis.video, components.mediaEncoder);
     send(window, { type: 'progress', data: { taskId, kind: 'export', stage: 'preparing', percent: 0 } });
     await logLine(taskId, 'INFO', `Export target: ${output}`);
-    await logLine(taskId, 'INFO', `Export strategy: ${request.export_strategy}`);
+    await logLine(taskId, 'INFO', 'Export strategy: fast segmented');
     await logLine(taskId, 'INFO', `Active media encoder: ${components.mediaEncoder}`);
     void executeExport(
       window,

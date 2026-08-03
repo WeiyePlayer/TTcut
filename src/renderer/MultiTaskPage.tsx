@@ -3,7 +3,6 @@ import type {
   AnalysisResultV1,
   Calibration,
   CutSelectionV1,
-  ExportStrategy,
   BallModelProfile,
   TableAnalysis,
   VideoMetadata,
@@ -38,6 +37,7 @@ type BatchItem = {
   analysis: AnalysisResultV1 | null;
   outputPath: string | null;
   outputMediaUrl: string | null;
+  recoveredOutputPath: string | null;
   error: string | null;
 };
 
@@ -45,7 +45,6 @@ interface MultiTaskPageProps {
   initialVideos: SelectedVideo[];
   preRoll: 1.5 | 2.5 | 5;
   postRoll: 0.5 | 1 | 2 | 4;
-  exportStrategy: ExportStrategy;
   ballModelProfile?: BallModelProfile;
   language?: 'zh-CN' | 'en';
   onOpenAnalysis: (analysisId: string) => void;
@@ -76,6 +75,7 @@ async function createItems(videos: SelectedVideo[]): Promise<BatchItem[]> {
     analysis: null,
     outputPath: null,
     outputMediaUrl: null,
+    recoveredOutputPath: null,
     error: null,
   })));
 }
@@ -94,7 +94,6 @@ export function MultiTaskPage({
   initialVideos,
   preRoll,
   postRoll,
-  exportStrategy,
   ballModelProfile = 'tracknet_v1',
   language = 'zh-CN',
   onOpenAnalysis,
@@ -120,8 +119,8 @@ export function MultiTaskPage({
   const scheduleRef = useRef<() => void>(() => undefined);
   const rowRefs = useRef(new Map<string, HTMLElement>());
   const previousRects = useRef(new Map<string, DOMRect>());
-  const optionsRef = useRef({ preRoll, postRoll, exportStrategy });
-  optionsRef.current = { preRoll, postRoll, exportStrategy };
+  const optionsRef = useRef({ preRoll, postRoll });
+  optionsRef.current = { preRoll, postRoll };
 
   const isEnglish = language === 'en';
   const text = {
@@ -131,6 +130,7 @@ export function MultiTaskPage({
     highlight: isEnglish ? 'Highlights' : '精彩回合',
     analyzeOnly: isEnglish ? 'Analyze only' : '只分析',
     remove: isEnglish ? 'Remove' : '删除',
+    openRecovered: isEnglish ? 'Open retained file' : '打开保留文件',
     preview: isEnglish ? 'Preview' : '预览',
     cancel: isEnglish ? 'Cancel' : '取消',
     start: isEnglish ? 'Start analysis and cutting' : '开始分析剪辑',
@@ -245,7 +245,6 @@ export function MultiTaskPage({
         selection,
         destination: 'source',
         mode_label: modeLabel(candidate),
-        export_strategy: optionsRef.current.exportStrategy,
       });
       pendingTaskStartRef.current = startPromise;
       void startPromise.then((taskId) => {
@@ -397,6 +396,7 @@ export function MultiTaskPage({
         progress: 100,
         outputPath: event.data.outputPath,
         outputMediaUrl: event.data.mediaUrl,
+        recoveredOutputPath: null,
         error: null,
       }));
       finishActive();
@@ -436,6 +436,7 @@ export function MultiTaskPage({
       progress: active.phase === 'export' && item.analysisId ? 70 : 0,
       analysisId: active.phase === 'analysis' ? null : item.analysisId,
       analysis: active.phase === 'analysis' ? null : item.analysis,
+      recoveredOutputPath: event.recoveredOutputPath ?? null,
       error: cancelled ? null : event.code,
     }));
     if (cancelled) {
@@ -470,7 +471,7 @@ export function MultiTaskPage({
     if (runningRef.current || hasPendingCalibration(itemsRef.current)) return;
     replaceItems((current) => current.map((item) => (
       item.processingStatus === 'failed' || item.processingStatus === 'cancelled'
-        ? { ...item, processingStatus: 'waiting', error: null }
+        ? { ...item, processingStatus: 'waiting', recoveredOutputPath: null, error: null }
         : item
     )));
     runningRef.current = true;
@@ -646,6 +647,11 @@ export function MultiTaskPage({
                     height: item.metadata.height,
                   }) : item.analysisId && onOpenAnalysis(item.analysisId)}>{item.outputPath ? '预览输出' : '查看分析'}</button>
                   <button className="secondary" type="button" onClick={() => void window.ttcut.revealOutput(item.outputPath ?? item.video.path)}>打开文件夹</button>
+                </div>
+              ) : item.processingStatus === 'failed' && item.recoveredOutputPath ? (
+                <div className="batch-actions">
+                  <button className="secondary" type="button" onClick={() => void window.ttcut.revealOutput(item.recoveredOutputPath!)}>{text.openRecovered}</button>
+                  <button className="batch-remove" type="button" aria-label={`${text.remove} ${item.video.name}`} disabled={active} onClick={() => void remove(item)}>×</button>
                 </div>
               ) : (
                 <>

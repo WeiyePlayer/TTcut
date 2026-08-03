@@ -119,7 +119,7 @@ function RallyPreviewDialog({ video, videoDuration, rally, translations, onClose
 export function App() {
   const [bootstrap, setBootstrap] = useState<BootstrapData | null>(null);
   const [settings, setSettings] = useState<AppSettings>({
-    language: 'zh-CN', calibration_method: 'automatic', export_strategy: 'compatible',
+    language: 'zh-CN', calibration_method: 'automatic',
     ball_model_profile: 'tracknet_v1', pre_roll_seconds: 2.5, post_roll_seconds: 2,
   });
   const [view, setView] = useState<View>('auto');
@@ -138,7 +138,7 @@ export function App() {
   const [progress, setProgress] = useState({ percent: 0, stage: 'probe' });
   const [activeTask, setActiveTask] = useState<string | null>(null);
   const [exportResult, setExportResult] = useState<ExportResult | null>(null);
-  const [error, setError] = useState<{ code: string } | null>(null);
+  const [error, setError] = useState<{ code: string; recoveredOutputPath?: string } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [supportPromptVisible, setSupportPromptVisible] = useState(false);
   const [closeDialog, setCloseDialog] = useState(false);
@@ -261,7 +261,10 @@ export function App() {
           return;
         }
         setActiveTask(null);
-        setError({ code: event.code });
+        setError({
+          code: event.code,
+          ...(event.recoveredOutputPath ? { recoveredOutputPath: event.recoveredOutputPath } : {}),
+        });
         setStep('error');
       }
     });
@@ -352,7 +355,6 @@ export function App() {
         analysis_id: analysisId,
         selection,
         destination: 'source',
-        export_strategy: settings.export_strategy,
       }));
     } catch (caught) {
       setError({ code: errorCode(caught) }); setStep('error');
@@ -621,7 +623,6 @@ export function App() {
             initialVideos={multiVideos}
             preRoll={settings.pre_roll_seconds}
             postRoll={settings.post_roll_seconds}
-            exportStrategy={settings.export_strategy}
             ballModelProfile={settings.ball_model_profile}
             language={settings.language}
             registerLeaveHandler={(handler) => { multiLeaveHandlerRef.current = handler; }}
@@ -661,28 +662,6 @@ export function App() {
                 <div className="model-profile-options">
                   <button className={settings.ball_model_profile === 'tracknet_v1' ? 'selected' : ''} onClick={() => void selectBallModelProfile('tracknet_v1')}><strong>{settings.language === 'zh-CN' ? '默认模型' : 'Default model'}</strong><span>{settings.language === 'zh-CN' ? '速度快，精准度一般。' : 'Fast, with average accuracy.'}</span></button>
                   <button disabled={bootstrap?.components.analysis.acceleration !== 'cuda' || Boolean(setupTask)} className={settings.ball_model_profile === 'uplifting_dual_v1' ? 'selected' : ''} onClick={() => void selectBallModelProfile('uplifting_dual_v1')}><strong>{settings.language === 'zh-CN' ? '新模型' : 'New model'}</strong><span>{settings.language === 'zh-CN' ? '速度慢，准确度很高。' : 'Slower, with very high accuracy.'}</span></button>
-                </div>
-              </article>
-              <article className="card setting-card">
-                <div>
-                  <h2>{settings.language === 'zh-CN' ? '导出方式' : 'Export strategy'}</h2>
-                  <p>{settings.language === 'zh-CN'
-                    ? '兼容模式保留现有全片滤镜流程；快速分段模式按片段 seek 后编码并使用 concat 合并。'
-                    : 'Compatible mode keeps the existing filter graph; fast segmented mode seeks, encodes, and concatenates each segment.'}</p>
-                </div>
-                <div className="segmented">
-                  <button
-                    className={settings.export_strategy === 'compatible' ? 'selected' : ''}
-                    onClick={() => void saveRolls({ export_strategy: 'compatible' })}
-                  >
-                    {settings.language === 'zh-CN' ? '兼容模式（默认）' : 'Compatible mode (default)'}
-                  </button>
-                  <button
-                    className={settings.export_strategy === 'fast_segmented' ? 'selected' : ''}
-                    onClick={() => void saveRolls({ export_strategy: 'fast_segmented' })}
-                  >
-                    {settings.language === 'zh-CN' ? '快速分段模式' : 'Fast segmented mode'}
-                  </button>
                 </div>
               </article>
               <article className="card setting-card">
@@ -845,11 +824,33 @@ export function App() {
             )}
 
             {step === 'complete' && exportResult && (
-              <div className="workflow-page success-page"><div className="success-heading"><span>✓</span><div><p className="eyebrow">4 / 4</p><h1>{t.exportComplete}</h1></div></div><video className="output-preview" src={exportResult.mediaUrl} controls preload="metadata" /><div className="card output-details"><div><span>{t.outputName}</span><strong>{exportResult.outputName}</strong></div><div><span>{t.outputPath}</span><strong>{exportResult.outputPath}</strong></div></div><div className="footer-actions"><button className="secondary" onClick={() => void window.ttcut.revealOutput(exportResult.outputPath)}>{t.openFolder}</button><button className="primary" onClick={reset}>{t.cutAnother}</button></div></div>
+              <div className="workflow-page success-page">
+                <div className="success-heading"><span>✓</span><div><p className="eyebrow">4 / 4</p><h1>{t.exportComplete}</h1></div></div>
+                {Math.abs(exportResult.timing.driftSeconds) > 0.1 && (
+                  <div className="notice" role="status"><span>{interpolate(t.exportTimingNotice, {
+                    drift: `${exportResult.timing.driftSeconds >= 0 ? '+' : ''}${exportResult.timing.driftSeconds.toFixed(2)}`,
+                    allowed: exportResult.timing.allowedDriftSeconds.toFixed(2),
+                  })}</span></div>
+                )}
+                <video className="output-preview" src={exportResult.mediaUrl} controls preload="metadata" />
+                <div className="card output-details"><div><span>{t.outputName}</span><strong>{exportResult.outputName}</strong></div><div><span>{t.outputPath}</span><strong>{exportResult.outputPath}</strong></div></div>
+                <div className="footer-actions"><button className="secondary" onClick={() => void window.ttcut.revealOutput(exportResult.outputPath)}>{t.openFolder}</button><button className="primary" onClick={reset}>{t.cutAnother}</button></div>
+              </div>
             )}
 
             {step === 'error' && error && (
-              <div className="empty-state error-state"><span>!</span><h1>{t.errorTitle}</h1><p>{localizedError(error.code, t)}</p><code>{error.code}</code><small>{t.technicalLog}</small><div className="error-actions"><button className="secondary" onClick={() => void window.ttcut.revealLogs()}>{t.logs}</button><button className="primary" onClick={() => { setError(null); setStep(video && metadata ? 'calibrate' : 'select'); }}>{t.retry}</button></div></div>
+              <div className="empty-state error-state">
+                <span>!</span><h1>{t.errorTitle}</h1><p>{localizedError(error.code, t)}</p><code>{error.code}</code>
+                {error.recoveredOutputPath && (
+                  <div className="card output-details"><div><span>{t.recoveredOutput}</span><strong>{error.recoveredOutputPath}</strong></div></div>
+                )}
+                <small>{t.technicalLog}</small>
+                <div className="error-actions">
+                  <button className="secondary" onClick={() => void window.ttcut.revealLogs()}>{t.logs}</button>
+                  {error.recoveredOutputPath && <button className="secondary" onClick={() => void window.ttcut.revealOutput(error.recoveredOutputPath!)}>{t.openRecoveredOutput}</button>}
+                  <button className="primary" onClick={() => { setError(null); setStep(video && metadata ? 'calibrate' : 'select'); }}>{t.retry}</button>
+                </div>
+              </div>
             )}
           </section>
         )}

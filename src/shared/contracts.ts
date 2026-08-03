@@ -4,7 +4,6 @@ export const DEVICE_VALUES = ['auto', 'cuda', 'cpu'] as const;
 export const PRE_ROLL_VALUES = [1.5, 2.5, 5] as const;
 export const POST_ROLL_VALUES = [0.5, 1, 2, 4] as const;
 export const HIGHLIGHT_VALUES = [3, 5, 7] as const;
-export const EXPORT_STRATEGIES = ['compatible', 'fast_segmented'] as const;
 export const BALL_MODEL_PROFILES = ['tracknet_v1', 'uplifting_dual_v1'] as const;
 
 const finiteNumber = z.number().finite();
@@ -263,7 +262,6 @@ export const appSettingsSchema = z.object({
   language: z.enum(['zh-CN', 'en']),
   calibration_method: z.enum(['manual', 'automatic']),
   ball_model_profile: z.enum(BALL_MODEL_PROFILES),
-  export_strategy: z.enum(EXPORT_STRATEGIES),
   pre_roll_seconds: z.union(PRE_ROLL_VALUES.map((value) => z.literal(value))),
   post_roll_seconds: z.union(POST_ROLL_VALUES.map((value) => z.literal(value))),
 }).strict();
@@ -303,7 +301,6 @@ export const historySummarySchema = z.object({
 export const exportRequestSchema = z.object({
   analysis_id: z.string().uuid(),
   selection: cutSelectionSchema,
-  export_strategy: z.enum(EXPORT_STRATEGIES),
   destination: z.enum(['prompt', 'source']),
   mode_label: z.string().min(1).optional(),
 }).strict();
@@ -393,7 +390,6 @@ export type AnalysisResultV1 = z.infer<typeof analysisResultSchema>;
 export type CalibrationResultV1 = z.infer<typeof calibrationResultSchema>;
 export type WorkerEventV1 = z.infer<typeof workerEventSchema>;
 export type CutSelectionV1 = z.infer<typeof cutSelectionSchema>;
-export type ExportStrategy = typeof EXPORT_STRATEGIES[number];
 export type AppSettings = z.infer<typeof appSettingsSchema>;
 export type HistorySource = z.infer<typeof historySourceSchema>;
 export type HistoryRecordV1 = z.infer<typeof historyRecordSchema>;
@@ -422,10 +418,19 @@ export type TaskProgress = {
   total?: number;
 };
 
+export type ExportTimingInfo = {
+  targetSeconds: number;
+  actualSeconds: number;
+  driftSeconds: number;
+  allowedDriftSeconds: number;
+  segmentCount: number;
+};
+
 export type ExportResult = {
   taskId: string;
   analysisId: string;
   outputPath: string;
   outputName: string;
   mediaUrl: string;
+  timing: ExportTimingInfo;
 };
