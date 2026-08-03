@@ -6,25 +6,25 @@ TTcut is a local automatic table-tennis video cutter for players and enthusiasts
 
 Videos, analysis results, and history stay on the local computer. TTcut requires no account, uploads no video, and collects no telemetry. The default analysis models are included in the installer; the optional new ball models are downloaded on demand. The analysis runtime and media-processing components require an internet connection during initial setup; after installation, analysis, preview, and cutting can run offline.
 
-> The current stable release is `v1.2.0` for Windows x64. TTcut no longer blocks startup according to a Windows build-number allowlist.
+> The current stable release is `v1.2.1` for Windows x64. TTcut no longer blocks startup according to a Windows build-number allowlist.
 
 ## Download and installation
 
-1. Download `TTcut-1.2.0-x64-Setup.exe` from the [TTcut v1.2.0 Release](https://github.com/WeiyePlayer/TTcut/releases/tag/v1.2.0).
+1. Download `TTcut-1.2.1-x64-Setup.exe` from the [TTcut v1.2.1 Release](https://github.com/WeiyePlayer/TTcut/releases/tag/v1.2.1).
 2. Run the installer, choose the installation root, and decide whether to create a desktop shortcut. Application files are written under `<root>\app`; large runtimes, downloads, and import staging are stored under `<root>\data\components`. A Start menu shortcut is always created.
 3. On first launch, open Settings and install the Analysis component and Video processing component after reviewing the prompts.
 
 The Analysis component detects an NVIDIA GPU automatically and falls back to CPU if CUDA installation or self-test fails. The Video processing component reads media information, cuts and joins segments, and validates exported files.
 
-## What's new in v1.2.0
+## What's new in v1.2.1
 
-- Added an optional CUDA high-accuracy dual-detection profile using a SegFormer++ B2 main model and WASB auxiliary-model consensus. TrackNet remains the default profile.
-- Both profiles use the calibration-derived dynamic ROI. TrackNet retains 1.25x sampling, while the new profile derives its main and auxiliary inputs from the actual video and ROI dimensions.
-- The approximately 105 MB of new weights are downloaded from pinned runtime assets only when selected, verified per file, and installed atomically. They are neither committed to Git nor bundled in the installer.
-- Export validation now derives timing tolerance from frame rate, audio boundaries, and merged segment count, reducing false failures for multi-segment VFR/AAC output. Structurally valid mismatch output is retained with recovery actions.
-- Active single-video and batch workflows stay mounted while navigating among Auto Cut, History, and Settings. Batch processing can optionally shut down Windows only after every item completes successfully.
+- Fixed segmented exports failing A/V duration validation when some source videos contain abnormal frame durations.
+- OpenH264 and x264 trim paths now clear inherited frame-rate metadata while preserving variable frame rate instead of forcing constant frame rate.
+- Concat manifests for silent videos now include the explicit selected-segment durations so abnormal source timing does not propagate into the final output.
+- A/V synchronization failures now log video duration, audio duration, their delta, and the allowed tolerance for diagnosis.
+- This release does not change analysis models, dynamic ROI, ball trajectories, rally grouping, or bounce-count recognition.
 
-See the [v1.2.0 release notes](docs/release-notes-v1.2.0.en.md) for the complete details.
+See the [v1.2.1 release notes](docs/release-notes-v1.2.1.en.md) for the complete details.
 
 ## Usage
 
