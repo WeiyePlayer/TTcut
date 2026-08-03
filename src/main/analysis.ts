@@ -7,11 +7,12 @@ import {
   workerEventSchema,
   type Calibration,
   type CalibrationChoice,
+  type BallModelProfile,
   type WorkerEventV1,
 } from '../shared/contracts';
 import type { AppEvent } from '../shared/api';
 import { IPC } from '../shared/ipc';
-import { resolveUsableAnalysisComponents } from './components';
+import { resolveUsableAnalysisComponents, validateDualBallModels } from './components';
 import { logLine } from './logger';
 import { getHistoryStore } from './history';
 import { probeVideo } from './probe';
@@ -30,6 +31,7 @@ export async function startAnalysis(
     calibrationChoice: CalibrationChoice;
     device: 'auto' | 'cuda' | 'cpu';
     historyVisibility: 'visible' | 'deferred';
+    ballModelProfile: BallModelProfile;
   },
 ): Promise<string> {
   if (hasActiveTasks()) throw new Error('TASK_BUSY');
@@ -40,13 +42,16 @@ export async function startAnalysis(
     throw new Error('INVALID_CALIBRATION');
   }
   const taskId = randomUUID();
-  const components = await resolveUsableAnalysisComponents(value.device);
+  const requestedDevice = value.ballModelProfile === 'uplifting_dual_v1' ? 'cuda' : value.device;
+  const components = await resolveUsableAnalysisComponents(requestedDevice);
   if (!components.python) throw new Error('RUNTIME_MISSING');
+  if (value.ballModelProfile === 'uplifting_dual_v1') await validateDualBallModels(components);
   const request = analysisRequestSchema.parse({
-    schema_version: 1,
+    schema_version: 2,
     task_id: taskId,
     video_path: metadata.path,
-    device: value.device,
+    device: requestedDevice,
+    ball_model_profile: value.ballModelProfile,
     video_metadata: {
       duration_seconds: metadata.duration_seconds,
       fps: metadata.fps,
@@ -63,6 +68,8 @@ export async function startAnalysis(
       PYTHONUTF8: '1',
       TTCUT_TRACKNET_WEIGHTS: components.tracknetWeights,
       TTCUT_TABLE_ANALYZE_WEIGHTS: components.tableAnalyzeWeights,
+      TTCUT_DUAL_BALL_MAIN_WEIGHTS: components.dualBallMainWeights,
+      TTCUT_DUAL_BALL_AUX_WEIGHTS: components.dualBallAuxWeights,
     },
   });
   child.stdout.setEncoding('utf8');

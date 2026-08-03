@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { TTcutApi, AppEvent } from '../shared/api';
-import type { AppSettings, CalibrationChoice, ExportRequest } from '../shared/contracts';
+import type { AppSettings, BallModelProfile, CalibrationChoice, ExportRequest } from '../shared/contracts';
 import { IPC } from '../shared/ipc';
 
 const api: TTcutApi = {
@@ -12,6 +12,7 @@ const api: TTcutApi = {
   openX264Download: () => ipcRenderer.invoke(IPC.componentsOpenX264Download),
   installAnalysisComponent: (consent: true) => ipcRenderer.invoke(IPC.componentsInstallAnalysis, consent),
   installMediaComponent: (consent: true) => ipcRenderer.invoke(IPC.componentsInstallMedia, consent),
+  installDualBallModels: (consent: true) => ipcRenderer.invoke(IPC.componentsInstallDualBallModels, consent),
   selectVideo: () => ipcRenderer.invoke(IPC.videoSelect),
   selectVideos: () => ipcRenderer.invoke(IPC.videosSelect),
   pathForDroppedFile: (file: File) => webUtils.getPathForFile(file),
@@ -20,7 +21,7 @@ const api: TTcutApi = {
   startAutoCalibration: (input: { videoPath: string; device: 'auto' | 'cuda' | 'cpu' }) => (
     ipcRenderer.invoke(IPC.calibrationStart, input)
   ),
-  startAnalysis: (input: { videoPath: string; calibrationChoice: CalibrationChoice; device: 'auto' | 'cuda' | 'cpu'; historyVisibility: 'visible' | 'deferred' }) => (
+  startAnalysis: (input: { videoPath: string; calibrationChoice: CalibrationChoice; device: 'auto' | 'cuda' | 'cpu'; historyVisibility: 'visible' | 'deferred'; ballModelProfile: BallModelProfile }) => (
     ipcRenderer.invoke(IPC.analysisStart, input)
   ),
   startExport: (input: ExportRequest) => ipcRenderer.invoke(IPC.exportStart, input),
@@ -51,6 +52,7 @@ const api: TTcutApi = {
   toggleMaximize: () => ipcRenderer.invoke(IPC.windowToggleMaximize),
   close: () => ipcRenderer.invoke(IPC.windowClose),
   confirmClose: (action: 'exit' | 'minimize' | 'cancel') => ipcRenderer.invoke(IPC.windowConfirmClose, action),
+  shutdownSystem: () => ipcRenderer.invoke(IPC.systemShutdown),
   onCloseRequested: (listener: () => void) => {
     const wrapped = () => listener();
     ipcRenderer.on(IPC.windowCloseRequested, wrapped);

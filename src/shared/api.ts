@@ -1,6 +1,7 @@
 import type {
   AnalysisResultV1,
   AppSettings,
+  BallModelProfile,
   Calibration,
   CalibrationChoice,
   TableAnalysis,
@@ -8,6 +9,7 @@ import type {
   ComponentSetupInfo,
   CutSelectionV1,
   ExportResult,
+  ExportTimingInfo,
   ExportRequest,
   HistorySummaryV1,
   PlatformCompatibility,
@@ -15,6 +17,8 @@ import type {
   VideoMetadata,
   UpdateState,
 } from './contracts';
+
+export type { ExportTimingInfo } from './contracts';
 
 export type SelectedVideo = {
   path: string;
@@ -48,10 +52,18 @@ export type AppEvent =
     type: 'component-result';
     taskId: string;
     data: ComponentStatus;
-    imported: Array<'analysis' | 'media'>;
+    imported: Array<'analysis' | 'media' | 'dual_ball_models'>;
     pendingImports: PendingComponentImport[];
   }
-  | { type: 'error'; taskId: string; code: string; message: string; logPath?: string };
+  | {
+    type: 'error';
+    taskId: string;
+    code: string;
+    message: string;
+    logPath?: string;
+    recoveredOutputPath?: string;
+    timing?: ExportTimingInfo;
+  };
 
 export type HistoryOpenResultV1 = {
   analysisId: string;
@@ -69,6 +81,7 @@ export interface TTcutApi {
   openX264Download(): Promise<void>;
   installAnalysisComponent(consent: true): Promise<string>;
   installMediaComponent(consent: true): Promise<string>;
+  installDualBallModels(consent: true): Promise<string>;
   selectVideo(): Promise<SelectedVideo | null>;
   selectVideos(): Promise<SelectedVideo[]>;
   pathForDroppedFile(file: File): string;
@@ -83,6 +96,7 @@ export interface TTcutApi {
     calibrationChoice: CalibrationChoice;
     device: 'auto' | 'cuda' | 'cpu';
     historyVisibility: 'visible' | 'deferred';
+    ballModelProfile: BallModelProfile;
   }): Promise<string>;
   startExport(input: ExportRequest): Promise<string>;
   listHistory(): Promise<HistorySummaryV1[]>;
@@ -104,5 +118,6 @@ export interface TTcutApi {
   toggleMaximize(): Promise<void>;
   close(): Promise<void>;
   confirmClose(action: 'exit' | 'minimize' | 'cancel'): Promise<void>;
+  shutdownSystem(): Promise<void>;
   onCloseRequested(listener: () => void): () => void;
 }

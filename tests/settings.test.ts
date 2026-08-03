@@ -20,20 +20,20 @@ describe('settings migration', () => {
     await rm(state.userData, { recursive: true, force: true });
   });
 
-  it('defaults old settings to automatic calibration and compatible export while preserving language and timing', async () => {
+  it('defaults old settings to automatic calibration and drops the legacy export strategy', async () => {
     await writeFile(path.join(state.userData, 'settings.json'), JSON.stringify({
-      language: 'en', pre_roll_seconds: 5, post_roll_seconds: 0.5,
+      language: 'en', export_strategy: 'compatible', pre_roll_seconds: 5, post_roll_seconds: 0.5,
     }), 'utf8');
     await expect(loadSettings()).resolves.toEqual({
-      language: 'en', calibration_method: 'automatic', export_strategy: 'compatible',
+      language: 'en', calibration_method: 'automatic', ball_model_profile: 'tracknet_v1',
       pre_roll_seconds: 5, post_roll_seconds: 0.5,
     });
   });
 
-  it('saves the selected calibration and export strategy atomically', async () => {
+  it('saves settings without an export strategy atomically', async () => {
     const settings = {
       language: 'zh-CN' as const, calibration_method: 'automatic' as const,
-      export_strategy: 'fast_segmented' as const,
+      ball_model_profile: 'uplifting_dual_v1' as const,
       pre_roll_seconds: 2.5 as const, post_roll_seconds: 2 as const,
     };
     await expect(saveSettings(settings)).resolves.toEqual(settings);

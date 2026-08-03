@@ -6,11 +6,11 @@ import type { AppEvent, BootstrapData, SelectedVideo, TTcutApi } from '../src/sh
 import type { VideoMetadata } from '../src/shared/contracts';
 
 const bootstrap: BootstrapData = {
-  version: '1.1.0',
+  version: '1.2.0',
   settings: {
     language: 'zh-CN',
     calibration_method: 'automatic',
-    export_strategy: 'compatible',
+    ball_model_profile: 'tracknet_v1',
     pre_roll_seconds: 2.5,
     post_roll_seconds: 2,
   },
@@ -30,10 +30,17 @@ const bootstrap: BootstrapData = {
       x264_available: false,
       detail: null,
     },
+    dual_ball_models: {
+      available: false,
+      version: null,
+      path: 'C:\\models\\dual-ball-models\\1.0.0',
+      detail: 'DUAL_BALL_MODELS_MISSING',
+    },
   },
   componentSetup: {
     analysis_offer: null,
     media_offer: null,
+    dual_ball_models_offer: null,
     x264_manual_offer: {
       id: 'media-x264',
       version: 'N-125716-g1b1f602699',
@@ -67,6 +74,17 @@ function metadata(path: string): VideoMetadata {
   };
 }
 
+const calibration = {
+  video_width: 1280,
+  video_height: 720,
+  points: {
+    top_left: [300, 200] as [number, number],
+    top_right: [900, 200] as [number, number],
+    bottom_right: [1000, 600] as [number, number],
+    bottom_left: [200, 600] as [number, number],
+  },
+};
+
 describe('App workflow notices and multi-task entry', () => {
   let taskListener: ((event: AppEvent) => void) | null;
   let selectVideos: ReturnType<typeof vi.fn>;
@@ -90,15 +108,27 @@ describe('App workflow notices and multi-task entry', () => {
         message: null,
       }),
       openExternalUrl: vi.fn().mockResolvedValue(undefined),
+      revealLogs: vi.fn().mockResolvedValue(undefined),
+      revealOutput: vi.fn().mockResolvedValue(undefined),
       selectVideos,
       probeVideo: vi.fn((path: string) => Promise.resolve(metadata(path))),
       startAutoCalibration: vi.fn().mockResolvedValue('calibration-task-1'),
+      startAnalysis: vi.fn().mockResolvedValue('analysis-task-1'),
+      startExport: vi.fn().mockResolvedValue('export-task-1'),
+      cancelTask: vi.fn().mockResolvedValue(undefined),
+      listHistory: vi.fn().mockResolvedValue([]),
+      saveSettings: vi.fn((settings) => Promise.resolve(settings)),
+      installDualBallModels: vi.fn().mockResolvedValue('dual-setup-task'),
     } as unknown as TTcutApi;
     Object.defineProperty(window, 'ttcut', { configurable: true, value: api });
   });
 
   afterEach(() => {
     bootstrap.settings.language = 'zh-CN';
+    bootstrap.settings.ball_model_profile = 'tracknet_v1';
+    bootstrap.components.dual_ball_models = {
+      available: false, version: null, path: 'C:\\models\\dual-ball-models\\1.0.0', detail: 'DUAL_BALL_MODELS_MISSING',
+    };
     window.localStorage.clear();
     cleanup();
     vi.useRealTimers();
@@ -122,6 +152,16 @@ describe('App workflow notices and multi-task entry', () => {
     expect(window.ttcut.openExternalUrl).toHaveBeenCalledWith('https://github.com/WeiyePlayer/TTcut/releases');
   });
 
+  it('does not expose an export strategy setting', async () => {
+    bootstrap.settings.language = 'en';
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+
+    expect(screen.queryByRole('heading', { name: 'Export strategy' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Compatible mode|Fast segmented mode/ })).toBeNull();
+  });
+
   it('presents video selection as a single or multi-task workflow', async () => {
     render(<App />);
 
@@ -129,6 +169,49 @@ describe('App workflow notices and multi-task entry', () => {
     expect(screen.getByText('选择 MP4 或 MOV 比赛视频开始本地分析，支持多任务批量处理。')).toBeVisible();
     expect(screen.getByText('或将 MP4 / MOV 文件拖到这里')).toBeVisible();
     expect(screen.queryByText(/单个|一次只能处理一个/)).toBeNull();
+  });
+
+  it('shows the simplified ball model profile copy', async () => {
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: '设置' }));
+
+    expect(screen.getByRole('button', { name: '默认模型速度快，精准度一般。' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '新模型速度慢，准确度很高。' })).toBeVisible();
+    expect(screen.getByText('高精度双检测模型')).toBeVisible();
+    expect(screen.getByText('组件路径: C:\\models\\dual-ball-models\\1.0.0')).toBeVisible();
+    expect(screen.queryByText('单视频和多任务统一使用所选档位。板数仍表示落台反弹数。')).toBeNull();
+  });
+
+  it('persists the dual profile only after both downloaded models are installed', async () => {
+    bootstrap.settings.language = 'en';
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+    fireEvent.click(screen.getByRole('button', { name: /New model/ }));
+    expect(window.ttcut.installDualBallModels).toHaveBeenCalledWith(true);
+    expect(window.ttcut.saveSettings).not.toHaveBeenCalled();
+
+    act(() => taskListener?.({
+      type: 'component-result', taskId: 'dual-setup-task', imported: ['dual_ball_models'], pendingImports: [],
+      data: {
+        ...bootstrap.components,
+        dual_ball_models: { available: true, version: '1.0.0', path: 'C:\\models\\dual-ball-models\\1.0.0', detail: null },
+      },
+    }));
+
+    await waitFor(() => expect(window.ttcut.saveSettings).toHaveBeenCalledWith(expect.objectContaining({
+      ball_model_profile: 'uplifting_dual_v1',
+    })));
+  });
+
+  it('keeps TrackNet selected when first-use dual model setup is cancelled', async () => {
+    bootstrap.settings.language = 'en';
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+    fireEvent.click(screen.getByRole('button', { name: /New model/ }));
+    act(() => taskListener?.({
+      type: 'error', taskId: 'dual-setup-task', code: 'SETUP_CANCELLED', message: 'SETUP_CANCELLED',
+    }));
+    expect(window.ttcut.saveSettings).not.toHaveBeenCalled();
   });
 
   it('hides the automatic calibration failure notice after three seconds', async () => {
@@ -175,6 +258,117 @@ describe('App workflow notices and multi-task entry', () => {
     await screen.findByRole('heading', { name: '多任务剪辑' });
     await waitFor(() => expect(screen.getByText('first.mp4')).toBeVisible());
     expect(confirm).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: '设置' }));
+    expect(await screen.findByRole('heading', { name: '设置' })).toBeVisible();
+    expect(screen.getByText('first.mp4')).not.toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '自动剪辑' }));
+    expect(await screen.findByText('first.mp4')).toBeVisible();
+    expect(window.ttcut.cancelTask).not.toHaveBeenCalled();
+  });
+
+  it('returns to an active single-video process across history and settings', async () => {
+    bootstrap.settings.language = 'en';
+    selectVideos.mockResolvedValue([{
+      path: 'C:\\video\\first.mp4', name: 'first.mp4', size: 100, mediaUrl: 'ttcut-media://first',
+    }]);
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: /Choose MP4 \/ MOV videos/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start analysis' }));
+    expect(await screen.findByRole('heading', { name: 'Analyzing video' })).toBeVisible();
+
+    fireEvent.click(screen.getByRole('button', { name: 'History' }));
+    expect(await screen.findByRole('heading', { name: 'History' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Auto Cut' }));
+    expect(await screen.findByRole('heading', { name: 'Analyzing video' })).toBeVisible();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    expect(await screen.findByRole('heading', { name: 'Settings' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Auto Cut' }));
+    expect(await screen.findByRole('heading', { name: 'Analyzing video' })).toBeVisible();
+    expect(window.ttcut.startAnalysis).toHaveBeenCalledTimes(1);
+    expect(window.ttcut.cancelTask).not.toHaveBeenCalled();
+  });
+
+  it('returns home when analysis finishes while another page is open', async () => {
+    bootstrap.settings.language = 'en';
+    const selected = {
+      path: 'C:\\video\\first.mp4', name: 'first.mp4', size: 100, mediaUrl: 'ttcut-media://first',
+    };
+    selectVideos.mockResolvedValue([selected]);
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: /Choose MP4 \/ MOV videos/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start analysis' }));
+    await screen.findByRole('heading', { name: 'Analyzing video' });
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+
+    act(() => taskListener?.({
+      type: 'analysis-result',
+      taskId: 'analysis-task-1',
+      analysisId: '11111111-1111-4111-8111-111111111111',
+      calibration,
+      data: {
+        schema_version: 1,
+        video: metadata(selected.path),
+        rallies: [{ id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 1, end_time_seconds: 5 }],
+        calibration,
+      },
+    }));
+    fireEvent.click(screen.getByRole('button', { name: 'Auto Cut' }));
+
+    expect(await screen.findByRole('heading', { name: 'Choose match videos' })).toBeVisible();
+    expect(screen.queryByRole('heading', { name: 'Choose a cutting mode' })).toBeNull();
+  });
+
+  it('returns to active cutting but goes home after export completes', async () => {
+    bootstrap.settings.language = 'en';
+    const selected = {
+      path: 'C:\\video\\first.mp4', name: 'first.mp4', size: 100, mediaUrl: 'ttcut-media://first',
+    };
+    selectVideos.mockResolvedValue([selected]);
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: /Choose MP4 \/ MOV videos/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start analysis' }));
+    act(() => taskListener?.({
+      type: 'analysis-result',
+      taskId: 'analysis-task-1',
+      analysisId: '11111111-1111-4111-8111-111111111111',
+      calibration,
+      data: {
+        schema_version: 1,
+        video: metadata(selected.path),
+        rallies: [{ id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 1, end_time_seconds: 5 }],
+        calibration,
+      },
+    }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start cutting' }));
+    expect(await screen.findByRole('heading', { name: 'Preparing' })).toBeVisible();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Auto Cut' }));
+    expect(await screen.findByRole('heading', { name: 'Preparing' })).toBeVisible();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    act(() => taskListener?.({
+      type: 'export-result',
+      taskId: 'export-task-1',
+      data: {
+        taskId: 'export-task-1',
+        analysisId: '11111111-1111-4111-8111-111111111111',
+        outputPath: 'C:\\video\\first_TTcut.mp4',
+        outputName: 'first_TTcut.mp4',
+        mediaUrl: 'ttcut-media://output',
+        timing: {
+          targetSeconds: 100,
+          actualSeconds: 100.05,
+          driftSeconds: 0.05,
+          allowedDriftSeconds: 0.1,
+          segmentCount: 1,
+        },
+      },
+    }));
+    fireEvent.click(screen.getByRole('button', { name: 'Auto Cut' }));
+    expect(await screen.findByRole('heading', { name: 'Choose match videos' })).toBeVisible();
   });
 
   it('keeps the export support prompt visible across pages until it is rejected', async () => {
@@ -190,9 +384,17 @@ describe('App workflow notices and multi-task entry', () => {
         outputPath: 'C:\\video\\first_TTcut.mp4',
         outputName: 'first_TTcut.mp4',
         mediaUrl: 'ttcut-media://output',
+        timing: {
+          targetSeconds: 100,
+          actualSeconds: 102.128,
+          driftSeconds: 2.128,
+          allowedDriftSeconds: 3.4,
+          segmentCount: 73,
+        },
       },
     }));
 
+    expect(await screen.findByRole('status')).toHaveTextContent('+2.13');
     const prompt = await screen.findByRole('region', { name: '使用与赞助提示' });
     expect(within(prompt).getByText((_content, element) => element?.textContent === (
       '如果使用中遇到问题请联系作者。\n\n如果软件对您有帮助希望可以赞助我，感谢'
@@ -223,6 +425,13 @@ describe('App workflow notices and multi-task entry', () => {
         outputPath: 'C:\\video\\first_TTcut.mp4',
         outputName: 'first_TTcut.mp4',
         mediaUrl: 'ttcut-media://output',
+        timing: {
+          targetSeconds: 100,
+          actualSeconds: 100.05,
+          driftSeconds: 0.05,
+          allowedDriftSeconds: 0.1,
+          segmentCount: 1,
+        },
       },
     }));
 
@@ -236,5 +445,30 @@ describe('App workflow notices and multi-task entry', () => {
 
     finishExport();
     expect(screen.queryByRole('region', { name: '使用与赞助提示' })).toBeNull();
+  });
+
+  it('offers the retained file when duration is the only failed validation', async () => {
+    bootstrap.settings.language = 'en';
+    render(<App />);
+    await screen.findByRole('heading', { name: 'Choose match videos' });
+
+    act(() => taskListener?.({
+      type: 'error',
+      taskId: 'export-task-1',
+      code: 'EXPORT_DURATION_MISMATCH',
+      message: 'duration mismatch',
+      recoveredOutputPath: 'C:\\video\\first_TTcut_duration_mismatch.mp4',
+      timing: {
+        targetSeconds: 100,
+        actualSeconds: 102.128,
+        driftSeconds: 2.128,
+        allowedDriftSeconds: 0.1,
+        segmentCount: 1,
+      },
+    }));
+
+    expect(await screen.findByText('C:\\video\\first_TTcut_duration_mismatch.mp4')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Open retained file location' }));
+    expect(window.ttcut.revealOutput).toHaveBeenCalledWith('C:\\video\\first_TTcut_duration_mismatch.mp4');
   });
 });
