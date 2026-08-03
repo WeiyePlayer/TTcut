@@ -30,6 +30,7 @@ import {
 import { COMPONENT_ASSETS_RELEASE_URL, DONATION_URL, GITHUB_URL, RELEASES_URL, WEBSITE_URL } from '../shared/urls';
 import { getUpdater } from './updater';
 import { runInstallerMigrationRequest } from './installer-migration';
+import { requestSystemShutdown } from './system-power';
 
 const installerMigrationIndex = process.argv.indexOf('--installer-migrate-components');
 const installerMigrationRequest = installerMigrationIndex >= 0 ? process.argv[installerMigrationIndex + 1] : null;
@@ -291,6 +292,15 @@ function registerIpc(): void {
       exitApproved = true;
       await cancelAllTasksAndWait('app-exit');
       window.close();
+    }
+  });
+  ipcMain.handle(IPC.systemShutdown, async () => {
+    await logLine('app', 'INFO', 'System shutdown requested after a completed batch task.');
+    try {
+      await requestSystemShutdown({ isBusy: hasActiveTasks });
+    } catch (error) {
+      await logLine('app', 'ERROR', `System shutdown request failed: ${String(error)}`);
+      throw error;
     }
   });
 }

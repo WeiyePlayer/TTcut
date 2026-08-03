@@ -458,7 +458,7 @@ export function App() {
       ...(!components.analysis.available ? [t.analysisComponent] : []),
       ...(!components.media.available ? [t.mediaComponent] : []),
       ...(settings.ball_model_profile === 'uplifting_dual_v1' && (!components.dual_ball_models.available || components.analysis.acceleration !== 'cuda')
-        ? [settings.language === 'zh-CN' ? 'Uplifting 双球模型（CUDA）' : 'Uplifting dual ball models (CUDA)']
+        ? [settings.language === 'zh-CN' ? '高精度双检测模型（CUDA）' : 'High-accuracy dual detection models (CUDA)']
         : []),
     ];
     setMissingComponents(missing.length > 0 ? missing : null);
@@ -528,7 +528,7 @@ export function App() {
     setSetupOutcome(null);
     setSetupFailureCode(null);
     if (!platformSupported || bootstrap?.components.analysis.acceleration !== 'cuda') {
-      setToast(settings.language === 'zh-CN' ? 'Uplifting 双模型仅支持 CUDA。' : 'Uplifting dual models require CUDA.');
+      setToast(settings.language === 'zh-CN' ? '高精度双检测模型仅支持 CUDA。' : 'High-accuracy dual detection models require CUDA.');
       return;
     }
     if (selectAfterInstall) pendingBallProfileRef.current = 'uplifting_dual_v1';
@@ -706,7 +706,7 @@ export function App() {
                 <h2>{t.components}</h2>
                 <div className="component-row"><div><strong>{t.analysisComponent}</strong><span>{bootstrap?.components.analysis.version ?? t.unavailable}</span>{bootstrap?.components.analysis.path && <span>{t.componentPath}: {bootstrap.components.analysis.path}</span>}</div><span className={`status ${bootstrap?.components.analysis.available ? 'ok' : ''}`}>{bootstrap?.components.analysis.available ? t.available : t.unavailable}</span></div>
                 <div className="component-row"><div><strong>{t.mediaComponent}</strong><span>{bootstrap?.components.media.version ?? t.unavailable}</span>{bootstrap?.components.media.available && <span>{t.activeEncoder}: {bootstrap.components.media.active_encoder === 'libx264' ? t.x264 : t.openh264}</span>}{bootstrap?.components.media.path && <span>{t.componentPath}: {bootstrap.components.media.path}</span>}</div><span className={`status ${bootstrap?.components.media.available ? 'ok' : ''}`}>{bootstrap?.components.media.available ? t.available : t.unavailable}</span></div>
-                <div className="component-row"><div><strong>{settings.language === 'zh-CN' ? 'Uplifting 双球模型' : 'Uplifting dual ball models'}</strong><span>{bootstrap?.components.dual_ball_models.version ?? bootstrap?.components.dual_ball_models.detail ?? t.unavailable}</span></div><span className={`status ${bootstrap?.components.dual_ball_models.available ? 'ok' : ''}`}>{bootstrap?.components.dual_ball_models.available ? t.available : t.unavailable}</span></div>
+                <div className="component-row"><div><strong>{settings.language === 'zh-CN' ? '高精度双检测模型' : 'High-accuracy dual detection models'}</strong><span>{bootstrap?.components.dual_ball_models.version ?? bootstrap?.components.dual_ball_models.detail ?? t.unavailable}</span>{bootstrap?.components.dual_ball_models.path && <span>{t.componentPath}: {bootstrap.components.dual_ball_models.path}</span>}</div><span className={`status ${bootstrap?.components.dual_ball_models.available ? 'ok' : ''}`}>{bootstrap?.components.dual_ball_models.available ? t.available : t.unavailable}</span></div>
                 <div className="component-row"><div><strong>{t.acceleration}</strong><span>{bootstrap?.components.analysis.acceleration === 'cuda' ? t.gpu : bootstrap?.components.analysis.acceleration === 'cpu' ? t.cpu : t.unavailable}</span></div></div>
               </article>
               <article className="card setup-card">
@@ -727,7 +727,7 @@ export function App() {
                       <div className="setup-option"><div><strong>{t.mediaOffer}</strong><span>{t.mediaOfferDetail}</span><small>{interpolate(t.downloadSize, { size: fileSize(bootstrap.componentSetup.media_offer.download_size_bytes) })}</small></div><div><button className="text-button" onClick={() => void window.ttcut.openExternalUrl(bootstrap.componentSetup.media_offer!.license_url)}>{t.viewLicense}</button><button className="primary" disabled={!platformSupported || !bootstrap.componentSetup.media_offer.available_for_download || Boolean(videoTaskOwner)} onClick={() => void installMediaComponent()}>{t.consentInstall}</button></div></div>
                     )}
                     {bootstrap?.componentSetup.dual_ball_models_offer && !bootstrap.components.dual_ball_models.available && (
-                      <div className="setup-option optional-component"><div><strong>{settings.language === 'zh-CN' ? '安装 Uplifting 双球模型' : 'Install Uplifting dual ball models'}</strong><span>{settings.language === 'zh-CN' ? '两个固定权重，下载后逐文件校验并原子安装；仅 CUDA 可用。' : 'Two pinned weights, verified per file and installed atomically; CUDA only.'}</span><small>{interpolate(t.downloadSize, { size: fileSize(bootstrap.componentSetup.dual_ball_models_offer.download_size_bytes) })}</small></div><div><button className="primary" disabled={bootstrap.components.analysis.acceleration !== 'cuda' || Boolean(setupTask) || Boolean(videoTaskOwner)} onClick={() => void installDualBallModels(false)}>{t.consentInstall}</button></div></div>
+                      <div className="setup-option optional-component"><div><strong>{settings.language === 'zh-CN' ? '安装高精度双检测模型' : 'Install high-accuracy dual detection models'}</strong><span>{settings.language === 'zh-CN' ? '两个固定权重，下载后逐文件校验并原子安装；仅 CUDA 可用。' : 'Two pinned weights, verified per file and installed atomically; CUDA only.'}</span><small>{interpolate(t.downloadSize, { size: fileSize(bootstrap.componentSetup.dual_ball_models_offer.download_size_bytes) })}</small></div><div><button className="primary" disabled={bootstrap.components.analysis.acceleration !== 'cuda' || Boolean(setupTask) || Boolean(videoTaskOwner)} onClick={() => void installDualBallModels(false)}>{t.consentInstall}</button></div></div>
                     )}
                     {bootstrap?.componentSetup.x264_manual_offer && !bootstrap.components.media.x264_available && (
                       <div className="setup-option optional-component"><div><strong>{t.x264ManualOffer}</strong><span>{t.x264ManualDetail}</span><small>{interpolate(t.downloadSize, { size: fileSize(bootstrap.componentSetup.x264_manual_offer.download_size_bytes) })}</small></div><div><button className="secondary" disabled={Boolean(setupTask)} onClick={() => void window.ttcut.openX264Download()}>{t.goToDownload}</button></div></div>

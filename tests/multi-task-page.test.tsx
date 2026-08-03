@@ -70,6 +70,7 @@ describe('multi-task clipping', () => {
       acceptDroppedVideo: vi.fn(),
       pathForDroppedFile: vi.fn(),
       cancelTask: vi.fn().mockResolvedValue(undefined),
+      shutdownSystem: vi.fn().mockResolvedValue(undefined),
       deleteAnalysis: vi.fn().mockResolvedValue(undefined),
       revealOutput: vi.fn().mockResolvedValue(undefined),
     } as unknown as TTcutApi;
@@ -273,6 +274,7 @@ describe('multi-task clipping', () => {
       />,
     );
     await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('checkbox', { name: '完成本任务后关机' }));
     act(() => listener?.({
       type: 'error',
       taskId: 'calibration-task-1',
@@ -314,6 +316,51 @@ describe('multi-task clipping', () => {
 
     await waitFor(() => expect(onCompletableTasksFinished).toHaveBeenCalledTimes(1));
     expect(screen.getByText('标定失败')).toBeVisible();
+    expect(window.ttcut.shutdownSystem).not.toHaveBeenCalled();
+  });
+
+  it('shuts down once after every item in an armed batch succeeds', async () => {
+    const onCompletableTasksFinished = vi.fn();
+    render(
+      <MultiTaskPage
+        initialVideos={videos}
+        preRoll={2.5}
+        postRoll={1}
+        exportStrategy="compatible"
+        onOpenAnalysis={vi.fn()}
+        onCompletableTasksFinished={onCompletableTasksFinished}
+      />,
+    );
+    await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledTimes(1));
+    await finishCalibration('calibration-task-1');
+    await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledTimes(2));
+    await finishCalibration('calibration-task-2');
+
+    for (const group of screen.getAllByRole('group')) {
+      fireEvent.click(within(group).getAllByRole('button')[2]!);
+    }
+    fireEvent.click(screen.getByRole('checkbox', { name: '完成本任务后关机' }));
+    fireEvent.click(document.querySelector('.batch-start')!);
+    await waitFor(() => expect(startAnalysis).toHaveBeenCalledTimes(1));
+    act(() => listener?.({
+      type: 'analysis-result',
+      taskId: 'analysis-task-1',
+      analysisId: '11111111-1111-4111-8111-111111111111',
+      calibration,
+      data: analysis(videos[0]!.path),
+    }));
+    await waitFor(() => expect(startAnalysis).toHaveBeenCalledTimes(2));
+    act(() => listener?.({
+      type: 'analysis-result',
+      taskId: 'analysis-task-2',
+      analysisId: '22222222-2222-4222-8222-222222222222',
+      calibration,
+      data: analysis(videos[1]!.path),
+    }));
+
+    await waitFor(() => expect(window.ttcut.shutdownSystem).toHaveBeenCalledTimes(1));
+    expect(onCompletableTasksFinished).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('checkbox', { name: '完成本任务后关机' })).not.toBeChecked();
   });
 
   it('turns all remaining items into manual calibration when the model is unavailable', async () => {

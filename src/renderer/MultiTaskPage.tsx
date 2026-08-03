@@ -115,11 +115,13 @@ export function MultiTaskPage({
   const [manualItemId, setManualItemId] = useState<string | null>(null);
   const [manualPoints, setManualPoints] = useState<Partial<Record<PointName, [number, number]>>>({});
   const [systemNotice, setSystemNotice] = useState<string | null>(null);
+  const [shutdownAfterCompletion, setShutdownAfterCompletion] = useState(false);
   const itemsRef = useRef(items);
   const activeRef = useRef<{ taskId: string | null; itemId: string; phase: ActivePhase } | null>(null);
   const runningRef = useRef(false);
   const cancelRequested = useRef(false);
   const autoCalibrationAvailableRef = useRef(true);
+  const shutdownAfterCompletionRef = useRef(false);
   const pendingTaskStartRef = useRef<Promise<string> | null>(null);
   const scheduleRef = useRef<() => void>(() => undefined);
   const rowRefs = useRef(new Map<string, HTMLElement>());
@@ -141,6 +143,8 @@ export function MultiTaskPage({
     start: isEnglish ? 'Start analysis and cutting' : '开始分析剪辑',
     calibrating: isEnglish ? 'Calibrating tables' : '正在自动标定',
     running: isEnglish ? 'Processing serially' : '正在串行处理',
+    shutdownAfterTask: isEnglish ? 'Shut down after this task' : '完成本任务后关机',
+    shutdownFailed: isEnglish ? 'Automatic shutdown failed. Please shut down manually.' : '自动关机失败，请手动关机。',
     calibrationTitle: isEnglish ? 'Calibrate the table' : '标定球桌',
     calibrationDescription: isEnglish
       ? 'Mark top-left, top-right, bottom-right, and bottom-left in order.'
@@ -223,9 +227,16 @@ export function MultiTaskPage({
       && item.processingStatus === 'waiting'
     ));
     if (!candidate) {
+      const completedSuccessfully = itemsRef.current.length > 0
+        && itemsRef.current.every((item) => item.processingStatus === 'done');
       runningRef.current = false;
       setRunning(false);
       onCompletableTasksFinished();
+      if (completedSuccessfully && shutdownAfterCompletionRef.current) {
+        shutdownAfterCompletionRef.current = false;
+        setShutdownAfterCompletion(false);
+        void window.ttcut.shutdownSystem().catch(() => setSystemNotice(text.shutdownFailed));
+      }
       return;
     }
     cancelRequested.current = false;
@@ -464,6 +475,11 @@ export function MultiTaskPage({
     scheduleRef.current();
   };
 
+  const toggleShutdownAfterCompletion = (enabled: boolean) => {
+    shutdownAfterCompletionRef.current = enabled;
+    setShutdownAfterCompletion(enabled);
+  };
+
   const cancel = async () => {
     const active = activeRef.current;
     if (!active?.taskId || active.phase === 'calibration') return;
@@ -643,14 +659,26 @@ export function MultiTaskPage({
           );
         })}
       </div>
-      <button
-        className="batch-start primary"
-        type="button"
-        disabled={running || calibrationBusy || !canStart}
-        onClick={start}
-      >
-        {activePhase === 'calibration' ? text.calibrating : running ? text.running : text.start}
-      </button>
+      <div className={`batch-launcher ${shutdownAfterCompletion ? 'shutdown-armed' : ''}`}>
+        <label className="batch-shutdown-option">
+          <input
+            type="checkbox"
+            checked={shutdownAfterCompletion}
+            disabled={!batchTaskActive}
+            onChange={(event) => toggleShutdownAfterCompletion(event.target.checked)}
+          />
+          <span>{text.shutdownAfterTask}</span>
+        </label>
+        <button
+          className="batch-start primary"
+          type="button"
+          disabled={running || calibrationBusy || !canStart}
+          onClick={start}
+        >
+          {activePhase === 'calibration' ? text.calibrating : running ? text.running : text.start}
+          {shutdownAfterCompletion && <span className="batch-shutdown-indicator" aria-hidden="true">⏻</span>}
+        </button>
+      </div>
       {preview && (
         <div className="modal-backdrop batch-preview-backdrop" onPointerDown={(event) => { if (event.target === event.currentTarget) setPreview(null); }}>
           <div className="modal batch-preview">

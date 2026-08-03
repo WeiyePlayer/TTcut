@@ -52,6 +52,7 @@ const api: TTcutApi = {
   toggleMaximize: () => ipcRenderer.invoke(IPC.windowToggleMaximize),
   close: () => ipcRenderer.invoke(IPC.windowClose),
   confirmClose: (action: 'exit' | 'minimize' | 'cancel') => ipcRenderer.invoke(IPC.windowConfirmClose, action),
+  shutdownSystem: () => ipcRenderer.invoke(IPC.systemShutdown),
   onCloseRequested: (listener: () => void) => {
     const wrapped = () => listener();
     ipcRenderer.on(IPC.windowCloseRequested, wrapped);

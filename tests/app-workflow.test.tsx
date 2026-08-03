@@ -177,6 +177,8 @@ describe('App workflow notices and multi-task entry', () => {
 
     expect(screen.getByRole('button', { name: '默认模型速度快，精准度一般。' })).toBeVisible();
     expect(screen.getByRole('button', { name: '新模型速度慢，准确度很高。' })).toBeVisible();
+    expect(screen.getByText('高精度双检测模型')).toBeVisible();
+    expect(screen.getByText('组件路径: C:\\models\\dual-ball-models\\1.0.0')).toBeVisible();
     expect(screen.queryByText('单视频和多任务统一使用所选档位。板数仍表示落台反弹数。')).toBeNull();
   });
 
