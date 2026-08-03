@@ -138,6 +138,27 @@ describe('media export planning', () => {
     },
   );
 
+  it('disables x264 B-frames only for independently concatenated segments', () => {
+    const segmentArgs = buildSegmentReencodeArgs(
+      metadata.path,
+      'segment.mp4',
+      oneGroup,
+      2.5,
+      metadata,
+      'libx264',
+    );
+    expect(segmentArgs).toEqual(expect.arrayContaining(['-bf', '0']));
+
+    const compatibleArgs = buildReencodeArgs(
+      metadata.path,
+      'compatible.mp4',
+      [oneGroup],
+      metadata,
+      'libx264',
+    );
+    expect(compatibleArgs).not.toContain('-bf');
+  });
+
   it('selects the nearest keyframe no later than the segment start', () => {
     expect(selectSeekStart(8, [0, 2.5, 7.75, 9])).toBe(7.75);
     expect(selectSeekStart(8, [9, 12])).toBe(0);
@@ -161,7 +182,8 @@ describe('media export planning', () => {
       '-map', '0:v:0', '-map', '0:a?',
       '-c:v', 'copy',
       '-c:a', 'aac', '-b:a', '128000', '-ar', '44100', '-ac', '1',
-      '-af', 'aresample=async=1:first_pts=0',
+      '-af', 'aresample=async=1:first_pts=0,apad',
+      '-shortest',
       '-avoid_negative_ts', 'auto',
     ]));
     expect(args).not.toEqual(expect.arrayContaining(['-c', 'copy']));
@@ -171,6 +193,10 @@ describe('media export planning', () => {
     expect(buildConcatManifest(['one.mp4', 'two.mp4'], [1, 2.5])).toBe(
       "ffconcat version 1.0\nfile 'one.mp4'\nduration 1.000000\n"
       + "file 'two.mp4'\nduration 2.500000\n",
+    );
+    expect(buildConcatManifest(['one.mp4', 'two.mp4'], [1, 2.5], 1 / 90_000)).toBe(
+      "ffconcat version 1.0\nfile 'one.mp4'\nduration 1.000011\n"
+      + "file 'two.mp4'\nduration 2.500011\n",
     );
     expect(() => buildConcatManifest(['one.mp4'], [])).toThrow('CONCAT_DURATION_COUNT_MISMATCH');
   });
@@ -189,6 +215,7 @@ describe('media export planning', () => {
     expect(args).not.toContain('-ar');
     expect(args).not.toContain('-ac');
     expect(args).not.toContain('-af');
+    expect(args).not.toContain('-shortest');
   });
 
   it('omits audio filters and encoding for silent segmented input', () => {

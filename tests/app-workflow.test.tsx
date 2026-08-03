@@ -6,7 +6,7 @@ import type { AppEvent, BootstrapData, SelectedVideo, TTcutApi } from '../src/sh
 import type { VideoMetadata } from '../src/shared/contracts';
 
 const bootstrap: BootstrapData = {
-  version: '1.2.1',
+  version: '1.2.2',
   settings: {
     language: 'zh-CN',
     calibration_method: 'automatic',
@@ -447,28 +447,39 @@ describe('App workflow notices and multi-task entry', () => {
     expect(screen.queryByRole('region', { name: '使用与赞助提示' })).toBeNull();
   });
 
-  it('offers the retained file when duration is the only failed validation', async () => {
+  it('shows a successful export page with warning details and a logs action', async () => {
     bootstrap.settings.language = 'en';
     render(<App />);
     await screen.findByRole('heading', { name: 'Choose match videos' });
 
     act(() => taskListener?.({
-      type: 'error',
+      type: 'export-result',
       taskId: 'export-task-1',
-      code: 'EXPORT_DURATION_MISMATCH',
-      message: 'duration mismatch',
-      recoveredOutputPath: 'C:\\video\\first_TTcut_duration_mismatch.mp4',
-      timing: {
-        targetSeconds: 100,
-        actualSeconds: 102.128,
-        driftSeconds: 2.128,
-        allowedDriftSeconds: 0.1,
-        segmentCount: 1,
+      data: {
+        taskId: 'export-task-1',
+        analysisId: '11111111-1111-4111-8111-111111111111',
+        outputPath: 'C:\\video\\first_TTcut.mp4',
+        outputName: 'first_TTcut.mp4',
+        mediaUrl: 'ttcut-media://output',
+        timing: {
+          targetSeconds: 100,
+          actualSeconds: 102.128,
+          driftSeconds: 2.128,
+          allowedDriftSeconds: 0.1,
+          segmentCount: 1,
+        },
+        warning: {
+          code: 'EXPORT_DURATION_MISMATCH',
+          message: 'EXPORT_DURATION_MISMATCH: target=100 actual=102.128',
+        },
       },
     }));
 
-    expect(await screen.findByText('C:\\video\\first_TTcut_duration_mismatch.mp4')).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: 'Open retained file location' }));
-    expect(window.ttcut.revealOutput).toHaveBeenCalledWith('C:\\video\\first_TTcut_duration_mismatch.mp4');
+    expect(await screen.findByRole('heading', { name: 'Export complete' })).toBeVisible();
+    expect(screen.getByText('C:\\video\\first_TTcut.mp4')).toBeVisible();
+    expect(screen.getByText('The video was exported with a processing warning')).toBeVisible();
+    expect(screen.getByText('EXPORT_DURATION_MISMATCH')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Open logs folder' }));
+    expect(window.ttcut.revealLogs).toHaveBeenCalledTimes(1);
   });
 });

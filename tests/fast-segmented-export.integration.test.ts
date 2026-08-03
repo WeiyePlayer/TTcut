@@ -38,6 +38,22 @@ const groups: CutGroup[] = [
   { rallyIds: ['rally_002'], rawStart: 32, rawEnd: 35, start: 29.565, end: 34.565 },
 ];
 
+const concatAvSyncRegressionGroups: CutGroup[] = [
+  { rallyIds: ['rally_001'], rawStart: 0.865, rawEnd: 9.506, start: 0.865, end: 9.506 },
+  { rallyIds: ['rally_002'], rawStart: 18.095, rawEnd: 23.678, start: 18.095, end: 23.678 },
+  { rallyIds: ['rally_003'], rawStart: 32.782, rawEnd: 37.697, start: 32.782, end: 37.697 },
+  { rallyIds: ['rally_004'], rawStart: 45.5, rawEnd: 50.682, start: 45.5, end: 50.682 },
+  { rallyIds: ['rally_005'], rawStart: 73.784, rawEnd: 85.593, start: 73.784, end: 85.593 },
+  { rallyIds: ['rally_006'], rawStart: 94.416, rawEnd: 101.011, start: 94.416, end: 101.011 },
+  { rallyIds: ['rally_007'], rawStart: 109.965, rawEnd: 115.014, start: 109.965, end: 115.014 },
+  { rallyIds: ['rally_008'], rawStart: 143.659, rawEnd: 149.707, start: 143.659, end: 149.707 },
+];
+
+const concatEqualDtsRegressionGroups: CutGroup[] = [
+  { rallyIds: ['rally_001'], rawStart: 2.365, rawEnd: 8.006, start: 0, end: 11.006 },
+  { rallyIds: ['rally_002'], rawStart: 17.234, rawEnd: 21.464, start: 14.734, end: 24.464 },
+];
+
 function run(executable: string, args: string[], timeout = 120_000): string {
   const result = spawnSync(executable, args, {
     encoding: 'utf8', windowsHide: true, shell: false, timeout,
@@ -144,6 +160,11 @@ function probeVideoPacketDurations(ffprobe: string, file: string): number[] {
 
 function streamDuration(data: ReturnType<typeof probe>, type: 'video' | 'audio'): number {
   return Number(data.streams.find((stream) => stream.codec_type === type)?.duration);
+}
+
+function timeBaseSeconds(value: unknown): number {
+  const [numerator, denominator] = String(value).split('/').map(Number);
+  return denominator ? numerator! / denominator : 0;
 }
 
 function createAbnormalFrameDurationSource(ffmpeg: string, output: string): void {
@@ -285,6 +306,153 @@ describe.each(cases)('fast segmented export with $encoder', ({ encoder, ffmpeg, 
       expect(() => readFileSync(directory)).toThrow();
     }
   }, 180_000);
+
+  it.skipIf(!enabled)('keeps eight separately encoded AAC segments synchronized after concat', () => {
+    if (!input || !ffmpeg || !ffprobe) throw new Error('Integration environment is incomplete.');
+    const directory = mkdtempSync(path.join(tmpdir(), `ttcut-concat-av-sync-${encoder}-`));
+    try {
+      const metadata = {
+        ...sourceMetadata(input, probe(ffprobe, input)),
+        variable_frame_rate: true,
+      };
+      const keyframeJson = JSON.parse(run(ffprobe, [
+        '-v', 'error', '-select_streams', 'v:0', '-skip_frame', 'nokey',
+        '-show_frames', '-show_entries', 'frame=best_effort_timestamp_time', '-of', 'json', input,
+      ])) as { frames?: Array<{ best_effort_timestamp_time?: string }> };
+      const keyframes = (keyframeJson.frames ?? [])
+        .map((frame) => Number(frame.best_effort_timestamp_time))
+        .filter(Number.isFinite);
+      const segmentDurations: number[] = [];
+      let segmentVideoTimeBase = 0;
+      const names = concatAvSyncRegressionGroups.map((group, index) => {
+        const name = `segment-${String(index + 1).padStart(6, '0')}.mp4`;
+        const segmentPath = path.join(directory, name);
+        run(ffmpeg, buildSegmentReencodeArgs(
+          input,
+          segmentPath,
+          group,
+          selectSeekStart(group.start, keyframes),
+          metadata,
+          encoder,
+        ));
+        const segment = probe(ffprobe, segmentPath);
+        segmentDurations.push(Number(segment.format.duration));
+        segmentVideoTimeBase ||= timeBaseSeconds(
+          segment.streams.find((stream) => stream.codec_type === 'video')?.time_base,
+        );
+        return name;
+      });
+      const manifest = path.join(directory, 'segments.ffconcat');
+      writeFileSync(
+        manifest,
+        buildConcatManifest(names, segmentDurations, Math.max(segmentVideoTimeBase, 0.000_001)),
+        'utf8',
+      );
+
+      const fixedOutput = path.join(directory, 'joined-fixed.mp4');
+      const fixedArgs = buildConcatArgs(manifest, fixedOutput, metadata);
+      const legacyOutput = path.join(directory, 'joined-legacy.mp4');
+      const legacyArgs = fixedArgs
+        .filter((argument) => argument !== '-shortest')
+        .map((argument) => argument === 'aresample=async=1:first_pts=0,apad'
+          ? 'aresample=async=1:first_pts=0'
+          : argument);
+      legacyArgs[legacyArgs.length - 1] = legacyOutput;
+      run(ffmpeg, legacyArgs);
+      const legacy = probe(ffprobe, legacyOutput);
+      const legacyAvDelta = Math.abs(
+        streamDuration(legacy, 'video') - streamDuration(legacy, 'audio'),
+      );
+      if (encoder === 'libopenh264') expect(legacyAvDelta).toBeGreaterThan(0.1);
+
+      const concat = runWithStderr(ffmpeg, fixedArgs);
+      expect(concat.stderr).not.toMatch(/Non-monotonic DTS/i);
+      const fixed = probe(ffprobe, fixedOutput);
+      expect(Math.abs(Number(fixed.format.duration) - 53.822)).toBeLessThanOrEqual(0.1);
+      const fixedAvDelta = Math.abs(
+        streamDuration(fixed, 'video') - streamDuration(fixed, 'audio'),
+      );
+      expect(fixedAvDelta).toBeLessThanOrEqual(0.1);
+      expect(fixedAvDelta).toBeLessThan(legacyAvDelta);
+      const audioPackets = probePacketTimes(ffprobe, fixedOutput, 'a:0');
+      expectMonotonic(audioPackets.map((packet) => packet.dts));
+      expectMonotonic(audioPackets.map((packet) => packet.pts));
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }, 240_000);
+
+  it.skipIf(!enabled || encoder !== 'libx264')(
+    'guards equal x264 decode timestamps at concat boundaries',
+    () => {
+      if (!input || !ffmpeg || !ffprobe) throw new Error('Integration environment is incomplete.');
+      const directory = mkdtempSync(path.join(tmpdir(), 'ttcut-concat-equal-dts-libx264-'));
+      try {
+        const metadata = {
+          ...sourceMetadata(input, probe(ffprobe, input)),
+          variable_frame_rate: true,
+        };
+        const keyframeJson = JSON.parse(run(ffprobe, [
+          '-v', 'error', '-select_streams', 'v:0', '-skip_frame', 'nokey',
+          '-show_frames', '-show_entries', 'frame=best_effort_timestamp_time', '-of', 'json', input,
+        ])) as { frames?: Array<{ best_effort_timestamp_time?: string }> };
+        const keyframes = (keyframeJson.frames ?? [])
+          .map((frame) => Number(frame.best_effort_timestamp_time))
+          .filter(Number.isFinite);
+        const segmentDurations: number[] = [];
+        let segmentVideoTimeBase = 0;
+        const names = concatEqualDtsRegressionGroups.map((group, index) => {
+          const name = `segment-${String(index + 1).padStart(6, '0')}.mp4`;
+          const segmentPath = path.join(directory, name);
+          run(ffmpeg, buildSegmentReencodeArgs(
+            input,
+            segmentPath,
+            group,
+            selectSeekStart(group.start, keyframes),
+            metadata,
+            encoder,
+          ));
+          const segment = probe(ffprobe, segmentPath);
+          segmentDurations.push(Number(segment.format.duration));
+          segmentVideoTimeBase ||= timeBaseSeconds(
+            segment.streams.find((stream) => stream.codec_type === 'video')?.time_base,
+          );
+          return name;
+        });
+
+        const legacyManifest = path.join(directory, 'legacy.ffconcat');
+        writeFileSync(legacyManifest, buildConcatManifest(names), 'utf8');
+        const legacyOutput = path.join(directory, 'legacy.mp4');
+        const legacy = runWithStderr(
+          ffmpeg,
+          buildConcatArgs(legacyManifest, legacyOutput, metadata),
+        );
+        expect(legacy.stderr).toMatch(/Non-monotonic DTS/i);
+
+        const fixedManifest = path.join(directory, 'fixed.ffconcat');
+        writeFileSync(
+          fixedManifest,
+          buildConcatManifest(
+            names,
+            segmentDurations,
+            Math.max(segmentVideoTimeBase, 0.000_001),
+          ),
+          'utf8',
+        );
+        const fixedOutput = path.join(directory, 'fixed.mp4');
+        const fixed = runWithStderr(
+          ffmpeg,
+          buildConcatArgs(fixedManifest, fixedOutput, metadata),
+        );
+        expect(fixed.stderr).not.toMatch(/Non-monotonic DTS/i);
+        const videoPackets = probePacketTimes(ffprobe, fixedOutput, 'v:0');
+        expectStrictlyIncreasing(videoPackets.map((packet) => packet.dts));
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    },
+    180_000,
+  );
 
   it.skipIf(!ffmpeg || !ffprobe)('exports 73 VFR AAC intervals within the dynamic duration budget', () => {
     if (!ffmpeg || !ffprobe) throw new Error('Integration environment is incomplete.');

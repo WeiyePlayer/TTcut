@@ -858,6 +858,17 @@ export function App() {
                 <video className="output-preview" src={exportResult.mediaUrl} controls preload="metadata" />
                 <div className="card output-details"><div><span>{t.outputName}</span><strong>{exportResult.outputName}</strong></div><div><span>{t.outputPath}</span><strong>{exportResult.outputPath}</strong></div></div>
                 <div className="footer-actions"><button className="secondary" onClick={() => void window.ttcut.revealOutput(exportResult.outputPath)}>{t.openFolder}</button><button className="primary" onClick={reset}>{t.cutAnother}</button></div>
+                {exportResult.warning && (
+                  <section className="export-warning" role="alert" aria-labelledby="export-warning-title">
+                    <div className="export-warning-heading">
+                      <span aria-hidden="true">!</span>
+                      <div><strong id="export-warning-title">{t.exportWarningTitle}</strong><p>{t.exportWarningDetail}</p></div>
+                      <button className="secondary" type="button" onClick={() => void window.ttcut.revealLogs()}>{t.logs}</button>
+                    </div>
+                    <div className="export-warning-summary"><code>{exportResult.warning.code}</code><span>{localizedError(exportResult.warning.code, t)}</span></div>
+                    <details><summary>{t.technicalDetails}</summary><pre>{exportResult.warning.message}</pre></details>
+                  </section>
+                )}
               </div>
             )}
 

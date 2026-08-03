@@ -221,6 +221,8 @@ export function buildSegmentReencodeArgs(
     '-filter_complex', filter.filter, ...filter.maps,
   ];
   appendMediaOutputOptions(args, metadata, encoder, hasAudio);
+  // Independently encoded MP4 segments need decode timestamps that remain ordered at concat boundaries.
+  if (encoder === 'libx264') args.push('-bf', '0');
   args.push(output);
   return args;
 }
@@ -232,14 +234,20 @@ function escapeConcatPath(value: string): string {
 export function buildConcatManifest(
   relativePaths: readonly string[],
   durationsSeconds?: readonly number[],
+  durationGuardSeconds = 0,
 ): string {
   if (durationsSeconds && durationsSeconds.length !== relativePaths.length) {
     throw new Error('CONCAT_DURATION_COUNT_MISMATCH');
   }
+  if (!Number.isFinite(durationGuardSeconds) || durationGuardSeconds < 0) {
+    throw new Error('CONCAT_DURATION_GUARD_INVALID');
+  }
   return `ffconcat version 1.0\n${relativePaths
     .flatMap((relativePath, index) => [
       `file '${escapeConcatPath(relativePath)}'`,
-      ...(durationsSeconds ? [`duration ${durationsSeconds[index]!.toFixed(6)}`] : []),
+      ...(durationsSeconds
+        ? [`duration ${(durationsSeconds[index]! + durationGuardSeconds).toFixed(6)}`]
+        : []),
     ])
     .join('\n')}\n`;
 }
@@ -257,7 +265,7 @@ export function buildConcatArgs(
   ];
   if (metadata.audio_codec !== null) {
     appendAudioEncodingOptions(args, metadata);
-    args.push('-af', 'aresample=async=1:first_pts=0');
+    args.push('-af', 'aresample=async=1:first_pts=0,apad', '-shortest');
   }
   args.push(
     // MP4 represents AAC priming with an edit list. make_zero would shift the copied video
