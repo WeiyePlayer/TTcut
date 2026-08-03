@@ -80,6 +80,26 @@ describe('export timestamp validation', () => {
     await expect(validateExportOutput(output, 2, source)).resolves.toBeDefined();
   });
 
+  it('accepts output duration drift within the domain tolerance', async () => {
+    state.probeVideo.mockResolvedValue({
+      ...source,
+      path: output,
+      duration_seconds: 3.99,
+    });
+
+    await expect(validateExportOutput(output, 2, source)).resolves.toBeDefined();
+  });
+
+  it('rejects output duration drift beyond the domain tolerance', async () => {
+    state.probeVideo.mockResolvedValue({
+      ...source,
+      path: output,
+      duration_seconds: 4.01,
+    });
+
+    await expect(validateExportOutput(output, 2, source)).rejects.toThrow('EXPORT_DURATION_MISMATCH');
+  });
+
   it('rejects an audio start timestamp beyond the frame-based tolerance', async () => {
     state.probeVideo.mockResolvedValue({
       ...source,
