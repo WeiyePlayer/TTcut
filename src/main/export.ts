@@ -50,6 +50,7 @@ import {
 } from './processes';
 
 const lastExportProgress = new Map<string, number>();
+const AV_SYNC_TOLERANCE_SECONDS = 0.1;
 
 type ExportTimingExpectation = {
   targetSeconds: number;
@@ -73,6 +74,21 @@ class ExportDurationMismatchError extends Error {
       + ` segments=${timing.segmentCount}`,
     );
     this.name = 'ExportDurationMismatchError';
+  }
+}
+
+class ExportAvSyncMismatchError extends Error {
+  readonly exportCode = 'EXPORT_AV_SYNC_MISMATCH';
+
+  constructor(videoSeconds: number, audioSeconds: number) {
+    const deltaSeconds = Math.abs(videoSeconds - audioSeconds);
+    super(
+      `EXPORT_AV_SYNC_MISMATCH: video=${videoSeconds.toFixed(6)}`
+      + ` audio=${audioSeconds.toFixed(6)}`
+      + ` delta=${deltaSeconds.toFixed(6)}`
+      + ` allowed=${AV_SYNC_TOLERANCE_SECONDS.toFixed(6)}`,
+    );
+    this.name = 'ExportAvSyncMismatchError';
   }
 }
 
@@ -326,8 +342,12 @@ export async function validateExportOutput(
   }
   if (metadata.video_duration_seconds !== null && metadata.video_duration_seconds !== undefined
     && metadata.audio_duration_seconds !== null && metadata.audio_duration_seconds !== undefined
-    && Math.abs(metadata.video_duration_seconds - metadata.audio_duration_seconds) > 0.1) {
-    throw new Error('EXPORT_AV_SYNC_MISMATCH');
+    && Math.abs(metadata.video_duration_seconds - metadata.audio_duration_seconds)
+      > AV_SYNC_TOLERANCE_SECONDS) {
+    throw new ExportAvSyncMismatchError(
+      metadata.video_duration_seconds,
+      metadata.audio_duration_seconds,
+    );
   }
   const timestampTolerance = exportTimestampTolerance(metadata);
   const startTimes = [
@@ -478,7 +498,11 @@ async function executeFastSegmented(
         analysisVideo,
         'normalized',
       );
-      encodedSegmentDurations.push(validation.metadata.duration_seconds);
+      encodedSegmentDurations.push(
+        analysisVideo.audio_codec === null
+          ? group.end - group.start
+          : validation.metadata.duration_seconds,
+      );
       await logExportTiming(taskId, `Fast segment ${index + 1} timing`, validation.timing, analysisVideo);
       const signature = await probeStreamSignature(segmentPath, components.ffprobe);
       if (!signature.video.extradataHash) throw new Error('EXPORT_SEGMENT_FAILED');
@@ -492,7 +516,10 @@ async function executeFastSegmented(
   }
   assertExportNotCancelled(taskId);
   const manifest = path.join(tempDirectory, 'segments.ffconcat');
-  await writeFile(manifest, buildConcatManifest(segmentNames), 'utf8');
+  const silentSegmentDurations = analysisVideo.audio_codec === null
+    ? groups.map((group) => group.end - group.start)
+    : undefined;
+  await writeFile(manifest, buildConcatManifest(segmentNames, silentSegmentDurations), 'utf8');
   try {
     await runFfmpeg(
       window,
