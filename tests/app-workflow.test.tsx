@@ -358,6 +358,13 @@ describe('App workflow notices and multi-task entry', () => {
         outputPath: 'C:\\video\\first_TTcut.mp4',
         outputName: 'first_TTcut.mp4',
         mediaUrl: 'ttcut-media://output',
+        timing: {
+          targetSeconds: 100,
+          actualSeconds: 100.05,
+          driftSeconds: 0.05,
+          allowedDriftSeconds: 0.1,
+          segmentCount: 1,
+        },
       },
     }));
     fireEvent.click(screen.getByRole('button', { name: 'Auto Cut' }));

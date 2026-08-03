@@ -326,7 +326,6 @@ describe('multi-task clipping', () => {
         initialVideos={videos}
         preRoll={2.5}
         postRoll={1}
-        exportStrategy="compatible"
         onOpenAnalysis={vi.fn()}
         onCompletableTasksFinished={onCompletableTasksFinished}
       />,
@@ -507,7 +506,6 @@ describe('multi-task clipping', () => {
         initialVideos={videos}
         preRoll={2.5}
         postRoll={1}
-        exportStrategy="compatible"
         ballModelProfile="tracknet_v1"
         onOpenAnalysis={vi.fn()}
       />,
@@ -522,7 +520,6 @@ describe('multi-task clipping', () => {
         initialVideos={videos}
         preRoll={5}
         postRoll={4}
-        exportStrategy="fast_segmented"
         ballModelProfile="uplifting_dual_v1"
         onOpenAnalysis={vi.fn()}
       />,
@@ -540,7 +537,6 @@ describe('multi-task clipping', () => {
     }));
     await waitFor(() => expect(startExport).toHaveBeenCalledTimes(1));
     expect(startExport.mock.calls[0]?.[0]).toMatchObject({
-      export_strategy: 'compatible',
       selection: { pre_roll_seconds: 2.5, post_roll_seconds: 1 },
     });
   });

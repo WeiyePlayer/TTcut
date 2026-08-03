@@ -127,7 +127,6 @@ export function MultiTaskPage({
   const rowRefs = useRef(new Map<string, HTMLElement>());
   const previousRects = useRef(new Map<string, DOMRect>());
   const optionsRef = useRef({ preRoll, postRoll, ballModelProfile });
-  optionsRef.current = { preRoll, postRoll, ballModelProfile };
 
   const isEnglish = language === 'en';
   const text = {
