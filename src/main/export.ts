@@ -5,6 +5,7 @@ import { dialog, type BrowserWindow } from 'electron';
 import type { AppEvent } from '../shared/api';
 import { exportRequestSchema, type CutGroup, type ExportRequest, type VideoMetadata } from '../shared/contracts';
 import { IPC } from '../shared/ipc';
+import { isExportDurationWithinTolerance } from '../domain/export-duration';
 import { createCutGroups } from '../domain/segments';
 import { normalizedVideoRotation } from '../domain/video-input';
 import { resolveUsableMediaComponents, type MediaEncoder } from './components';
@@ -243,8 +244,7 @@ export async function validateExportOutput(
   const info = await stat(output);
   if (!info.isFile() || info.size < 1024) throw new Error('EXPORT_INVALID');
   const metadata = await probeVideo(output);
-  const durationTolerance = Math.max(0.1, 2 / metadata.fps);
-  if (Math.abs(metadata.duration_seconds - wantedDuration) > durationTolerance) {
+  if (!isExportDurationWithinTolerance(metadata.duration_seconds, wantedDuration)) {
     throw new Error('EXPORT_DURATION_MISMATCH');
   }
   if (metadata.width !== source.width || metadata.height !== source.height) {
