@@ -52,6 +52,22 @@ const componentCatalogSchema = z.object({
       }
     }
   }),
+  dual_ball_models: z.object({
+    version: z.literal('1.0.0'),
+    release_tag: z.literal('dual-ball-models-1.0.0'),
+    install_directory: z.literal('dual-ball-models/1.0.0'),
+    assets: z.array(z.object({
+      role: z.enum(['main', 'aux']),
+      asset: z.string().endsWith('.pt'),
+      url: z.string().url().refine((value) => value.startsWith('https://')),
+      size_bytes: z.number().int().positive(),
+      sha256: sha256Schema,
+    }).strict()).length(2).superRefine((assets, context) => {
+      if (new Set(assets.map((asset) => asset.role)).size !== 2) {
+        context.addIssue({ code: 'custom', message: 'Dual ball model roles must contain main and aux exactly once.' });
+      }
+    }),
+  }).strict(),
   ffmpeg: z.object({
     provider: z.string().min(1),
     release_tag: z.string().min(1),
@@ -123,6 +139,12 @@ export async function componentSetupInfo(): Promise<ComponentSetupInfo> {
       version: catalog.ffmpeg.version_line,
       download_size_bytes: catalog.ffmpeg.size_bytes,
       license_url: catalog.ffmpeg.license_url,
+      available_for_download: process.platform === 'win32',
+    },
+    dual_ball_models_offer: {
+      id: 'dual_ball_models',
+      version: catalog.dual_ball_models.version,
+      download_size_bytes: catalog.dual_ball_models.assets.reduce((total, asset) => total + asset.size_bytes, 0),
       available_for_download: process.platform === 'win32',
     },
     x264_manual_offer: {

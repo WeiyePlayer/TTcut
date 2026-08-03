@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-from collections import deque
 import hashlib
 import json
 import math
@@ -229,7 +228,7 @@ def _annotate_frame(
     frame_index: int,
     label: str,
     roi=None,
-    trail_frames: int = 90,
+    trail_frames: int = 10,
 ) -> np.ndarray:
     annotated = source.copy()
     if roi is not None:
@@ -240,40 +239,32 @@ def _annotate_frame(
             (255, 180, 0),
             3,
         )
-    trail = deque(
-        points[max(0, frame_index - trail_frames):frame_index + 1],
-        maxlen=trail_frames + 1,
-    )
-    for first, second in zip(trail, list(trail)[1:]):
-        if first.visibility and second.visibility:
-            cv2.line(
-                annotated,
-                (first.x, first.y),
-                (second.x, second.y),
-                (0, 220, 80),
-                3,
-                cv2.LINE_AA,
-            )
-    current = points[frame_index]
-    status = "missing"
-    if current.visibility:
-        cv2.circle(
+        cv2.putText(
             annotated,
-            (current.x, current.y),
-            10,
-            (0, 0, 255),
-            -1,
-            cv2.LINE_AA,
-        )
-        cv2.circle(
-            annotated,
-            (current.x, current.y),
-            14,
-            (255, 255, 255),
+            f"Dynamic ROI {roi.x1 - roi.x0}x{roi.y1 - roi.y0}",
+            (roi.x0 + 8, roi.y0 + 28),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.72,
+            (255, 180, 0),
             2,
             cv2.LINE_AA,
         )
-        status = f"ball=({current.x},{current.y}) confidence={current.confidence:.3f}"
+    trail = [
+        point
+        for point in points[max(0, frame_index - trail_frames + 1):frame_index + 1]
+        if point.visibility
+    ]
+    previous = None
+    for point in trail:
+        current = (int(round(point.x)), int(round(point.y)))
+        if previous is not None:
+            cv2.line(annotated, previous, current, (0, 230, 0), 2, cv2.LINE_AA)
+        cv2.circle(annotated, current, 5, (0, 230, 0), -1, cv2.LINE_AA)
+        previous = current
+    current = points[frame_index]
+    status = "missing"
+    if current.visibility:
+        status = f"filtered ball=({current.x},{current.y})"
     cv2.rectangle(annotated, (16, 14), (780, 82), (0, 0, 0), -1)
     cv2.putText(
         annotated,

@@ -13,7 +13,7 @@ import { IPC } from '../shared/ipc';
 import { startAnalysis } from './analysis';
 import { startAutoCalibration } from './calibration';
 import { componentSetupInfo, loadComponentCatalog } from './component-catalog';
-import { recoverComponentInstallState, startAnalysisComponentInstall, startComponentImport, startMediaComponentInstall } from './component-manager';
+import { recoverComponentInstallState, startAnalysisComponentInstall, startComponentImport, startDualBallModelsInstall, startMediaComponentInstall } from './component-manager';
 import { inspectComponents } from './components';
 import { startExport } from './export';
 import { getLogDirectory, logLine } from './logger';
@@ -30,6 +30,7 @@ import {
 import { COMPONENT_ASSETS_RELEASE_URL, DONATION_URL, GITHUB_URL, RELEASES_URL, WEBSITE_URL } from '../shared/urls';
 import { getUpdater } from './updater';
 import { runInstallerMigrationRequest } from './installer-migration';
+import { requestSystemShutdown } from './system-power';
 
 const installerMigrationIndex = process.argv.indexOf('--installer-migrate-components');
 const installerMigrationRequest = installerMigrationIndex >= 0 ? process.argv[installerMigrationIndex + 1] : null;
@@ -83,6 +84,7 @@ function registerIpc(): void {
       componentSetup: {
         analysis_offer: setup.analysis_offer,
         media_offer: setup.media_offer,
+        dual_ball_models_offer: setup.dual_ball_models_offer,
         x264_manual_offer: setup.x264_manual_offer,
       },
       platformCompatibility,
@@ -121,6 +123,9 @@ function registerIpc(): void {
   });
   ipcMain.handle(IPC.componentsInstallMedia, async (_event, consent: unknown) => {
     return startMediaComponentInstall(currentWindow(), consent);
+  });
+  ipcMain.handle(IPC.componentsInstallDualBallModels, async (_event, consent: unknown) => {
+    return startDualBallModelsInstall(currentWindow(), consent);
   });
   ipcMain.handle(IPC.videoSelect, async () => {
     if (e2eHarnessEnabled()) {
@@ -182,6 +187,7 @@ function registerIpc(): void {
       calibrationChoice: calibrationChoiceSchema.parse(record.calibrationChoice),
       device,
       historyVisibility,
+      ballModelProfile: record.ballModelProfile === 'uplifting_dual_v1' ? 'uplifting_dual_v1' : 'tracknet_v1',
     });
   });
   ipcMain.handle(IPC.exportStart, async (_event, value: unknown) => {
@@ -286,6 +292,15 @@ function registerIpc(): void {
       exitApproved = true;
       await cancelAllTasksAndWait('app-exit');
       window.close();
+    }
+  });
+  ipcMain.handle(IPC.systemShutdown, async () => {
+    await logLine('app', 'INFO', 'System shutdown requested after a completed batch task.');
+    try {
+      await requestSystemShutdown({ isBusy: hasActiveTasks });
+    } catch (error) {
+      await logLine('app', 'ERROR', `System shutdown request failed: ${String(error)}`);
+      throw error;
     }
   });
 }

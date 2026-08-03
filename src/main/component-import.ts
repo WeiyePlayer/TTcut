@@ -13,6 +13,12 @@ export type ImportableComponentFile =
     asset: ComponentCatalog['analysis_runtime']['assets'][number];
     part: ComponentCatalog['analysis_runtime']['assets'][number]['parts'][number];
   }
+  | {
+    kind: 'dual-model';
+    sourcePath: string;
+    modelSet: ComponentCatalog['dual_ball_models'];
+    asset: ComponentCatalog['dual_ball_models']['assets'][number];
+  }
   | { kind: 'media'; sourcePath: string; asset: ComponentCatalog['ffmpeg'] }
   | { kind: 'media-x264'; sourcePath: string; asset: ComponentCatalog['ffmpeg_x264'] };
 
@@ -22,6 +28,11 @@ type ImportCandidate =
     variant: AnalysisRuntimeVariant;
     asset: ComponentCatalog['analysis_runtime']['assets'][number];
     part: ComponentCatalog['analysis_runtime']['assets'][number]['parts'][number];
+  }
+  | {
+    kind: 'dual-model';
+    modelSet: ComponentCatalog['dual_ball_models'];
+    asset: ComponentCatalog['dual_ball_models']['assets'][number];
   }
   | { kind: 'media'; asset: ComponentCatalog['ffmpeg'] }
   | { kind: 'media-x264'; asset: ComponentCatalog['ffmpeg_x264'] };
@@ -38,6 +49,9 @@ export async function validateImportFiles(
     for (const part of asset.parts) {
       candidates.set(part.asset, { kind: 'runtime-part', variant: asset.variant, asset, part });
     }
+  }
+  for (const asset of catalog.dual_ball_models.assets) {
+    candidates.set(asset.asset, { kind: 'dual-model', modelSet: catalog.dual_ball_models, asset });
   }
   candidates.set(catalog.ffmpeg.asset, { kind: 'media', asset: catalog.ffmpeg });
   candidates.set(catalog.ffmpeg_x264.asset, { kind: 'media-x264', asset: catalog.ffmpeg_x264 });
@@ -64,6 +78,11 @@ export async function validateImportFiles(
     if (await sha256File(sourcePath) !== expectedHash) throw new Error(`COMPONENT_IMPORT_FILE_HASH_MISMATCH:${filename}`);
     validated.push({ ...candidate, sourcePath } as ImportableComponentFile);
     onProgress?.(index + 1, filePaths.length);
+  }
+
+  const selectedDualModels = validated.filter((file) => file.kind === 'dual-model');
+  if (selectedDualModels.length > 0 && selectedDualModels.length !== catalog.dual_ball_models.assets.length) {
+    throw new Error('DUAL_BALL_MODELS_IMPORT_INCOMPLETE');
   }
 
   return validated;

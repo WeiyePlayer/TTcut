@@ -42,6 +42,12 @@ export function layoutFromRoot(root: string, userDataRoot: string): Installation
   };
 }
 
+export function isLocalForgePackage(appRoot: string): boolean {
+  const resolvedAppRoot = path.resolve(appRoot);
+  return path.basename(resolvedAppRoot).toLowerCase() === 'ttcut-win32-x64'
+    && path.basename(path.dirname(resolvedAppRoot)).toLowerCase() === 'out';
+}
+
 export function resolveInstallationLayout(): InstallationLayout {
   if (!app.isPackaged) {
     const developmentRoot = path.join(app.getPath('userData'), 'development-installation');
@@ -53,7 +59,7 @@ export function resolveInstallationLayout(): InstallationLayout {
   const registeredRoot = readRegisteredInstallRoot();
   if (!registeredRoot) throw new Error('INSTALL_ROOT_REGISTRY_MISSING');
   if (path.normalize(registeredRoot).toLowerCase() !== path.normalize(derivedRoot).toLowerCase()) {
-    if (existsSync(path.join(process.resourcesPath, 'app-update.yml'))) {
+    if (existsSync(path.join(process.resourcesPath, 'app-update.yml')) && !isLocalForgePackage(appRoot)) {
       throw new Error('INSTALL_ROOT_REGISTRY_MISMATCH');
     }
     return layoutFromRoot(registeredRoot, app.getPath('userData'));

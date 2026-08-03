@@ -56,6 +56,8 @@ describe('application updater', () => {
     mock.quitAndInstall.mockClear();
     mock.logLine.mockClear();
     mock.app.isPackaged = true;
+    mock.app.getVersion.mockReturnValue('1.0.1');
+    mock.updaterApi.allowPrerelease = false;
     mock.updaterApi.verifyUpdateCodeSignature = undefined;
     resourcesPath = await mkdtemp(path.join(os.tmpdir(), 'ttcut-updater-'));
     await writeFile(path.join(resourcesPath, 'app-update.yml'), 'provider: github\n', 'utf8');
@@ -94,6 +96,17 @@ describe('application updater', () => {
     updater.start(null);
 
     expect(mock.updaterApi.verifyUpdateCodeSignature).toEqual(expect.any(Function));
+  });
+
+  it('enables prerelease updates only for an installed prerelease', () => {
+    const stableUpdater = new AppUpdater();
+    stableUpdater.start(null);
+    expect(mock.updaterApi.allowPrerelease).toBe(false);
+
+    mock.app.getVersion.mockReturnValue('1.2.0-beta.1');
+    const betaUpdater = new AppUpdater();
+    betaUpdater.start(null);
+    expect(mock.updaterApi.allowPrerelease).toBe(true);
   });
 
   it('reports manual check errors without forcing a restart', async () => {

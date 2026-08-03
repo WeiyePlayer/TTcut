@@ -3,6 +3,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { createWriteStream } from 'node:fs';
 import {
   access,
+  copyFile,
   mkdir,
   readdir,
   rename,
@@ -26,6 +27,7 @@ import {
   activateManagedAnalysisRuntime,
   resolveUsableAnalysisComponents,
   validateAnalysisRuntime,
+  validateDualBallModels,
   validateMediaComponent,
   validateX264EightKCapability,
 } from './components';
@@ -56,6 +58,7 @@ import {
 const INSTALLABLE_DIRECTORIES = new Set([
   ...ANALYSIS_RUNTIME_VARIANTS.map(analysisRuntimeDirectory),
   'models',
+  'dual-ball-models/1.0.0',
   'ffmpeg-8.1',
   'ffmpeg-x264-N-125716-g1b1f602699',
 ]);
@@ -459,7 +462,7 @@ async function installOnlineAnalysisRuntime(
 }
 
 type SetupTaskResult = {
-  imported: Array<'analysis' | 'media'>;
+  imported: Array<'analysis' | 'media' | 'dual_ball_models'>;
   pendingImports: PendingComponentImport[];
 };
 
@@ -585,6 +588,83 @@ export async function startMediaComponentInstall(window: BrowserWindow, consent:
   });
 }
 
+export async function startDualBallModelsInstall(window: BrowserWindow, consent: unknown): Promise<string> {
+  if (consent !== true) throw new Error('COMPONENT_CONSENT_REQUIRED');
+  if (process.platform !== 'win32') throw new Error('COMPONENT_PLATFORM_UNSUPPORTED');
+  const cudaComponents = await resolveUsableAnalysisComponents('cuda').catch(() => null);
+  const cudaPython = cudaComponents?.python;
+  if (!cudaComponents || !cudaPython) throw new Error('DUAL_BALL_MODELS_CUDA_REQUIRED');
+  const catalog = await loadComponentCatalog();
+  const taskId = randomUUID();
+  return runSetupTask(window, taskId, async (signal) => {
+    const root = managedComponentsRoot();
+    const modelSet = catalog.dual_ball_models;
+    const downloadRoot = path.join(root, '.downloads');
+    const staging = path.join(root, '.staging', taskId);
+    const totalBytes = modelSet.assets.reduce((total, asset) => total + asset.size_bytes, 0);
+    const downloadedBytes = (await Promise.all(modelSet.assets.map((asset) => fileSize(path.join(downloadRoot, `${asset.asset}.download`)))))
+      .reduce((total, size, index) => total + Math.min(size, modelSet.assets[index]!.size_bytes), 0);
+    const existingSize = await directorySize(path.join(root, ...modelSet.install_directory.split('/')));
+    await ensureComponentSpace(root, totalBytes - downloadedBytes, totalBytes, existingSize);
+    await rm(staging, { recursive: true, force: true });
+    const stagedModels = path.join(staging, ...modelSet.install_directory.split('/'));
+    await mkdir(stagedModels, { recursive: true });
+    try {
+      let completedBase = 0;
+      for (const asset of modelSet.assets) {
+        const download = path.join(downloadRoot, `${asset.asset}.download`);
+        await downloadWithResume(
+          asset.url,
+          download,
+          asset.size_bytes,
+          signal,
+          (current) => sendProgress(window, taskId, 'download', (completedBase + current) / totalBytes * 78, completedBase + current, totalBytes),
+          (error, failedAttempt, maxAttempts) => logLine(taskId, 'WARN', `Dual model download attempt ${failedAttempt}/${maxAttempts} failed; preserving partial data: ${error instanceof Error ? error.message : String(error)}`),
+        );
+        sendProgress(window, taskId, 'verify', 78 + (completedBase / totalBytes) * 12);
+        if (await sha256File(download) !== asset.sha256) {
+          await rm(download, { force: true });
+          throw new Error('COMPONENT_DOWNLOAD_HASH_MISMATCH');
+        }
+        await copyFile(download, path.join(stagedModels, asset.asset));
+        completedBase += asset.size_bytes;
+      }
+      if (signal.aborted) throw Object.assign(new Error('SETUP_CANCELLED'), { name: 'AbortError' });
+      for (const asset of modelSet.assets) {
+        const staged = path.join(stagedModels, asset.asset);
+        const metadata = await stat(staged);
+        if (metadata.size !== asset.size_bytes || await sha256File(staged) !== asset.sha256) throw new Error('COMPONENT_DOWNLOAD_HASH_MISMATCH');
+      }
+      sendProgress(window, taskId, 'self_test', 92);
+      const mainAsset = modelSet.assets.find((asset) => asset.role === 'main');
+      const auxAsset = modelSet.assets.find((asset) => asset.role === 'aux');
+      if (!mainAsset || !auxAsset) throw new Error('DUAL_BALL_MODELS_CATALOG_INCOMPLETE');
+      await runProcess(cudaPython, [
+        '-m', 'ttcut_worker.dual_smoke',
+        '--main', path.join(stagedModels, mainAsset.asset),
+        '--aux', path.join(stagedModels, auxAsset.asset),
+      ], {
+        cwd: cudaComponents.worker,
+        env: { ...process.env, PYTHONPATH: cudaComponents.worker, PYTHONUTF8: '1' },
+        timeoutMs: 120_000,
+      });
+      sendProgress(window, taskId, 'install', 94);
+      await commitComponentDirectories(staging, [modelSet.install_directory], taskId);
+      const manifestRoot = path.join(root, '.manifests');
+      await mkdir(manifestRoot, { recursive: true });
+      await writeFile(path.join(manifestRoot, `dual-ball-models-${modelSet.version}.json`), JSON.stringify({
+        schema_version: 1,
+        installed_at: new Date().toISOString(),
+        dual_ball_models: modelSet,
+      }, null, 2), 'utf8');
+      sendProgress(window, taskId, 'complete', 99);
+      return { imported: ['dual_ball_models'], pendingImports: [] };
+    } finally {
+      await rm(staging, { recursive: true, force: true });
+    }
+  });
+}
+
 async function prepareImportedRuntime(
   window: BrowserWindow,
   taskId: string,
@@ -642,6 +722,49 @@ async function prepareImportedMedia(
   if (signal.aborted) throw Object.assign(new Error('SETUP_CANCELLED'), { name: 'AbortError' });
 }
 
+type ImportedDualModelFile = Extract<ImportableComponentFile, { kind: 'dual-model' }>;
+
+async function prepareImportedDualModels(
+  window: BrowserWindow,
+  taskId: string,
+  signal: AbortSignal,
+  staging: string,
+  files: ImportedDualModelFile[],
+  progress: number,
+): Promise<void> {
+  const modelSet = files[0]?.modelSet;
+  if (!modelSet || files.length !== modelSet.assets.length) throw new Error('DUAL_BALL_MODELS_IMPORT_INCOMPLETE');
+  const byRole = new Map(files.map((file) => [file.asset.role, file]));
+  const main = byRole.get('main');
+  const aux = byRole.get('aux');
+  if (!main || !aux) throw new Error('DUAL_BALL_MODELS_IMPORT_INCOMPLETE');
+
+  const cudaComponents = await resolveUsableAnalysisComponents('cuda').catch(() => null);
+  if (!cudaComponents?.python) throw new Error('DUAL_BALL_MODELS_CUDA_REQUIRED');
+
+  sendProgress(window, taskId, 'extract', progress);
+  const stagedModels = path.join(staging, ...modelSet.install_directory.split('/'));
+  await mkdir(stagedModels, { recursive: true });
+  await Promise.all(files.map((file) => copyFile(file.sourcePath, path.join(stagedModels, file.asset.asset))));
+  await validateDualBallModels({
+    dualBallMainWeights: path.join(stagedModels, main.asset.asset),
+    dualBallAuxWeights: path.join(stagedModels, aux.asset.asset),
+  });
+  if (signal.aborted) throw Object.assign(new Error('SETUP_CANCELLED'), { name: 'AbortError' });
+
+  sendProgress(window, taskId, 'self_test', progress + 4);
+  await runProcess(cudaComponents.python, [
+    '-m', 'ttcut_worker.dual_smoke',
+    '--main', path.join(stagedModels, main.asset.asset),
+    '--aux', path.join(stagedModels, aux.asset.asset),
+  ], {
+    cwd: cudaComponents.worker,
+    env: { ...process.env, PYTHONPATH: cudaComponents.worker, PYTHONUTF8: '1' },
+    timeoutMs: 120_000,
+  });
+  if (signal.aborted) throw Object.assign(new Error('SETUP_CANCELLED'), { name: 'AbortError' });
+}
+
 export async function startComponentImport(window: BrowserWindow, filePaths: string[]): Promise<string> {
   if (process.platform !== 'win32') throw new Error('COMPONENT_PLATFORM_UNSUPPORTED');
   const catalog = await loadComponentCatalog();
@@ -658,6 +781,16 @@ export async function startComponentImport(window: BrowserWindow, filePaths: str
       });
       const importedAssets = new Map<string, { size: number; installedSize: number; installDirectory: string; cached: boolean }>();
       for (const file of files) {
+        if (file.kind === 'dual-model') {
+          const totalSize = file.modelSet.assets.reduce((total, asset) => total + asset.size_bytes, 0);
+          importedAssets.set(file.modelSet.install_directory, {
+            size: totalSize,
+            installedSize: totalSize,
+            installDirectory: file.modelSet.install_directory,
+            cached: false,
+          });
+          continue;
+        }
         const asset = file.asset;
         importedAssets.set(asset.install_directory, {
           size: asset.size_bytes,
@@ -712,6 +845,12 @@ export async function startComponentImport(window: BrowserWindow, filePaths: str
         directories.push(media.asset.install_directory);
       }
 
+      const dualModelFiles = files.filter((file): file is ImportedDualModelFile => file.kind === 'dual-model');
+      if (dualModelFiles.length > 0) {
+        await prepareImportedDualModels(window, taskId, signal, staging, dualModelFiles, 88);
+        directories.push(catalog.dual_ball_models.install_directory);
+      }
+
       if (directories.length === 0 && pendingImports.length === 0) throw new Error('COMPONENT_IMPORT_NO_FILES');
       if (signal.aborted) throw Object.assign(new Error('SETUP_CANCELLED'), { name: 'AbortError' });
       if (directories.length > 0) {
@@ -739,11 +878,19 @@ export async function startComponentImport(window: BrowserWindow, filePaths: str
           ffmpeg: media.asset,
         }, null, 2), 'utf8');
       }
+      if (dualModelFiles.length > 0) {
+        await writeFile(path.join(manifestRoot, `dual-ball-models-${catalog.dual_ball_models.version}.json`), JSON.stringify({
+          schema_version: 1,
+          installed_at: new Date().toISOString(),
+          dual_ball_models: catalog.dual_ball_models,
+        }, null, 2), 'utf8');
+      }
       sendProgress(window, taskId, 'complete', 99);
       return {
         imported: [
           ...(installedVariants.length ? ['analysis' as const] : []),
           ...(mediaFiles.length ? ['media' as const] : []),
+          ...(dualModelFiles.length ? ['dual_ball_models' as const] : []),
         ],
         pendingImports,
       };

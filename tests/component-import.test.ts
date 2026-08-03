@@ -43,6 +43,15 @@ function testCatalog(): ComponentCatalog {
         },
       ],
     },
+    dual_ball_models: {
+      version: '1.0.0',
+      release_tag: 'dual-ball-models-1.0.0',
+      install_directory: 'dual-ball-models/1.0.0',
+      assets: [
+        { role: 'main', asset: 'main.pt', url: 'https://example.com/main.pt', size_bytes: 1, sha256: hash('m') },
+        { role: 'aux', asset: 'aux.pt', url: 'https://example.com/aux.pt', size_bytes: 1, sha256: hash('a') },
+      ],
+    },
     ffmpeg: {
       provider: 'test', release_tag: 'test', version_line: 'test', variant: 'win64-lgpl-shared-8.1', asset: 'ffmpeg.zip', archive_root: 'ffmpeg-root',
       install_directory: 'ffmpeg-8.1', url: 'https://example.com/ffmpeg', license_url: 'https://example.com/ffmpeg-license', size_bytes: media.length, installed_size_bytes: media.length * 2,
@@ -103,6 +112,21 @@ describe('manual component import validation', () => {
     const wrongHash = path.join(root, 'cpu.zip');
     await writeFile(wrongHash, 'cpu-datX', 'utf8');
     await expect(validateImportFiles([wrongHash], testCatalog())).rejects.toThrow('COMPONENT_IMPORT_FILE_HASH_MISMATCH');
+  });
+
+  it('recognizes both dual-model checkpoints and rejects a partial pair', async () => {
+    const root = await temporaryDirectory();
+    const main = path.join(root, 'main.pt');
+    const aux = path.join(root, 'aux.pt');
+    await writeFile(main, 'm', 'utf8');
+    await writeFile(aux, 'a', 'utf8');
+    const catalog = testCatalog();
+
+    await expect(validateImportFiles([main, aux], catalog)).resolves.toEqual([
+      expect.objectContaining({ kind: 'dual-model', asset: expect.objectContaining({ role: 'main' }) }),
+      expect.objectContaining({ kind: 'dual-model', asset: expect.objectContaining({ role: 'aux' }) }),
+    ]);
+    await expect(validateImportFiles([main], catalog)).rejects.toThrow('DUAL_BALL_MODELS_IMPORT_INCOMPLETE');
   });
 
   it('persists partial CUDA imports and assembles them after the final part arrives', async () => {

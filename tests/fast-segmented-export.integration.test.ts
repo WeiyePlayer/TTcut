@@ -8,10 +8,12 @@ import type { MediaEncoder } from '../src/main/components';
 import {
   buildConcatArgs,
   buildConcatManifest,
+  buildReencodeArgs,
   buildSegmentReencodeArgs,
   expectedOutputDuration,
   selectSeekStart,
 } from '../src/main/media-plan';
+import { assessExportDuration } from '../src/domain/export-duration';
 
 const input = process.env.TTCUT_VIDEO_INTEGRATION;
 const cases = [
@@ -120,6 +122,68 @@ function expectMonotonic(values: readonly number[]): void {
   }
 }
 
+function verifyVfr73IntervalExport(
+  encoder: MediaEncoder,
+  ffmpeg: string,
+  ffprobe: string,
+): void {
+  const directory = mkdtempSync(path.join(tmpdir(), `ttcut-vfr-73-${encoder}-`));
+  try {
+    const source = path.join(directory, 'source-vfr.mp4');
+    run(ffmpeg, [
+      '-hide_banner', '-y',
+      '-f', 'lavfi', '-i', 'testsrc2=size=320x240:rate=60:duration=18',
+      '-f', 'lavfi', '-i', 'sine=frequency=731:sample_rate=48000:duration=18',
+      '-map', '0:v:0', '-map', '1:a:0',
+      '-vf', "select='not(eq(mod(n,10),0))'",
+      '-fps_mode', 'vfr',
+      '-c:v', encoder, ...(encoder === 'libx264' ? ['-preset', 'ultrafast'] : []), '-g', '120',
+      '-c:a', 'aac', '-b:a', '128k', '-ar', '48000', '-ac', '2',
+      '-shortest', source,
+    ]);
+    const metadata = {
+      ...sourceMetadata(source, probe(ffprobe, source)),
+      variable_frame_rate: true,
+    };
+    expect(metadata.fps).toBeLessThan(metadata.nominal_fps ?? Number.POSITIVE_INFINITY);
+
+    const selectedGroups: CutGroup[] = Array.from({ length: 73 }, (_, index) => {
+      const start = 0.137 + index * 0.235;
+      const end = start + 0.123;
+      return {
+        rallyIds: [`rally_${String(index + 1).padStart(3, '0')}`],
+        rawStart: start,
+        rawEnd: end,
+        start,
+        end,
+      };
+    });
+    const targetSeconds = expectedOutputDuration(selectedGroups);
+    const output = path.join(directory, 'joined-vfr.mp4');
+    run(
+      ffmpeg,
+      buildReencodeArgs(source, output, selectedGroups, metadata, encoder),
+      180_000,
+    );
+
+    const joined = probe(ffprobe, output);
+    const video = joined.streams.find((stream) => stream.codec_type === 'video');
+    const audio = joined.streams.find((stream) => stream.codec_type === 'audio');
+    const assessment = assessExportDuration(
+      Number(joined.format.duration),
+      targetSeconds,
+      selectedGroups.length,
+      metadata,
+    );
+    expect(assessment.withinTolerance, JSON.stringify(assessment)).toBe(true);
+    expect(video?.codec_name).toBe('h264');
+    expect(audio?.codec_name).toBe('aac');
+    expect(Math.abs(Number(video?.duration) - Number(audio?.duration))).toBeLessThanOrEqual(0.1);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
 describe.each(cases)('fast segmented export with $encoder', ({ encoder, ffmpeg, ffprobe }) => {
   const enabled = Boolean(input && ffmpeg && ffprobe);
   it.skipIf(!enabled)('exports distant segments with matching signatures and removes temporary files', () => {
@@ -182,6 +246,11 @@ describe.each(cases)('fast segmented export with $encoder', ({ encoder, ffmpeg, 
       expect(() => readFileSync(directory)).toThrow();
     }
   }, 180_000);
+
+  it.skipIf(!ffmpeg || !ffprobe)('exports 73 VFR AAC intervals within the dynamic duration budget', () => {
+    if (!ffmpeg || !ffprobe) throw new Error('Integration environment is incomplete.');
+    verifyVfr73IntervalExport(encoder, ffmpeg, ffprobe);
+  }, 240_000);
 });
 
 const syntheticFfmpeg = process.env.TTCUT_X264_FFMPEG_INTEGRATION;

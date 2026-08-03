@@ -86,6 +86,27 @@
       }
     ]
   },
+  "dual_ball_models": {
+    "version": "1.0.0",
+    "release_tag": "dual-ball-models-1.0.0",
+    "install_directory": "dual-ball-models/1.0.0",
+    "assets": [
+      {
+        "role": "main",
+        "asset": "ttcut-ball-main-segformerpp-b2-1.0.0.pt",
+        "url": "https://github.com/WeiyePlayer/TTcut-runtime-assets/releases/download/dual-ball-models-1.0.0/ttcut-ball-main-segformerpp-b2-1.0.0.pt",
+        "size_bytes": 99091962,
+        "sha256": "f2e8b1050866a8bba540f731b379ee510a792f1af91996cb3bbc9cc0953f096e"
+      },
+      {
+        "role": "aux",
+        "asset": "ttcut-ball-aux-wasb-1.0.0.pt",
+        "url": "https://github.com/WeiyePlayer/TTcut-runtime-assets/releases/download/dual-ball-models-1.0.0/ttcut-ball-aux-wasb-1.0.0.pt",
+        "size_bytes": 6085114,
+        "sha256": "73bfe091d22dcca40f2ab19671370bb0f4236b451041dcbe72e8feefdb8539a0"
+      }
+    ]
+  },
   "ffmpeg": {
     "provider": "BtbN/FFmpeg-Builds",
     "release_tag": "autobuild-2026-07-17-13-22",

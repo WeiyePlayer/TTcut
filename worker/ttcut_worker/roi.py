@@ -94,6 +94,29 @@ def model_dimensions(
     return int(width), int(height)
 
 
+def dual_model_dimensions(
+    roi: AnalysisRoi | None,
+    source_width: int,
+    source_height: int,
+) -> tuple[tuple[int, int], tuple[int, int]]:
+    if source_width <= 0 or source_height <= 0:
+        raise AnalysisRoiError("Source video dimensions are invalid for dual-model analysis.")
+    if roi is not None and (roi.source_width != source_width or roi.source_height != source_height):
+        raise AnalysisRoiError("The analysis ROI dimensions do not match the decoded source video.")
+    width = roi.width if roi is not None else source_width
+    height = roi.height if roi is not None else source_height
+    if width <= 0 or height <= 0:
+        raise AnalysisRoiError("The dual-model analysis ROI has no pixels.")
+
+    def aligned(value: float, stride: int) -> int:
+        return max(32, math.ceil(value / stride) * stride)
+
+    return (
+        (aligned(width * 0.5, 4), aligned(height * 0.5, 4)),
+        (aligned(width * 0.4, 8), aligned(height * 0.4, 8)),
+    )
+
+
 def _project_table_points(calibration: TableCalibration, points: np.ndarray) -> np.ndarray:
     projected = np.asarray([calibration.table_to_image(float(x), float(y)) for x, y in points], dtype=np.float64)
     if projected.shape != (4, 2) or not np.isfinite(projected).all():

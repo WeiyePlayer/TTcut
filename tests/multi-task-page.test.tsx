@@ -70,6 +70,7 @@ describe('multi-task clipping', () => {
       acceptDroppedVideo: vi.fn(),
       pathForDroppedFile: vi.fn(),
       cancelTask: vi.fn().mockResolvedValue(undefined),
+      shutdownSystem: vi.fn().mockResolvedValue(undefined),
       deleteAnalysis: vi.fn().mockResolvedValue(undefined),
       revealOutput: vi.fn().mockResolvedValue(undefined),
     } as unknown as TTcutApi;
@@ -91,7 +92,7 @@ describe('multi-task clipping', () => {
   }
 
   it('auto-calibrates sequentially before allowing mode selection', async () => {
-    render(<MultiTaskPage initialVideos={videos} preRoll={2.5} postRoll={1} exportStrategy="compatible" onOpenAnalysis={vi.fn()} />);
+    render(<MultiTaskPage initialVideos={videos} preRoll={2.5} postRoll={1} onOpenAnalysis={vi.fn()} />);
     await screen.findByText('first.mp4');
     await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledTimes(1));
 
@@ -125,7 +126,7 @@ describe('multi-task clipping', () => {
   });
 
   it('runs ready videos serially with precalibrated analysis and 70/30 progress mapping', async () => {
-    render(<MultiTaskPage initialVideos={videos} preRoll={2.5} postRoll={1} exportStrategy="compatible" onOpenAnalysis={vi.fn()} />);
+    render(<MultiTaskPage initialVideos={videos} preRoll={2.5} postRoll={1} onOpenAnalysis={vi.fn()} />);
     await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledTimes(1));
     await finishCalibration('calibration-task-1');
     await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledTimes(2));
@@ -138,6 +139,7 @@ describe('multi-task clipping', () => {
       calibrationChoice: { method: 'precalibrated', calibration, table_analysis: tableAnalysis },
       device: 'auto',
       historyVisibility: 'deferred',
+      ballModelProfile: 'tracknet_v1',
     });
 
     act(() => listener?.({
@@ -154,7 +156,6 @@ describe('multi-task clipping', () => {
     expect(startExport).toHaveBeenCalledWith(expect.objectContaining({
       analysis_id: '11111111-1111-4111-8111-111111111111',
       destination: 'source',
-      export_strategy: 'compatible',
       selection: { mode: 'all', pre_roll_seconds: 2.5, post_roll_seconds: 1 },
     }));
 
@@ -170,6 +171,13 @@ describe('multi-task clipping', () => {
       data: {
         taskId: 'export-task-1', analysisId: '11111111-1111-4111-8111-111111111111',
         outputPath: 'C:\\video\\first_TTcut_所有回合.mp4', outputName: 'first_TTcut_所有回合.mp4', mediaUrl: 'ttcut-media://output',
+        timing: {
+          targetSeconds: 10,
+          actualSeconds: 10.05,
+          driftSeconds: 0.05,
+          allowedDriftSeconds: 0.1,
+          segmentCount: 1,
+        },
       },
     }));
     await waitFor(() => expect(startAnalysis).toHaveBeenCalledTimes(2));
@@ -177,7 +185,7 @@ describe('multi-task clipping', () => {
   });
 
   it('shows manual calibration for an automatic failure without exposing the raw code', async () => {
-    render(<MultiTaskPage initialVideos={videos} preRoll={2.5} postRoll={1} exportStrategy="compatible" onOpenAnalysis={vi.fn()} />);
+    render(<MultiTaskPage initialVideos={videos} preRoll={2.5} postRoll={1} onOpenAnalysis={vi.fn()} />);
     await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledTimes(1));
     act(() => listener?.({
       type: 'error',
@@ -198,7 +206,7 @@ describe('multi-task clipping', () => {
   });
 
   it('continues ready items while a failed item waits for manual calibration', async () => {
-    render(<MultiTaskPage initialVideos={videos} preRoll={2.5} postRoll={1} exportStrategy="compatible" onOpenAnalysis={vi.fn()} />);
+    render(<MultiTaskPage initialVideos={videos} preRoll={2.5} postRoll={1} onOpenAnalysis={vi.fn()} />);
     await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledTimes(1));
     act(() => listener?.({
       type: 'error',
@@ -214,6 +222,46 @@ describe('multi-task clipping', () => {
     expect(startAnalysis.mock.calls[0]?.[0].videoPath).toBe(videos[1]!.path);
   });
 
+  it('retains a duration-mismatch output and continues the remaining batch', async () => {
+    render(<MultiTaskPage initialVideos={videos} preRoll={2.5} postRoll={1} language="en" onOpenAnalysis={vi.fn()} />);
+    await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledTimes(1));
+    await finishCalibration('calibration-task-1');
+    await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledTimes(2));
+    await finishCalibration('calibration-task-2');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Start analysis and cutting' }));
+    await waitFor(() => expect(startAnalysis).toHaveBeenCalledTimes(1));
+    act(() => listener?.({
+      type: 'analysis-result',
+      taskId: 'analysis-task-1',
+      analysisId: '11111111-1111-4111-8111-111111111111',
+      calibration,
+      data: analysis(videos[0]!.path),
+    }));
+    await waitFor(() => expect(startExport).toHaveBeenCalledTimes(1));
+
+    act(() => listener?.({
+      type: 'error',
+      taskId: 'export-task-1',
+      code: 'EXPORT_DURATION_MISMATCH',
+      message: 'duration mismatch',
+      recoveredOutputPath: 'C:\\video\\first_TTcut_duration_mismatch.mp4',
+      timing: {
+        targetSeconds: 100,
+        actualSeconds: 102.128,
+        driftSeconds: 2.128,
+        allowedDriftSeconds: 0.1,
+        segmentCount: 1,
+      },
+    }));
+
+    const openRetained = await screen.findByRole('button', { name: 'Open retained file' });
+    fireEvent.click(openRetained);
+    expect(window.ttcut.revealOutput).toHaveBeenCalledWith('C:\\video\\first_TTcut_duration_mismatch.mp4');
+    await waitFor(() => expect(startAnalysis).toHaveBeenCalledTimes(2));
+    expect(startAnalysis.mock.calls[1]?.[0]).toMatchObject({ videoPath: videos[1]!.path });
+  });
+
   it('notifies once after every currently completable batch cut has ended', async () => {
     const onCompletableTasksFinished = vi.fn();
     render(
@@ -221,12 +269,12 @@ describe('multi-task clipping', () => {
         initialVideos={videos}
         preRoll={2.5}
         postRoll={1}
-        exportStrategy="compatible"
         onOpenAnalysis={vi.fn()}
         onCompletableTasksFinished={onCompletableTasksFinished}
       />,
     );
     await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('checkbox', { name: '完成本任务后关机' }));
     act(() => listener?.({
       type: 'error',
       taskId: 'calibration-task-1',
@@ -256,15 +304,66 @@ describe('multi-task clipping', () => {
         outputPath: 'C:\\video\\second_TTcut_所有回合.mp4',
         outputName: 'second_TTcut_所有回合.mp4',
         mediaUrl: 'ttcut-media://second-output',
+        timing: {
+          targetSeconds: 10,
+          actualSeconds: 10.05,
+          driftSeconds: 0.05,
+          allowedDriftSeconds: 0.1,
+          segmentCount: 1,
+        },
       },
     }));
 
     await waitFor(() => expect(onCompletableTasksFinished).toHaveBeenCalledTimes(1));
     expect(screen.getByText('标定失败')).toBeVisible();
+    expect(window.ttcut.shutdownSystem).not.toHaveBeenCalled();
+  });
+
+  it('shuts down once after every item in an armed batch succeeds', async () => {
+    const onCompletableTasksFinished = vi.fn();
+    render(
+      <MultiTaskPage
+        initialVideos={videos}
+        preRoll={2.5}
+        postRoll={1}
+        onOpenAnalysis={vi.fn()}
+        onCompletableTasksFinished={onCompletableTasksFinished}
+      />,
+    );
+    await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledTimes(1));
+    await finishCalibration('calibration-task-1');
+    await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledTimes(2));
+    await finishCalibration('calibration-task-2');
+
+    for (const group of screen.getAllByRole('group')) {
+      fireEvent.click(within(group).getAllByRole('button')[2]!);
+    }
+    fireEvent.click(screen.getByRole('checkbox', { name: '完成本任务后关机' }));
+    fireEvent.click(document.querySelector('.batch-start')!);
+    await waitFor(() => expect(startAnalysis).toHaveBeenCalledTimes(1));
+    act(() => listener?.({
+      type: 'analysis-result',
+      taskId: 'analysis-task-1',
+      analysisId: '11111111-1111-4111-8111-111111111111',
+      calibration,
+      data: analysis(videos[0]!.path),
+    }));
+    await waitFor(() => expect(startAnalysis).toHaveBeenCalledTimes(2));
+    act(() => listener?.({
+      type: 'analysis-result',
+      taskId: 'analysis-task-2',
+      analysisId: '22222222-2222-4222-8222-222222222222',
+      calibration,
+      data: analysis(videos[1]!.path),
+    }));
+
+    await waitFor(() => expect(window.ttcut.shutdownSystem).toHaveBeenCalledTimes(1));
+    expect(onCompletableTasksFinished).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('checkbox', { name: '完成本任务后关机' })).not.toBeChecked();
   });
 
   it('turns all remaining items into manual calibration when the model is unavailable', async () => {
-    render(<MultiTaskPage initialVideos={videos} preRoll={2.5} postRoll={1} exportStrategy="compatible" onOpenAnalysis={vi.fn()} />);
+    render(<MultiTaskPage initialVideos={videos} preRoll={2.5} postRoll={1} onOpenAnalysis={vi.fn()} />);
     await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledTimes(1));
     act(() => listener?.({
       type: 'error',
@@ -284,7 +383,7 @@ describe('multi-task clipping', () => {
   });
 
   it('adds a manual repair to a batch that is already running', async () => {
-    render(<MultiTaskPage initialVideos={videos} preRoll={2.5} postRoll={1} exportStrategy="compatible" onOpenAnalysis={vi.fn()} />);
+    render(<MultiTaskPage initialVideos={videos} preRoll={2.5} postRoll={1} onOpenAnalysis={vi.fn()} />);
     await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledTimes(1));
     act(() => listener?.({
       type: 'error',
@@ -330,7 +429,7 @@ describe('multi-task clipping', () => {
   });
 
   it('calibrates an added video before resuming requested processing', async () => {
-    render(<MultiTaskPage initialVideos={videos} preRoll={2.5} postRoll={1} exportStrategy="compatible" onOpenAnalysis={vi.fn()} />);
+    render(<MultiTaskPage initialVideos={videos} preRoll={2.5} postRoll={1} onOpenAnalysis={vi.fn()} />);
     await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledTimes(1));
     await finishCalibration('calibration-task-1');
     await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledTimes(2));
@@ -361,31 +460,84 @@ describe('multi-task clipping', () => {
     expect(startAnalysis.mock.calls[1]?.[0]).toMatchObject({ videoPath: videos[1]!.path });
   });
 
-  it('confirms and cancels the active worker before leaving the batch', async () => {
-    let leaveHandler: ((target: 'auto' | 'history' | 'settings') => void) | null = null;
-    const onLeave = vi.fn();
-    const registerLeaveHandler = (handler: typeof leaveHandler) => { leaveHandler = handler; };
+  it('continues the batch after cancellation without retrying the cancelled item', async () => {
+    const onTaskStateChange = vi.fn();
     render(
       <MultiTaskPage
         initialVideos={videos}
         preRoll={2.5}
         postRoll={1}
-        exportStrategy="compatible"
         onOpenAnalysis={vi.fn()}
-        registerLeaveHandler={registerLeaveHandler}
-        onLeave={onLeave}
+        onTaskStateChange={onTaskStateChange}
       />,
     );
     await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(document.querySelector('.batch-cover.processing')).not.toBeNull());
+    await finishCalibration('calibration-task-1');
+    await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledTimes(2));
+    await finishCalibration('calibration-task-2');
 
-    vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
-    act(() => leaveHandler?.('history'));
-    expect(window.ttcut.cancelTask).not.toHaveBeenCalled();
-    expect(onLeave).not.toHaveBeenCalled();
+    for (const group of screen.getAllByRole('group')) {
+      fireEvent.click(within(group).getAllByRole('button')[2]!);
+    }
+    fireEvent.click(document.querySelector('.batch-start')!);
+    await waitFor(() => expect(startAnalysis).toHaveBeenCalledTimes(1));
+    fireEvent.click(document.querySelector('.batch-cover.processing')!);
+    await waitFor(() => expect(window.ttcut.cancelTask).toHaveBeenCalledWith('analysis-task-1'));
 
-    act(() => leaveHandler?.('history'));
-    await waitFor(() => expect(window.ttcut.cancelTask).toHaveBeenCalledWith('calibration-task-1'));
-    await waitFor(() => expect(onLeave).toHaveBeenCalledWith('history'));
+    act(() => listener?.({
+      type: 'error', taskId: 'analysis-task-1', code: 'WORKER_EXITED', message: 'cancelled',
+    }));
+    await waitFor(() => expect(startAnalysis).toHaveBeenCalledTimes(2));
+    act(() => listener?.({
+      type: 'analysis-result',
+      taskId: 'analysis-task-2',
+      analysisId: '22222222-2222-4222-8222-222222222222',
+      calibration,
+      data: analysis(videos[1]!.path),
+    }));
+
+    await waitFor(() => expect(onTaskStateChange).toHaveBeenLastCalledWith(false));
+    expect(startAnalysis).toHaveBeenCalledTimes(2);
+  });
+
+  it('freezes processing settings for the lifetime of a batch', async () => {
+    const view = render(
+      <MultiTaskPage
+        initialVideos={videos}
+        preRoll={2.5}
+        postRoll={1}
+        ballModelProfile="tracknet_v1"
+        onOpenAnalysis={vi.fn()}
+      />,
+    );
+    await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledTimes(1));
+    await finishCalibration('calibration-task-1');
+    await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledTimes(2));
+    await finishCalibration('calibration-task-2');
+
+    view.rerender(
+      <MultiTaskPage
+        initialVideos={videos}
+        preRoll={5}
+        postRoll={4}
+        ballModelProfile="uplifting_dual_v1"
+        onOpenAnalysis={vi.fn()}
+      />,
+    );
+    fireEvent.click(document.querySelector('.batch-start')!);
+    await waitFor(() => expect(startAnalysis).toHaveBeenCalledTimes(1));
+    expect(startAnalysis.mock.calls[0]?.[0]).toMatchObject({ ballModelProfile: 'tracknet_v1' });
+
+    act(() => listener?.({
+      type: 'analysis-result',
+      taskId: 'analysis-task-1',
+      analysisId: '11111111-1111-4111-8111-111111111111',
+      calibration,
+      data: analysis(videos[0]!.path),
+    }));
+    await waitFor(() => expect(startExport).toHaveBeenCalledTimes(1));
+    expect(startExport.mock.calls[0]?.[0]).toMatchObject({
+      selection: { pre_roll_seconds: 2.5, post_roll_seconds: 1 },
+    });
   });
 });
