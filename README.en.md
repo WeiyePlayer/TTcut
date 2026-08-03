@@ -6,25 +6,25 @@ TTcut is a local automatic table-tennis video cutter for players and enthusiasts
 
 Videos, analysis results, and history stay on the local computer. TTcut requires no account, uploads no video, and collects no telemetry. The default analysis models are included in the installer; the optional new ball models are downloaded on demand. The analysis runtime and media-processing components require an internet connection during initial setup; after installation, analysis, preview, and cutting can run offline.
 
-> The current stable release is `v1.2.1` for Windows x64. TTcut no longer blocks startup according to a Windows build-number allowlist.
+> The current stable release is `v1.2.2` for Windows x64. TTcut no longer blocks startup according to a Windows build-number allowlist.
 
 ## Download and installation
 
-1. Download `TTcut-1.2.1-x64-Setup.exe` from the [TTcut v1.2.1 Release](https://github.com/WeiyePlayer/TTcut/releases/tag/v1.2.1).
+1. Download `TTcut-1.2.2-x64-Setup.exe` from the [TTcut v1.2.2 Release](https://github.com/WeiyePlayer/TTcut/releases/tag/v1.2.2).
 2. Run the installer, choose the installation root, and decide whether to create a desktop shortcut. Application files are written under `<root>\app`; large runtimes, downloads, and import staging are stored under `<root>\data\components`. A Start menu shortcut is always created.
 3. On first launch, open Settings and install the Analysis component and Video processing component after reviewing the prompts.
 
 The Analysis component detects an NVIDIA GPU automatically and falls back to CPU if CUDA installation or self-test fails. The Video processing component reads media information, cuts and joins segments, and validates exported files.
 
-## What's new in v1.2.1
+## What's new in v1.2.2
 
-- Fixed segmented exports failing A/V duration validation when some source videos contain abnormal frame durations.
-- OpenH264 and x264 trim paths now clear inherited frame-rate metadata while preserving variable frame rate instead of forcing constant frame rate.
-- Concat manifests for silent videos now include the explicit selected-segment durations so abnormal source timing does not propagate into the final output.
-- A/V synchronization failures now log video duration, audio duration, their delta, and the allowed tolerance for diagnosis.
-- This release does not change analysis models, dynamic ROI, ball trajectories, rally grouping, or bounce-count recognition.
+- Fixed A/V drift caused by accumulated encoded-duration rounding in multi-segment AAC exports. Concat now uses measured encoded-segment durations and safely pads audio to the video endpoint.
+- x264 segment encoding avoids equal or regressing decode timestamps at concat boundaries, reducing `EXPORT_CONCAT_FAILED` cases.
+- If a playable file already exists when a later validation or bookkeeping step fails, TTcut retains it under a collision-safe name instead of deleting it.
+- Single-video and batch workflows mark such results as exported with a warning, expose the error code, technical details, and logs, and continue with remaining videos.
+- Unreadable output and explicit cancellation remain failure or cancellation states. This release does not change analysis models, dynamic ROI, trajectories, rally grouping, or bounce-count recognition.
 
-See the [v1.2.1 release notes](docs/release-notes-v1.2.1.en.md) for the complete details.
+See the [v1.2.2 release notes](docs/release-notes-v1.2.2.en.md) for the complete details.
 
 ## Usage
 
