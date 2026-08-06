@@ -371,6 +371,105 @@ describe('App workflow notices and multi-task entry', () => {
     expect(await screen.findByRole('heading', { name: 'Choose match videos' })).toBeVisible();
   });
 
+  it('edits explicit custom ranges, preserves them on export cancellation, and resets them on back', async () => {
+    bootstrap.settings.language = 'en';
+    const selected = {
+      path: 'C:\\video\\first.mp4', name: 'first.mp4', size: 100, mediaUrl: 'ttcut-media://first',
+    };
+    selectVideos.mockResolvedValue([selected]);
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+      setTransform: vi.fn(), clearRect: vi.fn(), beginPath: vi.fn(), moveTo: vi.fn(), lineTo: vi.fn(), stroke: vi.fn(), fillText: vi.fn(),
+    } as unknown as CanvasRenderingContext2D);
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: /Choose MP4 \/ MOV videos/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start analysis' }));
+    act(() => taskListener?.({
+      type: 'analysis-result',
+      taskId: 'analysis-task-1',
+      analysisId: '11111111-1111-4111-8111-111111111111',
+      calibration,
+      data: {
+        schema_version: 1,
+        video: metadata(selected.path),
+        rallies: [
+          { id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 1, end_time_seconds: 2 },
+          { id: 'rally_002', index: 2, bounce_count: 6, start_time_seconds: 6, end_time_seconds: 7 },
+        ],
+        calibration,
+      },
+    }));
+
+    fireEvent.click(await screen.findByRole('button', { name: /Custom/ }));
+    expect(screen.getByRole('region', { name: 'Custom cut timeline' })).toBeVisible();
+    const monitor = document.querySelector('.custom-monitor video') as HTMLVideoElement;
+    expect(getComputedStyle(monitor).objectFit).toBe('contain');
+    Object.defineProperty(monitor, 'paused', { configurable: true, value: true });
+    fireEvent.keyDown(window, { key: ' ', code: 'Space' });
+    expect(play).toHaveBeenCalledTimes(1);
+    Object.defineProperty(monitor, 'paused', { configurable: true, value: false });
+    fireEvent.keyDown(window, { key: ' ', code: 'Space' });
+    expect(pause).toHaveBeenCalledTimes(1);
+
+    const viewport = document.querySelector('.timeline-viewport') as HTMLDivElement;
+    vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue({
+      x: 0, y: 0, left: 0, top: 0, right: 1, bottom: 96, width: 1, height: 96, toJSON: () => ({}),
+    });
+    const playhead = screen.getByRole('slider', { name: 'Custom cut timeline' });
+    Object.defineProperty(playhead, 'setPointerCapture', { configurable: true, value: vi.fn() });
+    fireEvent.pointerDown(playhead, { pointerId: 7, clientX: 0.2 });
+    fireEvent.pointerMove(playhead, { pointerId: 7, clientX: 0.6 });
+    expect(monitor.currentTime).toBeGreaterThan(0);
+    expect(Number(playhead.getAttribute('aria-valuenow'))).toBeCloseTo(monitor.currentTime, 4);
+    fireEvent.pointerUp(playhead, { pointerId: 7, clientX: 0.6 });
+    Object.defineProperty(monitor, 'paused', { configurable: true, value: true });
+    playhead.focus();
+    fireEvent.keyDown(playhead, { key: ' ', code: 'Space' });
+    expect(play).toHaveBeenCalledTimes(2);
+
+    expect(screen.queryByRole('button', { name: 'Preview' })).toBeNull();
+    expect(document.querySelectorAll('.timeline-clip')).toHaveLength(2);
+    expect(screen.getAllByRole('checkbox')).toHaveLength(2);
+    expect(screen.getAllByRole('checkbox').every((input) => (input as HTMLInputElement).checked)).toBe(true);
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Rally 2' }));
+    expect(document.querySelectorAll('.timeline-clip')).toHaveLength(1);
+    const endHandle = screen.getByRole('slider', { name: 'Resize clip end 1' });
+    const defaultEnd = Number(endHandle.getAttribute('aria-valuenow'));
+    fireEvent.keyDown(endHandle, { key: 'ArrowLeft' });
+    const editedEnd = Number(screen.getByRole('slider', { name: 'Resize clip end 1' }).getAttribute('aria-valuenow'));
+    expect(editedEnd).toBeLessThan(defaultEnd);
+
+    Object.defineProperty(endHandle, 'setPointerCapture', { configurable: true, value: vi.fn() });
+    fireEvent.pointerDown(endHandle, { pointerId: 8, clientX: 10 });
+    fireEvent.pointerMove(endHandle, { pointerId: 8, clientX: 9.9 });
+    expect(screen.getByText('-1.00 s')).toBeVisible();
+    fireEvent.pointerUp(endHandle, { pointerId: 8, clientX: 9.9 });
+    expect(screen.queryByText('-1.00 s')).toBeNull();
+    const draggedEnd = Number(screen.getByRole('slider', { name: 'Resize clip end 1' }).getAttribute('aria-valuenow'));
+    expect(draggedEnd).toBeLessThan(editedEnd);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start cutting' }));
+    await waitFor(() => expect(window.ttcut.startExport).toHaveBeenCalledWith(expect.objectContaining({
+      selection: {
+        mode: 'custom',
+        segments: [{ rally_id: 'rally_001', start_time_seconds: 0, end_time_seconds: draggedEnd }],
+      },
+    })));
+    act(() => taskListener?.({
+      type: 'error', taskId: 'export-task-1', code: 'EXPORT_CANCELLED', message: 'EXPORT_CANCELLED',
+    }));
+    expect(await screen.findByRole('region', { name: 'Custom cut timeline' })).toBeVisible();
+    expect(Number(screen.getByRole('slider', { name: 'Resize clip end 1' }).getAttribute('aria-valuenow'))).toBe(draggedEnd);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(await screen.findByRole('heading', { name: 'Choose a cutting mode' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: /Custom/ }));
+    expect(Number(screen.getByRole('slider', { name: 'Resize clip end 1' }).getAttribute('aria-valuenow'))).toBe(defaultEnd);
+    expect(screen.getAllByRole('checkbox').every((input) => (input as HTMLInputElement).checked)).toBe(true);
+  });
+
   it('keeps the export support prompt visible across pages until it is rejected', async () => {
     render(<App />);
     await screen.findByRole('heading', { name: '选择比赛视频' });

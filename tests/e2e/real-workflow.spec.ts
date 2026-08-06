@@ -318,43 +318,90 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     await expect(page.getByText('已识别 41 个有效回合', { exact: true })).toBeVisible();
 
     await page.getByRole('button', { name: /自定义/ }).click();
-    await expect(page.getByRole('button', { name: '开始剪辑' })).toBeDisabled();
-    await page.locator('tbody input[type="checkbox"]').first().check();
-    const thirdRallyRow = page.locator('tbody tr').nth(2);
-    await expect(thirdRallyRow).toContainText('00:00:32.032');
-    await expect(thirdRallyRow).toContainText('00:00:38.204');
-    await thirdRallyRow.getByRole('button', { name: '预览' }).click();
-    const rallyPreview = page.getByRole('dialog', { name: '回合预览' });
-    await expect(rallyPreview).toBeVisible();
-    await expect(rallyPreview).toContainText('第 3 回合');
-    await expect(rallyPreview).toContainText('00:00:31.032 – 00:00:39.204');
-    const rallyPreviewState = await rallyPreview.locator('video').evaluate(async (element: HTMLVideoElement) => {
-      if (element.readyState < 1) {
-        await new Promise<void>((resolve, reject) => {
-          element.addEventListener('loadedmetadata', () => resolve(), { once: true });
-          element.addEventListener('error', () => reject(new Error('Rally preview failed to load.')), { once: true });
-        });
-      }
-      if (element.seeking) {
-        await new Promise<void>((resolve, reject) => {
-          const timer = setTimeout(() => reject(new Error('Rally preview seek did not finish.')), 10_000);
-          element.addEventListener('seeked', () => { clearTimeout(timer); resolve(); }, { once: true });
-        });
-      }
-      const startTime = element.currentTime;
-      element.muted = true;
-      await element.play();
-      await new Promise((resolve) => setTimeout(resolve, 200));
-      element.pause();
-      return { controls: element.controls, readyState: element.readyState, startTime, currentTime: element.currentTime };
+    const customMonitor = page.locator('.custom-monitor video');
+    await expect(customMonitor).toBeVisible();
+    await customMonitor.evaluate(async (element: HTMLVideoElement) => {
+      if (element.readyState >= 1) return;
+      await new Promise<void>((resolve, reject) => {
+        element.addEventListener('loadedmetadata', () => resolve(), { once: true });
+        element.addEventListener('error', () => reject(new Error('Custom monitor failed to load.')), { once: true });
+      });
     });
-    expect(rallyPreviewState.controls).toBe(true);
-    expect(rallyPreviewState.readyState).toBeGreaterThanOrEqual(1);
-    expect(rallyPreviewState.startTime).toBeGreaterThanOrEqual(30.982);
-    expect(rallyPreviewState.startTime).toBeLessThanOrEqual(31.082);
-    expect(rallyPreviewState.currentTime).toBeGreaterThan(rallyPreviewState.startTime);
-    await rallyPreview.getByRole('button', { name: '关闭预览' }).click();
-    await expect(rallyPreview).toBeHidden();
+    await expect(customMonitor).toHaveCSS('object-fit', 'contain');
+    await customMonitor.evaluate((element: HTMLVideoElement) => {
+      element.muted = true;
+      element.pause();
+      document.body.focus();
+    });
+    await page.keyboard.press('Space');
+    await expect.poll(() => customMonitor.evaluate((element: HTMLVideoElement) => element.paused)).toBe(false);
+    await page.keyboard.press('Space');
+    await expect.poll(() => customMonitor.evaluate((element: HTMLVideoElement) => element.paused)).toBe(true);
+    await expect(page.locator('.timeline-clip')).toHaveCount(41);
+    await expect(page.getByRole('button', { name: '开始剪辑' })).toBeEnabled();
+    await expect(page.getByRole('button', { name: '预览' })).toHaveCount(0);
+    await page.getByRole('button', { name: '取消全选' }).click();
+    await expect(page.locator('.timeline-clip')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '开始剪辑' })).toBeDisabled();
+    const thirdRallyRow = page.locator('tbody tr').nth(2);
+    await thirdRallyRow.locator('input[type="checkbox"]').check();
+    await expect(page.locator('.timeline-clip')).toHaveCount(1);
+    const startHandle = page.getByRole('slider', { name: '调整片段开始 3' });
+    const endHandle = page.getByRole('slider', { name: '调整片段结束 3' });
+    const selectedStart = Number(await startHandle.getAttribute('aria-valuenow'));
+    const initialEnd = Number(await endHandle.getAttribute('aria-valuenow'));
+    expect(selectedStart).toBeLessThan(32.032);
+    expect(initialEnd).toBeGreaterThan(38.204);
+
+    await thirdRallyRow.click();
+    const playback = await customMonitor.evaluate(async (element: HTMLVideoElement) => {
+      element.muted = true;
+      await new Promise((resolve) => setTimeout(resolve, 220));
+      const state = { start: element.currentTime, paused: element.paused, controls: element.controls };
+      element.pause();
+      return state;
+    });
+    expect(playback.controls).toBe(true);
+    expect(playback.paused).toBe(false);
+    expect(playback.start).toBeGreaterThan(selectedStart);
+    const playheadLeft = await page.locator('.timeline-playhead').evaluate((element) => Number.parseFloat(getComputedStyle(element).left));
+    expect(playheadLeft).toBeGreaterThan(0);
+
+    const playhead = page.locator('.timeline-playhead');
+    const playheadBox = await playhead.boundingBox();
+    expect(playheadBox).not.toBeNull();
+    const timeBeforeScrub = await customMonitor.evaluate((element: HTMLVideoElement) => element.currentTime);
+    await page.mouse.move(playheadBox!.x + playheadBox!.width / 2, playheadBox!.y + 8);
+    await page.mouse.down();
+    await page.mouse.move(playheadBox!.x + playheadBox!.width / 2 + 30, playheadBox!.y + 8);
+    await expect.poll(() => customMonitor.evaluate((element: HTMLVideoElement) => element.currentTime)).toBeGreaterThan(timeBeforeScrub);
+    await page.mouse.up();
+
+    const endBox = await endHandle.boundingBox();
+    expect(endBox).not.toBeNull();
+    await page.mouse.move(endBox!.x + endBox!.width / 2, endBox!.y + endBox!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(endBox!.x + endBox!.width / 2 - 12, endBox!.y + endBox!.height / 2);
+    await expect(page.locator('.resize-feedback')).toHaveText(/^-\d+\.\d{2} s$/);
+    await page.screenshot({ path: path.join(screenshotDir, '03-custom-timeline-resize-feedback.png'), fullPage: true });
+    await page.mouse.up();
+    await expect(page.locator('.resize-feedback')).toHaveCount(0);
+    const selectedEnd = Number(await endHandle.getAttribute('aria-valuenow'));
+    expect(selectedEnd).toBeLessThan(initialEnd);
+    expect(selectedEnd).toBeGreaterThan(selectedStart);
+
+    const originalViewport = page.viewportSize();
+    await page.setViewportSize({ width: 840, height: 520 });
+    const compactLayout = await page.evaluate(() => ({
+      bodyWidth: document.body.scrollWidth,
+      viewportWidth: window.innerWidth,
+      monitorRight: document.querySelector('.custom-monitor')!.getBoundingClientRect().right,
+      mainRight: document.querySelector('.main-content')!.getBoundingClientRect().right,
+    }));
+    expect(compactLayout.bodyWidth).toBeLessThanOrEqual(compactLayout.viewportWidth);
+    expect(compactLayout.monitorRight).toBeLessThanOrEqual(compactLayout.mainRight + 1);
+    await page.screenshot({ path: path.join(screenshotDir, '03-custom-timeline-compact.png'), fullPage: true });
+    if (originalViewport) await page.setViewportSize(originalViewport);
     await expect(page.getByRole('button', { name: '开始剪辑' })).toBeEnabled();
     await page.getByRole('button', { name: '开始剪辑' }).click();
     await expect(page.getByRole('heading', { name: /正在/ })).toBeVisible();
@@ -385,7 +432,7 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
       return { controls: element.controls, duration: element.duration, readyState: element.readyState, volume: element.volume, paused: element.paused };
     });
     expect(previewState.controls).toBe(true);
-    expect(previewState.duration).toBeGreaterThan(2);
+    expect(previewState.duration).toBeCloseTo(selectedEnd - selectedStart, 0);
     expect(previewState.readyState).toBeGreaterThanOrEqual(1);
     expect(previewState.volume).toBe(0.25);
     expect(previewState.paused).toBe(true);
