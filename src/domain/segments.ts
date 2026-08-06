@@ -26,10 +26,7 @@ export function selectRallies(result: AnalysisResultV1, selection: CutSelectionV
     return filtered;
   }
 
-  const selectedIds = new Set(selection.selected_rally_ids);
-  const filtered = rallies.filter((rally) => selectedIds.has(rally.id));
-  if (filtered.length === 0) throw new SelectionError('NO_CUSTOM_SELECTION');
-  return filtered;
+  throw new SelectionError('NO_CUSTOM_SELECTION');
 }
 
 export function buildCutGroups(
@@ -89,6 +86,7 @@ export function buildCutGroups(
 }
 
 export function createCutGroups(result: AnalysisResultV1, selection: CutSelectionV1): CutGroup[] {
+  if (selection.mode === 'custom') throw new SelectionError('NO_CUSTOM_SELECTION');
   const rallies = selectRallies(result, selection);
   return buildCutGroups(
     rallies,

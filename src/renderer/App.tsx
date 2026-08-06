@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { AnalysisResultV1, AppSettings, Calibration, CutSelectionV1, ExportResult, HistorySummaryV1, Rally, UpdateState, VideoMetadata } from '../shared/contracts';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { AnalysisResultV1, AppSettings, Calibration, CutSelectionV1, ExportResult, HistorySummaryV1, UpdateState, VideoMetadata } from '../shared/contracts';
 import type { AppEvent, BootstrapData, PendingComponentImport, SelectedVideo } from '../shared/api';
 import { DONATION_URL, GITHUB_URL, RELEASES_URL, WEBSITE_URL } from '../shared/urls';
 import { formatTimestamp } from '../domain/time';
-import { rallyPreviewRange } from '../domain/preview';
+import { createCustomClipDraft, customExportSegments, setCustomClipSelected, type CustomRallyClip } from '../domain/custom-clips';
 import { validateCalibration } from '../domain/calibration';
 import { isSupportedVideoFileName } from '../domain/video-input';
 import { isSupportPromptSuppressed, suppressSupportPromptForThirtyDays } from '../domain/support-prompt';
@@ -11,11 +11,12 @@ import { interpolate, messages, type Language, type Messages } from './i18n';
 import { MultiTaskPage } from './MultiTaskPage';
 import { CalibrationSurface } from './CalibrationSurface';
 import { SupportPrompt } from './SupportPrompt';
+import { CustomCutPage } from './CustomCutPage';
 import packageJson from '../../package.json';
 import captureGuideImage from './assets/pingpong-table-with-pose-mannequins.png';
 
 type View = 'auto' | 'history' | 'settings' | 'multi';
-type Step = 'select' | 'calibrate' | 'analyzing' | 'empty' | 'mode' | 'cutting' | 'complete' | 'error';
+type Step = 'select' | 'calibrate' | 'analyzing' | 'empty' | 'mode' | 'custom' | 'cutting' | 'complete' | 'error';
 type VideoTaskOwner = 'single' | 'multi' | null;
 type PointName = keyof Calibration['points'];
 
@@ -48,75 +49,6 @@ function updateErrorMessage(code: string | null, language: Language): string {
     : 'Update check failed. Check your network connection and try again.';
 }
 
-function RallyPreviewDialog({ video, videoDuration, rally, translations, onClose }: {
-  video: SelectedVideo;
-  videoDuration: number;
-  rally: Rally;
-  translations: Messages;
-  onClose: () => void;
-}) {
-  const bounds = useMemo(() => rallyPreviewRange(rally, videoDuration), [rally, videoDuration]);
-  const previewRef = useRef<HTMLVideoElement>(null);
-  const [position, setPosition] = useState(bounds.start);
-  const [failed, setFailed] = useState(false);
-  const seekToleranceSeconds = 0.05;
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => {
-      window.removeEventListener('keydown', onKeyDown);
-      const element = previewRef.current;
-      if (element) {
-        element.pause();
-        element.removeAttribute('src');
-        element.load();
-      }
-    };
-  }, [onClose]);
-
-  const clampToRally = (element: HTMLVideoElement) => {
-    if (element.currentTime < bounds.start - seekToleranceSeconds) element.currentTime = bounds.start;
-    else if (element.currentTime > bounds.end + seekToleranceSeconds) element.currentTime = bounds.end;
-  };
-
-  return (
-    <div className="modal-backdrop" onPointerDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <div className="modal rally-preview-modal" role="dialog" aria-modal="true" aria-label={translations.rallyPreviewTitle}>
-        <div className="preview-heading"><div><h2>{translations.rallyPreviewTitle}</h2><p>{interpolate(translations.rallyPreviewDetail, { index: rally.index })}</p></div><button className="preview-close" type="button" aria-label={translations.closePreview} onClick={onClose}>×</button></div>
-        <video
-          ref={previewRef}
-          src={video.mediaUrl}
-          controls
-          preload="metadata"
-          playsInline
-          onLoadedMetadata={(event) => {
-            event.currentTarget.currentTime = bounds.start;
-            setPosition(bounds.start);
-          }}
-          onPlay={(event) => {
-            if (event.currentTarget.currentTime >= bounds.end - seekToleranceSeconds) event.currentTarget.currentTime = bounds.start;
-          }}
-          onSeeking={(event) => clampToRally(event.currentTarget)}
-          onTimeUpdate={(event) => {
-            const element = event.currentTarget;
-            if (element.currentTime >= bounds.end) {
-              element.pause();
-              element.currentTime = bounds.end;
-            }
-            setPosition(Math.max(bounds.start, Math.min(bounds.end, element.currentTime)));
-          }}
-          onError={() => setFailed(true)}
-        />
-        <div className="preview-time"><span>{formatTimestamp(position)}</span><span>{formatTimestamp(bounds.start)} – {formatTimestamp(bounds.end)}</span></div>
-        {failed && <p className="preview-error" role="alert">{translations.previewFailed}</p>}
-      </div>
-    </div>
-  );
-}
-
 export function App() {
   const [bootstrap, setBootstrap] = useState<BootstrapData | null>(null);
   const [settings, setSettings] = useState<AppSettings>({
@@ -135,7 +67,7 @@ export function App() {
   const [updateState, setUpdateState] = useState<UpdateState>({ status: 'idle', version: null, message: null });
   const [mode, setMode] = useState<'all' | 'highlight' | 'custom'>('all');
   const [threshold, setThreshold] = useState<3 | 5 | 7>(5);
-  const [customIds, setCustomIds] = useState<Set<string>>(new Set());
+  const [customDraft, setCustomDraft] = useState<CustomRallyClip[] | null>(null);
   const [progress, setProgress] = useState({ percent: 0, stage: 'probe' });
   const [activeTask, setActiveTask] = useState<string | null>(null);
   const [videoTaskOwner, setVideoTaskOwnerState] = useState<VideoTaskOwner>(null);
@@ -162,7 +94,7 @@ export function App() {
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [historyConfirmation, setHistoryConfirmation] = useState<{ kind: 'delete'; id: string } | { kind: 'clear' } | null>(null);
   const [missingComponents, setMissingComponents] = useState<string[] | null>(null);
-  const [previewRally, setPreviewRally] = useState<Rally | null>(null);
+  const exportOriginRef = useRef<'mode' | 'custom'>('mode');
   const updateVideoTaskOwner = useCallback((owner: VideoTaskOwner) => {
     videoTaskOwnerRef.current = owner;
     setVideoTaskOwnerState(owner);
@@ -267,7 +199,7 @@ export function App() {
         if (event.code === 'EXPORT_CANCELLED') {
           setActiveTask(null);
           if (videoTaskOwnerRef.current === 'single') updateVideoTaskOwner(null);
-          setStep('mode');
+          setStep(exportOriginRef.current);
           return;
         }
         setActiveTask(null);
@@ -300,9 +232,8 @@ export function App() {
   }, [updateState]);
 
   const reset = useCallback(() => {
-    setPreviewRally(null);
     setStep('select'); setVideo(null); setMetadata(null); setPoints({}); setAnalysis(null); setAnalysisId(null); setForceManual(false);
-    setMode('all'); setThreshold(5); setCustomIds(new Set()); setProgress({ percent: 0, stage: 'probe' });
+    setMode('all'); setThreshold(5); setCustomDraft(null); setProgress({ percent: 0, stage: 'probe' });
     setActiveTask(null); setExportResult(null); setError(null);
     if (videoTaskOwnerRef.current === 'single') updateVideoTaskOwner(null);
   }, [updateVideoTaskOwner]);
@@ -337,7 +268,24 @@ export function App() {
   } : null;
   const calibrationIssue = calibrationValue ? validateCalibration(calibrationValue) : null;
   const highlights = analysis?.rallies.filter((rally) => rally.bounce_count > threshold) ?? [];
-  const selectedCount = mode === 'all' ? analysis?.rallies.length ?? 0 : mode === 'highlight' ? highlights.length : customIds.size;
+  const selectedCount = mode === 'all'
+    ? analysis?.rallies.length ?? 0
+    : mode === 'highlight'
+      ? highlights.length
+      : customDraft?.filter((clip) => clip.selected).length ?? 0;
+
+  const openCustomEditor = () => {
+    if (!analysis) return;
+    setMode('custom');
+    setCustomDraft(createCustomClipDraft(
+      analysis.rallies,
+      settings.pre_roll_seconds,
+      settings.post_roll_seconds,
+      analysis.video.duration_seconds,
+      analysis.video.fps,
+    ));
+    setStep('custom');
+  };
 
   const startAnalysis = async () => {
     if (!video || !metadata || (useManualCalibration && (!calibrationValue || calibrationIssue)) || !platformSupported || !bootstrap?.components.analysis.available || !ballProfileReady) return;
@@ -357,13 +305,17 @@ export function App() {
     }
   };
 
-  const startCutting = async () => {
-    if (!analysis || !analysisId || !platformSupported || !bootstrap?.components.media.available || selectedCount === 0) return;
+  const startCutting = async (preparedSelection?: CutSelectionV1) => {
+    if (!analysis || !analysisId || !platformSupported || !bootstrap?.components.media.available) return;
+    if (!preparedSelection && selectedCount === 0) return;
     let selection: CutSelectionV1;
     const common = { pre_roll_seconds: settings.pre_roll_seconds, post_roll_seconds: settings.post_roll_seconds } as const;
-    if (mode === 'all') selection = { mode, ...common };
+    if (preparedSelection) selection = preparedSelection;
+    else if (mode === 'all') selection = { mode, ...common };
     else if (mode === 'highlight') selection = { mode, highlight_threshold: threshold, ...common };
-    else selection = { mode, selected_rally_ids: [...customIds], ...common };
+    else return;
+    if (selection.mode === 'custom' && selection.segments.length === 0) return;
+    exportOriginRef.current = selection.mode === 'custom' ? 'custom' : 'mode';
     updateVideoTaskOwner('single');
     setStep('cutting'); setProgress({ percent: 0, stage: 'preparing' });
     try {
@@ -409,7 +361,6 @@ export function App() {
   };
 
   const showHistory = () => {
-    setPreviewRally(null);
     setView('history');
     void loadHistory();
   };
@@ -425,7 +376,7 @@ export function App() {
       setPoints(opened.calibration.points);
       setMode('all');
       setThreshold(5);
-      setCustomIds(new Set());
+      setCustomDraft(null);
       setExportResult(null);
       setError(null);
       setStep('mode');
@@ -607,7 +558,15 @@ export function App() {
     reset();
     setView('auto');
   };
-  const returnToSelection = () => requestView('auto');
+  const returnToSelection = () => {
+    if (view === 'auto' && step === 'custom') {
+      setCustomDraft(null);
+      setMode('all');
+      setStep('mode');
+      return;
+    }
+    requestView('auto');
+  };
 
   return (
     <div className={`app-shell ${languageTransition ? 'language-changing' : ''}`}>
@@ -837,13 +796,40 @@ export function App() {
                   {([
                     ['all', t.all, t.allDetail], ['highlight', t.highlight, t.highlightDetail], ['custom', t.custom, t.customDetail],
                   ] as const).map(([value, title, detail]) => (
-                    <button key={value} className={`mode-card ${mode === value ? 'selected' : ''}`} onClick={() => setMode(value)}><span className="radio-dot" /><strong>{title}</strong><small>{detail}</small></button>
+                    <button key={value} className={`mode-card ${mode === value ? 'selected' : ''}`} onClick={() => { if (value === 'custom') openCustomEditor(); else setMode(value); }}><span className="radio-dot" /><strong>{title}</strong><small>{detail}</small></button>
                   ))}
                 </div>
                 {mode === 'highlight' && <div className="card inline-setting"><div><h2>{t.threshold}</h2><p>{t.highlightDetail}</p></div><div className="segmented">{([3, 5, 7] as const).map((value) => <button key={value} className={threshold === value ? 'selected' : ''} onClick={() => setThreshold(value)}>&gt; {value}</button>)}</div>{highlights.length === 0 && <span className="inline-error">{t.noHighlights}</span>}</div>}
-                {mode === 'custom' && <div className="rally-table card"><div className="table-tools"><button className="text-button" onClick={() => setCustomIds(new Set(analysis.rallies.map((rally) => rally.id)))}>{t.selectAll}</button><button className="text-button" onClick={() => setCustomIds(new Set())}>{t.clearAll}</button></div><div className="table-scroll"><table><thead><tr><th /><th>{t.rally}</th><th>{t.strokes}</th><th>{t.start}</th><th>{t.end}</th><th>{t.preview}</th></tr></thead><tbody>{analysis.rallies.map((rally: Rally) => <tr key={rally.id}><td><input type="checkbox" checked={customIds.has(rally.id)} onChange={(event) => { const next = new Set(customIds); if (event.target.checked) next.add(rally.id); else next.delete(rally.id); setCustomIds(next); }} /></td><td>{rally.index}</td><td>{rally.bounce_count}</td><td>{formatTimestamp(rally.start_time_seconds)}</td><td>{formatTimestamp(rally.end_time_seconds)}</td><td><button className="text-button" onClick={() => setPreviewRally(rally)}>{t.preview}</button></td></tr>)}</tbody></table></div></div>}
                 <div className="footer-actions"><span>{selectedCount} / {analysis.rallies.length}</span><button className="primary" disabled={selectedCount === 0 || !platformSupported || !bootstrap?.components.media.available} onClick={() => void startCutting()}>{t.startCutting}</button></div>
               </div>
+            )}
+
+            {step === 'custom' && analysis && video && customDraft && (
+              <CustomCutPage
+                video={video}
+                analysis={analysis}
+                clips={customDraft}
+                translations={t}
+                canExport={Boolean(platformSupported && bootstrap?.components.media.available)}
+                onClipsChange={setCustomDraft}
+                onToggleAll={(selected) => {
+                  if (!selected) {
+                    setCustomDraft((current) => current?.map((clip) => ({ ...clip, selected: false })) ?? null);
+                    return;
+                  }
+                  setCustomDraft((current) => current?.reduce(
+                    (next, clip) => setCustomClipSelected(
+                      next,
+                      clip.rallyId,
+                      true,
+                      analysis.video.duration_seconds,
+                      analysis.video.fps,
+                    ),
+                    current,
+                  ) ?? null);
+                }}
+                onExport={() => void startCutting({ mode: 'custom', segments: customExportSegments(customDraft) })}
+              />
             )}
 
             {step === 'complete' && exportResult && (
@@ -914,7 +900,6 @@ export function App() {
       )}
       {toast && <div className="toast" role="status">{toast}</div>}
       {languageTransition && <div className="language-loader"><span /></div>}
-      {previewRally && video && analysis && <RallyPreviewDialog key={`${video.mediaUrl}:${previewRally.id}`} video={video} videoDuration={analysis.video.duration_seconds} rally={previewRally} translations={t} onClose={() => setPreviewRally(null)} />}
       {missingComponents && <div className="modal-backdrop"><div className="modal" role="dialog" aria-modal="true" aria-label={t.componentCheckTitle}><h2>{t.componentCheckTitle}</h2><p>{interpolate(t.missingComponentsMessage, { components: missingComponents.join(settings.language === 'zh-CN' ? '、' : ', ') })}</p><div><button className="primary" onClick={() => setMissingComponents(null)}>{t.confirm}</button></div></div></div>}
       {historyConfirmation && <div className="modal-backdrop"><div className="modal" role="dialog" aria-modal="true"><h2>{historyConfirmation.kind === 'clear' ? t.clearHistoryTitle : t.deleteHistoryTitle}</h2><p>{historyConfirmation.kind === 'clear' ? t.clearHistoryConfirm : t.deleteHistoryConfirm}</p><div><button className="secondary" onClick={() => setHistoryConfirmation(null)}>{t.cancel}</button><button className="primary destructive-confirm" onClick={() => void confirmHistoryAction()}>{t.confirmDelete}</button></div></div></div>}
       {closeDialog && <div className="modal-backdrop"><div className="modal" role="dialog" aria-modal="true"><h2>{t.closeTitle}</h2><p>{t.closeDetail}</p><div><button className="secondary" onClick={() => { setCloseDialog(false); void window.ttcut.confirmClose('cancel'); }}>{t.cancel}</button><button className="secondary" onClick={() => { setCloseDialog(false); void window.ttcut.confirmClose('minimize'); }}>{t.minimize}</button><button className="primary" onClick={() => void window.ttcut.confirmClose('exit')}>{t.exit}</button></div></div></div>}

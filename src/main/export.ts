@@ -17,6 +17,7 @@ import {
   type ExportTimingAssessment,
 } from '../domain/export-duration';
 import { createCutGroups } from '../domain/segments';
+import { InvalidCustomSegmentsError, validateAndBuildCustomCutGroups } from '../domain/custom-clips';
 import { normalizedVideoRotation } from '../domain/video-input';
 import { resolveUsableMediaComponents, type MediaEncoder } from './components';
 import { logLine } from './logger';
@@ -793,12 +794,21 @@ async function executeExport(
 }
 
 export async function startExport(window: BrowserWindow, rawRequest: ExportRequest): Promise<string> {
-  const request = exportRequestSchema.parse(rawRequest);
+  const parsedRequest = exportRequestSchema.safeParse(rawRequest);
+  if (!parsedRequest.success) {
+    if ((rawRequest as { selection?: { mode?: unknown } })?.selection?.mode === 'custom') {
+      throw new InvalidCustomSegmentsError();
+    }
+    throw parsedRequest.error;
+  }
+  const request = parsedRequest.data;
   const selection = request.selection;
   const record = await getHistoryStore().open(request.analysis_id);
   const analysis = record.analysis;
   if (hasActiveTasks()) throw new Error('TASK_BUSY');
-  const groups = [...createCutGroups(analysis, selection)].sort((left, right) => left.start - right.start);
+  const groups = selection.mode === 'custom'
+    ? validateAndBuildCustomCutGroups(analysis, selection.segments)
+    : [...createCutGroups(analysis, selection)].sort((left, right) => left.start - right.start);
   if (!groups.length) throw new Error('NO_RALLIES');
   const components = await resolveUsableMediaComponents();
   if (!components.ffmpeg || !components.ffprobe || components.mediaEncoder === 'unavailable') throw new Error('MEDIA_COMPONENT_MISSING');
