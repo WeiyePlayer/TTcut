@@ -89,8 +89,6 @@ export function CustomCutPage({
         duration={analysis.video.duration_seconds}
         fps={analysis.video.fps}
         currentTime={currentTime}
-        zoomOutLabel={translations.zoomOut}
-        zoomInLabel={translations.zoomIn}
         timelineLabel={translations.timeline}
         resizeStartLabel={translations.resizeStart}
         resizeEndLabel={translations.resizeEnd}

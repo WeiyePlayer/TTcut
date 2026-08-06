@@ -33,13 +33,42 @@ export function formatResizeDelta(value: number): string {
   return `${rounded > 0 ? '+' : ''}${rounded.toFixed(2)} s`;
 }
 
+export function timelineWheelDelta(
+  deltaX: number,
+  deltaY: number,
+  deltaMode: number,
+  viewportWidth: number,
+): number {
+  const rawDelta = Math.abs(deltaX) > 0.01 ? deltaX : deltaY;
+  if (deltaMode === 1) return rawDelta * 16;
+  if (deltaMode === 2) return rawDelta * viewportWidth;
+  return rawDelta;
+}
+
+export function timelineWheelScroll(
+  scrollLeft: number,
+  clientWidth: number,
+  scrollWidth: number,
+  deltaX: number,
+  deltaY: number,
+  deltaMode: number,
+): { nextScroll: number; shouldPreventDefault: boolean } {
+  const maximumScroll = Math.max(0, scrollWidth - clientWidth);
+  if (maximumScroll <= 0) return { nextScroll: scrollLeft, shouldPreventDefault: false };
+  const delta = timelineWheelDelta(deltaX, deltaY, deltaMode, clientWidth);
+  if (delta === 0) return { nextScroll: scrollLeft, shouldPreventDefault: false };
+  const nextScroll = Math.max(0, Math.min(maximumScroll, scrollLeft + delta));
+  return {
+    nextScroll,
+    shouldPreventDefault: Math.abs(nextScroll - scrollLeft) >= 0.01,
+  };
+}
+
 export function CustomTimeline({
   clips,
   duration,
   fps,
   currentTime,
-  zoomOutLabel,
-  zoomInLabel,
   timelineLabel,
   resizeStartLabel,
   resizeEndLabel,
@@ -51,8 +80,6 @@ export function CustomTimeline({
   duration: number;
   fps: number;
   currentTime: number;
-  zoomOutLabel: string;
-  zoomInLabel: string;
   timelineLabel: string;
   resizeStartLabel: string;
   resizeEndLabel: string;
@@ -68,6 +95,7 @@ export function CustomTimeline({
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [resizeFeedback, setResizeFeedback] = useState<ResizeFeedback | null>(null);
   const playheadDraggingRef = useRef<number | null>(null);
+  const wheelHandlerRef = useRef<(event: WheelEvent) => void>(() => undefined);
   const draggingRef = useRef<{
     pointerId: number;
     rallyId: string;
@@ -153,11 +181,44 @@ export function CustomTimeline({
     const anchor = anchorClientX === undefined ? viewport.clientWidth / 2 : anchorClientX - rect.left;
     const time = (viewport.scrollLeft + anchor) / pixelsPerSecond;
     setZoom(bounded);
-    requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => {
       const nextPixelsPerSecond = Math.max(viewport.clientWidth, viewport.clientWidth * bounded) / Math.max(duration, 0.001);
       viewport.scrollLeft = Math.max(0, time * nextPixelsPerSecond - anchor);
     });
   };
+
+  wheelHandlerRef.current = (event) => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    if (event.ctrlKey) {
+      const zoomDelta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
+      if (zoomDelta === 0) return;
+      event.preventDefault();
+      setZoomAnchored(actualZoom * (zoomDelta < 0 ? 1.18 : 1 / 1.18), event.clientX);
+      return;
+    }
+
+    const { nextScroll, shouldPreventDefault } = timelineWheelScroll(
+      viewport.scrollLeft,
+      viewport.clientWidth,
+      viewport.scrollWidth,
+      event.deltaX,
+      event.deltaY,
+      event.deltaMode,
+    );
+    if (!shouldPreventDefault) return;
+    event.preventDefault();
+    viewport.scrollLeft = nextScroll;
+    setScrollLeft(nextScroll);
+  };
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const handleWheel = (event: WheelEvent) => wheelHandlerRef.current(event);
+    viewport.addEventListener('wheel', handleWheel, { passive: false });
+    return () => viewport.removeEventListener('wheel', handleWheel);
+  }, []);
 
   const seekFromPointer = (clientX: number) => {
     const viewport = viewportRef.current;
@@ -257,28 +318,11 @@ export function CustomTimeline({
 
   return (
     <section className="custom-timeline" aria-label={timelineLabel}>
-      <div className="timeline-toolbar">
-        <button type="button" aria-label={zoomOutLabel} title={zoomOutLabel} onClick={() => setZoomAnchored(actualZoom / 1.35)}>−</button>
-        <input
-          type="range"
-          min="1"
-          max={maximumZoom}
-          step="0.01"
-          value={actualZoom}
-          aria-label={`${zoomOutLabel} / ${zoomInLabel}`}
-          onChange={(event) => setZoomAnchored(Number(event.currentTarget.value))}
-        />
-        <button type="button" aria-label={zoomInLabel} title={zoomInLabel} onClick={() => setZoomAnchored(actualZoom * 1.35)}>+</button>
-      </div>
       <div
         ref={viewportRef}
         className="timeline-viewport"
+        data-zoom={actualZoom}
         onScroll={(event) => setScrollLeft(event.currentTarget.scrollLeft)}
-        onWheel={(event) => {
-          if (!event.ctrlKey) return;
-          event.preventDefault();
-          setZoomAnchored(actualZoom * (event.deltaY < 0 ? 1.18 : 1 / 1.18), event.clientX);
-        }}
       >
         <div className="timeline-content" style={{ width: contentWidth }}>
           <div className="timeline-ruler" onPointerDown={(event) => seekFromPointer(event.clientX)}>
@@ -303,6 +347,7 @@ export function CustomTimeline({
                     type="button"
                     className="clip-handle start"
                     role="slider"
+                    aria-orientation="horizontal"
                     aria-label={`${resizeStartLabel} ${clip.rallyIndex}`}
                     aria-valuemin={previous?.end ?? 0}
                     aria-valuemax={clip.end - minimumDuration}
@@ -319,6 +364,7 @@ export function CustomTimeline({
                     type="button"
                     className="clip-handle end"
                     role="slider"
+                    aria-orientation="horizontal"
                     aria-label={`${resizeEndLabel} ${clip.rallyIndex}`}
                     aria-valuemin={clip.start + minimumDuration}
                     aria-valuemax={following?.start ?? duration}
@@ -348,6 +394,7 @@ export function CustomTimeline({
             className={`timeline-playhead${isScrubbing ? ' dragging' : ''}`}
             style={{ left: currentTime * pixelsPerSecond }}
             role="slider"
+            aria-orientation="horizontal"
             tabIndex={0}
             aria-label={timelineLabel}
             aria-valuemin={0}

@@ -328,6 +328,9 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
       });
     });
     await expect(customMonitor).toHaveCSS('object-fit', 'contain');
+    await expect(customMonitor).toHaveCSS('object-position', '50% 50%');
+    await expect(customMonitor).toHaveCSS('position', 'absolute');
+    await expect(page.locator('.custom-monitor')).toHaveCSS('background-color', 'rgb(0, 0, 0)');
     await customMonitor.evaluate((element: HTMLVideoElement) => {
       element.muted = true;
       element.pause();
@@ -337,6 +340,43 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     await expect.poll(() => customMonitor.evaluate((element: HTMLVideoElement) => element.paused)).toBe(false);
     await page.keyboard.press('Space');
     await expect.poll(() => customMonitor.evaluate((element: HTMLVideoElement) => element.paused)).toBe(true);
+    await expect(page.locator('.timeline-toolbar')).toHaveCount(0);
+    const timelineViewport = page.locator('.timeline-viewport');
+    const timelineAppearance = await page.evaluate(() => {
+      const viewport = document.querySelector('.timeline-viewport')!;
+      const track = document.querySelector('.timeline-track')!;
+      const viewportStyle = getComputedStyle(viewport);
+      const trackStyle = getComputedStyle(track);
+      return {
+        scrollbarWidth: viewportStyle.scrollbarWidth,
+        overflowX: viewportStyle.overflowX,
+        viewportHeight: viewport.getBoundingClientRect().height,
+        trackHeight: track.getBoundingClientRect().height,
+        trackRadius: trackStyle.borderRadius,
+        trackBackground: trackStyle.backgroundColor,
+      };
+    });
+    expect(timelineAppearance).toMatchObject({
+      scrollbarWidth: 'none', overflowX: 'auto', viewportHeight: 78, trackHeight: 42, trackRadius: '999px',
+    });
+    expect(timelineAppearance.trackBackground).not.toBe('rgba(0, 0, 0, 0)');
+    const timelineBox = await timelineViewport.boundingBox();
+    expect(timelineBox).not.toBeNull();
+    await page.mouse.move(timelineBox!.x + timelineBox!.width / 2, timelineBox!.y + timelineBox!.height / 2);
+    const initialZoom = Number(await timelineViewport.getAttribute('data-zoom'));
+    await page.keyboard.down('Control');
+    await page.mouse.wheel(0, -360);
+    await page.keyboard.up('Control');
+    await expect.poll(async () => Number(await timelineViewport.getAttribute('data-zoom'))).toBeGreaterThan(initialZoom);
+    const overflowState = await timelineViewport.evaluate((element: HTMLDivElement) => ({
+      clientWidth: element.clientWidth, scrollWidth: element.scrollWidth, scrollLeft: element.scrollLeft,
+    }));
+    expect(overflowState.scrollWidth).toBeGreaterThan(overflowState.clientWidth);
+    await page.mouse.wheel(0, 120);
+    await expect.poll(() => timelineViewport.evaluate((element: HTMLDivElement) => element.scrollLeft)).toBeGreaterThan(overflowState.scrollLeft);
+    const afterVerticalWheel = await timelineViewport.evaluate((element: HTMLDivElement) => element.scrollLeft);
+    await page.mouse.wheel(-40, 0);
+    await expect.poll(() => timelineViewport.evaluate((element: HTMLDivElement) => element.scrollLeft)).toBeLessThan(afterVerticalWheel);
     await expect(page.locator('.timeline-clip')).toHaveCount(41);
     await expect(page.getByRole('button', { name: '开始剪辑' })).toBeEnabled();
     await expect(page.getByRole('button', { name: '预览' })).toHaveCount(0);

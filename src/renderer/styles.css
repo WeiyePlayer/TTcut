@@ -209,49 +209,46 @@ td input { accent-color: var(--blue); }
 
 .custom-cut-page { width: min(1180px, 100%); margin: 0 auto; padding-bottom: 30px; }
 .custom-monitor {
-  width: 100%; height: clamp(230px, 47vh, 610px); display: grid; place-items: center;
-  overflow: hidden; background: #111; border: 1px solid #242424; border-radius: 8px;
+  position: relative; width: 100%; height: clamp(230px, 47vh, 610px); min-width: 0; min-height: 0;
+  overflow: hidden; background-color: #000; border: 1px solid #242424; border-radius: 8px;
 }
 .custom-monitor video {
-  display: block; width: 100%; height: 100%; max-width: 100%; max-height: 100%;
-  object-fit: contain; object-position: center center; background: #111;
+  position: absolute; inset: 0; display: block; width: 100%; height: 100%;
+  object-fit: contain; object-position: center center; background-color: #000;
 }
-.custom-timeline { margin-top: 12px; user-select: none; }
-.timeline-toolbar { height: 34px; display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
-.timeline-toolbar button {
-  width: 28px; height: 28px; padding: 0; display: grid; place-items: center; border: 1px solid var(--line-strong);
-  border-radius: 7px; background: white; cursor: pointer; font-size: 18px; line-height: 1;
-}
-.timeline-toolbar button:hover { background: var(--secondary-hover); }
-.timeline-toolbar input { width: 150px; accent-color: var(--blue); }
+.custom-timeline { margin-top: 18px; user-select: none; }
 .timeline-viewport {
-  position: relative; width: 100%; height: 96px; overflow-x: auto; overflow-y: hidden;
-  border: 1px solid var(--line-strong); border-radius: 7px; background: #f8f8f9; overscroll-behavior-x: contain;
+  position: relative; width: 100%; height: 78px; overflow-x: auto; overflow-y: hidden;
+  background: transparent; overscroll-behavior-x: contain; scrollbar-width: none; -ms-overflow-style: none;
 }
-.timeline-content { position: relative; min-width: 100%; height: 96px; }
-.timeline-ruler { position: absolute; inset: 0 0 auto; height: 34px; cursor: crosshair; background: #fbfbfc; border-bottom: 1px solid var(--line); }
+.timeline-viewport::-webkit-scrollbar { display: none; width: 0; height: 0; }
+.timeline-content { position: relative; min-width: 100%; height: 78px; }
+.timeline-ruler { position: absolute; z-index: 3; inset: 0 0 auto; height: 34px; cursor: crosshair; background: transparent; }
 .timeline-ruler canvas { position: absolute; left: 0; top: 0; pointer-events: none; }
-.timeline-track { position: absolute; inset: 34px 0 0; height: 62px; background: linear-gradient(#f4f4f5, #fafafa); }
+.timeline-track {
+  position: absolute; z-index: 1; top: 34px; right: 0; left: 0; height: 42px;
+  border: 1px solid #c9ced6; border-radius: 999px; background: #edf0f4;
+}
 .timeline-clip {
-  position: absolute; top: 9px; height: 44px; min-width: 1px; display: flex; align-items: center; justify-content: center;
-  overflow: visible; border: 1px solid var(--blue-dark); border-radius: 3px; background: var(--blue); color: white;
+  position: absolute; top: 1px; height: 40px; min-width: 1px; display: flex; align-items: center; justify-content: center;
+  overflow: visible; border: 1px solid var(--blue-dark); border-radius: 999px; background: var(--blue); color: white;
   cursor: pointer; font-size: 11px; font-weight: 700;
 }
-.timeline-clip > span { overflow: hidden; text-overflow: clip; pointer-events: none; }
+.timeline-clip > span { position: relative; z-index: 1; overflow: hidden; text-overflow: clip; pointer-events: none; }
 .clip-handle {
-  position: absolute; z-index: 2; top: -1px; bottom: -1px; width: 9px; padding: 0; border: 1px solid rgba(255,255,255,.85);
-  border-radius: 2px; background: var(--blue-dark); cursor: ew-resize; touch-action: none;
+  position: absolute; z-index: 2; top: -1px; bottom: -1px; width: 14px; padding: 0;
+  border: 1px solid rgba(255,255,255,.78); background: var(--blue-dark); cursor: ew-resize; touch-action: none;
 }
-.clip-handle.start { left: -1px; }
-.clip-handle.end { right: -1px; }
-.clip-handle::after { content: ""; position: absolute; top: 13px; bottom: 13px; left: 3px; border-left: 1px solid rgba(255,255,255,.8); }
+.clip-handle.start { left: -1px; border-radius: 999px 5px 5px 999px; }
+.clip-handle.end { right: -1px; border-radius: 5px 999px 999px 5px; }
+.clip-handle::after { content: ""; position: absolute; top: 12px; bottom: 12px; left: 6px; border-left: 1px solid rgba(255,255,255,.85); }
 .resize-feedback {
   position: absolute; z-index: 7; top: 34px; min-width: 62px; padding: 3px 6px; transform: translate(-50%, -100%);
   border-radius: 4px; background: #242426; color: white; text-align: center; font-size: 11px; font-variant-numeric: tabular-nums;
   pointer-events: none;
 }
 .timeline-playhead {
-  position: absolute; z-index: 6; top: 0; bottom: 0; width: 15px; transform: translateX(-7px);
+  position: absolute; z-index: 8; top: 0; bottom: 2px; width: 15px; transform: translateX(-7px);
   cursor: ew-resize; touch-action: none; outline: none;
 }
 .timeline-playhead::before {

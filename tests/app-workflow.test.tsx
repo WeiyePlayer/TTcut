@@ -404,7 +404,6 @@ describe('App workflow notices and multi-task entry', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Custom/ }));
     expect(screen.getByRole('region', { name: 'Custom cut timeline' })).toBeVisible();
     const monitor = document.querySelector('.custom-monitor video') as HTMLVideoElement;
-    expect(getComputedStyle(monitor).objectFit).toBe('contain');
     Object.defineProperty(monitor, 'paused', { configurable: true, value: true });
     fireEvent.keyDown(window, { key: ' ', code: 'Space' });
     expect(play).toHaveBeenCalledTimes(1);
@@ -413,8 +412,10 @@ describe('App workflow notices and multi-task entry', () => {
     expect(pause).toHaveBeenCalledTimes(1);
 
     const viewport = document.querySelector('.timeline-viewport') as HTMLDivElement;
+    expect(document.querySelector('.timeline-track')).not.toBeNull();
+    expect(document.querySelector('.timeline-toolbar')).toBeNull();
     vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue({
-      x: 0, y: 0, left: 0, top: 0, right: 1, bottom: 96, width: 1, height: 96, toJSON: () => ({}),
+      x: 0, y: 0, left: 0, top: 0, right: 1, bottom: 78, width: 1, height: 78, toJSON: () => ({}),
     });
     const playhead = screen.getByRole('slider', { name: 'Custom cut timeline' });
     Object.defineProperty(playhead, 'setPointerCapture', { configurable: true, value: vi.fn() });
