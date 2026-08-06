@@ -31,6 +31,27 @@ The displayed `bounce_count`: the number of detected table bounces in a rally.
 It is not a count of racket contacts.
 _Avoid_: stroke count, paddle-hit count
 
+## Rally
+
+A detected interval in an `AnalysisResultV1`, identified by a stable rally ID
+and bounded by its analyzed start and end times. Rally boundaries describe the
+detected exchange; they are not necessarily final export boundaries.
+
+## Custom Rally Clip
+
+The editable export interval associated with exactly one Rally in the
+single-video custom workflow. Its default start includes Before-rally time; its
+default end includes the Rally end, one fixed closing second, and After-rally
+time. Selected Custom Rally Clips never overlap on the single track.
+_Avoid_: Rally, CutGroup
+
+## Custom Cut Draft
+
+The Renderer-owned, non-persisted set of Custom Rally Clips and selection
+states for the current video. It survives cancellation of its own export but is
+discarded when returning to mode selection, changing video, or restarting.
+_Avoid_: History Record, project file
+
 ## Analysis Runtime
 
 The managed Python and PyTorch environment installed separately from the

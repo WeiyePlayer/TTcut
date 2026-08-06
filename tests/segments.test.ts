@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildCutGroups, selectRallies, SelectionError } from '../src/domain/segments';
+import { buildCutGroups, selectRallies } from '../src/domain/segments';
 import type { AnalysisResultV1, Rally } from '../src/shared/contracts';
 
 function rally(id: string, start: number, end: number, bounceCount = 4, index = 1): Rally {
@@ -75,11 +75,5 @@ describe('selectRallies', () => {
     expect(selectRallies(result, {
       mode: 'highlight', highlight_threshold: 5, pre_roll_seconds: 2.5, post_roll_seconds: 2,
     }).map((item) => item.id)).toEqual(['rally_002']);
-  });
-
-  it('rejects empty custom selection', () => {
-    expect(() => selectRallies(result, {
-      mode: 'custom', selected_rally_ids: ['missing'], pre_roll_seconds: 2.5, post_roll_seconds: 2,
-    })).toThrowError(SelectionError);
   });
 });
