@@ -144,4 +144,15 @@ describe('export task start and terminal lifecycle', () => {
     await waitForTaskEnd(taskId);
     expect(state.events.filter((event) => event.type === 'error')).toEqual([]);
   });
+
+  it('rejects invalid explicit custom ranges before starting FFmpeg work', async () => {
+    await expect(startExport(windowMock() as never, {
+      ...request,
+      selection: {
+        mode: 'custom',
+        segments: [{ rally_id: 'missing', start_time_seconds: 1, end_time_seconds: 2 }],
+      },
+    })).rejects.toThrow('INVALID_CUSTOM_SEGMENTS');
+    expect(state.keyframes).not.toHaveBeenCalled();
+  });
 });

@@ -252,9 +252,11 @@ export const cutSelectionSchema = z.discriminatedUnion('mode', [
   }).strict(),
   z.object({
     mode: z.literal('custom'),
-    selected_rally_ids: z.array(z.string()).min(1),
-    pre_roll_seconds: z.union(PRE_ROLL_VALUES.map((value) => z.literal(value))),
-    post_roll_seconds: z.union(POST_ROLL_VALUES.map((value) => z.literal(value))),
+    segments: z.array(z.object({
+      rally_id: z.string().min(1),
+      start_time_seconds: finiteNumber.nonnegative(),
+      end_time_seconds: finiteNumber.positive(),
+    }).strict()).min(1),
   }).strict(),
 ]);
 

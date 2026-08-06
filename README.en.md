@@ -6,25 +6,25 @@ TTcut is a local automatic table-tennis video cutter for players and enthusiasts
 
 Videos, analysis results, and history stay on the local computer. TTcut requires no account, uploads no video, and collects no telemetry. The default analysis models are included in the installer; the optional new ball models are downloaded on demand. The analysis runtime and media-processing components require an internet connection during initial setup; after installation, analysis, preview, and cutting can run offline.
 
-> The current stable release is `v1.2.2` for Windows x64. TTcut no longer blocks startup according to a Windows build-number allowlist.
+> The current stable release is `v1.2.3` for Windows x64. TTcut no longer blocks startup according to a Windows build-number allowlist.
 
 ## Download and installation
 
-1. Download `TTcut-1.2.2-x64-Setup.exe` from the [TTcut v1.2.2 Release](https://github.com/WeiyePlayer/TTcut/releases/tag/v1.2.2).
+1. Download `TTcut-1.2.3-x64-Setup.exe` from the [TTcut v1.2.3 Release](https://github.com/WeiyePlayer/TTcut/releases/tag/v1.2.3).
 2. Run the installer, choose the installation root, and decide whether to create a desktop shortcut. Application files are written under `<root>\app`; large runtimes, downloads, and import staging are stored under `<root>\data\components`. A Start menu shortcut is always created.
 3. On first launch, open Settings and install the Analysis component and Video processing component after reviewing the prompts.
 
 The Analysis component detects an NVIDIA GPU automatically and falls back to CPU if CUDA installation or self-test fails. The Video processing component reads media information, cuts and joins segments, and validates exported files.
 
-## What's new in v1.2.2
+## What's new in v1.2.3
 
-- Fixed A/V drift caused by accumulated encoded-duration rounding in multi-segment AAC exports. Concat now uses measured encoded-segment durations and safely pads audio to the video endpoint.
-- x264 segment encoding avoids equal or regressing decode timestamps at concat boundaries, reducing `EXPORT_CONCAT_FAILED` cases.
-- If a playable file already exists when a later validation or bookkeeping step fails, TTcut retains it under a collision-safe name instead of deleting it.
-- Single-video and batch workflows mark such results as exported with a warning, expose the error code, technical details, and logs, and continue with remaining videos.
-- Unreadable output and explicit cancellation remain failure or cancellation states. This release does not change analysis models, dynamic ROI, trajectories, rally grouping, or bounce-count recognition.
+- Custom mode opens a dedicated editing page where rallies can be selected or cleared individually and previewed as separate clips.
+- Drag clip start and end boundaries or the playhead on the timeline. Use the mouse wheel to pan and `Ctrl` + wheel to zoom around the pointer.
+- Press Space to play or pause. The video monitor uses contain-fit so the full frame remains visible while editing.
+- Main revalidates rally IDs, time ranges, frame-length limits, ordering, and overlap before export; invalid custom ranges never reach FFmpeg.
+- Cancelling an export preserves the current custom edits, while returning to the mode page resets them for the next edit.
 
-See the [v1.2.2 release notes](docs/release-notes-v1.2.2.en.md) for the complete details.
+See the [v1.2.3 release notes](docs/release-notes-v1.2.3.en.md) for the complete details.
 
 ## Usage
 
@@ -46,13 +46,13 @@ The analysis page reports real processing progress. A running task can be cancel
 
 - **All rallies**: export every valid rally.
 - **Highlights**: retain rallies whose bounce-based count exceeds the selected threshold of 3, 5, or 7.
-- **Custom**: select rallies individually and preview each one.
+- **Custom**: open the dedicated timeline to select rallies individually, preview each clip, and adjust its start and end boundaries.
 
 ![Choose a cutting mode](docs/images/cutting-modes.png)
 
 ### 4. Set boundaries and export
 
-Choose the pre-roll and post-roll duration in Settings, return to the cutting mode, and export. Results are stored beside the source video:
+For All rallies and Highlights, choose pre-roll and post-roll durations in Settings. Custom mode lets you adjust each clip's start and end directly on its dedicated timeline before exporting. Results are stored beside the source video:
 
 - `match.mp4` or `match.mov` becomes `match_ttcut.mp4`.
 - Existing names are preserved; TTcut uses `match_ttcut_2.mp4`, `match_ttcut_3.mp4`, and so on.
