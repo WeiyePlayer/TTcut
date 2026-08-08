@@ -8,12 +8,13 @@ import {
   endTrackedTask,
   getTaskController,
   markTaskTerminal,
+  runProcess,
   spawnTracked,
 } from '../src/main/processes';
 
 afterEach(async () => {
   await cancelAllTasks('app-exit');
-  for (const taskId of ['normal', 'gap', 'cancelled']) endTrackedTask(taskId);
+  for (const taskId of ['normal', 'gap', 'cancelled', 'signal']) endTrackedTask(taskId);
 });
 
 describe('tracked task lifecycle', () => {
@@ -60,5 +61,31 @@ describe('tracked task lifecycle', () => {
     expect(markTaskTerminal('cancelled')).toBe(true);
     expect(markTaskTerminal('cancelled')).toBe(false);
     expect(getTaskController('cancelled')?.terminal).toBe(true);
+  });
+
+  it('cancels a process without requiring a timeout', async () => {
+    const controller = new AbortController();
+    const result = runProcess(process.execPath, [
+      '-e',
+      'setTimeout(() => process.exit(0), 1500); setInterval(() => {}, 1000);',
+    ], { signal: controller.signal });
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    controller.abort();
+
+    await expect(result).rejects.toMatchObject({
+      name: 'AbortError',
+      message: 'PROCESS_CANCELLED',
+    });
+  });
+
+  it('aborts the signal exposed by a tracked task when cancelled', async () => {
+    beginTrackedTask('signal');
+    const signal = getTaskController('signal')?.signal;
+    expect(signal?.aborted).toBe(false);
+
+    await cancelTask('signal', 'user');
+
+    expect(signal?.aborted).toBe(true);
   });
 });

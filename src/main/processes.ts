@@ -1,4 +1,4 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from 'node:child_process';
 
 export type ProcessResult = { stdout: string; stderr: string; code: number };
 export type TaskCancellationReason = 'user' | 'app-exit';
@@ -12,6 +12,8 @@ export type ProcessExitClassification = {
 
 export type TaskController = {
   taskId: string;
+  abortController: AbortController;
+  signal: AbortSignal;
   currentProcess: ChildProcessWithoutNullStreams | null;
   cancelRequested: boolean;
   cancelReason: TaskCancellationReason | null;
@@ -41,8 +43,11 @@ function assertTaskSlotAvailable(taskId: string): void {
 
 export function beginTrackedTask(taskId: string): TaskController {
   assertTaskSlotAvailable(taskId);
+  const abortController = new AbortController();
   const controller: TaskController = {
     taskId,
+    abortController,
+    signal: abortController.signal,
     currentProcess: null,
     cancelRequested: false,
     cancelReason: null,
@@ -86,8 +91,11 @@ export function spawnTracked(taskId: string, executable: string, args: readonly 
   let controller = controllers.get(taskId);
   if (!controller) {
     assertTaskSlotAvailable(taskId);
+    const abortController = new AbortController();
     controller = {
       taskId,
+      abortController,
+      signal: abortController.signal,
       currentProcess: null,
       cancelRequested: false,
       cancelReason: null,
@@ -166,7 +174,7 @@ export function activeTaskIds(): string[] {
   return [...new Set([...controllers.keys(), ...externalTasks.keys()])];
 }
 
-async function terminateChild(child: ChildProcessWithoutNullStreams): Promise<void> {
+async function terminateChild(child: ChildProcess): Promise<void> {
   child.kill('SIGTERM');
   if (process.platform === 'win32' && child.pid) {
     await new Promise<void>((resolve) => {
@@ -190,6 +198,7 @@ export async function cancelTask(taskId: string, reason: TaskCancellationReason 
   if (!controller) return;
   controller.cancelRequested = true;
   controller.cancelReason = reason;
+  if (!controller.signal.aborted) controller.abortController.abort();
   if (controller.currentProcess) await terminateChild(controller.currentProcess);
   if (!controller.explicit) {
     controllers.delete(taskId);
@@ -213,8 +222,14 @@ export function runProcess(executable: string, args: readonly string[], options:
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
+  signal?: AbortSignal;
 } = {}): Promise<ProcessResult> {
   return new Promise((resolve, reject) => {
+    const cancellationError = () => Object.assign(new Error('PROCESS_CANCELLED'), { name: 'AbortError' });
+    if (options.signal?.aborted) {
+      reject(cancellationError());
+      return;
+    }
     const child = spawn(executable, [...args], {
       cwd: options.cwd,
       env: options.env,
@@ -229,10 +244,22 @@ export function runProcess(executable: string, args: readonly string[], options:
     child.stdout.on('data', (chunk: string) => { stdout += chunk; });
     child.stderr.on('data', (chunk: string) => { stderr += chunk; });
     const timer = options.timeoutMs ? setTimeout(() => child.kill(), options.timeoutMs) : null;
-    child.once('error', reject);
-    child.once('close', (code, signal) => {
+    const abort = () => { void terminateChild(child); };
+    const cleanup = () => {
       if (timer) clearTimeout(timer);
-      if (code === 0) {
+      options.signal?.removeEventListener('abort', abort);
+    };
+    options.signal?.addEventListener('abort', abort, { once: true });
+    if (options.signal?.aborted) abort();
+    child.once('error', (error) => {
+      cleanup();
+      reject(options.signal?.aborted ? cancellationError() : error);
+    });
+    child.once('close', (code, signal) => {
+      cleanup();
+      if (options.signal?.aborted) {
+        reject(cancellationError());
+      } else if (code === 0) {
         resolve({ stdout, stderr, code });
       } else if (code === null || signal !== null) {
         reject(new Error(stderr.trim() || `Process terminated by signal ${String(signal)}`));
