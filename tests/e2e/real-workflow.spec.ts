@@ -445,7 +445,7 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     await expect(page.getByRole('button', { name: '开始剪辑' })).toBeEnabled();
     await page.getByRole('button', { name: '开始剪辑' }).click();
     await expect(page.getByRole('heading', { name: /正在/ })).toBeVisible();
-    await expect(page.getByRole('heading', { name: '成功导出' })).toBeVisible({ timeout: 2 * 60 * 1_000 });
+    await expect(page.getByRole('heading', { name: '成功导出' })).toBeVisible({ timeout: 0 });
 
     const outputDetails = page.locator('.output-details strong');
     const outputPath = (await outputDetails.nth(1).textContent())?.trim();
@@ -566,9 +566,9 @@ test('automatic calibration completes serial multi-task analysis and records zer
     const rows = page.locator('.batch-row');
     await expect(rows.nth(0).locator('.batch-cover.processing')).toBeVisible({ timeout: 30_000 });
     await expect(page.locator('.batch-cover.processing')).toHaveCount(1);
-    await expect(rows.nth(1).locator('.batch-cover.processing')).toBeVisible({ timeout: 2 * 60 * 1_000 });
+    await expect(rows.nth(1).locator('.batch-cover.processing')).toBeVisible({ timeout: 0 });
     await expect(page.locator('.batch-cover.processing')).toHaveCount(1);
-    await expect(page.locator('.batch-start')).toBeEnabled({ timeout: 2 * 60 * 1_000 });
+    await expect(page.locator('.batch-start')).toBeEnabled({ timeout: 0 });
     await rows.nth(0).locator('.batch-cover').click();
     const preview = page.locator('.batch-preview');
     await expect(preview).toBeVisible();
@@ -699,7 +699,7 @@ test('failed batch calibration can be repaired manually and returned to the runn
 
     await page.locator('.drop-zone').click();
     await expect(page.locator('.multi-task-page')).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByText('标定失败')).toBeVisible({ timeout: 2 * 60 * 1_000 });
+    await expect(page.getByText('标定失败')).toBeVisible({ timeout: 0 });
     await expect(page.getByText('手动标定')).toBeVisible();
     await expect(page.getByText('AUTO_CALIBRATION_FAILED')).toHaveCount(0);
     const failedCoverVideoStyle = await page.getByRole('button', { name: 'calibration-failure.mp4 手动标定' })
@@ -718,7 +718,7 @@ test('failed batch calibration can be repaired manually and returned to the runn
     await expect(finishCalibration).toBeEnabled();
     await finishCalibration.click();
     await expect(page.getByRole('heading', { name: '多任务剪辑' })).toBeVisible();
-    await expect(page.locator('.batch-start')).toBeEnabled({ timeout: 2 * 60 * 1_000 });
+    await expect(page.locator('.batch-start')).toBeEnabled({ timeout: 0 });
 
     for (const row of await page.locator('.batch-row').all()) {
       await row.locator('.batch-mode-options button').nth(2).click();

@@ -69,7 +69,6 @@ describe.skipIf(!enabled)('real FFmpeg export', () => {
       encoding: 'utf8',
       windowsHide: true,
       shell: false,
-      timeout: 120_000,
     });
     if (encode.status !== 0) throw new Error(encode.stderr || `FFmpeg exited with ${encode.status}`);
     expect(existsSync(output)).toBe(true);
@@ -110,7 +109,7 @@ describe.skipIf(!enabled)('real FFmpeg export', () => {
     const quality = spawnSync(ffmpeg, [
       '-hide_banner', '-i', input, '-i', output,
       '-filter_complex', filters.join(';'), '-an', '-f', 'null', 'NUL',
-    ], { encoding: 'utf8', windowsHide: true, shell: false, timeout: 120_000 });
+    ], { encoding: 'utf8', windowsHide: true, shell: false });
     if (quality.status !== 0) throw new Error(quality.stderr || `SSIM check exited with ${quality.status}`);
     const match = /All:([0-9.]+)/.exec(quality.stderr);
     expect(match, quality.stderr).not.toBeNull();

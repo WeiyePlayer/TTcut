@@ -73,20 +73,20 @@ function parseJson<T>(value: string, errorCode = 'VIDEO_UNREADABLE'): T {
   }
 }
 
-async function countFrames(ffprobe: string, videoPath: string): Promise<number | null> {
+async function countFrames(ffprobe: string, videoPath: string, signal?: AbortSignal): Promise<number | null> {
   const result = await runProcess(ffprobe, [
     '-v', 'error', '-count_frames', '-select_streams', 'v:0',
     '-show_entries', 'stream=nb_read_frames', '-of', 'json', videoPath,
-  ], { timeoutMs: 120_000 });
+  ], signal ? { signal } : {});
   const data = parseJson<{ streams?: ProbeStream[] }>(result.stdout);
   return optionalInteger(data.streams?.[0]?.nb_read_frames);
 }
 
-async function sampledVfr(ffprobe: string, videoPath: string): Promise<boolean> {
+async function sampledVfr(ffprobe: string, videoPath: string, signal?: AbortSignal): Promise<boolean> {
   const result = await runProcess(ffprobe, [
     '-v', 'error', '-select_streams', 'v:0', '-read_intervals', '%+60',
     '-show_packets', '-show_entries', 'packet=duration_time', '-of', 'json', videoPath,
-  ], { timeoutMs: 60_000 });
+  ], signal ? { timeoutMs: 60_000, signal } : { timeoutMs: 60_000 });
   const data = parseJson<{ packets?: Array<{ duration_time?: string }> }>(result.stdout);
   const durations = (data.packets ?? [])
     .map((packet) => Number(packet.duration_time))
@@ -98,14 +98,14 @@ async function sampledVfr(ffprobe: string, videoPath: string): Promise<boolean> 
   return durations.some((duration) => Math.abs(duration - median) > tolerance);
 }
 
-export async function probeVideo(videoPath: string): Promise<VideoMetadata> {
+export async function probeVideo(videoPath: string, signal?: AbortSignal): Promise<VideoMetadata> {
   const container = videoContainerFromFileName(videoPath);
   if (!container) throw new Error('INVALID_INPUT');
   const components = await resolveUsableMediaComponents();
   if (!components.ffprobe) throw new Error('MEDIA_COMPONENT_MISSING');
   const result = await runProcess(components.ffprobe, [
     '-v', 'error', '-show_format', '-show_streams', '-of', 'json', videoPath,
-  ], { timeoutMs: 30_000 });
+  ], signal ? { timeoutMs: 30_000, signal } : { timeoutMs: 30_000 });
   const data = parseJson<ProbeData>(result.stdout);
   const video = data.streams?.find((stream) => stream.codec_type === 'video');
   const audio = data.streams?.find((stream) => stream.codec_type === 'audio');
@@ -116,12 +116,13 @@ export async function probeVideo(videoPath: string): Promise<VideoMetadata> {
     throw new Error('VIDEO_UNREADABLE');
   }
   let frameCount = optionalInteger(video.nb_frames);
-  if (frameCount === null) frameCount = await countFrames(components.ffprobe, videoPath);
+  if (frameCount === null) frameCount = await countFrames(components.ffprobe, videoPath, signal);
   const fieldRatesDiffer = nominalFps > 0 && Math.abs(nominalFps - averageFps) / averageFps > 0.001;
   let packetDurationsDiffer = false;
   try {
-    packetDurationsDiffer = await sampledVfr(components.ffprobe, videoPath);
-  } catch {
+    packetDurationsDiffer = await sampledVfr(components.ffprobe, videoPath, signal);
+  } catch (error) {
+    if (signal?.aborted) throw error;
     // The rate fields remain the conservative fallback when packet sampling is unavailable.
   }
   const rotation = video.side_data_list?.find((item) => Number.isFinite(item.rotation))?.rotation
@@ -160,28 +161,39 @@ export async function probeVideo(videoPath: string): Promise<VideoMetadata> {
   });
 }
 
-export async function probeKeyframes(videoPath: string, ffprobeOverride?: string): Promise<number[]> {
+export async function probeKeyframes(
+  videoPath: string,
+  ffprobeOverride?: string,
+  signal?: AbortSignal,
+): Promise<number[]> {
   const ffprobe = ffprobeOverride ?? (await resolveUsableMediaComponents()).ffprobe;
   if (!ffprobe) throw new Error('MEDIA_COMPONENT_MISSING');
   const result = await runProcess(ffprobe, [
-    '-v', 'error', '-select_streams', 'v:0', '-skip_frame', 'nokey',
-    '-show_frames', '-show_entries', 'frame=best_effort_timestamp_time,pkt_pts_time',
+    '-v', 'error', '-select_streams', 'v:0', '-show_packets',
+    '-show_entries', 'packet=pts_time,flags',
     '-of', 'json', videoPath,
-  ], { timeoutMs: 120_000 });
-  const parsed = parseJson<{ frames?: Array<Record<string, string>> }>(result.stdout);
-  return (parsed.frames ?? [])
-    .map((frame) => Number(frame.best_effort_timestamp_time ?? frame.pkt_pts_time))
+  ], signal ? { signal } : {});
+  const parsed = parseJson<{
+    packets?: Array<{ pts_time?: string; flags?: string }>;
+  }>(result.stdout);
+  return (parsed.packets ?? [])
+    .filter((packet) => packet.flags?.includes('K'))
+    .map((packet) => Number(packet.pts_time))
     .filter((value) => Number.isFinite(value) && value >= 0)
     .sort((a, b) => a - b);
 }
 
-export async function probeAudioPacketBoundaries(videoPath: string, ffprobeOverride?: string): Promise<number[]> {
+export async function probeAudioPacketBoundaries(
+  videoPath: string,
+  ffprobeOverride?: string,
+  signal?: AbortSignal,
+): Promise<number[]> {
   const ffprobe = ffprobeOverride ?? (await resolveUsableMediaComponents()).ffprobe;
   if (!ffprobe) throw new Error('MEDIA_COMPONENT_MISSING');
   const result = await runProcess(ffprobe, [
     '-v', 'error', '-select_streams', 'a:0', '-show_packets',
     '-show_entries', 'packet=pts_time,duration_time', '-of', 'json', videoPath,
-  ], { timeoutMs: 120_000 });
+  ], signal ? { signal } : {});
   const parsed = parseJson<{
     packets?: Array<{ pts_time?: string; duration_time?: string }>;
   }>(result.stdout);
@@ -217,12 +229,16 @@ export type StreamSignature = {
   } | null;
 };
 
-export async function probeStreamSignature(videoPath: string, ffprobeOverride?: string): Promise<StreamSignature> {
+export async function probeStreamSignature(
+  videoPath: string,
+  ffprobeOverride?: string,
+  signal?: AbortSignal,
+): Promise<StreamSignature> {
   const ffprobe = ffprobeOverride ?? (await resolveUsableMediaComponents()).ffprobe;
   if (!ffprobe) throw new Error('MEDIA_COMPONENT_MISSING');
   const result = await runProcess(ffprobe, [
     '-v', 'error', '-show_streams', '-show_data_hash', 'sha256', '-of', 'json', videoPath,
-  ], { timeoutMs: 30_000 });
+  ], signal ? { timeoutMs: 30_000, signal } : { timeoutMs: 30_000 });
   const data = parseJson<ProbeData>(result.stdout);
   const video = data.streams?.find((stream) => stream.codec_type === 'video');
   const audio = data.streams?.find((stream) => stream.codec_type === 'audio');

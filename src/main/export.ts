@@ -333,10 +333,11 @@ export async function validateExportOutput(
   expectation: ExportTimingExpectation,
   source: VideoMetadata,
   orientation: 'preserved' | 'normalized' = 'preserved',
+  signal?: AbortSignal,
 ): Promise<ExportValidationResult> {
   const info = await stat(output);
   if (!info.isFile() || info.size < 1024) throw new Error('EXPORT_INVALID');
-  const metadata = await probeVideo(output);
+  const metadata = await probeVideo(output, signal);
   if (metadata.width !== source.width || metadata.height !== source.height) {
     throw new Error('EXPORT_RESOLUTION_MISMATCH');
   }
@@ -412,20 +413,40 @@ async function logExportTiming(
   );
 }
 
+async function probeExportKeyframes(
+  taskId: string,
+  videoPath: string,
+  ffprobe: string,
+  signal?: AbortSignal,
+): Promise<number[]> {
+  const started = Date.now();
+  await logLine(taskId, 'INFO', 'Keyframe packet probe started');
+  const keyframes = await probeKeyframes(videoPath, ffprobe, signal);
+  await logLine(
+    taskId,
+    'INFO',
+    `Keyframe packet probe complete: count=${keyframes.length} elapsedMs=${Date.now() - started}`,
+  );
+  return keyframes;
+}
+
 async function streamCopyEligibility(
+  taskId: string,
   videoPath: string,
   groups: readonly CutGroup[],
   metadata: VideoMetadata,
   ffprobe: string,
+  signal?: AbortSignal,
 ): Promise<boolean> {
   if (groups.length !== 1) return false;
   try {
     const [keyframes, audioBoundaries] = await Promise.all([
-      probeKeyframes(videoPath, ffprobe),
-      metadata.audio_codec === null ? Promise.resolve([]) : probeAudioPacketBoundaries(videoPath, ffprobe),
+      probeExportKeyframes(taskId, videoPath, ffprobe, signal),
+      metadata.audio_codec === null ? Promise.resolve([]) : probeAudioPacketBoundaries(videoPath, ffprobe, signal),
     ]);
     return canUseStreamCopy(groups, keyframes, audioBoundaries, metadata);
   } catch {
+    assertExportNotCancelled(taskId);
     return false;
   }
 }
@@ -464,8 +485,9 @@ async function executeFastSegmented(
   groups: readonly CutGroup[],
   partial: string,
   tempDirectory: string,
+  signal?: AbortSignal,
 ): Promise<number[]> {
-  const keyframes = await probeKeyframes(analysisVideo.path, components.ffprobe);
+  const keyframes = await probeExportKeyframes(taskId, analysisVideo.path, components.ffprobe, signal);
   assertExportNotCancelled(taskId);
   const signatures: StreamSignature[] = [];
   const segmentNames: string[] = [];
@@ -504,6 +526,7 @@ async function executeFastSegmented(
         { targetSeconds: group.end - group.start, segmentCount: 1 },
         analysisVideo,
         'normalized',
+        signal,
       );
       encodedSegmentDurations.push(
         analysisVideo.audio_codec === null
@@ -511,7 +534,7 @@ async function executeFastSegmented(
           : validation.metadata.duration_seconds,
       );
       await logExportTiming(taskId, `Fast segment ${index + 1} timing`, validation.timing, analysisVideo);
-      const signature = await probeStreamSignature(segmentPath, components.ffprobe);
+      const signature = await probeStreamSignature(segmentPath, components.ffprobe, signal);
       if (!signature.video.extradataHash) throw new Error('EXPORT_SEGMENT_FAILED');
       if (signatures.length > 0 && !sameStreamSignature(signatures[0]!, signature)) {
         throw new Error('EXPORT_SEGMENT_INCOMPATIBLE');
@@ -554,8 +577,9 @@ async function executeFastSingle(
   analysisVideo: VideoMetadata,
   group: CutGroup,
   partial: string,
+  signal?: AbortSignal,
 ): Promise<ExportValidationResult> {
-  const keyframes = await probeKeyframes(analysisVideo.path, components.ffprobe);
+  const keyframes = await probeExportKeyframes(taskId, analysisVideo.path, components.ffprobe, signal);
   assertExportNotCancelled(taskId);
   const seekStart = selectSeekStart(group.start, keyframes);
   await logLine(
@@ -589,6 +613,7 @@ async function executeFastSingle(
     { targetSeconds: group.end - group.start, segmentCount: 1 },
     analysisVideo,
     'normalized',
+    signal,
   );
   await logExportTiming(taskId, 'Fast single timing', validation.timing, analysisVideo);
   return validation;
@@ -619,11 +644,14 @@ async function executeExport(
     await mkdir(tempDirectory, { recursive: true });
     const requestedBudget = assessExportDuration(duration, duration, groups.length, analysis.video);
     await logExportTiming(taskId, 'Export timing budget (fast segmented)', requestedBudget, analysis.video);
+    const signal = getTaskController(taskId)?.signal;
     const canCopy = await streamCopyEligibility(
+      taskId,
       analysis.video.path,
       groups,
       analysis.video,
       components.ffprobe,
+      signal,
     );
     assertExportNotCancelled(taskId);
     if (!canCopy && highResolution && components.mediaEncoder !== 'libx264') {
@@ -643,6 +671,8 @@ async function executeExport(
           partial,
           { targetSeconds: duration, segmentCount: 1 },
           analysis.video,
+          'preserved',
+          signal,
         );
         finalTiming = validation.timing;
         await logExportTiming(taskId, 'Stream-copy final timing', validation.timing, analysis.video);
@@ -658,6 +688,7 @@ async function executeExport(
           analysis.video,
           groups[0]!,
           partial,
+          signal,
         );
         finalTiming = validation.timing;
       }
@@ -670,6 +701,7 @@ async function executeExport(
         groups,
         partial,
         tempDirectory,
+        signal,
       );
       const encodedSegmentDuration = encodedSegmentDurations.reduce(
         (total, segmentDuration) => total + segmentDuration,
@@ -683,6 +715,7 @@ async function executeExport(
         },
         analysis.video,
         'normalized',
+        signal,
       );
       await logExportTiming(taskId, 'Fast concat timing', concatValidation.timing, analysis.video);
       const requestedTiming = assessFastConcatDuration(
@@ -702,6 +735,7 @@ async function executeExport(
         analysis.video,
         groups[0]!,
         partial,
+        signal,
       );
       finalTiming = validation.timing;
     }
@@ -724,9 +758,10 @@ async function executeExport(
       send(window, { type: 'export-result', taskId, data: result });
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    const code = exportCode(error) ?? 'EXPORT_FAILED';
     const controller = getTaskController(taskId);
+    const cancelled = controller?.cancelRequested ?? false;
+    const message = cancelled ? 'EXPORT_CANCELLED' : error instanceof Error ? error.message : String(error);
+    const code = cancelled ? 'EXPORT_CANCELLED' : exportCode(error) ?? 'EXPORT_FAILED';
     const cancelledForExit = code === 'EXPORT_CANCELLED' && controller?.cancelReason === 'app-exit';
     await logLine(taskId, cancelledForExit ? 'INFO' : 'ERROR', `${code}: ${message}`);
 
