@@ -562,7 +562,7 @@ export async function startMediaComponentInstall(window: BrowserWindow, consent:
       if (signal.aborted) throw Object.assign(new Error('SETUP_CANCELLED'), { name: 'AbortError' });
       await mkdir(staging, { recursive: true });
       sendProgress(window, taskId, 'extract', 80);
-      await runProcess('tar.exe', ['-xf', download, '-C', staging], { timeoutMs: 120_000 });
+      await runProcess('tar.exe', ['-xf', download, '-C', staging], { signal });
       const extracted = path.join(staging, catalog.ffmpeg.archive_root);
       const normalized = path.join(staging, catalog.ffmpeg.install_directory);
       if (!await exists(extracted)) throw new Error('COMPONENT_ARCHIVE_LAYOUT_MISMATCH');
@@ -646,7 +646,7 @@ export async function startDualBallModelsInstall(window: BrowserWindow, consent:
       ], {
         cwd: cudaComponents.worker,
         env: { ...process.env, PYTHONPATH: cudaComponents.worker, PYTHONUTF8: '1' },
-        timeoutMs: 120_000,
+        signal,
       });
       sendProgress(window, taskId, 'install', 94);
       await commitComponentDirectories(staging, [modelSet.install_directory], taskId);
@@ -760,7 +760,7 @@ async function prepareImportedDualModels(
   ], {
     cwd: cudaComponents.worker,
     env: { ...process.env, PYTHONPATH: cudaComponents.worker, PYTHONUTF8: '1' },
-    timeoutMs: 120_000,
+    signal,
   });
   if (signal.aborted) throw Object.assign(new Error('SETUP_CANCELLED'), { name: 'AbortError' });
 }

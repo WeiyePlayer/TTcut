@@ -129,7 +129,6 @@ const selfTest = spawnSync(python, ['-c', selfTestCode], {
   cwd: target,
   encoding: 'utf8',
   windowsHide: true,
-  timeout: 120_000,
 });
 if (selfTest.status !== 0) throw new Error(`Runtime self-test failed: ${selfTest.stderr || selfTest.stdout}`);
 const versions = JSON.parse(selfTest.stdout.trim());
