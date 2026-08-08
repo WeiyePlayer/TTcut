@@ -1,5 +1,5 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, type SpawnSyncOptionsWithStringEncoding } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -13,6 +13,7 @@ import {
   expectedOutputDuration,
   selectSeekStart,
 } from '../src/main/media-plan';
+import { probeKeyframes } from '../src/main/probe';
 import { assessExportDuration } from '../src/domain/export-duration';
 
 const input = process.env.TTCUT_VIDEO_INTEGRATION;
@@ -54,10 +55,12 @@ const concatEqualDtsRegressionGroups: CutGroup[] = [
   { rallyIds: ['rally_002'], rawStart: 17.234, rawEnd: 21.464, start: 14.734, end: 24.464 },
 ];
 
-function run(executable: string, args: string[], timeout = 120_000): string {
-  const result = spawnSync(executable, args, {
-    encoding: 'utf8', windowsHide: true, shell: false, timeout,
-  });
+function run(executable: string, args: string[], timeout?: number): string {
+  const options: SpawnSyncOptionsWithStringEncoding = {
+    encoding: 'utf8', windowsHide: true, shell: false,
+    ...(timeout === undefined ? {} : { timeout }),
+  };
+  const result = spawnSync(executable, args, options);
   if (result.status !== 0) throw new Error(result.stderr || `Process exited with ${result.status}`);
   return result.stdout;
 }
@@ -65,11 +68,13 @@ function run(executable: string, args: string[], timeout = 120_000): string {
 function runWithStderr(
   executable: string,
   args: string[],
-  timeout = 120_000,
+  timeout?: number,
 ): { stdout: string; stderr: string } {
-  const result = spawnSync(executable, args, {
-    encoding: 'utf8', windowsHide: true, shell: false, timeout,
-  });
+  const options: SpawnSyncOptionsWithStringEncoding = {
+    encoding: 'utf8', windowsHide: true, shell: false,
+    ...(timeout === undefined ? {} : { timeout }),
+  };
+  const result = spawnSync(executable, args, options);
   if (result.status !== 0) throw new Error(result.stderr || `Process exited with ${result.status}`);
   return { stdout: result.stdout, stderr: result.stderr };
 }
@@ -535,6 +540,34 @@ describe.each(cases)('fast segmented export with $encoder', ({ encoder, ffmpeg, 
 });
 
 describe.skipIf(!syntheticEnabled)('fast segmented timestamp repair with generated media', () => {
+  it('matches decoder keyframes with packet-level probing for H.264 B-frame media', async () => {
+    if (!syntheticFfmpeg || !syntheticFfprobe) throw new Error('Integration environment is incomplete.');
+    const directory = mkdtempSync(path.join(tmpdir(), 'ttcut-keyframe-probe-'));
+    try {
+      const source = path.join(directory, 'source.mp4');
+      run(syntheticFfmpeg, [
+        '-hide_banner', '-y',
+        '-f', 'lavfi', '-i', 'testsrc2=size=320x240:rate=60:duration=6',
+        '-c:v', 'libx264', '-preset', 'medium', '-g', '60', '-bf', '2', '-an', source,
+      ]);
+
+      const packetKeyframes = await probeKeyframes(source, syntheticFfprobe);
+      const frameData = JSON.parse(run(syntheticFfprobe, [
+        '-v', 'error', '-select_streams', 'v:0', '-skip_frame', 'nokey',
+        '-show_frames', '-show_entries', 'frame=best_effort_timestamp_time,pkt_pts_time',
+        '-of', 'json', source,
+      ])) as { frames?: Array<{ best_effort_timestamp_time?: string; pkt_pts_time?: string }> };
+      const decodedKeyframes = (frameData.frames ?? [])
+        .map((frame) => Number(frame.best_effort_timestamp_time ?? frame.pkt_pts_time))
+        .filter((value) => Number.isFinite(value) && value >= 0)
+        .sort((left, right) => left - right);
+
+      expect(packetKeyframes).toEqual(decodedKeyframes);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }, 180_000);
+
   it('joins separately encoded 44.1 kHz AAC segments without DTS regressions', () => {
     if (!syntheticFfmpeg || !syntheticFfprobe) throw new Error('Integration environment is incomplete.');
     const directory = mkdtempSync(path.join(tmpdir(), 'ttcut-aac-timestamps-'));

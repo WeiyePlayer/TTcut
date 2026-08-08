@@ -10,7 +10,15 @@ const state = vi.hoisted(() => {
   return {
     source: '',
     events: [] as AppEvent[],
-    keyframes: vi.fn(() => new Promise<number[]>((resolve) => { releaseKeyframes = resolve; })),
+    keyframes: vi.fn((_path: string, _ffprobe: string, signal?: AbortSignal) => new Promise<number[]>((resolve, reject) => {
+      const abort = () => reject(Object.assign(new Error('PROCESS_CANCELLED'), { name: 'AbortError' }));
+      releaseKeyframes = (value) => {
+        signal?.removeEventListener('abort', abort);
+        resolve(value);
+      };
+      signal?.addEventListener('abort', abort, { once: true });
+      if (signal?.aborted) abort();
+    })),
     release: (value: number[]) => releaseKeyframes?.(value),
   };
 });
@@ -128,7 +136,6 @@ describe('export task start and terminal lifecycle', () => {
     await vi.waitFor(() => expect(state.keyframes).toHaveBeenCalledTimes(1));
 
     await cancelTask(taskId, 'user');
-    state.release([]);
     await waitForTaskEnd(taskId);
     const terminal = state.events.filter((event) => event.type === 'error' || event.type === 'export-result');
     expect(terminal).toEqual([
@@ -140,7 +147,6 @@ describe('export task start and terminal lifecycle', () => {
     const taskId = await startExport(windowMock() as never, request);
     await vi.waitFor(() => expect(state.keyframes).toHaveBeenCalledTimes(1));
     await cancelTask(taskId, 'app-exit');
-    state.release([]);
     await waitForTaskEnd(taskId);
     expect(state.events.filter((event) => event.type === 'error')).toEqual([]);
   });
