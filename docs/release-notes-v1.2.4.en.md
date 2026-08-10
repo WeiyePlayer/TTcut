@@ -13,7 +13,7 @@
 ## Cancellation and component setup
 
 - Export probes and output validation receive the task cancellation signal. Cancelling or exiting still terminates the active FFprobe/FFmpeg process tree and reports `EXPORT_CANCELLED`.
-- Media-component extraction, dual-model validation, and analysis-runtime self-tests no longer depend on a fixed two-minute deadline. Cancelling component installation still aborts the corresponding subprocess.
+- Media-component extraction and analysis-runtime self-tests no longer depend on a fixed two-minute deadline. Cancelling component installation still aborts the corresponding subprocess.
 - Removing the shared deadline does not remove cancellation or allow cancelled tasks to keep running in the background.
 
 ## Scope

@@ -8,9 +8,4 @@ describe('ball model analysis device selection', () => {
       expect(requestedAnalysisDevice('blurball_v1', device)).toBe(device);
     }
   });
-
-  it('keeps the Uplifting dual model CUDA-only', () => {
-    expect(requestedAnalysisDevice('uplifting_dual_v1', 'auto')).toBe('cuda');
-    expect(requestedAnalysisDevice('uplifting_dual_v1', 'cpu')).toBe('cuda');
-  });
 });

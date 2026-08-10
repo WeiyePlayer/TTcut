@@ -37,7 +37,7 @@ async function auditWorker(directory, label) {
   const forbiddenPaths = relative.filter((file) => (
     /(^|\/)(tests?|__pycache__)(\/|$)/i.test(file)
     || /\.(pyc|pt|pth)$/i.test(file)
-    || /(inpaint|speed|hit.?detect|overlay|gradio|webui)/i.test(file)
+    || /(inpaint|speed|hit.?detect|overlay|gradio|webui|dual_(?:models|predictor|smoke)|wasb)/i.test(file)
   ));
   check(forbiddenPaths.length === 0, `${label} contains non-runtime files: ${forbiddenPaths.join(', ')}`);
 
@@ -142,6 +142,7 @@ for (const [filename, size, hash] of [
 }
 check(!('tracknet_weight' in componentCatalog), 'Model weights remain in the managed component catalog.');
 check(!('table_weight' in componentCatalog), 'Table model weights remain in the managed component catalog.');
+check(!('dual_ball_models' in componentCatalog), 'The removed ball model remains in the managed component catalog.');
 check(/^[a-f0-9]{64}$/.test(componentCatalog.ffmpeg?.sha256 ?? ''), 'The fixed FFmpeg archive hash is missing.');
 check(componentCatalog.ffmpeg_x264?.asset === 'ffmpeg-N-125716-g1b1f602699-win64-gpl.zip', 'The fixed x264 asset name is incorrect.');
 check(componentCatalog.ffmpeg_x264?.size_bytes === 168733210, 'The fixed x264 asset size is incorrect.');

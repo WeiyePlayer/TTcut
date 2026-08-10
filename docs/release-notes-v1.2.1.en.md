@@ -22,7 +22,7 @@
 
 - The fix covers both the default OpenH264 component and the optional x264 component.
 - It does not change selected intervals, output resolution, encoding quality, or output naming.
-- It does not change TrackNet, the optional dual-model profile, dynamic ROI, ball trajectories, bounce detection, rally grouping, or `bounce_count`.
+- It does not change the ball-recognition models of that release, dynamic ROI, ball trajectories, bounce detection, rally grouping, or `bounce_count`.
 
 ## Updates and signing
 

@@ -52,7 +52,7 @@ export type AppEvent =
     type: 'component-result';
     taskId: string;
     data: ComponentStatus;
-    imported: Array<'analysis' | 'media' | 'dual_ball_models'>;
+    imported: Array<'analysis' | 'media'>;
     pendingImports: PendingComponentImport[];
   }
   | {
@@ -81,7 +81,6 @@ export interface TTcutApi {
   openX264Download(): Promise<void>;
   installAnalysisComponent(consent: true): Promise<string>;
   installMediaComponent(consent: true): Promise<string>;
-  installDualBallModels(consent: true): Promise<string>;
   selectVideo(): Promise<SelectedVideo | null>;
   selectVideos(): Promise<SelectedVideo[]>;
   pathForDroppedFile(file: File): string;

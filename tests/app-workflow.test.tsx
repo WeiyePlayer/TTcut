@@ -10,7 +10,7 @@ const bootstrap: BootstrapData = {
   settings: {
     language: 'zh-CN',
     calibration_method: 'automatic',
-    ball_model_profile: 'tracknet_v1',
+    ball_model_profile: 'blurball_v1',
     pre_roll_seconds: 2.5,
     post_roll_seconds: 2,
   },
@@ -30,17 +30,10 @@ const bootstrap: BootstrapData = {
       x264_available: false,
       detail: null,
     },
-    dual_ball_models: {
-      available: false,
-      version: null,
-      path: 'C:\\models\\dual-ball-models\\1.0.0',
-      detail: 'DUAL_BALL_MODELS_MISSING',
-    },
   },
   componentSetup: {
     analysis_offer: null,
     media_offer: null,
-    dual_ball_models_offer: null,
     x264_manual_offer: {
       id: 'media-x264',
       version: 'N-125716-g1b1f602699',
@@ -118,18 +111,14 @@ describe('App workflow notices and multi-task entry', () => {
       cancelTask: vi.fn().mockResolvedValue(undefined),
       listHistory: vi.fn().mockResolvedValue([]),
       saveSettings: vi.fn((settings) => Promise.resolve(settings)),
-      installDualBallModels: vi.fn().mockResolvedValue('dual-setup-task'),
     } as unknown as TTcutApi;
     Object.defineProperty(window, 'ttcut', { configurable: true, value: api });
   });
 
   afterEach(() => {
     bootstrap.settings.language = 'zh-CN';
-    bootstrap.settings.ball_model_profile = 'tracknet_v1';
+    bootstrap.settings.ball_model_profile = 'blurball_v1';
     bootstrap.components.analysis.acceleration = 'cuda';
-    bootstrap.components.dual_ball_models = {
-      available: false, version: null, path: 'C:\\models\\dual-ball-models\\1.0.0', detail: 'DUAL_BALL_MODELS_MISSING',
-    };
     window.localStorage.clear();
     cleanup();
     vi.useRealTimers();
@@ -176,16 +165,16 @@ describe('App workflow notices and multi-task entry', () => {
     render(<App />);
     fireEvent.click(await screen.findByRole('button', { name: '设置' }));
 
-    expect(screen.getByRole('button', { name: '默认模型速度快，精准度一般。' })).toBeVisible();
-    expect(screen.getByRole('button', { name: '新模型速度慢，准确度很高。' })).toBeVisible();
-    expect(screen.getByRole('button', { name: 'BlurBallCPU / CUDA；阈值 0.7，步长 3，最大位移 100 px。' })).toBeVisible();
-    expect(screen.getByText('高精度双检测模型')).toBeVisible();
-    expect(screen.getByText('组件路径: C:\\models\\dual-ball-models\\1.0.0')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'BlurBall（默认）CPU / CUDA；阈值 0.7，步长 3，最大位移 100 px。' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'TrackNet速度快，精准度一般。' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: /新模型|New model/ })).toBeNull();
+    expect(screen.queryByText(/双检测模型|dual detection models/i)).toBeNull();
     expect(screen.queryByText('单视频和多任务统一使用所选档位。板数仍表示落台反弹数。')).toBeNull();
   });
 
   it('persists the bundled BlurBall profile directly when CUDA is available', async () => {
     bootstrap.settings.language = 'en';
+    bootstrap.settings.ball_model_profile = 'tracknet_v1';
     render(<App />);
     fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
     fireEvent.click(screen.getByRole('button', { name: /BlurBall/ }));
@@ -193,11 +182,11 @@ describe('App workflow notices and multi-task entry', () => {
     await waitFor(() => expect(window.ttcut.saveSettings).toHaveBeenCalledWith(expect.objectContaining({
       ball_model_profile: 'blurball_v1',
     })));
-    expect(window.ttcut.installDualBallModels).not.toHaveBeenCalled();
   });
 
   it('allows the bundled BlurBall profile when only the CPU component is active', async () => {
     bootstrap.settings.language = 'en';
+    bootstrap.settings.ball_model_profile = 'tracknet_v1';
     bootstrap.components.analysis.acceleration = 'cpu';
     render(<App />);
     fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
@@ -219,38 +208,6 @@ describe('App workflow notices and multi-task entry', () => {
     render(<App />);
 
     expect(await screen.findByRole('heading', { name: 'Choose match videos' })).toBeVisible();
-  });
-
-  it('persists the dual profile only after both downloaded models are installed', async () => {
-    bootstrap.settings.language = 'en';
-    render(<App />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
-    fireEvent.click(screen.getByRole('button', { name: /New model/ }));
-    expect(window.ttcut.installDualBallModels).toHaveBeenCalledWith(true);
-    expect(window.ttcut.saveSettings).not.toHaveBeenCalled();
-
-    act(() => taskListener?.({
-      type: 'component-result', taskId: 'dual-setup-task', imported: ['dual_ball_models'], pendingImports: [],
-      data: {
-        ...bootstrap.components,
-        dual_ball_models: { available: true, version: '1.0.0', path: 'C:\\models\\dual-ball-models\\1.0.0', detail: null },
-      },
-    }));
-
-    await waitFor(() => expect(window.ttcut.saveSettings).toHaveBeenCalledWith(expect.objectContaining({
-      ball_model_profile: 'uplifting_dual_v1',
-    })));
-  });
-
-  it('keeps TrackNet selected when first-use dual model setup is cancelled', async () => {
-    bootstrap.settings.language = 'en';
-    render(<App />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
-    fireEvent.click(screen.getByRole('button', { name: /New model/ }));
-    act(() => taskListener?.({
-      type: 'error', taskId: 'dual-setup-task', code: 'SETUP_CANCELLED', message: 'SETUP_CANCELLED',
-    }));
-    expect(window.ttcut.saveSettings).not.toHaveBeenCalled();
   });
 
   it('hides the automatic calibration failure notice after three seconds', async () => {

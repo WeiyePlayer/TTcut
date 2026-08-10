@@ -53,7 +53,7 @@ export function App() {
   const [bootstrap, setBootstrap] = useState<BootstrapData | null>(null);
   const [settings, setSettings] = useState<AppSettings>({
     language: 'zh-CN', calibration_method: 'automatic',
-    ball_model_profile: 'tracknet_v1', pre_roll_seconds: 2.5, post_roll_seconds: 2,
+    ball_model_profile: 'blurball_v1', pre_roll_seconds: 2.5, post_roll_seconds: 2,
   });
   const [view, setView] = useState<View>('auto');
   const [step, setStep] = useState<Step>('select');
@@ -81,7 +81,6 @@ export function App() {
   const [dragging, setDragging] = useState(false);
   const [setupTask, setSetupTask] = useState<string | null>(null);
   const setupTaskRef = useRef<string | null>(null);
-  const pendingBallProfileRef = useRef<'uplifting_dual_v1' | null>(null);
   const multiActiveRef = useRef(false);
   const settingsRef = useRef(settings);
   const promptedUpdateVersion = useRef<string | null>(null);
@@ -101,8 +100,6 @@ export function App() {
   }, []);
   const t = messages(settings.language as Language);
   const platformSupported = bootstrap?.platformCompatibility.status === 'supported';
-  const ballProfileReady = settings.ball_model_profile !== 'uplifting_dual_v1'
-    || Boolean(bootstrap?.components.dual_ball_models.available && bootstrap.components.analysis.acceleration === 'cuda');
   const useManualCalibration = settings.calibration_method === 'manual' || forceManual;
   const platformDetail = !bootstrap
     ? ''
@@ -120,9 +117,7 @@ export function App() {
       setBootstrap(data);
       setSettings(data.settings);
       settingsRef.current = data.settings;
-      if (data.platformCompatibility.status !== 'supported' || !data.components.analysis.available || !data.components.media.available
-        || (data.settings.ball_model_profile === 'uplifting_dual_v1'
-          && (!data.components.dual_ball_models.available || data.components.analysis.acceleration !== 'cuda'))) {
+      if (data.platformCompatibility.status !== 'supported' || !data.components.analysis.available || !data.components.media.available) {
         setView('settings');
       }
     });
@@ -165,16 +160,6 @@ export function App() {
         setSetupFailureCode(null);
         setSetupPendingImports(event.pendingImports);
         setBootstrap((current) => current ? { ...current, components: event.data } : current);
-        if (pendingBallProfileRef.current === 'uplifting_dual_v1'
-          && event.imported.includes('dual_ball_models')
-          && event.data.dual_ball_models.available
-          && event.data.analysis.acceleration === 'cuda') {
-          pendingBallProfileRef.current = null;
-          void window.ttcut.saveSettings({ ...settingsRef.current, ball_model_profile: 'uplifting_dual_v1' }).then((next) => {
-            setSettings(next);
-            settingsRef.current = next;
-          });
-        }
       } else {
         if (setupTaskRef.current === event.taskId) {
           setupTaskRef.current = null;
@@ -182,7 +167,6 @@ export function App() {
           setSetupProgress(null);
           setSetupOutcome(event.code === 'SETUP_CANCELLED' ? 'cancelled' : 'failed');
           setSetupFailureCode(event.code);
-          pendingBallProfileRef.current = null;
           return;
         }
         if (settingsRef.current.calibration_method === 'automatic'
@@ -288,7 +272,7 @@ export function App() {
   };
 
   const startAnalysis = async () => {
-    if (!video || !metadata || (useManualCalibration && (!calibrationValue || calibrationIssue)) || !platformSupported || !bootstrap?.components.analysis.available || !ballProfileReady) return;
+    if (!video || !metadata || (useManualCalibration && (!calibrationValue || calibrationIssue)) || !platformSupported || !bootstrap?.components.analysis.available) return;
     updateVideoTaskOwner('single');
     setStep('analyzing'); setProgress({ percent: 0, stage: 'load_model' });
     try {
@@ -408,9 +392,6 @@ export function App() {
     const missing = [
       ...(!components.analysis.available ? [t.analysisComponent] : []),
       ...(!components.media.available ? [t.mediaComponent] : []),
-      ...(settings.ball_model_profile === 'uplifting_dual_v1' && (!components.dual_ball_models.available || components.analysis.acceleration !== 'cuda')
-        ? [settings.language === 'zh-CN' ? '高精度双检测模型（CUDA）' : 'High-accuracy dual detection models (CUDA)']
-        : []),
     ];
     setMissingComponents(missing.length > 0 ? missing : null);
   };
@@ -474,41 +455,8 @@ export function App() {
     }
   };
 
-  const installDualBallModels = async (selectAfterInstall = false) => {
-    if (videoTaskOwnerRef.current) return;
-    setSetupOutcome(null);
-    setSetupFailureCode(null);
-    if (!platformSupported || bootstrap?.components.analysis.acceleration !== 'cuda') {
-      setToast(settings.language === 'zh-CN' ? '高精度双检测模型仅支持 CUDA。' : 'High-accuracy dual detection models require CUDA.');
-      return;
-    }
-    if (selectAfterInstall) pendingBallProfileRef.current = 'uplifting_dual_v1';
-    try {
-      const taskId = await window.ttcut.installDualBallModels(true);
-      setupTaskRef.current = taskId;
-      setSetupTask(taskId);
-    } catch (caught) {
-      pendingBallProfileRef.current = null;
-      setSetupOutcome('failed');
-      setSetupFailureCode(errorCode(caught));
-    }
-  };
-
   const selectBallModelProfile = async (profile: AppSettings['ball_model_profile']) => {
     if (profile === settings.ball_model_profile) return;
-    if (profile === 'tracknet_v1') {
-      await saveRolls({ ball_model_profile: profile });
-      return;
-    }
-    if (profile === 'blurball_v1') {
-      await saveRolls({ ball_model_profile: profile });
-      return;
-    }
-    if (bootstrap?.components.analysis.acceleration !== 'cuda') return;
-    if (!bootstrap.components.dual_ball_models.available) {
-      await installDualBallModels(true);
-      return;
-    }
     await saveRolls({ ball_model_profile: profile });
   };
 
@@ -646,9 +594,8 @@ export function App() {
               <article className="card model-profile-card">
                 <div><h2>{settings.language === 'zh-CN' ? '球识别模型' : 'Ball recognition model'}</h2></div>
                 <div className="model-profile-options">
-                  <button className={settings.ball_model_profile === 'tracknet_v1' ? 'selected' : ''} onClick={() => void selectBallModelProfile('tracknet_v1')}><strong>{settings.language === 'zh-CN' ? '默认模型' : 'Default model'}</strong><span>{settings.language === 'zh-CN' ? '速度快，精准度一般。' : 'Fast, with average accuracy.'}</span></button>
-                  <button disabled={bootstrap?.components.analysis.acceleration !== 'cuda' || Boolean(setupTask) || Boolean(videoTaskOwner && !bootstrap?.components.dual_ball_models.available)} className={settings.ball_model_profile === 'uplifting_dual_v1' ? 'selected' : ''} onClick={() => void selectBallModelProfile('uplifting_dual_v1')}><strong>{settings.language === 'zh-CN' ? '新模型' : 'New model'}</strong><span>{settings.language === 'zh-CN' ? '速度慢，准确度很高。' : 'Slower, with very high accuracy.'}</span></button>
-                  <button disabled={Boolean(setupTask)} className={settings.ball_model_profile === 'blurball_v1' ? 'selected' : ''} onClick={() => void selectBallModelProfile('blurball_v1')}><strong>BlurBall</strong><span>{settings.language === 'zh-CN' ? 'CPU / CUDA；阈值 0.7，步长 3，最大位移 100 px。' : 'CPU / CUDA; threshold 0.7, step 3, maximum displacement 100 px.'}</span></button>
+                  <button disabled={Boolean(setupTask)} className={settings.ball_model_profile === 'blurball_v1' ? 'selected' : ''} onClick={() => void selectBallModelProfile('blurball_v1')}><strong>{settings.language === 'zh-CN' ? 'BlurBall（默认）' : 'BlurBall (default)'}</strong><span>{settings.language === 'zh-CN' ? 'CPU / CUDA；阈值 0.7，步长 3，最大位移 100 px。' : 'CPU / CUDA; threshold 0.7, step 3, maximum displacement 100 px.'}</span></button>
+                  <button className={settings.ball_model_profile === 'tracknet_v1' ? 'selected' : ''} onClick={() => void selectBallModelProfile('tracknet_v1')}><strong>TrackNet</strong><span>{settings.language === 'zh-CN' ? '速度快，精准度一般。' : 'Fast, with average accuracy.'}</span></button>
                 </div>
               </article>
               <article className="card setting-card">
@@ -670,7 +617,6 @@ export function App() {
                 <h2>{t.components}</h2>
                 <div className="component-row"><div><strong>{t.analysisComponent}</strong><span>{bootstrap?.components.analysis.version ?? t.unavailable}</span>{bootstrap?.components.analysis.path && <span>{t.componentPath}: {bootstrap.components.analysis.path}</span>}</div><span className={`status ${bootstrap?.components.analysis.available ? 'ok' : ''}`}>{bootstrap?.components.analysis.available ? t.available : t.unavailable}</span></div>
                 <div className="component-row"><div><strong>{t.mediaComponent}</strong><span>{bootstrap?.components.media.version ?? t.unavailable}</span>{bootstrap?.components.media.available && <span>{t.activeEncoder}: {bootstrap.components.media.active_encoder === 'libx264' ? t.x264 : t.openh264}</span>}{bootstrap?.components.media.path && <span>{t.componentPath}: {bootstrap.components.media.path}</span>}</div><span className={`status ${bootstrap?.components.media.available ? 'ok' : ''}`}>{bootstrap?.components.media.available ? t.available : t.unavailable}</span></div>
-                <div className="component-row"><div><strong>{settings.language === 'zh-CN' ? '高精度双检测模型' : 'High-accuracy dual detection models'}</strong><span>{bootstrap?.components.dual_ball_models.version ?? bootstrap?.components.dual_ball_models.detail ?? t.unavailable}</span>{bootstrap?.components.dual_ball_models.path && <span>{t.componentPath}: {bootstrap.components.dual_ball_models.path}</span>}</div><span className={`status ${bootstrap?.components.dual_ball_models.available ? 'ok' : ''}`}>{bootstrap?.components.dual_ball_models.available ? t.available : t.unavailable}</span></div>
                 <div className="component-row"><div><strong>{t.acceleration}</strong><span>{bootstrap?.components.analysis.acceleration === 'cuda' ? t.gpu : bootstrap?.components.analysis.acceleration === 'cpu' ? t.cpu : t.unavailable}</span></div></div>
               </article>
               <article className="card setup-card">
@@ -689,9 +635,6 @@ export function App() {
                     )}
                     {bootstrap?.componentSetup.media_offer && !bootstrap.components.media.available && (
                       <div className="setup-option"><div><strong>{t.mediaOffer}</strong><span>{t.mediaOfferDetail}</span><small>{interpolate(t.downloadSize, { size: fileSize(bootstrap.componentSetup.media_offer.download_size_bytes) })}</small></div><div><button className="text-button" onClick={() => void window.ttcut.openExternalUrl(bootstrap.componentSetup.media_offer!.license_url)}>{t.viewLicense}</button><button className="primary" disabled={!platformSupported || !bootstrap.componentSetup.media_offer.available_for_download || Boolean(videoTaskOwner)} onClick={() => void installMediaComponent()}>{t.consentInstall}</button></div></div>
-                    )}
-                    {bootstrap?.componentSetup.dual_ball_models_offer && !bootstrap.components.dual_ball_models.available && (
-                      <div className="setup-option optional-component"><div><strong>{settings.language === 'zh-CN' ? '安装高精度双检测模型' : 'Install high-accuracy dual detection models'}</strong><span>{settings.language === 'zh-CN' ? '两个固定权重，下载后逐文件校验并原子安装；仅 CUDA 可用。' : 'Two pinned weights, verified per file and installed atomically; CUDA only.'}</span><small>{interpolate(t.downloadSize, { size: fileSize(bootstrap.componentSetup.dual_ball_models_offer.download_size_bytes) })}</small></div><div><button className="primary" disabled={bootstrap.components.analysis.acceleration !== 'cuda' || Boolean(setupTask) || Boolean(videoTaskOwner)} onClick={() => void installDualBallModels(false)}>{t.consentInstall}</button></div></div>
                     )}
                     {bootstrap?.componentSetup.x264_manual_offer && !bootstrap.components.media.x264_available && (
                       <div className="setup-option optional-component"><div><strong>{t.x264ManualOffer}</strong><span>{t.x264ManualDetail}</span><small>{interpolate(t.downloadSize, { size: fileSize(bootstrap.componentSetup.x264_manual_offer.download_size_bytes) })}</small></div><div><button className="secondary" disabled={Boolean(setupTask)} onClick={() => void window.ttcut.openX264Download()}>{t.goToDownload}</button></div></div>
@@ -775,7 +718,7 @@ export function App() {
                   <div className="point-legend">{[t.point1, t.point2, t.point3, t.point4].map((label, index) => <span className={points[pointOrder[index]!] ? 'done' : ''} key={label}><b>{index + 1}</b>{label.replace(/^\d\s/, '')}</span>)}</div>
                   {calibrationIssue && <p className="calibration-error" role="alert">{t.invalidCalibration}</p>}
                 </> : <div className="card automatic-calibration"><span>⌖</span><div><h2>{settings.language === 'zh-CN' ? '自动球台标定' : 'Automatic table calibration'}</h2><p>{settings.language === 'zh-CN' ? '将识别首帧、25%、50%、75% 和尾帧，并融合为固定球台标定。' : 'The first, 25%, 50%, 75%, and final frames are combined into one fixed table calibration.'}</p></div></div>}
-                <div className="footer-actions">{useManualCalibration && <button className="secondary" onClick={() => setPoints({})}>{t.resetPoints}</button>}<button className="primary" disabled={(useManualCalibration && (!allPoints || Boolean(calibrationIssue))) || !platformSupported || !bootstrap?.components.analysis.available || !ballProfileReady} onClick={() => void startAnalysis()}>{t.startAnalysis}</button></div>
+                <div className="footer-actions">{useManualCalibration && <button className="secondary" onClick={() => setPoints({})}>{t.resetPoints}</button>}<button className="primary" disabled={(useManualCalibration && (!allPoints || Boolean(calibrationIssue))) || !platformSupported || !bootstrap?.components.analysis.available} onClick={() => void startAnalysis()}>{t.startAnalysis}</button></div>
               </div>
             )}
 

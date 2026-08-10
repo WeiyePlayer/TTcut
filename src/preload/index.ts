@@ -12,7 +12,6 @@ const api: TTcutApi = {
   openX264Download: () => ipcRenderer.invoke(IPC.componentsOpenX264Download),
   installAnalysisComponent: (consent: true) => ipcRenderer.invoke(IPC.componentsInstallAnalysis, consent),
   installMediaComponent: (consent: true) => ipcRenderer.invoke(IPC.componentsInstallMedia, consent),
-  installDualBallModels: (consent: true) => ipcRenderer.invoke(IPC.componentsInstallDualBallModels, consent),
   selectVideo: () => ipcRenderer.invoke(IPC.videoSelect),
   selectVideos: () => ipcRenderer.invoke(IPC.videosSelect),
   pathForDroppedFile: (file: File) => webUtils.getPathForFile(file),

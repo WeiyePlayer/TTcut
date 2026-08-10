@@ -22,8 +22,6 @@ from ttcut_worker.blurball_models import load_blurball  # noqa: E402
 from ttcut_worker.blurball_predictor import BlurBallPredictor  # noqa: E402
 from ttcut_worker.calibration import TableCalibration  # noqa: E402
 from ttcut_worker.model import load_tracknet  # noqa: E402
-from ttcut_worker.dual_models import load_dual_models  # noqa: E402
-from ttcut_worker.dual_predictor import UpliftingDualPredictor  # noqa: E402
 from ttcut_worker.rallies import group_rallies  # noqa: E402
 from ttcut_worker.roi import build_analysis_roi  # noqa: E402
 
@@ -98,7 +96,7 @@ def predictor_class(source_ref: str | None):
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Run one reproducible TrackNetPredictor analysis checkpoint.",
+        description="Run one reproducible TTcut ball-model analysis checkpoint.",
     )
     parser.add_argument("--video", type=Path, default=DEFAULT_VIDEO)
     parser.add_argument("--calibration", type=Path, default=DEFAULT_CALIBRATION)
@@ -110,9 +108,7 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--device", choices=("cuda", "cpu"), default="cuda")
     parser.add_argument("--batch-size", type=int, default=4)
-    parser.add_argument("--profile", choices=("tracknet_v1", "uplifting_dual_v1", "blurball_v1"), default="tracknet_v1")
-    parser.add_argument("--dual-main-weights", type=Path)
-    parser.add_argument("--dual-aux-weights", type=Path)
+    parser.add_argument("--profile", choices=("tracknet_v1", "blurball_v1"), default="blurball_v1")
     parser.add_argument(
         "--blurball-weights",
         type=Path,
@@ -149,11 +145,6 @@ def main() -> int:
         loaded = load_tracknet(args.weights, args.device)
         Predictor = predictor_class(args.predictor_source_ref)
         predictor = Predictor(loaded, batch_size=args.batch_size)
-    elif args.profile == "uplifting_dual_v1":
-        if args.device != "cuda" or args.batch_size != 2 or not args.dual_main_weights or not args.dual_aux_weights:
-            parser.error("uplifting_dual_v1 requires CUDA, batch size 2, and both dual weight paths")
-        loaded = load_dual_models(args.dual_main_weights, args.dual_aux_weights, args.device)
-        predictor = UpliftingDualPredictor(loaded, batch_size=2)
     else:
         if args.blurball_batch_size is not None and args.blurball_batch_size <= 0:
             parser.error("blurball_v1 requires a positive BlurBall batch size")
@@ -206,16 +197,8 @@ def main() -> int:
             "video_size_before": source_size_before,
             "video_size_after": args.video.stat().st_size,
             "profile": args.profile,
-            "weights": (
-                str(args.weights.resolve()) if args.profile == "tracknet_v1"
-                else str(args.blurball_weights.resolve()) if args.profile == "blurball_v1"
-                else {"main": str(args.dual_main_weights.resolve()), "aux": str(args.dual_aux_weights.resolve())}
-            ),
-            "weights_sha256": (
-                model_hash if args.profile == "tracknet_v1"
-                else sha256(args.blurball_weights) if args.profile == "blurball_v1"
-                else {"main": sha256(args.dual_main_weights), "aux": sha256(args.dual_aux_weights)}
-            ),
+            "weights": str(args.weights.resolve()) if args.profile == "tracknet_v1" else str(args.blurball_weights.resolve()),
+            "weights_sha256": model_hash if args.profile == "tracknet_v1" else sha256(args.blurball_weights),
             "calibration": str(args.calibration.resolve()),
             "batch_size": predictor.batch_size if args.profile == "blurball_v1" else args.batch_size,
             "sequence_length": loaded.seq_len if args.profile == "tracknet_v1" else 3,

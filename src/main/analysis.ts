@@ -12,7 +12,7 @@ import {
 } from '../shared/contracts';
 import type { AppEvent } from '../shared/api';
 import { IPC } from '../shared/ipc';
-import { resolveUsableAnalysisComponents, validateDualBallModels } from './components';
+import { resolveUsableAnalysisComponents } from './components';
 import { logLine } from './logger';
 import { getHistoryStore } from './history';
 import { probeVideo } from './probe';
@@ -46,7 +46,6 @@ export async function startAnalysis(
   const requestedDevice = requestedAnalysisDevice(value.ballModelProfile, value.device);
   const components = await resolveUsableAnalysisComponents(requestedDevice);
   if (!components.python) throw new Error('RUNTIME_MISSING');
-  if (value.ballModelProfile === 'uplifting_dual_v1') await validateDualBallModels(components);
   const request = analysisRequestSchema.parse({
     schema_version: 2,
     task_id: taskId,
@@ -70,8 +69,6 @@ export async function startAnalysis(
       TTCUT_TRACKNET_WEIGHTS: components.tracknetWeights,
       TTCUT_BLURBALL_WEIGHTS: components.blurballWeights,
       TTCUT_TABLE_ANALYZE_WEIGHTS: components.tableAnalyzeWeights,
-      TTCUT_DUAL_BALL_MAIN_WEIGHTS: components.dualBallMainWeights,
-      TTCUT_DUAL_BALL_AUX_WEIGHTS: components.dualBallAuxWeights,
     },
   });
   child.stdout.setEncoding('utf8');

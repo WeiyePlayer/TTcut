@@ -4,7 +4,7 @@
 
 TTcut is a local automatic table-tennis video cutter for players and enthusiasts. It locates the ball, detects bounce events and valid rallies, then exports edited clips using the selected cutting mode.
 
-Videos, analysis results, and history stay on the local computer. TTcut requires no account, uploads no video, and collects no telemetry. The default analysis models are included in the installer; the optional new ball models are downloaded on demand. The analysis runtime and media-processing components require an internet connection during initial setup; after installation, analysis, preview, and cutting can run offline.
+Videos, analysis results, and history stay on the local computer. TTcut requires no account, uploads no video, and collects no telemetry. BlurBall (the default), TrackNet, and table-recognition weights are all included in the installer and require no separate model download. The analysis runtime and media-processing components require an internet connection during initial setup; after installation, analysis, preview, and cutting can run offline.
 
 > The current stable release is `v1.2.4` for Windows x64. TTcut no longer blocks startup according to a Windows build-number allowlist.
 
@@ -75,14 +75,14 @@ Select multiple MP4 or MOV files in Batch tasks. On entry, TTcut automatically c
 
 ## Analysis component
 
-The installer includes fixed rally-analysis and table-recognition models. The on-demand runtime provides Python 3.12.13, PyTorch 2.12.1, NumPy, OpenCV, and the minimal Worker used for:
+The installer includes fixed BlurBall, TrackNet, and table-recognition models. The on-demand runtime provides Python 3.12.13, PyTorch 2.12.1, NumPy, OpenCV, and the minimal Worker used for:
 
-- frame-by-frame TrackNet ball localisation;
+- BlurBall ball localisation by default, with TrackNet selectable in Settings;
 - automatic or manual table calibration and coordinate mapping;
-- three-frame/five-frame bounce detection and timestamp deduplication;
+- profile-specific bounce detection with shared table-region, timing, and rally rules;
 - rally grouping based on bounce events.
 
-The runtime is installed under `<root>\data\components`. CPU, CUDA 12.6, and CUDA 13.2 variants are supported.
+The runtime is installed under `<root>\data\components`. All three model files are size- and SHA-256-verified before packaging. CPU, CUDA 12.6, and CUDA 13.2 runtime variants are supported.
 
 ## Video processing component
 

@@ -5,7 +5,7 @@ const features = [
   {
     number: "01",
     title: "自动标定与识别",
-    description: "TTcut 默认自动识别球桌，再定位乒乓球、识别弹跳。CUDA 用户还可按需安装双模型识别档位。",
+    description: "TTcut 默认使用随安装包提供的高精度球识别模型，也可在设置中切换兼容模型；两者均支持 CPU / CUDA。",
   },
   {
     number: "02",
