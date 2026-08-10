@@ -39,4 +39,12 @@ describe('settings migration', () => {
     await expect(saveSettings(settings)).resolves.toEqual(settings);
     expect(JSON.parse(await readFile(path.join(state.userData, 'settings.json'), 'utf8'))).toEqual(settings);
   });
+
+  it('preserves a persisted BlurBall profile', async () => {
+    await writeFile(path.join(state.userData, 'settings.json'), JSON.stringify({
+      language: 'zh-CN', calibration_method: 'automatic', ball_model_profile: 'blurball_v1',
+      pre_roll_seconds: 2.5, post_roll_seconds: 2,
+    }), 'utf8');
+    await expect(loadSettings()).resolves.toMatchObject({ ball_model_profile: 'blurball_v1' });
+  });
 });

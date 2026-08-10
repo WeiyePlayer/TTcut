@@ -25,10 +25,12 @@ def validate_request(value: object) -> dict:
         uuid.UUID(str(value["task_id"]))
         if value["device"] not in {"auto", "cuda", "cpu"}:
             raise ValueError("device")
-        if value.get("ball_model_profile", "tracknet_v1") not in {"tracknet_v1", "uplifting_dual_v1"}:
+        if value.get("ball_model_profile", "tracknet_v1") not in {
+            "tracknet_v1", "uplifting_dual_v1", "blurball_v1",
+        }:
             raise ValueError("ball_model_profile")
-        if value.get("ball_model_profile") == "uplifting_dual_v1" and value["device"] != "cuda":
-            raise ValueError("uplifting_dual_v1 requires cuda")
+        if value.get("ball_model_profile") in {"uplifting_dual_v1", "blurball_v1"} and value["device"] != "cuda":
+            raise ValueError("selected ball model requires cuda")
         if (
             not isinstance(value["video_path"], str)
             or Path(value["video_path"]).suffix.lower() not in {".mp4", ".mov"}

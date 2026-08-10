@@ -38,6 +38,7 @@ export type ComponentPaths = {
   runtimeVariant: RuntimeLocation | null;
   worker: string;
   tracknetWeights: string;
+  blurballWeights: string;
   tableAnalyzeWeights: string;
   dualBallMainWeights: string;
   dualBallAuxWeights: string;
@@ -134,6 +135,7 @@ export async function resolveComponents(device: 'auto' | 'cuda' | 'cpu' = 'auto'
     runtimeVariant: runtimes[0]?.variant ?? null,
     worker: resource('worker'),
     tracknetWeights: process.env.TTCUT_TRACKNET_WEIGHTS || resource('resources', 'models', 'analyze.pt'),
+    blurballWeights: process.env.TTCUT_BLURBALL_WEIGHTS || resource('resources', 'models', 'blurball_best.pt'),
     tableAnalyzeWeights: process.env.TTCUT_TABLE_ANALYZE_WEIGHTS || resource('resources', 'models', 'table_analyze.pt'),
     dualBallMainWeights: process.env.TTCUT_DUAL_BALL_MAIN_WEIGHTS || path.join(dualRoot, 'ttcut-ball-main-segformerpp-b2-1.0.0.pt'),
     dualBallAuxWeights: process.env.TTCUT_DUAL_BALL_AUX_WEIGHTS || path.join(dualRoot, 'ttcut-ball-aux-wasb-1.0.0.pt'),
@@ -297,7 +299,9 @@ export async function inspectComponentPaths(paths: ComponentPaths, x264Available
   let analysisVersion: string | null = null;
   let acceleration: 'cuda' | 'cpu' | 'unavailable' = 'unavailable';
   let analysisDetail: string | null = null;
-  const modelsAvailable = await exists(paths.tracknetWeights) && await exists(paths.tableAnalyzeWeights);
+  const modelsAvailable = await exists(paths.tracknetWeights)
+    && await exists(paths.blurballWeights)
+    && await exists(paths.tableAnalyzeWeights);
   if (paths.python && modelsAvailable) {
     try {
       const expected = paths.runtimeVariant && isAnalysisRuntimeVariant(paths.runtimeVariant) ? paths.runtimeVariant : undefined;

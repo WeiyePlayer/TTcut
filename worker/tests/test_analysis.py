@@ -200,7 +200,7 @@ def test_worker_request_accepts_mov_video_path():
     assert validate_request(request) is request
 
 
-def test_worker_request_v2_requires_a_valid_ball_model_profile_and_cuda_for_dual():
+def test_worker_request_v2_requires_cuda_for_optional_models():
     request = valid_request()
     request.update(schema_version=2, device="cuda", ball_model_profile="uplifting_dual_v1")
     assert validate_request(request) is request
@@ -211,6 +211,16 @@ def test_worker_request_v2_requires_a_valid_ball_model_profile_and_cuda_for_dual
         assert "fields" in str(exc).lower()
     else:
         raise AssertionError("dual-model v2 requests must reject CPU")
+    request["device"] = "cuda"
+    request["ball_model_profile"] = "blurball_v1"
+    assert validate_request(request) is request
+    request["device"] = "cpu"
+    try:
+        validate_request(request)
+    except Exception as exc:
+        assert "fields" in str(exc).lower()
+    else:
+        raise AssertionError("BlurBall v2 requests must reject CPU")
 
 
 def test_worker_request_rejects_unrelated_video_container():
@@ -409,6 +419,51 @@ def test_worker_v2_routes_dual_profile_and_preserves_bounce_rally_output(monkeyp
         "aux_input": {"width": 512, "height": 288},
     }
     assert result["rallies"][0]["bounce_count"] == 2
+
+
+def test_worker_v2_routes_blurball_profile_and_records_fixed_parameters(monkeypatch):
+    request = valid_request()
+    request.update(schema_version=2, device="cuda", ball_model_profile="blurball_v1")
+    captured = {}
+
+    class FakeBlurBallPredictor:
+        def __init__(self, loaded):
+            captured["loaded"] = loaded
+
+        def predict(self, video_path, progress_callback=None, analysis_roi=None):
+            captured["roi"] = analysis_roi
+            points = [
+                TrajectoryPoint(i, i * 0.1, 1, 640, 360, "blurball", 1.0)
+                for i in range(6)
+            ]
+            return points, VideoInfo(Path(video_path), 1280, 720, 10.0, 6, 6, 0.6), SimpleNamespace(
+                model_width=512,
+                model_height=288,
+                confidence_threshold=0.7,
+                step=3,
+                maximum_displacement_pixels=100.0,
+            )
+
+    fake_loaded = SimpleNamespace(component_version="1.0.0")
+    monkeypatch.setenv("TTCUT_BLURBALL_WEIGHTS", "blurball.pt")
+    monkeypatch.setattr("ttcut_worker.worker.load_blurball", lambda path, device: fake_loaded)
+    monkeypatch.setattr("ttcut_worker.worker.BlurBallPredictor", FakeBlurBallPredictor)
+    monkeypatch.setattr("ttcut_worker.worker.detect_blurball_bounce_frames", lambda points, calibration: [0, 5])
+
+    result = analyze(request)
+
+    assert captured["loaded"] is fake_loaded
+    assert captured["roi"].source_width == 1280
+    assert result["rallies"][0]["bounce_count"] == 2
+    assert result["model_provenance"]["profile"] == "blurball_v1"
+    assert result["model_provenance"]["main_input"] == {"width": 512, "height": 288}
+    assert result["model_provenance"]["aux_input"] is None
+    assert result["model_provenance"]["detection"] == {
+        "confidence_threshold": 0.7,
+        "step": 3,
+        "maximum_displacement_pixels": 100.0,
+        "landing_region": "expanded_table",
+    }
 
 
 def test_worker_dual_profile_counts_long_flat_bounce_peaks(monkeypatch):

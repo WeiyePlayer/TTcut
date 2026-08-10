@@ -6,11 +6,11 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const manifest = JSON.parse(await readFile(path.join(root, 'resources', 'model-manifest.json'), 'utf8'));
 
-if (manifest.schema_version !== 1 || !Array.isArray(manifest.models) || manifest.models.length !== 2) {
-  throw new Error('Model manifest must contain exactly two schema-v1 model entries.');
+if (manifest.schema_version !== 1 || !Array.isArray(manifest.models) || manifest.models.length !== 3) {
+  throw new Error('Model manifest must contain exactly three schema-v1 model entries.');
 }
 
-const expectedNames = new Set(['analyze.pt', 'table_analyze.pt']);
+const expectedNames = new Set(['analyze.pt', 'table_analyze.pt', 'blurball_best.pt']);
 for (const model of manifest.models) {
   if (!expectedNames.delete(model.filename)) throw new Error(`Unexpected or duplicate model asset: ${model.filename}`);
   if (!Number.isSafeInteger(model.size_bytes) || model.size_bytes <= 0 || !/^[a-f0-9]{64}$/.test(model.sha256)) {

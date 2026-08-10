@@ -17,6 +17,9 @@ if str(WORKER_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKER_ROOT))
 
 from ttcut_worker.bounce import detect_bounce_frames  # noqa: E402
+from ttcut_worker.blurball_bounce import detect_blurball_bounce_frames  # noqa: E402
+from ttcut_worker.blurball_models import load_blurball  # noqa: E402
+from ttcut_worker.blurball_predictor import BLURBALL_BATCH_SIZE, BlurBallPredictor  # noqa: E402
 from ttcut_worker.calibration import TableCalibration  # noqa: E402
 from ttcut_worker.model import load_tracknet  # noqa: E402
 from ttcut_worker.dual_models import load_dual_models  # noqa: E402
@@ -107,9 +110,15 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--device", choices=("cuda", "cpu"), default="cuda")
     parser.add_argument("--batch-size", type=int, default=4)
-    parser.add_argument("--profile", choices=("tracknet_v1", "uplifting_dual_v1"), default="tracknet_v1")
+    parser.add_argument("--profile", choices=("tracknet_v1", "uplifting_dual_v1", "blurball_v1"), default="tracknet_v1")
     parser.add_argument("--dual-main-weights", type=Path)
     parser.add_argument("--dual-aux-weights", type=Path)
+    parser.add_argument(
+        "--blurball-weights",
+        type=Path,
+        default=PROJECT_ROOT / "resources" / "models" / "blurball_best.pt",
+    )
+    parser.add_argument("--blurball-batch-size", type=int, default=BLURBALL_BATCH_SIZE)
     parser.add_argument("--model-size", default="280x160")
     parser.add_argument(
         "--predictor-source-ref",
@@ -140,11 +149,16 @@ def main() -> int:
         loaded = load_tracknet(args.weights, args.device)
         Predictor = predictor_class(args.predictor_source_ref)
         predictor = Predictor(loaded, batch_size=args.batch_size)
-    else:
+    elif args.profile == "uplifting_dual_v1":
         if args.device != "cuda" or args.batch_size != 2 or not args.dual_main_weights or not args.dual_aux_weights:
             parser.error("uplifting_dual_v1 requires CUDA, batch size 2, and both dual weight paths")
         loaded = load_dual_models(args.dual_main_weights, args.dual_aux_weights, args.device)
         predictor = UpliftingDualPredictor(loaded, batch_size=2)
+    else:
+        if args.device != "cuda" or args.blurball_batch_size <= 0:
+            parser.error("blurball_v1 requires CUDA and a positive BlurBall batch size")
+        loaded = load_blurball(args.blurball_weights, args.device)
+        predictor = BlurBallPredictor(loaded, batch_size=args.blurball_batch_size)
     model_load_seconds = time.perf_counter() - load_started
     last_progress = [-1]
 
@@ -168,7 +182,11 @@ def main() -> int:
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
-    bounces = detect_bounce_frames(points, calibration)
+    bounces = (
+        detect_blurball_bounce_frames(points, calibration)
+        if args.profile == "blurball_v1"
+        else detect_bounce_frames(points, calibration)
+    )
     rallies = group_rallies(bounces, points)
     complete_analysis_seconds = time.perf_counter() - analysis_started
     payload = {
@@ -188,18 +206,22 @@ def main() -> int:
             "video_size_before": source_size_before,
             "video_size_after": args.video.stat().st_size,
             "profile": args.profile,
-            "weights": str(args.weights.resolve()) if args.profile == "tracknet_v1" else {
-                "main": str(args.dual_main_weights.resolve()), "aux": str(args.dual_aux_weights.resolve()),
-            },
-            "weights_sha256": model_hash if args.profile == "tracknet_v1" else {
-                "main": sha256(args.dual_main_weights), "aux": sha256(args.dual_aux_weights),
-            },
+            "weights": (
+                str(args.weights.resolve()) if args.profile == "tracknet_v1"
+                else str(args.blurball_weights.resolve()) if args.profile == "blurball_v1"
+                else {"main": str(args.dual_main_weights.resolve()), "aux": str(args.dual_aux_weights.resolve())}
+            ),
+            "weights_sha256": (
+                model_hash if args.profile == "tracknet_v1"
+                else sha256(args.blurball_weights) if args.profile == "blurball_v1"
+                else {"main": sha256(args.dual_main_weights), "aux": sha256(args.dual_aux_weights)}
+            ),
             "calibration": str(args.calibration.resolve()),
-            "batch_size": args.batch_size,
+            "batch_size": args.blurball_batch_size if args.profile == "blurball_v1" else args.batch_size,
             "sequence_length": loaded.seq_len if args.profile == "tracknet_v1" else 3,
             "background_mode": loaded.bg_mode if args.profile == "tracknet_v1" else None,
             "analysis_roi": asdict(roi),
-            "model_size": list(model_size) if model_size else "auto",
+            "model_size": [stats.model_width, stats.model_height] if args.profile == "blurball_v1" else (list(model_size) if model_size else "auto"),
             "predictor_source_ref": args.predictor_source_ref,
         },
         "timing": {

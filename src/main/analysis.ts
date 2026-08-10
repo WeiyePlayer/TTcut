@@ -42,7 +42,7 @@ export async function startAnalysis(
     throw new Error('INVALID_CALIBRATION');
   }
   const taskId = randomUUID();
-  const requestedDevice = value.ballModelProfile === 'uplifting_dual_v1' ? 'cuda' : value.device;
+  const requestedDevice = value.ballModelProfile === 'tracknet_v1' ? value.device : 'cuda';
   const components = await resolveUsableAnalysisComponents(requestedDevice);
   if (!components.python) throw new Error('RUNTIME_MISSING');
   if (value.ballModelProfile === 'uplifting_dual_v1') await validateDualBallModels(components);
@@ -67,6 +67,7 @@ export async function startAnalysis(
       PYTHONPATH: components.worker,
       PYTHONUTF8: '1',
       TTCUT_TRACKNET_WEIGHTS: components.tracknetWeights,
+      TTCUT_BLURBALL_WEIGHTS: components.blurballWeights,
       TTCUT_TABLE_ANALYZE_WEIGHTS: components.tableAnalyzeWeights,
       TTCUT_DUAL_BALL_MAIN_WEIGHTS: components.dualBallMainWeights,
       TTCUT_DUAL_BALL_AUX_WEIGHTS: components.dualBallAuxWeights,

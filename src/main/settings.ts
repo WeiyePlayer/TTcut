@@ -23,7 +23,7 @@ export async function loadSettings(): Promise<AppSettings> {
       calibration_method: raw.calibration_method === 'automatic' || raw.calibration_method === 'manual'
         ? raw.calibration_method
         : defaults.calibration_method,
-      ball_model_profile: raw.ball_model_profile === 'uplifting_dual_v1'
+      ball_model_profile: raw.ball_model_profile === 'uplifting_dual_v1' || raw.ball_model_profile === 'blurball_v1'
         ? raw.ball_model_profile
         : defaults.ball_model_profile,
       pre_roll_seconds: [1.5, 2.5, 5].includes(Number(raw.pre_roll_seconds))
