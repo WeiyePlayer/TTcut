@@ -165,9 +165,8 @@ describe('App workflow notices and multi-task entry', () => {
     render(<App />);
     fireEvent.click(await screen.findByRole('button', { name: '设置' }));
 
-    expect(screen.getByRole('button', { name: 'BlurBall（默认）CPU / CUDA；阈值 0.7，步长 3，最大位移 100 px。' })).toBeVisible();
-    expect(screen.getByRole('button', { name: 'TrackNet速度快，精准度一般。' })).toBeVisible();
-    expect(screen.queryByRole('button', { name: /新模型|New model/ })).toBeNull();
+    expect(screen.getByRole('button', { name: '新模型速度更快，更精准' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '旧模型速度快，精准度一般。' })).toBeVisible();
     expect(screen.queryByText(/双检测模型|dual detection models/i)).toBeNull();
     expect(screen.queryByText('单视频和多任务统一使用所选档位。板数仍表示落台反弹数。')).toBeNull();
   });
@@ -177,7 +176,7 @@ describe('App workflow notices and multi-task entry', () => {
     bootstrap.settings.ball_model_profile = 'tracknet_v1';
     render(<App />);
     fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
-    fireEvent.click(screen.getByRole('button', { name: /BlurBall/ }));
+    fireEvent.click(screen.getByRole('button', { name: /New model/ }));
 
     await waitFor(() => expect(window.ttcut.saveSettings).toHaveBeenCalledWith(expect.objectContaining({
       ball_model_profile: 'blurball_v1',
@@ -190,7 +189,7 @@ describe('App workflow notices and multi-task entry', () => {
     bootstrap.components.analysis.acceleration = 'cpu';
     render(<App />);
     fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
-    const blurball = screen.getByRole('button', { name: /BlurBall/ });
+    const blurball = screen.getByRole('button', { name: /New model/ });
 
     expect(blurball).toBeEnabled();
     fireEvent.click(blurball);

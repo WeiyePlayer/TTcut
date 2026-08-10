@@ -594,8 +594,8 @@ export function App() {
               <article className="card model-profile-card">
                 <div><h2>{settings.language === 'zh-CN' ? '球识别模型' : 'Ball recognition model'}</h2></div>
                 <div className="model-profile-options">
-                  <button disabled={Boolean(setupTask)} className={settings.ball_model_profile === 'blurball_v1' ? 'selected' : ''} onClick={() => void selectBallModelProfile('blurball_v1')}><strong>{settings.language === 'zh-CN' ? 'BlurBall（默认）' : 'BlurBall (default)'}</strong><span>{settings.language === 'zh-CN' ? 'CPU / CUDA；阈值 0.7，步长 3，最大位移 100 px。' : 'CPU / CUDA; threshold 0.7, step 3, maximum displacement 100 px.'}</span></button>
-                  <button className={settings.ball_model_profile === 'tracknet_v1' ? 'selected' : ''} onClick={() => void selectBallModelProfile('tracknet_v1')}><strong>TrackNet</strong><span>{settings.language === 'zh-CN' ? '速度快，精准度一般。' : 'Fast, with average accuracy.'}</span></button>
+                  <button disabled={Boolean(setupTask)} className={settings.ball_model_profile === 'blurball_v1' ? 'selected' : ''} onClick={() => void selectBallModelProfile('blurball_v1')}><strong>{settings.language === 'zh-CN' ? '新模型' : 'New model'}</strong><span>{settings.language === 'zh-CN' ? '速度更快，更精准' : 'Faster, more accurate.'}</span></button>
+                  <button className={settings.ball_model_profile === 'tracknet_v1' ? 'selected' : ''} onClick={() => void selectBallModelProfile('tracknet_v1')}><strong>{settings.language === 'zh-CN' ? '旧模型' : 'Old model'}</strong><span>{settings.language === 'zh-CN' ? '速度快，精准度一般。' : 'Fast, with average accuracy.'}</span></button>
                 </div>
               </article>
               <article className="card setting-card">
