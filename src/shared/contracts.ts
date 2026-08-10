@@ -4,7 +4,7 @@ export const DEVICE_VALUES = ['auto', 'cuda', 'cpu'] as const;
 export const PRE_ROLL_VALUES = [1.5, 2.5, 5] as const;
 export const POST_ROLL_VALUES = [0.5, 1, 2, 4] as const;
 export const HIGHLIGHT_VALUES = [3, 5, 7] as const;
-export const BALL_MODEL_PROFILES = ['tracknet_v1', 'uplifting_dual_v1'] as const;
+export const BALL_MODEL_PROFILES = ['tracknet_v1', 'blurball_v1'] as const;
 
 const finiteNumber = z.number().finite();
 const point = z.tuple([finiteNumber, finiteNumber]);
@@ -205,6 +205,12 @@ export const analysisResultSchema = z.object({
     }).strict(),
     main_input: z.object({ width: z.number().int().positive(), height: z.number().int().positive() }).strict(),
     aux_input: z.object({ width: z.number().int().positive(), height: z.number().int().positive() }).strict().nullable(),
+    detection: z.object({
+      confidence_threshold: finiteNumber.min(0).max(1),
+      step: z.literal(3),
+      maximum_displacement_pixels: finiteNumber.positive(),
+      landing_region: z.literal('expanded_table'),
+    }).strict().optional(),
   }).strict().optional(),
 }).strict();
 
@@ -329,12 +335,6 @@ export const componentStatusSchema = z.object({
     x264_available: z.boolean(),
     detail: z.string().nullable(),
   }).strict(),
-  dual_ball_models: z.object({
-    available: z.boolean(),
-    version: z.string().nullable(),
-    path: z.string().nullable(),
-    detail: z.string().nullable(),
-  }).strict(),
 }).strict();
 
 export const managedComponentOfferSchema = z.object({
@@ -348,12 +348,6 @@ export const managedComponentOfferSchema = z.object({
 export const componentSetupInfoSchema = z.object({
   analysis_offer: managedComponentOfferSchema.nullable(),
   media_offer: managedComponentOfferSchema.nullable(),
-  dual_ball_models_offer: z.object({
-    id: z.literal('dual_ball_models'),
-    version: z.string().min(1),
-    download_size_bytes: z.number().int().positive(),
-    available_for_download: z.boolean(),
-  }).strict().nullable(),
   x264_manual_offer: z.object({
     id: z.literal('media-x264'),
     version: z.string().min(1),

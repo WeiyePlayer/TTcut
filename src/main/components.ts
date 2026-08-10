@@ -1,4 +1,4 @@
-import { access, mkdir, rename, stat, writeFile } from 'node:fs/promises';
+import { access, mkdir, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { app } from 'electron';
 import type { ComponentStatus } from '../shared/contracts';
@@ -16,7 +16,6 @@ import {
   type AnalysisRuntimeVariant,
 } from './runtime-layout';
 import { resolveInstallationLayout } from './installation-layout';
-import { sha256File } from './component-assets';
 
 const ANALYSIS_NUMPY_VERSION = '2.5.1';
 const ANALYSIS_OPENCV_VERSION = '4.13.0';
@@ -38,9 +37,8 @@ export type ComponentPaths = {
   runtimeVariant: RuntimeLocation | null;
   worker: string;
   tracknetWeights: string;
+  blurballWeights: string;
   tableAnalyzeWeights: string;
-  dualBallMainWeights: string;
-  dualBallAuxWeights: string;
   ffmpeg: string | null;
   ffprobe: string | null;
   mediaEncoder: MediaEncoder | 'unavailable';
@@ -128,30 +126,17 @@ async function mediaCandidates(): Promise<MediaCandidate[]> {
 export async function resolveComponents(device: 'auto' | 'cuda' | 'cpu' = 'auto'): Promise<ComponentPaths> {
   const runtimes = await runtimeCandidates(device);
   const media = (await mediaCandidates())[0] ?? null;
-  const dualRoot = path.join(managedComponentsRoot(), 'dual-ball-models', '1.0.0');
   return {
     python: runtimes[0]?.python ?? null,
     runtimeVariant: runtimes[0]?.variant ?? null,
     worker: resource('worker'),
     tracknetWeights: process.env.TTCUT_TRACKNET_WEIGHTS || resource('resources', 'models', 'analyze.pt'),
+    blurballWeights: process.env.TTCUT_BLURBALL_WEIGHTS || resource('resources', 'models', 'blurball_best.pt'),
     tableAnalyzeWeights: process.env.TTCUT_TABLE_ANALYZE_WEIGHTS || resource('resources', 'models', 'table_analyze.pt'),
-    dualBallMainWeights: process.env.TTCUT_DUAL_BALL_MAIN_WEIGHTS || path.join(dualRoot, 'ttcut-ball-main-segformerpp-b2-1.0.0.pt'),
-    dualBallAuxWeights: process.env.TTCUT_DUAL_BALL_AUX_WEIGHTS || path.join(dualRoot, 'ttcut-ball-aux-wasb-1.0.0.pt'),
     ffmpeg: media?.ffmpeg ?? null,
     ffprobe: media?.ffprobe ?? null,
     mediaEncoder: media?.encoder ?? 'unavailable',
   };
-}
-
-export async function validateDualBallModels(paths: Pick<ComponentPaths, 'dualBallMainWeights' | 'dualBallAuxWeights'>): Promise<void> {
-  const catalog = await loadComponentCatalog();
-  const byRole = new Map(catalog.dual_ball_models.assets.map((asset) => [asset.role, asset]));
-  for (const [role, file] of [['main', paths.dualBallMainWeights], ['aux', paths.dualBallAuxWeights]] as const) {
-    const asset = byRole.get(role);
-    const metadata = await access(file).then(() => stat(file), () => null);
-    if (!asset || !metadata?.isFile() || metadata.size !== asset.size_bytes) throw new Error('DUAL_BALL_MODELS_MISSING');
-    if (await sha256File(file) !== asset.sha256) throw new Error('DUAL_BALL_MODELS_HASH_MISMATCH');
-  }
 }
 
 export async function activateManagedAnalysisRuntime(variant: AnalysisRuntimeVariant): Promise<void> {
@@ -297,7 +282,9 @@ export async function inspectComponentPaths(paths: ComponentPaths, x264Available
   let analysisVersion: string | null = null;
   let acceleration: 'cuda' | 'cpu' | 'unavailable' = 'unavailable';
   let analysisDetail: string | null = null;
-  const modelsAvailable = await exists(paths.tracknetWeights) && await exists(paths.tableAnalyzeWeights);
+  const modelsAvailable = await exists(paths.tracknetWeights)
+    && await exists(paths.blurballWeights)
+    && await exists(paths.tableAnalyzeWeights);
   if (paths.python && modelsAvailable) {
     try {
       const expected = paths.runtimeVariant && isAnalysisRuntimeVariant(paths.runtimeVariant) ? paths.runtimeVariant : undefined;
@@ -326,11 +313,6 @@ export async function inspectComponentPaths(paths: ComponentPaths, x264Available
   } else {
     mediaDetail = 'MEDIA_RUNTIME_MISSING';
   }
-  let dualDetail: string | null = null;
-  await validateDualBallModels(paths).catch((error) => {
-    dualDetail = error instanceof Error ? error.message : String(error);
-  });
-  const dualPath = path.dirname(paths.dualBallMainWeights);
   return {
     analysis: {
       available: Boolean(paths.python && modelsAvailable && !analysisDetail),
@@ -346,12 +328,6 @@ export async function inspectComponentPaths(paths: ComponentPaths, x264Available
       active_encoder: mediaDetail ? 'unavailable' : paths.mediaEncoder,
       x264_available: x264Available || (!mediaDetail && paths.mediaEncoder === 'libx264'),
       detail: mediaDetail,
-    },
-    dual_ball_models: {
-      available: dualDetail === null,
-      version: dualDetail === null ? '1.0.0' : null,
-      path: dualPath,
-      detail: dualDetail,
     },
   };
 }

@@ -4,27 +4,27 @@
 
 TTcut is a local automatic table-tennis video cutter for players and enthusiasts. It locates the ball, detects bounce events and valid rallies, then exports edited clips using the selected cutting mode.
 
-Videos, analysis results, and history stay on the local computer. TTcut requires no account, uploads no video, and collects no telemetry. The default analysis models are included in the installer; the optional new ball models are downloaded on demand. The analysis runtime and media-processing components require an internet connection during initial setup; after installation, analysis, preview, and cutting can run offline.
+Videos, analysis results, and history stay on the local computer. TTcut requires no account, uploads no video, and collects no telemetry. BlurBall (the default), TrackNet, and table-recognition weights are all included in the installer and require no separate model download. The analysis runtime and media-processing components require an internet connection during initial setup; after installation, analysis, preview, and cutting can run offline.
 
-> The current stable release is `v1.2.4` for Windows x64. TTcut no longer blocks startup according to a Windows build-number allowlist.
+> The current stable release is `v1.2.5` for Windows x64. TTcut no longer blocks startup according to a Windows build-number allowlist.
 
 ## Download and installation
 
-1. Download `TTcut-1.2.4-x64-Setup.exe` from the [TTcut v1.2.4 Release](https://github.com/WeiyePlayer/TTcut/releases/tag/v1.2.4).
+1. Download `TTcut-1.2.5-x64-Setup.exe` from the [TTcut v1.2.5 Release](https://github.com/WeiyePlayer/TTcut/releases/tag/v1.2.5).
 2. Run the installer, choose the installation root, and decide whether to create a desktop shortcut. Application files are written under `<root>\app`; large runtimes, downloads, and import staging are stored under `<root>\data\components`. A Start menu shortcut is always created.
 3. On first launch, open Settings and install the Analysis component and Video processing component after reviewing the prompts.
 
 The Analysis component detects an NVIDIA GPU automatically and falls back to CPU if CUDA installation or self-test fails. The Video processing component reads media information, cuts and joins segments, and validates exported files.
 
-## What's new in v1.2.4
+## What's new in v1.2.5
 
-- Fixed long CPU-only exports that could fail after a fixed 120-second deadline during keyframe discovery.
-- Keyframe discovery now uses packet-level FFprobe data instead of decoding and scanning the entire video before segmented encoding.
-- Export, output-validation, and component-setup subprocesses no longer share a fixed 120-second deadline; long tasks can run for the time they actually require.
-- Cancelling an export or exiting the app still terminates the active FFprobe/FFmpeg process tree and reports the correct cancellation state.
-- This release does not change analysis models, dynamic ROI, trajectories, rally recognition, bounce-count recognition, or user-selected cut ranges.
+- BlurBall is now the default bundled ball-localisation model and supports both CPU and CUDA; TrackNet remains selectable in Settings.
+- BlurBall, TrackNet, and table-recognition weights are included in the installer with fixed size and SHA-256 verification, so no separate model download is required after installation.
+- The old B2/Uplifting dual-model component has been removed; legacy persisted settings fall back to the supported BlurBall profile.
+- Fixed a task-state race at analysis/export completion that could make the next queued task fail with `TASK_BUSY`.
+- Retained the long CPU-only export, cancellation, and component-setup fixes from v1.2.4.
 
-See the [v1.2.4 release notes](docs/release-notes-v1.2.4.en.md) for the complete details.
+See the [v1.2.5 release notes](docs/release-notes-v1.2.5.en.md) for the complete details.
 
 ## Usage
 
@@ -75,14 +75,14 @@ Select multiple MP4 or MOV files in Batch tasks. On entry, TTcut automatically c
 
 ## Analysis component
 
-The installer includes fixed rally-analysis and table-recognition models. The on-demand runtime provides Python 3.12.13, PyTorch 2.12.1, NumPy, OpenCV, and the minimal Worker used for:
+The installer includes fixed BlurBall, TrackNet, and table-recognition models. The on-demand runtime provides Python 3.12.13, PyTorch 2.12.1, NumPy, OpenCV, and the minimal Worker used for:
 
-- frame-by-frame TrackNet ball localisation;
+- BlurBall ball localisation by default, with TrackNet selectable in Settings;
 - automatic or manual table calibration and coordinate mapping;
-- three-frame/five-frame bounce detection and timestamp deduplication;
+- profile-specific bounce detection with shared table-region, timing, and rally rules;
 - rally grouping based on bounce events.
 
-The runtime is installed under `<root>\data\components`. CPU, CUDA 12.6, and CUDA 13.2 variants are supported.
+The runtime is installed under `<root>\data\components`. All three model files are size- and SHA-256-verified before packaging. CPU, CUDA 12.6, and CUDA 13.2 runtime variants are supported.
 
 ## Video processing component
 

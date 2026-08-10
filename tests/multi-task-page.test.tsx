@@ -140,7 +140,7 @@ describe('multi-task clipping', () => {
       calibrationChoice: { method: 'precalibrated', calibration, table_analysis: tableAnalysis },
       device: 'auto',
       historyVisibility: 'deferred',
-      ballModelProfile: 'tracknet_v1',
+      ballModelProfile: 'blurball_v1',
     });
 
     act(() => listener?.({
@@ -530,7 +530,7 @@ describe('multi-task clipping', () => {
         initialVideos={videos}
         preRoll={5}
         postRoll={4}
-        ballModelProfile="uplifting_dual_v1"
+        ballModelProfile="blurball_v1"
         onOpenAnalysis={vi.fn()}
       />,
     );

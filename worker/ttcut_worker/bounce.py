@@ -8,8 +8,6 @@ from .types import TrajectoryPoint
 
 
 DEFAULT_MINIMUM_BOUNCE_INTERVAL_SECONDS = 0.315
-MAXIMUM_BRIDGED_DUAL_GAP_SECONDS = 0.1
-MAXIMUM_BRIDGED_DUAL_MISSING_FRAMES = 5
 
 
 def _valid_window(window: Sequence[TrajectoryPoint]) -> bool:
@@ -37,59 +35,11 @@ def _add_candidate(
     return False
 
 
-def _bridge_short_dual_gaps(
-    points: Sequence[TrajectoryPoint],
-) -> tuple[TrajectoryPoint, ...]:
-    bridged = list(points)
-    index = 0
-    while index < len(points):
-        if points[index].visibility:
-            index += 1
-            continue
-        gap_start = index
-        while index < len(points) and not points[index].visibility:
-            index += 1
-        gap_end = index - 1
-        left_index = gap_start - 1
-        right_index = index
-        if left_index < 0 or right_index >= len(points):
-            continue
-        left = points[left_index]
-        right = points[right_index]
-        missing_count = gap_end - gap_start + 1
-        elapsed = right.time - left.time
-        if (
-            left.source != "uplifting_dual"
-            or right.source != "uplifting_dual"
-            or missing_count > MAXIMUM_BRIDGED_DUAL_MISSING_FRAMES
-            or elapsed <= 0
-            or elapsed > MAXIMUM_BRIDGED_DUAL_GAP_SECONDS + 1e-9
-            or right.frame - left.frame != missing_count + 1
-        ):
-            continue
-        confidence = min(left.confidence, right.confidence)
-        for missing_index in range(gap_start, gap_end + 1):
-            missing = points[missing_index]
-            ratio = (missing.time - left.time) / elapsed
-            bridged[missing_index] = TrajectoryPoint(
-                frame=missing.frame,
-                time=missing.time,
-                visibility=1,
-                x=int(round(left.x + (right.x - left.x) * ratio)),
-                y=int(round(left.y + (right.y - left.y) * ratio)),
-                source="uplifting_dual",
-                confidence=confidence,
-                time_source=missing.time_source,
-            )
-    return tuple(bridged)
-
-
 def detect_bounce_frames(
     points: Sequence[TrajectoryPoint], calibration: TableCalibration,
     *, minimum_interval_seconds: float = DEFAULT_MINIMUM_BOUNCE_INTERVAL_SECONDS,
     table_length_margin_cm: float = 35.0, table_width_margin_cm: float = 25.0,
 ) -> list[int]:
-    points = _bridge_short_dual_gaps(points)
     candidates: dict[int, TrajectoryPoint] = {}
     index = 1
     while index < len(points) - 1:

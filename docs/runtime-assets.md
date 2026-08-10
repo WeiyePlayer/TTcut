@@ -48,9 +48,10 @@ CPU 与 cu126 资产固定在 [WeiyePlayer/TTcut-runtime-assets `analysis-3.12.1
 
 ## 固定模型文件
 
-模型二进制不进入普通 Git 或源码归档，但 `analyze.pt` 和 `table_analyze.pt` 会作为应用资源进入 TTcut 安装包。两个模型的固定文件名、大小和 SHA-256 记录在 `resources/model-manifest.json`，构建前由 `scripts/verify-model-assets.mjs` 严格校验。
+模型二进制不进入普通 Git 或源码归档，但 `analyze.pt`、`blurball_best.pt` 和 `table_analyze.pt` 会作为应用资源进入 TTcut 安装包。三个模型的固定文件名、大小和 SHA-256 记录在 `resources/model-manifest.json`，构建前由 `scripts/verify-model-assets.mjs` 严格校验。
 
 - `analyze.pt`：`136191005` 字节，SHA-256 `ffb5469161c4bd39a5a7e745c3d13f076b2c5e575f33279ea62f1e5803245a52`
+- `blurball_best.pt`：`6156034` 字节，SHA-256 `3545206c7155194ea654899d33579c88c9fd8e82c632cbdbae3b0c0ec3f2985f`
 - `table_analyze.pt`：`99028986` 字节，SHA-256 `160e1a9b2d0236b501dc4a4d38bbfb39315eeef6de5d8c11770452623ff102df`
 - 打包位置：应用资源目录中的 `resources/models`
 

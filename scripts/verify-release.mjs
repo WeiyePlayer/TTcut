@@ -37,7 +37,7 @@ async function auditWorker(directory, label) {
   const forbiddenPaths = relative.filter((file) => (
     /(^|\/)(tests?|__pycache__)(\/|$)/i.test(file)
     || /\.(pyc|pt|pth)$/i.test(file)
-    || /(inpaint|speed|hit.?detect|overlay|gradio|webui)/i.test(file)
+    || /(inpaint|speed|hit.?detect|overlay|gradio|webui|dual_(?:models|predictor|smoke)|wasb)/i.test(file)
   ));
   check(forbiddenPaths.length === 0, `${label} contains non-runtime files: ${forbiddenPaths.join(', ')}`);
 
@@ -130,17 +130,19 @@ check(componentManagerSource.includes("spawn('taskkill.exe'"), 'Stalled Windows 
 const componentCatalog = JSON.parse(await readFile(path.join(root, 'resources', 'components.json'), 'utf8'));
 const modelManifest = JSON.parse(await readFile(path.join(root, 'resources', 'model-manifest.json'), 'utf8'));
 check(modelManifest.schema_version === 1, 'The bundled model manifest schema is invalid.');
-check(modelManifest.models?.length === 2, 'The bundled model manifest must contain exactly two models.');
-check(new Set(modelManifest.models?.map((model) => model.filename)).size === 2, 'The bundled model manifest contains duplicate filenames.');
+check(modelManifest.models?.length === 3, 'The bundled model manifest must contain exactly three models.');
+check(new Set(modelManifest.models?.map((model) => model.filename)).size === 3, 'The bundled model manifest contains duplicate filenames.');
 for (const [filename, size, hash] of [
   ['analyze.pt', 136191005, 'ffb5469161c4bd39a5a7e745c3d13f076b2c5e575f33279ea62f1e5803245a52'],
   ['table_analyze.pt', 99028986, '160e1a9b2d0236b501dc4a4d38bbfb39315eeef6de5d8c11770452623ff102df'],
+  ['blurball_best.pt', 6156034, '3545206c7155194ea654899d33579c88c9fd8e82c632cbdbae3b0c0ec3f2985f'],
 ]) {
   const model = modelManifest.models?.find((candidate) => candidate.filename === filename);
   check(model?.size_bytes === size && model?.sha256 === hash, `Bundled model manifest entry is invalid: ${filename}`);
 }
 check(!('tracknet_weight' in componentCatalog), 'Model weights remain in the managed component catalog.');
 check(!('table_weight' in componentCatalog), 'Table model weights remain in the managed component catalog.');
+check(!('dual_ball_models' in componentCatalog), 'The removed ball model remains in the managed component catalog.');
 check(/^[a-f0-9]{64}$/.test(componentCatalog.ffmpeg?.sha256 ?? ''), 'The fixed FFmpeg archive hash is missing.');
 check(componentCatalog.ffmpeg_x264?.asset === 'ffmpeg-N-125716-g1b1f602699-win64-gpl.zip', 'The fixed x264 asset name is incorrect.');
 check(componentCatalog.ffmpeg_x264?.size_bytes === 168733210, 'The fixed x264 asset size is incorrect.');
@@ -246,7 +248,7 @@ if (existsSync(packagedRoot)) {
   check(existsSync(path.join(packagedRoot, 'resources', 'resources', 'model-manifest.json')), 'Packaged model manifest is missing.');
   if (existsSync(packagedModels)) {
     const modelFiles = (await readdir(packagedModels)).filter((name) => /\.pt$/i.test(name)).sort();
-    check(JSON.stringify(modelFiles) === JSON.stringify(['analyze.pt', 'table_analyze.pt']), `Packaged model names are incorrect: ${modelFiles.join(', ')}`);
+    check(JSON.stringify(modelFiles) === JSON.stringify(['analyze.pt', 'blurball_best.pt', 'table_analyze.pt']), `Packaged model names are incorrect: ${modelFiles.join(', ')}`);
     for (const model of modelManifest.models) {
       const modelPath = path.join(packagedModels, model.filename);
       if (!existsSync(modelPath)) {
