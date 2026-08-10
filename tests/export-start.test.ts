@@ -10,6 +10,7 @@ const state = vi.hoisted(() => {
   return {
     source: '',
     events: [] as AppEvent[],
+    terminalTaskActive: [] as boolean[],
     keyframes: vi.fn((_path: string, _ffprobe: string, signal?: AbortSignal) => new Promise<number[]>((resolve, reject) => {
       const abort = () => reject(Object.assign(new Error('PROCESS_CANCELLED'), { name: 'AbortError' }));
       releaseKeyframes = (value) => {
@@ -100,7 +101,12 @@ function windowMock() {
   return {
     isDestroyed: () => false,
     webContents: {
-      send: (_channel: string, event: AppEvent) => state.events.push(event),
+      send: (_channel: string, event: AppEvent) => {
+        state.events.push(event);
+        if (event.type === 'error' || event.type === 'export-result') {
+          state.terminalTaskActive.push(Boolean(getTaskController(event.taskId)));
+        }
+      },
     },
   };
 }
@@ -119,6 +125,7 @@ describe('export task start and terminal lifecycle', () => {
     directory = await mkdtemp(path.join(tmpdir(), 'ttcut-export-start-'));
     state.source = path.join(directory, 'source.mp4');
     state.events.length = 0;
+    state.terminalTaskActive.length = 0;
     state.keyframes.mockClear();
     await writeFile(state.source, 'source');
   });
@@ -141,6 +148,7 @@ describe('export task start and terminal lifecycle', () => {
     expect(terminal).toEqual([
       expect.objectContaining({ type: 'error', taskId, code: 'EXPORT_CANCELLED' }),
     ]);
+    expect(state.terminalTaskActive).toEqual([false]);
   });
 
   it('records app-exit cancellation without sending an error terminal event', async () => {
