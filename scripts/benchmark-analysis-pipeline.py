@@ -19,7 +19,7 @@ if str(WORKER_ROOT) not in sys.path:
 from ttcut_worker.bounce import detect_bounce_frames  # noqa: E402
 from ttcut_worker.blurball_bounce import detect_blurball_bounce_frames  # noqa: E402
 from ttcut_worker.blurball_models import load_blurball  # noqa: E402
-from ttcut_worker.blurball_predictor import BLURBALL_BATCH_SIZE, BlurBallPredictor  # noqa: E402
+from ttcut_worker.blurball_predictor import BlurBallPredictor  # noqa: E402
 from ttcut_worker.calibration import TableCalibration  # noqa: E402
 from ttcut_worker.model import load_tracknet  # noqa: E402
 from ttcut_worker.dual_models import load_dual_models  # noqa: E402
@@ -118,7 +118,7 @@ def main() -> int:
         type=Path,
         default=PROJECT_ROOT / "resources" / "models" / "blurball_best.pt",
     )
-    parser.add_argument("--blurball-batch-size", type=int, default=BLURBALL_BATCH_SIZE)
+    parser.add_argument("--blurball-batch-size", type=int)
     parser.add_argument("--model-size", default="280x160")
     parser.add_argument(
         "--predictor-source-ref",
@@ -155,8 +155,8 @@ def main() -> int:
         loaded = load_dual_models(args.dual_main_weights, args.dual_aux_weights, args.device)
         predictor = UpliftingDualPredictor(loaded, batch_size=2)
     else:
-        if args.device != "cuda" or args.blurball_batch_size <= 0:
-            parser.error("blurball_v1 requires CUDA and a positive BlurBall batch size")
+        if args.blurball_batch_size is not None and args.blurball_batch_size <= 0:
+            parser.error("blurball_v1 requires a positive BlurBall batch size")
         loaded = load_blurball(args.blurball_weights, args.device)
         predictor = BlurBallPredictor(loaded, batch_size=args.blurball_batch_size)
     model_load_seconds = time.perf_counter() - load_started
@@ -217,7 +217,7 @@ def main() -> int:
                 else {"main": sha256(args.dual_main_weights), "aux": sha256(args.dual_aux_weights)}
             ),
             "calibration": str(args.calibration.resolve()),
-            "batch_size": args.blurball_batch_size if args.profile == "blurball_v1" else args.batch_size,
+            "batch_size": predictor.batch_size if args.profile == "blurball_v1" else args.batch_size,
             "sequence_length": loaded.seq_len if args.profile == "tracknet_v1" else 3,
             "background_mode": loaded.bg_mode if args.profile == "tracknet_v1" else None,
             "analysis_roi": asdict(roi),

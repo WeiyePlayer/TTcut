@@ -10,16 +10,20 @@ from ttcut_worker.blurball_bounce import (
     landing_table_coordinates,
 )
 from ttcut_worker.blurball_model import create_blurball
+from ttcut_worker.blurball_models import LoadedBlurBall, load_blurball
 from ttcut_worker.blurball_predictor import (
+    BLURBALL_CPU_BATCH_SIZE,
     BLURBALL_CONFIDENCE_THRESHOLD,
     BLURBALL_MAX_DISPLACEMENT_PIXELS,
     BLURBALL_STEP,
+    BlurBallPredictor,
     _OnlineTracker,
     _affine_transforms,
     _decode_heatmap,
 )
 from ttcut_worker.calibration import TableCalibration
 from ttcut_worker.types import TrajectoryPoint
+from ttcut_worker.video import FramePacket, VideoInfo
 
 
 def calibration() -> TableCalibration:
@@ -39,6 +43,59 @@ def test_bundled_blurball_architecture_strictly_matches_checkpoint():
     checkpoint = torch.load(path, map_location="cpu", weights_only=False)
     model = create_blurball()
     assert str(model.load_state_dict(checkpoint["model_state_dict"], strict=True)) == "<All keys matched successfully>"
+
+
+def test_bundled_blurball_loads_and_runs_on_cpu():
+    path = Path(__file__).parents[2] / "resources" / "models" / "blurball_best.pt"
+    loaded = load_blurball(path, "cpu")
+    with torch.inference_mode():
+        output = loaded.model(torch.zeros((1, 9, 160, 280), dtype=torch.float32))[0]
+    assert loaded.device == torch.device("cpu")
+    assert output.shape == (1, 3, 160, 280)
+
+
+def test_cpu_predictor_uses_bounded_batch_and_skips_cuda_calls(monkeypatch):
+    class FakeReader:
+        def __init__(self, value):
+            self.info = VideoInfo(Path(value), 96, 64, 30.0, 3, None, 0.1)
+
+        def __iter__(self):
+            for index in range(3):
+                yield FramePacket(
+                    index, index / 30, "fps_estimation",
+                    np.zeros((64, 96, 3), dtype=np.uint8),
+                )
+
+        def final_info(self):
+            return VideoInfo(self.info.path, 96, 64, 30.0, 3, 3, 0.1, "fps_estimation")
+
+    class FakeModel:
+        def __init__(self):
+            self.devices = []
+
+        def __call__(self, tensor):
+            self.devices.append(tensor.device)
+            batch, _, height, width = tensor.shape
+            logits = torch.full((batch, 3, height, width), -10.0, device=tensor.device)
+            logits[:, :, height // 2, width // 2] = 10.0
+            return {0: logits}
+
+    model = FakeModel()
+    predictor = BlurBallPredictor(LoadedBlurBall(model, torch.device("cpu")))
+    monkeypatch.setattr("ttcut_worker.blurball_predictor.StreamingVideoReader", FakeReader)
+    monkeypatch.setattr(
+        torch.cuda,
+        "reset_peak_memory_stats",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("CPU predictor touched CUDA stats")),
+    )
+
+    points, _, stats = predictor.predict("fake.mp4")
+
+    assert predictor.batch_size == BLURBALL_CPU_BATCH_SIZE
+    assert model.devices == [torch.device("cpu")]
+    assert len(points) == 3
+    assert all(point.source == "blurball" for point in points)
+    assert stats.peak_cuda_memory_bytes == 0
 
 
 def test_fixed_blurball_parameters_match_product_contract():

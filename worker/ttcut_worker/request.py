@@ -29,7 +29,7 @@ def validate_request(value: object) -> dict:
             "tracknet_v1", "uplifting_dual_v1", "blurball_v1",
         }:
             raise ValueError("ball_model_profile")
-        if value.get("ball_model_profile") in {"uplifting_dual_v1", "blurball_v1"} and value["device"] != "cuda":
+        if value.get("ball_model_profile") == "uplifting_dual_v1" and value["device"] != "cuda":
             raise ValueError("selected ball model requires cuda")
         if (
             not isinstance(value["video_path"], str)

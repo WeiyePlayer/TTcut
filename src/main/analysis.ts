@@ -18,6 +18,7 @@ import { getHistoryStore } from './history';
 import { probeVideo } from './probe';
 import { hasActiveTasks, spawnTracked } from './processes';
 import { overallAnalysisProgress } from '../domain/analysis-progress';
+import { requestedAnalysisDevice } from '../domain/analysis-device';
 import { analysisProcessEnvironment } from './analysis-environment';
 
 function send(window: BrowserWindow, event: AppEvent): void {
@@ -42,7 +43,7 @@ export async function startAnalysis(
     throw new Error('INVALID_CALIBRATION');
   }
   const taskId = randomUUID();
-  const requestedDevice = value.ballModelProfile === 'tracknet_v1' ? value.device : 'cuda';
+  const requestedDevice = requestedAnalysisDevice(value.ballModelProfile, value.device);
   const components = await resolveUsableAnalysisComponents(requestedDevice);
   if (!components.python) throw new Error('RUNTIME_MISSING');
   if (value.ballModelProfile === 'uplifting_dual_v1') await validateDualBallModels(components);

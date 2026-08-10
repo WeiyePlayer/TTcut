@@ -22,6 +22,7 @@ BLURBALL_CONFIDENCE_THRESHOLD = 0.7
 BLURBALL_STEP = 3
 BLURBALL_MAX_DISPLACEMENT_PIXELS = 100.0
 BLURBALL_BATCH_SIZE = 16
+BLURBALL_CPU_BATCH_SIZE = 4
 _MEAN = np.asarray([0.485, 0.456, 0.406], dtype=np.float32)[:, None, None]
 _STD = np.asarray([0.229, 0.224, 0.225], dtype=np.float32)[:, None, None]
 
@@ -156,9 +157,13 @@ def _decode_heatmap(
 
 
 class BlurBallPredictor:
-    def __init__(self, loaded: LoadedBlurBall, batch_size: int = BLURBALL_BATCH_SIZE):
-        if loaded.device.type != "cuda" or batch_size <= 0:
-            raise ValueError("BlurBall inference requires CUDA and a positive batch size.")
+    def __init__(self, loaded: LoadedBlurBall, batch_size: int | None = None):
+        if loaded.device.type not in {"cpu", "cuda"}:
+            raise ValueError("BlurBall inference requires a CPU or CUDA device.")
+        if batch_size is None:
+            batch_size = BLURBALL_CPU_BATCH_SIZE if loaded.device.type == "cpu" else BLURBALL_BATCH_SIZE
+        if batch_size <= 0:
+            raise ValueError("BlurBall inference requires a positive batch size.")
         self.loaded = loaded
         self.batch_size = batch_size
 
@@ -215,7 +220,9 @@ class BlurBallPredictor:
         total = reader.info.metadata_frame_count or 0
         if progress_callback:
             progress_callback(0, total)
-        torch.cuda.reset_peak_memory_stats(self.loaded.device)
+        is_cuda = self.loaded.device.type == "cuda"
+        if is_cuda:
+            torch.cuda.reset_peak_memory_stats(self.loaded.device)
         tracker = _OnlineTracker(BLURBALL_MAX_DISPLACEMENT_PIXELS)
         points: list[TrajectoryPoint] = []
         windows: list[_PreparedWindow] = []
@@ -227,20 +234,25 @@ class BlurBallPredictor:
             if not windows:
                 return
             inputs = np.stack([window.input for window in windows])
-            tensor = torch.from_numpy(inputs).to(self.loaded.device, non_blocking=True)
+            tensor = torch.from_numpy(inputs).to(self.loaded.device, non_blocking=is_cuda)
             try:
-                torch.cuda.synchronize(self.loaded.device)
+                if is_cuda:
+                    torch.cuda.synchronize(self.loaded.device)
                 inference_started = time.perf_counter()
-                with torch.inference_mode(), torch.autocast(
-                    device_type="cuda",
-                    dtype=torch.float16,
-                ):
-                    output = self.loaded.model(tensor)[0].sigmoid()
-                torch.cuda.synchronize(self.loaded.device)
+                if is_cuda:
+                    with torch.inference_mode(), torch.autocast(
+                        device_type="cuda",
+                        dtype=torch.float16,
+                    ):
+                        output = self.loaded.model(tensor)[0].sigmoid()
+                    torch.cuda.synchronize(self.loaded.device)
+                else:
+                    with torch.inference_mode():
+                        output = self.loaded.model(tensor)[0].sigmoid()
                 inference_seconds += time.perf_counter() - inference_started
                 heatmaps = output.float().cpu().numpy()
             except RuntimeError as error:
-                if "out of memory" in str(error).lower():
+                if is_cuda and "out of memory" in str(error).lower():
                     torch.cuda.empty_cache()
                     raise DeviceError("CUDA ran out of memory during BlurBall inference.") from error
                 raise
@@ -305,5 +317,7 @@ class BlurBallPredictor:
             average_predictor_fps=len(points) / elapsed if elapsed else 0.0,
             model_width=input_width,
             model_height=input_height,
-            peak_cuda_memory_bytes=int(torch.cuda.max_memory_allocated(self.loaded.device)),
+            peak_cuda_memory_bytes=(
+                int(torch.cuda.max_memory_allocated(self.loaded.device)) if is_cuda else 0
+            ),
         )

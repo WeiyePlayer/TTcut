@@ -101,10 +101,8 @@ export function App() {
   }, []);
   const t = messages(settings.language as Language);
   const platformSupported = bootstrap?.platformCompatibility.status === 'supported';
-  const ballProfileReady = settings.ball_model_profile === 'tracknet_v1'
-    || (settings.ball_model_profile === 'blurball_v1'
-      ? bootstrap?.components.analysis.acceleration === 'cuda'
-      : Boolean(bootstrap?.components.dual_ball_models.available && bootstrap.components.analysis.acceleration === 'cuda'));
+  const ballProfileReady = settings.ball_model_profile !== 'uplifting_dual_v1'
+    || Boolean(bootstrap?.components.dual_ball_models.available && bootstrap.components.analysis.acceleration === 'cuda');
   const useManualCalibration = settings.calibration_method === 'manual' || forceManual;
   const platformDetail = !bootstrap
     ? ''
@@ -124,9 +122,7 @@ export function App() {
       settingsRef.current = data.settings;
       if (data.platformCompatibility.status !== 'supported' || !data.components.analysis.available || !data.components.media.available
         || (data.settings.ball_model_profile === 'uplifting_dual_v1'
-          && (!data.components.dual_ball_models.available || data.components.analysis.acceleration !== 'cuda'))
-        || (data.settings.ball_model_profile === 'blurball_v1'
-          && data.components.analysis.acceleration !== 'cuda')) {
+          && (!data.components.dual_ball_models.available || data.components.analysis.acceleration !== 'cuda'))) {
         setView('settings');
       }
     });
@@ -415,9 +411,6 @@ export function App() {
       ...(settings.ball_model_profile === 'uplifting_dual_v1' && (!components.dual_ball_models.available || components.analysis.acceleration !== 'cuda')
         ? [settings.language === 'zh-CN' ? '高精度双检测模型（CUDA）' : 'High-accuracy dual detection models (CUDA)']
         : []),
-      ...(settings.ball_model_profile === 'blurball_v1' && components.analysis.acceleration !== 'cuda'
-        ? [settings.language === 'zh-CN' ? 'BlurBall 模型（CUDA）' : 'BlurBall model (CUDA)']
-        : []),
     ];
     setMissingComponents(missing.length > 0 ? missing : null);
   };
@@ -507,11 +500,11 @@ export function App() {
       await saveRolls({ ball_model_profile: profile });
       return;
     }
-    if (bootstrap?.components.analysis.acceleration !== 'cuda') return;
     if (profile === 'blurball_v1') {
       await saveRolls({ ball_model_profile: profile });
       return;
     }
+    if (bootstrap?.components.analysis.acceleration !== 'cuda') return;
     if (!bootstrap.components.dual_ball_models.available) {
       await installDualBallModels(true);
       return;
@@ -655,7 +648,7 @@ export function App() {
                 <div className="model-profile-options">
                   <button className={settings.ball_model_profile === 'tracknet_v1' ? 'selected' : ''} onClick={() => void selectBallModelProfile('tracknet_v1')}><strong>{settings.language === 'zh-CN' ? '默认模型' : 'Default model'}</strong><span>{settings.language === 'zh-CN' ? '速度快，精准度一般。' : 'Fast, with average accuracy.'}</span></button>
                   <button disabled={bootstrap?.components.analysis.acceleration !== 'cuda' || Boolean(setupTask) || Boolean(videoTaskOwner && !bootstrap?.components.dual_ball_models.available)} className={settings.ball_model_profile === 'uplifting_dual_v1' ? 'selected' : ''} onClick={() => void selectBallModelProfile('uplifting_dual_v1')}><strong>{settings.language === 'zh-CN' ? '新模型' : 'New model'}</strong><span>{settings.language === 'zh-CN' ? '速度慢，准确度很高。' : 'Slower, with very high accuracy.'}</span></button>
-                  <button disabled={bootstrap?.components.analysis.acceleration !== 'cuda' || Boolean(setupTask)} className={settings.ball_model_profile === 'blurball_v1' ? 'selected' : ''} onClick={() => void selectBallModelProfile('blurball_v1')}><strong>BlurBall</strong><span>{settings.language === 'zh-CN' ? 'CUDA；阈值 0.7，步长 3，最大位移 100 px。' : 'CUDA; threshold 0.7, step 3, maximum displacement 100 px.'}</span></button>
+                  <button disabled={Boolean(setupTask)} className={settings.ball_model_profile === 'blurball_v1' ? 'selected' : ''} onClick={() => void selectBallModelProfile('blurball_v1')}><strong>BlurBall</strong><span>{settings.language === 'zh-CN' ? 'CPU / CUDA；阈值 0.7，步长 3，最大位移 100 px。' : 'CPU / CUDA; threshold 0.7, step 3, maximum displacement 100 px.'}</span></button>
                 </div>
               </article>
               <article className="card setting-card">

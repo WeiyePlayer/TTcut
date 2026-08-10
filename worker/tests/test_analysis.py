@@ -200,7 +200,7 @@ def test_worker_request_accepts_mov_video_path():
     assert validate_request(request) is request
 
 
-def test_worker_request_v2_requires_cuda_for_optional_models():
+def test_worker_request_v2_requires_cuda_only_for_dual_model():
     request = valid_request()
     request.update(schema_version=2, device="cuda", ball_model_profile="uplifting_dual_v1")
     assert validate_request(request) is request
@@ -211,16 +211,11 @@ def test_worker_request_v2_requires_cuda_for_optional_models():
         assert "fields" in str(exc).lower()
     else:
         raise AssertionError("dual-model v2 requests must reject CPU")
-    request["device"] = "cuda"
     request["ball_model_profile"] = "blurball_v1"
-    assert validate_request(request) is request
     request["device"] = "cpu"
-    try:
-        validate_request(request)
-    except Exception as exc:
-        assert "fields" in str(exc).lower()
-    else:
-        raise AssertionError("BlurBall v2 requests must reject CPU")
+    assert validate_request(request) is request
+    request["device"] = "auto"
+    assert validate_request(request) is request
 
 
 def test_worker_request_rejects_unrelated_video_container():
@@ -423,7 +418,7 @@ def test_worker_v2_routes_dual_profile_and_preserves_bounce_rally_output(monkeyp
 
 def test_worker_v2_routes_blurball_profile_and_records_fixed_parameters(monkeypatch):
     request = valid_request()
-    request.update(schema_version=2, device="cuda", ball_model_profile="blurball_v1")
+    request.update(schema_version=2, device="cpu", ball_model_profile="blurball_v1")
     captured = {}
 
     class FakeBlurBallPredictor:
@@ -446,13 +441,20 @@ def test_worker_v2_routes_blurball_profile_and_records_fixed_parameters(monkeypa
 
     fake_loaded = SimpleNamespace(component_version="1.0.0")
     monkeypatch.setenv("TTCUT_BLURBALL_WEIGHTS", "blurball.pt")
-    monkeypatch.setattr("ttcut_worker.worker.load_blurball", lambda path, device: fake_loaded)
+    def fake_load_blurball(path, device):
+        captured["weight_path"] = path
+        captured["device"] = device
+        return fake_loaded
+
+    monkeypatch.setattr("ttcut_worker.worker.load_blurball", fake_load_blurball)
     monkeypatch.setattr("ttcut_worker.worker.BlurBallPredictor", FakeBlurBallPredictor)
     monkeypatch.setattr("ttcut_worker.worker.detect_blurball_bounce_frames", lambda points, calibration: [0, 5])
 
     result = analyze(request)
 
     assert captured["loaded"] is fake_loaded
+    assert captured["weight_path"] == "blurball.pt"
+    assert captured["device"] == "cpu"
     assert captured["roi"].source_width == 1280
     assert result["rallies"][0]["bounce_count"] == 2
     assert result["model_provenance"]["profile"] == "blurball_v1"
