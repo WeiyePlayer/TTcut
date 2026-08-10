@@ -1,5 +1,7 @@
 # TTcut
 
+<p align="center"><img src="public/ttcut-icon.png" alt="TTcut 图标" width="160"></p>
+
 **简体中文** | [English](README.en.md)
 
 TTcut 是一款面向乒乓球爱好者的本地乒乓球视频自动剪辑工具。它从比赛视频中定位乒乓球、识别弹跳和有效回合，并按所选模式导出剪辑成片。

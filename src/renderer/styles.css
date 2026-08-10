@@ -54,7 +54,8 @@ button:disabled { cursor: not-allowed !important; opacity: 0.42; transform: none
   position: fixed; z-index: 21; inset: 0 auto 0 0; width: 220px; padding: 52px 14px 16px;
   background: #f3f3f3; border-right: 1px solid var(--line); display: flex; flex-direction: column;
 }
-.brand { padding: 0 14px 28px; display: flex; align-items: baseline; gap: 8px; }
+.brand { padding: 0 14px 28px; display: flex; align-items: center; gap: 8px; }
+.brand-icon { width: 30px; height: 30px; flex: 0 0 auto; border-radius: 8px; object-fit: cover; }
 .brand span { font-size: 24px; font-weight: 720; letter-spacing: -0.04em; }
 .brand small { color: var(--muted); font-size: 11px; }
 .sidebar nav { display: grid; gap: 4px; padding-top: 14px; border-top: 1px solid var(--line); }
@@ -305,7 +306,7 @@ td input { accent-color: var(--blue); }
 .settings-grid > .card { width: 100%; border-radius: 14px; }
 .about-card { min-height: 116px; padding: 20px; display: grid; grid-template-columns: minmax(180px, 1fr) auto; align-items: center; gap: 14px 22px; }
 .about-brand { display: flex; align-items: center; gap: 14px; }
-.about-brand > span { width: 52px; height: 52px; display: grid; place-items: center; border-radius: 14px; background: linear-gradient(145deg, #4c8df8, #2567d8); color: white; font-weight: 800; letter-spacing: -.08em; }
+.about-brand > img { width: 52px; height: 52px; flex: 0 0 auto; border-radius: 14px; object-fit: cover; }
 .about-brand h2 { font-size: 19px; }
 .about-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .about-actions .secondary { min-height: 36px; padding: 0 12px; font-size: 12px; }

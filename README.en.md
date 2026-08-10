@@ -1,5 +1,7 @@
 # TTcut
 
+<p align="center"><img src="public/ttcut-icon.png" alt="TTcut icon" width="160"></p>
+
 [简体中文](README.md) | **English**
 
 TTcut is a local automatic table-tennis video cutter for players and enthusiasts. It locates the ball, detects bounce events and valid rallies, then exports edited clips using the selected cutting mode.

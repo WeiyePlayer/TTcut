@@ -80,7 +80,7 @@ export default function Home() {
   return (
     <main>
       <header className="site-header">
-        <a className="brand" href="#top" aria-label="TTcut 首页">TTcut</a>
+        <a className="brand" href="#top" aria-label="TTcut 首页"><img src="/ttcut-icon.png" alt="" />TTcut</a>
         <nav className="nav-links" aria-label="主导航">
           <a href="#features">功能</a>
           <a href="#how-it-works">使用方法</a>
@@ -264,7 +264,7 @@ export default function Home() {
       </section>
 
       <footer className="site-footer section-shell">
-        <a className="brand" href="#top">TTcut</a>
+        <a className="brand" href="#top"><img src="/ttcut-icon.png" alt="" />TTcut</a>
         <p>本地离线乒乓球回合分析与自动剪辑工具。</p>
         <div><a href={repositoryUrl} target="_blank" rel="noreferrer">GitHub</a><a href={downloadUrl} target="_blank" rel="noreferrer" aria-label="下载 TTcut v1.2.5 Windows x64 安装包">下载</a><a href={`${repositoryUrl}/blob/main/LICENSE`} target="_blank" rel="noreferrer">MIT License</a></div>
       </footer>

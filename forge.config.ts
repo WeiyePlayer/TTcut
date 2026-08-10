@@ -59,6 +59,7 @@ const packagerWindowsSign = signingConfigured ? {
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
+    icon: path.resolve('public/ttcut.ico'),
     executableName: 'TTcut',
     ignore: ignoreUnbuiltSource,
     extraResource: ['.runtime/worker', '.runtime/release-metadata', 'resources'],

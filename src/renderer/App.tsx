@@ -14,6 +14,7 @@ import { SupportPrompt } from './SupportPrompt';
 import { CustomCutPage } from './CustomCutPage';
 import packageJson from '../../package.json';
 import captureGuideImage from './assets/pingpong-table-with-pose-mannequins.png';
+import ttcutIcon from './assets/ttcut-icon.png';
 
 type View = 'auto' | 'history' | 'settings' | 'multi';
 type Step = 'select' | 'calibrate' | 'analyzing' | 'empty' | 'mode' | 'custom' | 'cutting' | 'complete' | 'error';
@@ -541,7 +542,7 @@ export function App() {
         </div>
       </header>
       <aside className="sidebar">
-        <div className="brand"><span>TTcut</span><small>v{bootstrap?.version ?? appVersion}</small></div>
+        <div className="brand"><img className="brand-icon" src={ttcutIcon} alt="" /><span>TTcut</span><small>v{bootstrap?.version ?? appVersion}</small></div>
         <nav aria-label="Primary navigation">
           <button className={view === 'auto' || view === 'multi' ? 'active' : ''} onClick={() => requestView('auto')}><i />{t.autoCut}</button>
           <button className={view === 'history' ? 'active' : ''} onClick={() => requestView('history')}><i />{t.history}</button>
@@ -569,7 +570,7 @@ export function App() {
             <div className="page-heading settings-heading"><h1>{t.settings}</h1></div>
             <div className="settings-grid">
               <article className="card about-card">
-                <div className="about-brand"><span>TT</span><div><h2>TTcut</h2><p>{settings.language === 'zh-CN' ? `当前版本 ${bootstrap?.version ?? ''}` : `Version ${bootstrap?.version ?? ''}`}</p></div></div>
+                <div className="about-brand"><img src={ttcutIcon} alt="" /><div><h2>TTcut</h2><p>{settings.language === 'zh-CN' ? `当前版本 ${bootstrap?.version ?? ''}` : `Version ${bootstrap?.version ?? ''}`}</p></div></div>
                 <div className="about-actions">
                   <button className="secondary" onClick={() => void window.ttcut.openExternalUrl(WEBSITE_URL)}>{settings.language === 'zh-CN' ? '官方网站' : 'Website'}</button>
                   <button className="secondary" onClick={() => void window.ttcut.openExternalUrl(GITHUB_URL)}>GitHub</button>
