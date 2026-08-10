@@ -633,12 +633,11 @@ async function executeExport(
   const analysis = record.analysis;
   const highResolution = analysis.video.width > 4096 || analysis.video.height > 2160;
   const tempDirectory = path.join(path.dirname(output), `.ttcut-${taskId}-segments`);
-  let terminalSent = false;
+  let terminalEvent: Extract<AppEvent, { type: 'export-result' | 'error' }> | null = null;
   let finalTiming: ExportTimingAssessment | null = null;
   const sendError = async (code: string, message: string): Promise<void> => {
-    if (terminalSent || !markTaskTerminal(taskId)) return;
-    terminalSent = true;
-    send(window, { type: 'error', taskId, code, message });
+    if (terminalEvent || !markTaskTerminal(taskId)) return;
+    terminalEvent = { type: 'error', taskId, code, message };
   };
   try {
     await mkdir(tempDirectory, { recursive: true });
@@ -753,9 +752,8 @@ async function executeExport(
     send(window, { type: 'progress', data: { taskId, kind: 'export', stage: 'complete', percent: 100 } });
     lastExportProgress.set(taskId, 100);
     await getHistoryStore().markVisible(record.id, 'export', output);
-    if (!terminalSent && markTaskTerminal(taskId)) {
-      terminalSent = true;
-      send(window, { type: 'export-result', taskId, data: result });
+    if (!terminalEvent && markTaskTerminal(taskId)) {
+      terminalEvent = { type: 'export-result', taskId, data: result };
     }
   } catch (error) {
     const controller = getTaskController(taskId);
@@ -804,9 +802,8 @@ async function executeExport(
           };
           send(window, { type: 'progress', data: { taskId, kind: 'export', stage: 'complete', percent: 100 } });
           lastExportProgress.set(taskId, 100);
-          if (!terminalSent && markTaskTerminal(taskId)) {
-            terminalSent = true;
-            send(window, { type: 'export-result', taskId, data: result });
+          if (!terminalEvent && markTaskTerminal(taskId)) {
+            terminalEvent = { type: 'export-result', taskId, data: result };
           }
           return;
         }
@@ -825,6 +822,7 @@ async function executeExport(
     await rm(tempDirectory, { recursive: true, force: true }).catch(() => undefined);
     lastExportProgress.delete(taskId);
     endTrackedTask(taskId);
+    if (terminalEvent) send(window, terminalEvent);
   }
 }
 

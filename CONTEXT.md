@@ -7,23 +7,16 @@ size, and SHA-256 before packaging.
 
 ## Ball Model Profile
 
-The global ball-recognition route recorded on every new analysis. `tracknet_v1`
-is the default legacy route; `uplifting_dual_v1` is the optional CUDA-only
-SegFormer++ B2 and WASB consensus route. A profile is never changed silently.
+The global ball-recognition route recorded on every new analysis. Bundled
+`blurball_v1` is the default and supports the same managed CPU and CUDA runtimes
+as the bundled `tracknet_v1` compatibility route. A profile is never changed
+silently.
 _Avoid_: automatic fallback, accuracy mode
-
-## Dual Ball Model Component
-
-The optional, versioned pair of Uplifting ball-model checkpoints installed on
-first selection after both files pass their pinned size and SHA-256 checks.
-The pair is committed atomically and is not bundled in the application.
 
 ## Model Input Size
 
 The actual tensor width and height derived from the decoded source dimensions
-and Analysis ROI. TrackNet keeps its 1.25× ROI sampling policy. Uplifting uses
-one-half for the main input and two-fifths for the auxiliary input, without
-the 1.25× multiplier.
+and Analysis ROI. TrackNet and BlurBall keep the 1.25× ROI sampling policy.
 
 ## Board Count
 

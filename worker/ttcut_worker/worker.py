@@ -5,14 +5,14 @@ import math
 import os
 import sys
 import traceback
-import uuid
 
 from .bounce import detect_bounce_frames
+from .blurball_bounce import detect_blurball_bounce_frames
+from .blurball_models import load_blurball
+from .blurball_predictor import BlurBallPredictor
 from .calibration import TableCalibration
 from .errors import InvalidRequestError, ModelResourceError, TableModelResourceError, WorkerError
 from .model import load_tracknet
-from .dual_models import load_dual_models
-from .dual_predictor import UpliftingDualPredictor
 from .predictor import TrackNetPredictor
 from .roi import AnalysisRoiConfig, build_analysis_roi
 from .rallies import group_rallies
@@ -54,7 +54,7 @@ def analyze(request: dict) -> dict:
             calibration_value["video_width"], calibration_value["video_height"], calibration_value["points"],
         )
     analysis_roi = build_analysis_roi(calibration, AnalysisRoiConfig())
-    profile = request.get("ball_model_profile", "tracknet_v1")
+    profile = request.get("ball_model_profile", "blurball_v1")
     emit({"type": "progress", "task_id": task_id, "stage": "load_model", "current": 0, "total": 1, "percent": 0.0})
     if profile == "tracknet_v1":
         weight_path = os.environ.get("TTCUT_TRACKNET_WEIGHTS", "").strip()
@@ -63,12 +63,11 @@ def analyze(request: dict) -> dict:
         loaded = load_tracknet(weight_path, request["device"])
         predictor = TrackNetPredictor(loaded)
     else:
-        main_path = os.environ.get("TTCUT_DUAL_BALL_MAIN_WEIGHTS", "").strip()
-        aux_path = os.environ.get("TTCUT_DUAL_BALL_AUX_WEIGHTS", "").strip()
-        if not main_path or not aux_path:
-            raise ModelResourceError("Dual ball model paths are not configured.")
-        loaded = load_dual_models(main_path, aux_path, request["device"])
-        predictor = UpliftingDualPredictor(loaded, batch_size=2)
+        blurball_path = os.environ.get("TTCUT_BLURBALL_WEIGHTS", "").strip()
+        if not blurball_path:
+            raise ModelResourceError("Bundled BlurBall model path is not configured.")
+        loaded = load_blurball(blurball_path, request["device"])
+        predictor = BlurBallPredictor(loaded)
     emit({"type": "progress", "task_id": task_id, "stage": "load_model", "current": 1, "total": 1, "percent": 100.0})
 
     def progress(current: int, total: int) -> None:
@@ -84,7 +83,11 @@ def analyze(request: dict) -> dict:
         analysis_roi=analysis_roi,
     )
     emit({"type": "progress", "task_id": task_id, "stage": "postprocess", "current": 0, "total": 1, "percent": 0.0})
-    bounce_frames = detect_bounce_frames(points, calibration)
+    bounce_frames = (
+        detect_blurball_bounce_frames(points, calibration)
+        if profile == "blurball_v1"
+        else detect_bounce_frames(points, calibration)
+    )
     rallies = group_rallies(bounce_frames, points)
     duration = float(info.duration or 0.0)
     normalized = []
@@ -125,7 +128,7 @@ def analyze(request: dict) -> dict:
         },
         "model_provenance": {
             "profile": profile,
-            "component_version": loaded.component_version if profile == "uplifting_dual_v1" else None,
+            "component_version": loaded.component_version if profile != "tracknet_v1" else None,
             "roi": {
                 "x": analysis_roi.x0,
                 "y": analysis_roi.y0,
@@ -133,13 +136,18 @@ def analyze(request: dict) -> dict:
                 "height": analysis_roi.height,
             },
             "main_input": {
-                "width": stats.main_width if profile == "uplifting_dual_v1" else stats.model_width,
-                "height": stats.main_height if profile == "uplifting_dual_v1" else stats.model_height,
+                "width": stats.model_width,
+                "height": stats.model_height,
             },
-            "aux_input": ({
-                "width": stats.aux_width,
-                "height": stats.aux_height,
-            } if profile == "uplifting_dual_v1" else None),
+            "aux_input": None,
+            **({
+                "detection": {
+                    "confidence_threshold": stats.confidence_threshold,
+                    "step": stats.step,
+                    "maximum_displacement_pixels": stats.maximum_displacement_pixels,
+                    "landing_region": "expanded_table",
+                },
+            } if profile == "blurball_v1" else {}),
         },
     }
     if table_analysis is None and choice["method"] == "precalibrated":

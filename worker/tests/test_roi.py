@@ -14,7 +14,6 @@ from ttcut_worker.roi import (
     AnalysisRoiConfig,
     AnalysisRoi,
     build_analysis_roi,
-    dual_model_dimensions,
     model_dimensions,
 )
 
@@ -47,26 +46,6 @@ def test_default_roi_model_dimensions_use_the_adopted_125_percent_scale():
     )
 
     assert model_dimensions(roi, 1920, 1080) == (280, 160)
-
-
-def test_dual_model_dimensions_use_roi_ratios_without_125_percent_scale():
-    roi = AnalysisRoi(
-        x0=0, y0=0, x1=1920, y1=1080,
-        projected_polygon=((0.0, 0.0),) * 4,
-        top_padding_pixels=0.0,
-        source_width=1920, source_height=1080,
-    )
-    assert dual_model_dimensions(roi, 1920, 1080) == ((960, 540), (768, 432))
-
-
-def test_dual_model_dimensions_align_up_and_keep_a_32_pixel_minimum():
-    roi = AnalysisRoi(
-        x0=2, y0=3, x1=103, y1=54,
-        projected_polygon=((0.0, 0.0),) * 4,
-        top_padding_pixels=0.0,
-        source_width=200, source_height=100,
-    )
-    assert dual_model_dimensions(roi, 200, 100) == ((52, 32), (48, 32))
 
 
 def test_analysis_roi_is_the_outer_bbox_and_extends_above_the_table():

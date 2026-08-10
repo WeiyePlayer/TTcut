@@ -157,10 +157,11 @@ def test_automatic_calibration_selects_two_coherent_samples():
 
 def valid_request():
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "task_id": "22222222-2222-4222-8222-222222222222",
         "video_path": "match.mp4",
         "device": "cpu",
+        "ball_model_profile": "tracknet_v1",
         "video_metadata": {
             "duration_seconds": 10.0,
             "fps": 30.0,
@@ -200,17 +201,21 @@ def test_worker_request_accepts_mov_video_path():
     assert validate_request(request) is request
 
 
-def test_worker_request_v2_requires_a_valid_ball_model_profile_and_cuda_for_dual():
+def test_worker_request_v2_accepts_tracknet_and_blurball_only():
     request = valid_request()
-    request.update(schema_version=2, device="cuda", ball_model_profile="uplifting_dual_v1")
+    request.update(schema_version=2, device="cpu", ball_model_profile="blurball_v1")
     assert validate_request(request) is request
-    request["device"] = "cpu"
+    request["device"] = "auto"
+    assert validate_request(request) is request
+    request["ball_model_profile"] = "tracknet_v1"
+    assert validate_request(request) is request
+    request["ball_model_profile"] = "uplifting_dual_v1"
     try:
         validate_request(request)
     except Exception as exc:
         assert "fields" in str(exc).lower()
     else:
-        raise AssertionError("dual-model v2 requests must reject CPU")
+        raise AssertionError("removed model profiles must be rejected")
 
 
 def test_worker_request_rejects_unrelated_video_container():
@@ -362,187 +367,53 @@ def test_worker_analysis_reuses_precalibrated_diagnostics_without_table_model(mo
     assert captured["loaded"] is not None
 
 
-def test_worker_v2_routes_dual_profile_and_preserves_bounce_rally_output(monkeypatch):
+def test_worker_v2_routes_blurball_profile_and_records_fixed_parameters(monkeypatch):
     request = valid_request()
-    request.update(schema_version=2, device="cuda", ball_model_profile="uplifting_dual_v1")
-    request["calibration_choice"]["calibration"] = {
-        "video_width": 1280,
-        "video_height": 720,
-        "points": {
-            "top_left": [0, 0], "top_right": [1279, 0],
-            "bottom_right": [1279, 719], "bottom_left": [0, 719],
-        },
-    }
+    request.update(schema_version=2, device="cpu", ball_model_profile="blurball_v1")
     captured = {}
 
-    class FakeDualPredictor:
-        def __init__(self, loaded, batch_size):
+    class FakeBlurBallPredictor:
+        def __init__(self, loaded):
             captured["loaded"] = loaded
-            captured["batch_size"] = batch_size
 
         def predict(self, video_path, progress_callback=None, analysis_roi=None):
             captured["roi"] = analysis_roi
-            values = [20, 40, 20, 42, 20, 44, 20]
-            points = [TrajectoryPoint(i, i * 0.1, 1, 640, y, "uplifting_dual") for i, y in enumerate(values)]
-            return points, VideoInfo(Path(video_path), 1280, 720, 10.0, 7, 7, 0.7), SimpleNamespace(
-                main_width=640, main_height=360, aux_width=512, aux_height=288,
+            points = [
+                TrajectoryPoint(i, i * 0.1, 1, 640, 360, "blurball", 1.0)
+                for i in range(6)
+            ]
+            return points, VideoInfo(Path(video_path), 1280, 720, 10.0, 6, 6, 0.6), SimpleNamespace(
+                model_width=512,
+                model_height=288,
+                confidence_threshold=0.7,
+                step=3,
+                maximum_displacement_pixels=100.0,
             )
 
     fake_loaded = SimpleNamespace(component_version="1.0.0")
-    monkeypatch.setenv("TTCUT_DUAL_BALL_MAIN_WEIGHTS", "main.pt")
-    monkeypatch.setenv("TTCUT_DUAL_BALL_AUX_WEIGHTS", "aux.pt")
-    monkeypatch.setattr("ttcut_worker.worker.load_dual_models", lambda main, aux, device: fake_loaded)
-    monkeypatch.setattr("ttcut_worker.worker.UpliftingDualPredictor", FakeDualPredictor)
+    monkeypatch.setenv("TTCUT_BLURBALL_WEIGHTS", "blurball.pt")
+    def fake_load_blurball(path, device):
+        captured["weight_path"] = path
+        captured["device"] = device
+        return fake_loaded
+
+    monkeypatch.setattr("ttcut_worker.worker.load_blurball", fake_load_blurball)
+    monkeypatch.setattr("ttcut_worker.worker.BlurBallPredictor", FakeBlurBallPredictor)
+    monkeypatch.setattr("ttcut_worker.worker.detect_blurball_bounce_frames", lambda points, calibration: [0, 5])
 
     result = analyze(request)
 
-    assert captured["batch_size"] == 2
+    assert captured["loaded"] is fake_loaded
+    assert captured["weight_path"] == "blurball.pt"
+    assert captured["device"] == "cpu"
     assert captured["roi"].source_width == 1280
-    assert result["model_provenance"] == {
-        "profile": "uplifting_dual_v1",
-        "component_version": "1.0.0",
-        "roi": {
-            "x": captured["roi"].x0, "y": captured["roi"].y0,
-            "width": captured["roi"].width, "height": captured["roi"].height,
-        },
-        "main_input": {"width": 640, "height": 360},
-        "aux_input": {"width": 512, "height": 288},
-    }
     assert result["rallies"][0]["bounce_count"] == 2
-
-
-def test_worker_dual_profile_counts_long_flat_bounce_peaks(monkeypatch):
-    request = valid_request()
-    request.update(schema_version=2, device="cuda", ball_model_profile="uplifting_dual_v1")
-    request["calibration_choice"]["calibration"] = {
-        "video_width": 1280,
-        "video_height": 720,
-        "points": {
-            "top_left": [0, 0], "top_right": [1279, 0],
-            "bottom_right": [1279, 719], "bottom_left": [0, 719],
-        },
+    assert result["model_provenance"]["profile"] == "blurball_v1"
+    assert result["model_provenance"]["main_input"] == {"width": 512, "height": 288}
+    assert result["model_provenance"]["aux_input"] is None
+    assert result["model_provenance"]["detection"] == {
+        "confidence_threshold": 0.7,
+        "step": 3,
+        "maximum_displacement_pixels": 100.0,
+        "landing_region": "expanded_table",
     }
-
-    class FlatPeakDualPredictor:
-        def __init__(self, loaded, batch_size):
-            del loaded, batch_size
-
-        def predict(self, video_path, progress_callback=None, analysis_roi=None):
-            del progress_callback, analysis_roi
-            values = [20, 40, 40, 40, 40, 40, 20, 20, 42, 42, 42, 42, 42, 20]
-            points = [
-                TrajectoryPoint(index, index * 0.1, 1, 640, y, "uplifting_dual")
-                for index, y in enumerate(values)
-            ]
-            return points, VideoInfo(
-                Path(video_path), 1280, 720, 10.0,
-                len(points), len(points), len(points) / 10.0,
-            ), SimpleNamespace(
-                main_width=640, main_height=360, aux_width=512, aux_height=288,
-            )
-
-    monkeypatch.setenv("TTCUT_DUAL_BALL_MAIN_WEIGHTS", "main.pt")
-    monkeypatch.setenv("TTCUT_DUAL_BALL_AUX_WEIGHTS", "aux.pt")
-    monkeypatch.setattr(
-        "ttcut_worker.worker.load_dual_models",
-        lambda main, aux, device: SimpleNamespace(component_version="1.0.0"),
-    )
-    monkeypatch.setattr("ttcut_worker.worker.UpliftingDualPredictor", FlatPeakDualPredictor)
-
-    result = analyze(request)
-
-    assert [rally["bounce_count"] for rally in result["rallies"]] == [2]
-
-
-def test_worker_dual_profile_bridges_a_short_gap_through_a_flat_bounce(monkeypatch):
-    request = valid_request()
-    request.update(schema_version=2, device="cuda", ball_model_profile="uplifting_dual_v1")
-    request["calibration_choice"]["calibration"] = {
-        "video_width": 1280,
-        "video_height": 720,
-        "points": {
-            "top_left": [0, 0], "top_right": [1279, 0],
-            "bottom_right": [1279, 719], "bottom_left": [0, 719],
-        },
-    }
-
-    class GappedDualPredictor:
-        def __init__(self, loaded, batch_size):
-            del loaded, batch_size
-
-        def predict(self, video_path, progress_callback=None, analysis_roi=None):
-            del progress_callback, analysis_roi
-            values = [20, 40, 40, None, 40, 40, 20, 20, 20, 42, 42, 42, 42, 42, 20]
-            points = [
-                TrajectoryPoint(
-                    index, index * 0.05, int(y is not None),
-                    640 if y is not None else 0, y or 0,
-                    "uplifting_dual" if y is not None else "missing",
-                )
-                for index, y in enumerate(values)
-            ]
-            return points, VideoInfo(
-                Path(video_path), 1280, 720, 20.0,
-                len(points), len(points), len(points) / 20.0,
-            ), SimpleNamespace(
-                main_width=640, main_height=360, aux_width=512, aux_height=288,
-            )
-
-    monkeypatch.setenv("TTCUT_DUAL_BALL_MAIN_WEIGHTS", "main.pt")
-    monkeypatch.setenv("TTCUT_DUAL_BALL_AUX_WEIGHTS", "aux.pt")
-    monkeypatch.setattr(
-        "ttcut_worker.worker.load_dual_models",
-        lambda main, aux, device: SimpleNamespace(component_version="1.0.0"),
-    )
-    monkeypatch.setattr("ttcut_worker.worker.UpliftingDualPredictor", GappedDualPredictor)
-
-    result = analyze(request)
-
-    assert [rally["bounce_count"] for rally in result["rallies"]] == [2]
-
-
-def test_worker_dual_profile_keeps_a_distinct_bounce_after_a_flat_peak(monkeypatch):
-    request = valid_request()
-    request.update(schema_version=2, device="cuda", ball_model_profile="uplifting_dual_v1")
-    request["calibration_choice"]["calibration"] = {
-        "video_width": 1280,
-        "video_height": 720,
-        "points": {
-            "top_left": [400, 100], "top_right": [879, 100],
-            "bottom_right": [879, 619], "bottom_left": [400, 619],
-        },
-    }
-
-    class FlatThenSharpDualPredictor:
-        def __init__(self, loaded, batch_size):
-            del loaded, batch_size
-
-        def predict(self, video_path, progress_callback=None, analysis_roi=None):
-            del progress_callback, analysis_roi
-            values = [20, *([40] * 7), *([20] * 13), 42, 20]
-            x_values = [640, 300, 400, 500, 600, 700, 800, 850, *([640] * 15)]
-            points = [
-                TrajectoryPoint(index, index / 60.0, 1, x_values[index], y, "uplifting_dual")
-                for index, y in enumerate(values)
-            ]
-            return points, VideoInfo(
-                Path(video_path), 1280, 720, 60.0,
-                len(points), len(points), len(points) / 60.0,
-            ), SimpleNamespace(
-                main_width=640, main_height=360, aux_width=512, aux_height=288,
-            )
-
-    monkeypatch.setenv("TTCUT_DUAL_BALL_MAIN_WEIGHTS", "main.pt")
-    monkeypatch.setenv("TTCUT_DUAL_BALL_AUX_WEIGHTS", "aux.pt")
-    monkeypatch.setattr(
-        "ttcut_worker.worker.load_dual_models",
-        lambda main, aux, device: SimpleNamespace(component_version="1.0.0"),
-    )
-    monkeypatch.setattr(
-        "ttcut_worker.worker.UpliftingDualPredictor",
-        FlatThenSharpDualPredictor,
-    )
-
-    result = analyze(request)
-
-    assert [rally["bounce_count"] for rally in result["rallies"]] == [2]

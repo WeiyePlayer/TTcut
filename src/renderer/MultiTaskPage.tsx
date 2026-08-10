@@ -103,7 +103,7 @@ export function MultiTaskPage({
   initialVideos,
   preRoll,
   postRoll,
-  ballModelProfile = 'tracknet_v1',
+  ballModelProfile = 'blurball_v1',
   language = 'zh-CN',
   onOpenAnalysis,
   onCompletableTasksFinished = () => undefined,
