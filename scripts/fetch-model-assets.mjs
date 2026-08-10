@@ -16,6 +16,12 @@ const assets = [
     sourceVariable: 'TTCUT_TABLE_ANALYZE_SOURCE',
     label: 'table analysis',
   },
+  {
+    target: path.join(modelRoot, 'blurball_best.pt'),
+    source: process.env.TTCUT_BLURBALL_SOURCE?.trim(),
+    sourceVariable: 'TTCUT_BLURBALL_SOURCE',
+    label: 'BlurBall',
+  },
 ];
 
 async function fileExists(filePath) {

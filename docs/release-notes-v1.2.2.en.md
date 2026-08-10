@@ -22,7 +22,7 @@
 
 - The release does not change selected intervals, output resolution, encoding quality, or normal output naming.
 - It does not relax A/V synchronization, timestamp, codec, resolution, or media-readability validation. A warning explicitly means that later processing reported an error, not that the file passed every validation step.
-- It does not change TrackNet, the optional dual-model profile, dynamic ROI, ball trajectories, bounce detection, rally grouping, or `bounce_count`.
+- It does not change the ball-recognition models of that release, dynamic ROI, ball trajectories, bounce detection, rally grouping, or `bounce_count`.
 
 ## Updates and signing
 

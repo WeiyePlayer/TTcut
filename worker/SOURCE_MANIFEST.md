@@ -14,6 +14,13 @@ Retained behavior:
 - `app/analysis/speed_analysis.py::group_rallies`: bounce-only grouping, extracted
   without speed or hit imports.
 
+The optional bundled BlurBall profile additionally carries the fixed 3-frame
+HRNet-style model structure, connected-component heatmap decoder, online
+100-pixel tracker, and local trajectory-change bounce detector adapted from the
+validated local `E:\BlurBall` checkout. TTcut still owns calibration, dynamic
+ROI construction, expanded-table filtering, minimum event spacing, and rally
+grouping.
+
 Automatic table calibration additionally retains the self-contained inference
 model and five-frame adapter supplied as the local `table_analyze` component:
 

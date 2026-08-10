@@ -30,15 +30,6 @@ describe('production component catalog', () => {
       part.url.includes('/analysis-3.12.13-2.12.1-cu132-r1/') && /^[a-f0-9]{64}$/.test(part.sha256)
     ))).toBe(true);
     expect(catalog).not.toHaveProperty('tracknet_weight');
-    expect(catalog.dual_ball_models).toMatchObject({
-      version: '1.0.0',
-      release_tag: 'dual-ball-models-1.0.0',
-      install_directory: 'dual-ball-models/1.0.0',
-    });
-    expect(catalog.dual_ball_models.assets).toEqual([
-      expect.objectContaining({ role: 'main', size_bytes: 99_091_962, sha256: 'f2e8b1050866a8bba540f731b379ee510a792f1af91996cb3bbc9cc0953f096e' }),
-      expect.objectContaining({ role: 'aux', size_bytes: 6_085_114, sha256: '73bfe091d22dcca40f2ab19671370bb0f4236b451041dcbe72e8feefdb8539a0' }),
-    ]);
     expect(catalog.ffmpeg).toMatchObject({
       variant: 'win64-lgpl-shared-8.1',
       install_directory: 'ffmpeg-8.1',
@@ -59,9 +50,7 @@ describe('production component catalog', () => {
     expect(setup.analysis_offer?.available_for_download).toBe(process.platform === 'win32');
     expect(setup.analysis_offer?.download_size_bytes).toBe(3_036_316_594);
     expect(setup.media_offer?.download_size_bytes).toBe(70_511_588);
-    expect(setup.dual_ball_models_offer).toMatchObject({
-      id: 'dual_ball_models', version: '1.0.0', download_size_bytes: 105_177_076,
-    });
+    expect(setup).not.toHaveProperty('dual_ball_models_offer');
     expect(setup.x264_manual_offer).toMatchObject({
       id: 'media-x264',
       filename: 'ffmpeg-N-125716-g1b1f602699-win64-gpl.zip',
