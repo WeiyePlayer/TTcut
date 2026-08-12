@@ -45,6 +45,24 @@ states for the current video. It survives cancellation of its own export but is
 discarded when returning to mode selection, changing video, or restarting.
 _Avoid_: History Record, project file
 
+## Rally Segment Video
+
+One independently exported MP4 for one selected Custom Rally Clip. It is a
+user-visible deliverable, not a temporary Fast Segmented Export file.
+_Avoid_: Fast Segmented Export, CutGroup
+
+## Custom Artifact Export
+
+A custom-cut export that produces Rally Segment Videos and/or Premiere XML
+instead of a combined video.
+_Avoid_: Compatible Export, Fast Segmented Export
+
+## Premiere XML
+
+A Final Cut Pro 7 XML v4 interchange file that references the source video and
+describes the selected Custom Rally Clips as a continuous editable timeline.
+_Avoid_: PR project file, `.prproj`, FCPXML
+
 ## Analysis Runtime
 
 The managed Python and PyTorch environment installed separately from the

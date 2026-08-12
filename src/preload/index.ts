@@ -36,6 +36,7 @@ const api: TTcutApi = {
     return () => ipcRenderer.removeListener(IPC.taskEvent, wrapped);
   },
   revealOutput: (path: string) => ipcRenderer.invoke(IPC.outputReveal, path),
+  openOutputDirectory: (path: string) => ipcRenderer.invoke(IPC.outputDirectoryOpen, path),
   revealLogs: () => ipcRenderer.invoke(IPC.logsReveal),
   openLicenses: () => ipcRenderer.invoke(IPC.licensesOpen),
   openExternalUrl: (url: string) => ipcRenderer.invoke(IPC.externalOpen, url),

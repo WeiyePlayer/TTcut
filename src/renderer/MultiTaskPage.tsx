@@ -391,14 +391,16 @@ export function MultiTaskPage({
       return;
     }
     if (event.type === 'export-result') {
+      const exportData = event.data;
+      if (!('outputPath' in exportData)) return;
       updateItem(active.itemId, (item) => ({
         ...item,
         processingStatus: 'done',
         progress: 100,
-        outputPath: event.data.outputPath,
-        outputMediaUrl: event.data.mediaUrl,
+        outputPath: exportData.outputPath,
+        outputMediaUrl: exportData.mediaUrl,
         recoveredOutputPath: null,
-        exportWarning: event.data.warning ?? null,
+        exportWarning: exportData.warning ?? null,
         error: null,
       }));
       finishActive();
@@ -671,8 +673,8 @@ export function MultiTaskPage({
           );
         })}
       </div>
-      <div className={`batch-launcher ${shutdownAfterCompletion ? 'shutdown-armed' : ''}`}>
-        <label className="batch-shutdown-option">
+      <div className={`batch-launcher floating-launcher ${shutdownAfterCompletion ? 'shutdown-armed' : ''}`}>
+        <label className="batch-shutdown-option floating-launch-options">
           <input
             type="checkbox"
             checked={shutdownAfterCompletion}
@@ -682,7 +684,7 @@ export function MultiTaskPage({
           <span>{text.shutdownAfterTask}</span>
         </label>
         <button
-          className="batch-start primary"
+          className="batch-start primary floating-launch-start"
           type="button"
           disabled={running || calibrationBusy || !canStart}
           onClick={start}

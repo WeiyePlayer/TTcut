@@ -23,6 +23,7 @@ export const IPC = {
   taskEvent: 'task:event',
   mediaRegister: 'media:register',
   outputReveal: 'output:reveal',
+  outputDirectoryOpen: 'output:directory-open',
   windowMinimize: 'window:minimize',
   windowToggleMaximize: 'window:toggle-maximize',
   windowClose: 'window:close',

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SelectedVideo } from '../shared/api';
-import type { AnalysisResultV1 } from '../shared/contracts';
+import type { AnalysisResultV1, ExportRequest } from '../shared/contracts';
 import { resizeCustomClip, setCustomClipSelected, type CustomRallyClip } from '../domain/custom-clips';
 import { formatTimestamp } from '../domain/time';
 import { CustomTimeline } from './CustomTimeline';
@@ -11,19 +11,23 @@ export function CustomCutPage({
   analysis,
   clips,
   translations,
-  canExport,
+  mediaAvailable,
   onClipsChange,
   onToggleAll,
+  outputs,
+  onOutputsChange,
   onExport,
 }: {
   video: SelectedVideo;
   analysis: AnalysisResultV1;
   clips: readonly CustomRallyClip[];
   translations: Messages;
-  canExport: boolean;
+  mediaAvailable: boolean;
   onClipsChange: (clips: CustomRallyClip[]) => void;
   onToggleAll: (selected: boolean) => void;
-  onExport: () => void;
+  outputs: NonNullable<ExportRequest['outputs']>;
+  onOutputsChange: (outputs: NonNullable<ExportRequest['outputs']>) => void;
+  onExport: (outputs: NonNullable<ExportRequest['outputs']>) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [currentTime, setCurrentTime] = useState(0);
@@ -150,7 +154,30 @@ export function CustomCutPage({
       </section>
       <div className="footer-actions custom-footer">
         <span>{selectedCount} / {clips.length}</span>
-        <button className="primary" type="button" disabled={!selectedCount || !canExport} onClick={onExport}>{translations.startCutting}</button>
+        <div className="custom-export-launcher floating-launcher">
+          <div className="custom-export-options floating-launch-options" role="group" aria-label={translations.customExportOptions}>
+            <label>
+              <input type="checkbox" checked={outputs.rally_videos} disabled={!mediaAvailable} onChange={(event) => onOutputsChange({ combined_video: false, rally_videos: event.currentTarget.checked, premiere_xml: outputs.premiere_xml })} />
+              <span>{translations.exportRallyVideos}</span>
+            </label>
+            <label>
+              <input type="checkbox" checked={outputs.premiere_xml} onChange={(event) => onOutputsChange({ combined_video: false, rally_videos: outputs.rally_videos, premiere_xml: event.currentTarget.checked })} />
+              <span>{translations.exportPremiereXml}</span>
+            </label>
+          </div>
+          <button
+            className="primary floating-launch-start"
+            type="button"
+            disabled={!selectedCount || (!outputs.premiere_xml && !outputs.rally_videos && !mediaAvailable)}
+            onClick={() => onExport({
+              combined_video: !outputs.rally_videos && !outputs.premiere_xml,
+              rally_videos: outputs.rally_videos,
+              premiere_xml: outputs.premiere_xml,
+            })}
+          >
+            {translations.startCutting}
+          </button>
+        </div>
       </div>
     </div>
   );

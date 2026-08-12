@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { AnalysisResultV1, AppSettings, Calibration, CutSelectionV1, ExportResult, HistorySummaryV1, UpdateState, VideoMetadata } from '../shared/contracts';
+import type { AnalysisResultV1, AppSettings, Calibration, CutSelectionV1, ExportRequest, ExportResult, HistorySummaryV1, UpdateState, VideoMetadata } from '../shared/contracts';
 import type { AppEvent, BootstrapData, PendingComponentImport, SelectedVideo } from '../shared/api';
 import { DONATION_URL, GITHUB_URL, RELEASES_URL, WEBSITE_URL } from '../shared/urls';
 import { formatTimestamp } from '../domain/time';
@@ -69,6 +69,11 @@ export function App() {
   const [mode, setMode] = useState<'all' | 'highlight' | 'custom'>('all');
   const [threshold, setThreshold] = useState<3 | 5 | 7>(5);
   const [customDraft, setCustomDraft] = useState<CustomRallyClip[] | null>(null);
+  const [customOutputs, setCustomOutputs] = useState<NonNullable<ExportRequest['outputs']>>({
+    combined_video: true,
+    rally_videos: false,
+    premiere_xml: false,
+  });
   const [progress, setProgress] = useState({ percent: 0, stage: 'probe' });
   const [activeTask, setActiveTask] = useState<string | null>(null);
   const [videoTaskOwner, setVideoTaskOwnerState] = useState<VideoTaskOwner>(null);
@@ -218,7 +223,7 @@ export function App() {
 
   const reset = useCallback(() => {
     setStep('select'); setVideo(null); setMetadata(null); setPoints({}); setAnalysis(null); setAnalysisId(null); setForceManual(false);
-    setMode('all'); setThreshold(5); setCustomDraft(null); setProgress({ percent: 0, stage: 'probe' });
+    setMode('all'); setThreshold(5); setCustomDraft(null); setCustomOutputs({ combined_video: true, rally_videos: false, premiere_xml: false }); setProgress({ percent: 0, stage: 'probe' });
     setActiveTask(null); setExportResult(null); setError(null);
     if (videoTaskOwnerRef.current === 'single') updateVideoTaskOwner(null);
   }, [updateVideoTaskOwner]);
@@ -269,6 +274,7 @@ export function App() {
       analysis.video.duration_seconds,
       analysis.video.fps,
     ));
+    setCustomOutputs({ combined_video: true, rally_videos: false, premiere_xml: false });
     setStep('custom');
   };
 
@@ -290,8 +296,9 @@ export function App() {
     }
   };
 
-  const startCutting = async (preparedSelection?: CutSelectionV1) => {
-    if (!analysis || !analysisId || !platformSupported || !bootstrap?.components.media.available) return;
+  const startCutting = async (preparedSelection?: CutSelectionV1, outputs?: ExportRequest['outputs']) => {
+    const mediaRequired = (outputs?.combined_video ?? true) || outputs?.rally_videos === true;
+    if (!analysis || !analysisId || !platformSupported || (mediaRequired && !bootstrap?.components.media.available)) return;
     if (!preparedSelection && selectedCount === 0) return;
     let selection: CutSelectionV1;
     const common = { pre_roll_seconds: settings.pre_roll_seconds, post_roll_seconds: settings.post_roll_seconds } as const;
@@ -308,6 +315,7 @@ export function App() {
         analysis_id: analysisId,
         selection,
         destination: 'source',
+        ...(outputs ? { outputs } : {}),
       }));
     } catch (caught) {
       if (videoTaskOwnerRef.current === 'single') updateVideoTaskOwner(null);
@@ -362,6 +370,7 @@ export function App() {
       setMode('all');
       setThreshold(5);
       setCustomDraft(null);
+      setCustomOutputs({ combined_video: true, rally_videos: false, premiere_xml: false });
       setExportResult(null);
       setError(null);
       setStep('mode');
@@ -514,6 +523,7 @@ export function App() {
   const returnToSelection = () => {
     if (view === 'auto' && step === 'custom') {
       setCustomDraft(null);
+      setCustomOutputs({ combined_video: true, rally_videos: false, premiere_xml: false });
       setMode('all');
       setStep('mode');
       return;
@@ -759,7 +769,9 @@ export function App() {
                 analysis={analysis}
                 clips={customDraft}
                 translations={t}
-                canExport={Boolean(platformSupported && bootstrap?.components.media.available)}
+                mediaAvailable={Boolean(platformSupported && bootstrap?.components.media.available)}
+                outputs={customOutputs}
+                onOutputsChange={setCustomOutputs}
                 onClipsChange={setCustomDraft}
                 onToggleAll={(selected) => {
                   if (!selected) {
@@ -777,11 +789,27 @@ export function App() {
                     current,
                   ) ?? null);
                 }}
-                onExport={() => void startCutting({ mode: 'custom', segments: customExportSegments(customDraft) })}
+                onExport={(outputs) => void startCutting({ mode: 'custom', segments: customExportSegments(customDraft) }, outputs)}
               />
             )}
 
-            {step === 'complete' && exportResult && (
+            {step === 'complete' && exportResult && exportResult.kind === 'custom-artifacts' && (
+              <div className="workflow-page success-page">
+                <div className="success-heading"><span>✓</span><div><p className="eyebrow">4 / 4</p><h1>{t.exportComplete}</h1></div></div>
+                <div className="card output-details custom-artifact-details">
+                  <div><span>{t.outputPath}</span><strong>{exportResult.outputDirectory}</strong></div>
+                  <div><span>{t.exportRallyVideos}</span><strong>{interpolate(t.exportedRallyVideos, { count: exportResult.rallyVideos.length })}</strong></div>
+                  <div><span>{t.exportPremiereXml}</span><strong>{exportResult.premiereXml ? t.exported : t.notExported}</strong></div>
+                </div>
+                {exportResult.partialSuccess && <div className="notice" role="status"><span>{t.partialExportNotice}</span></div>}
+                {exportResult.premiereXml?.quantizedForVfr && <div className="notice" role="status"><span>{t.xmlVfrNotice}</span></div>}
+                {exportResult.failedRallies.length > 0 && <div className="notice" role="status"><span>{interpolate(t.rallyExportFailures, { count: exportResult.failedRallies.length })} {interpolate(t.failedRallyDetails, { rallies: exportResult.failedRallies.map((failure) => failure.rallyIndex === undefined ? failure.rallyId ?? '?' : String(failure.rallyIndex)).join(', ') })}</span></div>}
+                {exportResult.xmlFailure && <div className="notice" role="status"><span>{t.xmlExportFailed}</span></div>}
+                <div className="footer-actions"><button className="secondary" onClick={() => void window.ttcut.openOutputDirectory(exportResult.outputDirectory)}>{t.openFolder}</button><button className="primary" onClick={reset}>{t.cutAnother}</button></div>
+              </div>
+            )}
+
+            {step === 'complete' && exportResult && exportResult.kind !== 'custom-artifacts' && (
               <div className="workflow-page success-page">
                 <div className="success-heading"><span>✓</span><div><p className="eyebrow">4 / 4</p><h1>{t.exportComplete}</h1></div></div>
                 {Math.abs(exportResult.timing.driftSeconds) > 0.1 && (

@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  clipEdgeHitWidth,
   chooseTimelineInterval,
   formatResizeDelta,
   formatTimelineLabel,
+  shouldShowClipBoundaryMarkers,
   timelineWheelDelta,
   timelineWheelScroll,
 } from '../src/renderer/CustomTimeline';
@@ -45,5 +47,18 @@ describe('custom timeline ruler', () => {
     expect(timelineWheelScroll(300, 100, 400, 0, 20, 0)).toEqual({
       nextScroll: 300, shouldPreventDefault: false,
     });
+  });
+});
+
+describe('custom timeline clip boundaries', () => {
+  it('keeps the two pointer hit areas separate even for a one-pixel clip', () => {
+    expect(clipEdgeHitWidth(1)).toBe(8.5);
+    expect(clipEdgeHitWidth(8)).toBe(12);
+    expect(clipEdgeHitWidth(100)).toBe(12);
+  });
+
+  it('only shows boundary markers when the clip has enough visual room', () => {
+    expect(shouldShowClipBoundaryMarkers(23.99)).toBe(false);
+    expect(shouldShowClipBoundaryMarkers(24)).toBe(true);
   });
 });
