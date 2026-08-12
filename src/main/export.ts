@@ -5,6 +5,8 @@ import { dialog, type BrowserWindow } from 'electron';
 import type { AppEvent } from '../shared/api';
 import {
   exportRequestSchema,
+  type CustomArtifactFailure,
+  type CustomArtifactExportResult,
   type CutGroup,
   type ExportRequest,
   type ExportTimingInfo,
@@ -17,7 +19,13 @@ import {
   type ExportTimingAssessment,
 } from '../domain/export-duration';
 import { createCutGroups } from '../domain/segments';
-import { InvalidCustomSegmentsError, validateAndBuildCustomCutGroups } from '../domain/custom-clips';
+import {
+  InvalidCustomSegmentsError,
+  validateAndBuildCustomCutGroups,
+  validateCustomExportSegments,
+  type ValidatedCustomExportSegment,
+} from '../domain/custom-clips';
+import { buildPremiereXml } from '../domain/premiere-xml';
 import { normalizedVideoRotation } from '../domain/video-input';
 import { resolveUsableMediaComponents, type MediaEncoder } from './components';
 import { logLine } from './logger';
@@ -172,6 +180,39 @@ async function chooseOutput(window: BrowserWindow, input: string, request: Expor
   });
   if (result.canceled || !result.filePath) throw new Error('EXPORT_CANCELLED');
   return path.extname(result.filePath).toLowerCase() === '.mp4' ? result.filePath : `${result.filePath}.mp4`;
+}
+
+async function createCustomArtifactDirectory(input: string): Promise<string> {
+  const directory = path.dirname(input);
+  const base = path.basename(input, path.extname(input));
+  let suffix = 1;
+  while (true) {
+    const name = suffix === 1 ? `${base}_TTcut_自定义` : `${base}_TTcut_自定义_${suffix}`;
+    const candidate = path.join(directory, name);
+    try {
+      await mkdir(candidate);
+      return candidate;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+        suffix += 1;
+        continue;
+      }
+      throw new Error('OUTPUT_DIRECTORY_UNWRITABLE');
+    }
+  }
+}
+
+function customArtifactOutputs(request: ExportRequest): {
+  combinedVideo: boolean;
+  rallyVideos: boolean;
+  premiereXml: boolean;
+} {
+  const outputs = request.outputs;
+  return {
+    combinedVideo: outputs?.combined_video ?? true,
+    rallyVideos: outputs?.rally_videos ?? false,
+    premiereXml: outputs?.premiere_xml ?? false,
+  };
 }
 
 async function assertExportPreconditions(
@@ -826,10 +867,181 @@ async function executeExport(
   }
 }
 
+function artifactFailure(
+  error: unknown,
+  fallbackCode: string,
+  segment?: ValidatedCustomExportSegment,
+): CustomArtifactFailure {
+  return {
+    ...(segment ? { rallyId: segment.rallyId, rallyIndex: segment.rallyIndex } : {}),
+    code: exportCode(error) ?? fallbackCode,
+    message: error instanceof Error ? error.message : String(error),
+  };
+}
+
+async function executeCustomArtifactExport(
+  window: BrowserWindow,
+  taskId: string,
+  record: Awaited<ReturnType<ReturnType<typeof getHistoryStore>['open']>>,
+  outputs: { rallyVideos: boolean; premiereXml: boolean },
+  segments: readonly ValidatedCustomExportSegment[],
+  outputDirectory: string,
+  components: { ffmpeg: string; ffprobe: string; mediaEncoder: MediaEncoder } | null,
+): Promise<void> {
+  const analysis = record.analysis;
+  let terminalEvent: Extract<AppEvent, { type: 'export-result' | 'error' }> | null = null;
+  const rallyVideos: CustomArtifactExportResult['rallyVideos'] = [];
+  const failedRallies: CustomArtifactFailure[] = [];
+  let premiereXml: CustomArtifactExportResult['premiereXml'] = null;
+  let xmlFailure: CustomArtifactFailure | null = null;
+  const sendError = (code: string, message: string) => {
+    if (!terminalEvent && markTaskTerminal(taskId)) terminalEvent = { type: 'error', taskId, code, message };
+  };
+  try {
+    const source = await stat(analysis.video.path).catch(() => null);
+    if (!source?.isFile() || source.size <= 0) throw new Error('INPUT_MOVED');
+    const signal = getTaskController(taskId)?.signal;
+    send(window, { type: 'progress', data: { taskId, kind: 'export', stage: 'preparing-artifacts', percent: 0, current: 0, total: segments.length } });
+
+    if (outputs.premiereXml) {
+      let partialPath: string | null = null;
+      try {
+        assertExportNotCancelled(taskId);
+        send(window, { type: 'progress', data: { taskId, kind: 'export', stage: 'writing-xml', percent: 2, current: 0, total: segments.length } });
+        const base = path.basename(analysis.video.path, path.extname(analysis.video.path));
+        const finalPath = path.join(outputDirectory, `${base}_TTcut_自定义.xml`);
+        partialPath = path.join(outputDirectory, `.${base}_TTcut_自定义.${taskId}.partial.xml`);
+        const generated = buildPremiereXml(analysis.video, segments, `${base}_TTcut_自定义`);
+        await writeFile(partialPath, generated.xml, 'utf8');
+        assertExportNotCancelled(taskId);
+        await rename(partialPath, finalPath);
+        premiereXml = { outputPath: finalPath, quantizedForVfr: generated.quantizedForVfr };
+        await logLine(taskId, 'INFO', `Premiere XML written: ${finalPath}`);
+      } catch (error) {
+        assertExportNotCancelled(taskId);
+        if (partialPath) await rm(partialPath, { force: true }).catch(() => undefined);
+        xmlFailure = artifactFailure(error, 'PREMIERE_XML_FAILED');
+        await logLine(taskId, 'ERROR', `Premiere XML failed: ${xmlFailure.message}`);
+      }
+    }
+
+    if (outputs.rallyVideos) {
+      if (!components) {
+        for (const segment of segments) {
+          failedRallies.push({
+            rallyId: segment.rallyId,
+            rallyIndex: segment.rallyIndex,
+            code: 'MEDIA_COMPONENT_MISSING',
+            message: 'MEDIA_COMPONENT_MISSING',
+          });
+        }
+      }
+      if (!components) {
+        await logLine(taskId, 'ERROR', 'Rally segment export skipped: MEDIA_COMPONENT_MISSING');
+      } else {
+      const totalDuration = segments.reduce((total, segment) => total + segment.end - segment.start, 0);
+      let keyframes: number[] | null = null;
+      try {
+        await assertExportPreconditions(
+          analysis.video.path,
+          outputDirectory,
+          taskId,
+          totalDuration,
+          analysis.video,
+          components.mediaEncoder,
+        );
+        keyframes = await probeExportKeyframes(taskId, analysis.video.path, components.ffprobe, signal);
+      } catch (error) {
+        if (exportCode(error) === 'EXPORT_CANCELLED' || getTaskController(taskId)?.cancelRequested) throw error;
+        for (const segment of segments) failedRallies.push(artifactFailure(error, 'EXPORT_SEGMENT_FAILED', segment));
+        await logLine(taskId, 'ERROR', `Rally segment preparation failed: ${String(error)}`);
+      }
+      if (keyframes) for (const [offset, segment] of segments.entries()) {
+        assertExportNotCancelled(taskId);
+        const position = offset + 1;
+        const filename = `${String(position).padStart(3, '0')}_回合${String(segment.rallyIndex).padStart(3, '0')}.mp4`;
+        const finalPath = path.join(outputDirectory, filename);
+        const partialPath = path.join(outputDirectory, `.${filename}.${taskId}.partial.mp4`);
+        const percent = 5 + Math.round((offset / segments.length) * 90);
+        send(window, { type: 'progress', data: { taskId, kind: 'export', stage: 'exporting-rallies', percent, current: position, total: segments.length } });
+        try {
+          const seekStart = selectSeekStart(segment.start, keyframes);
+          await runFfmpeg(
+            window,
+            taskId,
+            components.ffmpeg,
+            buildSegmentReencodeArgs(
+              analysis.video.path,
+              partialPath,
+              segment,
+              seekStart,
+              analysis.video,
+              components.mediaEncoder,
+            ),
+            Math.max(0.001, segment.end - segment.start),
+            'exporting-rallies',
+            { segmentIndex: position, seekStart },
+          );
+          const validation = await validateExportOutput(
+            partialPath,
+            { targetSeconds: segment.end - segment.start, segmentCount: 1 },
+            analysis.video,
+            'normalized',
+            signal,
+          );
+          await logExportTiming(taskId, `Rally segment ${position} timing`, validation.timing, analysis.video);
+          assertExportNotCancelled(taskId);
+          await rename(partialPath, finalPath);
+          rallyVideos.push({ rallyId: segment.rallyId, rallyIndex: segment.rallyIndex, outputPath: finalPath });
+        } catch (error) {
+          if (exportCode(error) === 'EXPORT_CANCELLED' || getTaskController(taskId)?.cancelRequested) throw error;
+          const failure = artifactFailure(error, 'EXPORT_SEGMENT_FAILED', segment);
+          failedRallies.push(failure);
+          await rm(partialPath, { force: true }).catch(() => undefined);
+          await logLine(taskId, 'ERROR', `Rally segment ${position} failed: ${failure.message}`);
+        }
+      }
+      }
+    }
+
+    assertExportNotCancelled(taskId);
+    if (!rallyVideos.length && !premiereXml) throw new Error('CUSTOM_ARTIFACT_EXPORT_FAILED');
+    const result: CustomArtifactExportResult = {
+      kind: 'custom-artifacts',
+      taskId,
+      analysisId: record.id,
+      outputDirectory,
+      partialSuccess: (rallyVideos.length > 0 || premiereXml !== null)
+        && (failedRallies.length > 0 || xmlFailure !== null),
+      rallyVideos,
+      failedRallies,
+      premiereXml,
+      xmlFailure,
+    };
+    send(window, { type: 'progress', data: { taskId, kind: 'export', stage: 'complete', percent: 100, current: segments.length, total: segments.length } });
+    if (markTaskTerminal(taskId)) terminalEvent = { type: 'export-result', taskId, data: result };
+  } catch (error) {
+    const controller = getTaskController(taskId);
+    const code = controller?.cancelRequested ? 'EXPORT_CANCELLED' : exportCode(error) ?? (error instanceof Error && error.message === 'CUSTOM_ARTIFACT_EXPORT_FAILED' ? error.message : 'EXPORT_FAILED');
+    const message = controller?.cancelRequested ? 'EXPORT_CANCELLED' : error instanceof Error ? error.message : String(error);
+    await rm(outputDirectory, { recursive: true, force: true }).catch(() => undefined);
+    if (!(code === 'EXPORT_CANCELLED' && controller?.cancelReason === 'app-exit')) sendError(code, message);
+    else markTaskTerminal(taskId);
+  } finally {
+    lastExportProgress.delete(taskId);
+    endTrackedTask(taskId);
+    if (terminalEvent) send(window, terminalEvent);
+  }
+}
+
 export async function startExport(window: BrowserWindow, rawRequest: ExportRequest): Promise<string> {
   const parsedRequest = exportRequestSchema.safeParse(rawRequest);
   if (!parsedRequest.success) {
-    if ((rawRequest as { selection?: { mode?: unknown } })?.selection?.mode === 'custom') {
+    const candidate = rawRequest as { selection?: { mode?: unknown }; outputs?: unknown };
+    if (candidate.outputs !== undefined) {
+      throw new Error('INVALID_EXPORT_OUTPUTS');
+    }
+    if (candidate.selection?.mode === 'custom') {
       throw new InvalidCustomSegmentsError();
     }
     throw parsedRequest.error;
@@ -839,29 +1051,70 @@ export async function startExport(window: BrowserWindow, rawRequest: ExportReque
   const record = await getHistoryStore().open(request.analysis_id);
   const analysis = record.analysis;
   if (hasActiveTasks()) throw new Error('TASK_BUSY');
+  const outputs = customArtifactOutputs(request);
+  const artifactExport = outputs.rallyVideos || outputs.premiereXml;
+  const customSegments = selection.mode === 'custom'
+    ? validateCustomExportSegments(analysis, selection.segments)
+    : null;
   const groups = selection.mode === 'custom'
     ? validateAndBuildCustomCutGroups(analysis, selection.segments)
     : [...createCutGroups(analysis, selection)].sort((left, right) => left.start - right.start);
   if (!groups.length) throw new Error('NO_RALLIES');
-  const components = await resolveUsableMediaComponents();
-  if (!components.ffmpeg || !components.ffprobe || components.mediaEncoder === 'unavailable') throw new Error('MEDIA_COMPONENT_MISSING');
+  if (artifactExport && (!customSegments || outputs.combinedVideo)) throw new Error('INVALID_EXPORT_OUTPUTS');
+  const needsMedia = outputs.combinedVideo || outputs.rallyVideos;
+  const components = needsMedia ? await resolveUsableMediaComponents() : null;
+  const mediaAvailable = Boolean(components?.ffmpeg && components.ffprobe && components.mediaEncoder !== 'unavailable');
+  if (outputs.combinedVideo && !mediaAvailable) throw new Error('MEDIA_COMPONENT_MISSING');
+  if (outputs.rallyVideos && !outputs.premiereXml && !mediaAvailable) throw new Error('MEDIA_COMPONENT_MISSING');
   const taskId = randomUUID();
+  if (artifactExport) {
+    const outputDirectory = await createCustomArtifactDirectory(analysis.video.path);
+    let taskTracked = false;
+    try {
+      beginTrackedTask(taskId);
+      taskTracked = true;
+      void executeCustomArtifactExport(
+        window,
+        taskId,
+        record,
+        { rallyVideos: outputs.rallyVideos, premiereXml: outputs.premiereXml },
+        customSegments!,
+        outputDirectory,
+        mediaAvailable && components?.ffmpeg && components.ffprobe && components.mediaEncoder !== 'unavailable'
+          ? { ffmpeg: components.ffmpeg, ffprobe: components.ffprobe, mediaEncoder: components.mediaEncoder }
+          : null,
+      );
+      return taskId;
+    } catch (error) {
+      await rm(outputDirectory, { recursive: true, force: true }).catch(() => undefined);
+      if (taskTracked) endTrackedTask(taskId);
+      throw error;
+    }
+  }
+  if (!components?.ffmpeg || !components.ffprobe || components.mediaEncoder === 'unavailable') {
+    throw new Error('MEDIA_COMPONENT_MISSING');
+  }
+  const mediaComponents = {
+    ffmpeg: components.ffmpeg,
+    ffprobe: components.ffprobe,
+    mediaEncoder: components.mediaEncoder,
+  };
   const output = await chooseOutput(window, analysis.video.path, request);
   const partial = path.join(path.dirname(output), `.${path.basename(output, '.mp4')}.${taskId}.partial.mp4`);
   const duration = expectedOutputDuration(groups);
   beginTrackedTask(taskId);
   try {
-    await assertExportPreconditions(analysis.video.path, path.dirname(output), taskId, duration, analysis.video, components.mediaEncoder);
+    await assertExportPreconditions(analysis.video.path, path.dirname(output), taskId, duration, analysis.video, mediaComponents.mediaEncoder);
     send(window, { type: 'progress', data: { taskId, kind: 'export', stage: 'preparing', percent: 0 } });
     await logLine(taskId, 'INFO', `Export target: ${output}`);
     await logLine(taskId, 'INFO', 'Export strategy: fast segmented');
-    await logLine(taskId, 'INFO', `Active media encoder: ${components.mediaEncoder}`);
+    await logLine(taskId, 'INFO', `Active media encoder: ${mediaComponents.mediaEncoder}`);
     void executeExport(
       window,
       taskId,
       request,
       record,
-      { ffmpeg: components.ffmpeg!, ffprobe: components.ffprobe!, mediaEncoder: components.mediaEncoder },
+      mediaComponents,
       groups,
       output,
       partial,

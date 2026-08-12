@@ -311,7 +311,24 @@ export const exportRequestSchema = z.object({
   selection: cutSelectionSchema,
   destination: z.enum(['prompt', 'source']),
   mode_label: z.string().min(1).optional(),
-}).strict();
+  outputs: z.object({
+    combined_video: z.boolean(),
+    rally_videos: z.boolean(),
+    premiere_xml: z.boolean(),
+  }).strict().optional(),
+}).strict().superRefine((request, context) => {
+  const outputs = request.outputs;
+  if (!outputs) return;
+  if (!outputs.combined_video && !outputs.rally_videos && !outputs.premiere_xml) {
+    context.addIssue({ code: 'custom', message: 'At least one export output is required', path: ['outputs'] });
+  }
+  if (outputs.combined_video && (outputs.rally_videos || outputs.premiere_xml)) {
+    context.addIssue({ code: 'custom', message: 'Combined video cannot be requested with custom artifacts', path: ['outputs'] });
+  }
+  if (request.selection.mode !== 'custom' && (!outputs.combined_video || outputs.rally_videos || outputs.premiere_xml)) {
+    context.addIssue({ code: 'custom', message: 'Custom artifacts require custom selection', path: ['outputs'] });
+  }
+});
 
 export const updateStateSchema = z.object({
   status: z.enum(['idle', 'unsupported', 'checking', 'available', 'downloaded', 'up-to-date', 'error']),
@@ -427,7 +444,8 @@ export type ExportWarning = {
   message: string;
 };
 
-export type ExportResult = {
+export type CombinedVideoExportResult = {
+  kind?: 'combined-video';
   taskId: string;
   analysisId: string;
   outputPath: string;
@@ -436,3 +454,31 @@ export type ExportResult = {
   timing: ExportTimingInfo;
   warning?: ExportWarning;
 };
+
+export type CustomArtifactFailure = {
+  rallyId?: string;
+  rallyIndex?: number;
+  code: string;
+  message: string;
+};
+
+export type CustomArtifactExportResult = {
+  kind: 'custom-artifacts';
+  taskId: string;
+  analysisId: string;
+  outputDirectory: string;
+  partialSuccess: boolean;
+  rallyVideos: Array<{
+    rallyId: string;
+    rallyIndex: number;
+    outputPath: string;
+  }>;
+  failedRallies: CustomArtifactFailure[];
+  premiereXml: {
+    outputPath: string;
+    quantizedForVfr: boolean;
+  } | null;
+  xmlFailure: CustomArtifactFailure | null;
+};
+
+export type ExportResult = CombinedVideoExportResult | CustomArtifactExportResult;

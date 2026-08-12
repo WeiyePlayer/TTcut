@@ -6,10 +6,11 @@ import {
   resizeCustomClip,
   setCustomClipSelected,
   validateAndBuildCustomCutGroups,
+  validateCustomExportSegments,
   type CustomExportSegment,
 } from '../src/domain/custom-clips';
 import type { AnalysisResultV1, Rally } from '../src/shared/contracts';
-import { cutSelectionSchema } from '../src/shared/contracts';
+import { cutSelectionSchema, exportRequestSchema } from '../src/shared/contracts';
 
 function rally(id: string, index: number, start: number, end: number): Rally {
   return { id, index, bounce_count: index + 2, start_time_seconds: start, end_time_seconds: end };
@@ -90,6 +91,42 @@ describe('custom export validation', () => {
     ])).toEqual([{
       rallyIds: ['rally_001', 'rally_002'], rawStart: 8, rawEnd: 20, start: 8, end: 20,
     }]);
+  });
+
+  it('validates custom artifact output combinations without changing legacy requests', () => {
+    const base = {
+      analysis_id: '11111111-1111-4111-8111-111111111111',
+      selection: { mode: 'custom' as const, segments: [{ rally_id: 'rally_001', start_time_seconds: 8, end_time_seconds: 14 }] },
+      destination: 'source' as const,
+    };
+    expect(exportRequestSchema.safeParse(base).success).toBe(true);
+    expect(exportRequestSchema.safeParse({
+      ...base,
+      outputs: { combined_video: false, rally_videos: true, premiere_xml: true },
+    }).success).toBe(true);
+    expect(exportRequestSchema.safeParse({
+      ...base,
+      outputs: { combined_video: true, rally_videos: true, premiere_xml: false },
+    }).success).toBe(false);
+    expect(exportRequestSchema.safeParse({
+      ...base,
+      outputs: { combined_video: false, rally_videos: false, premiere_xml: false },
+    }).success).toBe(false);
+    expect(exportRequestSchema.safeParse({
+      ...base,
+      selection: { mode: 'all', pre_roll_seconds: 2.5, post_roll_seconds: 2 },
+      outputs: { combined_video: false, rally_videos: false, premiere_xml: true },
+    }).success).toBe(false);
+  });
+
+  it('keeps touching ranges separate for per-rally artifact exports', () => {
+    expect(validateCustomExportSegments(analysis(), [
+      { rally_id: 'rally_001', start_time_seconds: 8, end_time_seconds: 14 },
+      { rally_id: 'rally_002', start_time_seconds: 14, end_time_seconds: 20 },
+    ])).toMatchObject([
+      { rallyId: 'rally_001', rallyIndex: 1, start: 8, end: 14 },
+      { rallyId: 'rally_002', rallyIndex: 2, start: 14, end: 20 },
+    ]);
   });
 
   const invalidSegments: CustomExportSegment[][] = [

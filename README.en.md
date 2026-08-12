@@ -1,20 +1,32 @@
 # TTcut
 
+<p align="center"><img src="public/ttcut-icon.png" alt="TTcut icon" width="160"></p>
+
 [简体中文](README.md) | **English**
 
 TTcut is a local automatic table-tennis video cutter for players and enthusiasts. It locates the ball, detects bounce events and valid rallies, then exports edited clips using the selected cutting mode.
 
 Videos, analysis results, and history stay on the local computer. TTcut requires no account, uploads no video, and collects no telemetry. BlurBall (the default), TrackNet, and table-recognition weights are all included in the installer and require no separate model download. The analysis runtime and media-processing components require an internet connection during initial setup; after installation, analysis, preview, and cutting can run offline.
 
-> The current stable release is `v1.2.5` for Windows x64. TTcut no longer blocks startup according to a Windows build-number allowlist.
+> The current stable release is `v1.2.6` for Windows x64. TTcut no longer blocks startup according to a Windows build-number allowlist.
 
 ## Download and installation
 
-1. Download `TTcut-1.2.5-x64-Setup.exe` from the [TTcut v1.2.5 Release](https://github.com/WeiyePlayer/TTcut/releases/tag/v1.2.5).
+1. Download `TTcut-1.2.6-x64-Setup.exe` from the [TTcut v1.2.6 Release](https://github.com/WeiyePlayer/TTcut/releases/tag/v1.2.6).
 2. Run the installer, choose the installation root, and decide whether to create a desktop shortcut. Application files are written under `<root>\app`; large runtimes, downloads, and import staging are stored under `<root>\data\components`. A Start menu shortcut is always created.
 3. On first launch, open Settings and install the Analysis component and Video processing component after reviewing the prompts.
 
 The Analysis component detects an NVIDIA GPU automatically and falls back to CPU if CUDA installation or self-test fails. The Video processing component reads media information, cuts and joins segments, and validates exported files.
+
+## What's new in v1.2.6
+
+- Custom mode can export each selected rally as an independent MP4 while retaining the combined MP4 as the default.
+- Generate Premiere Pro-importable FCP7 `xmeml` v4 XML with an original-media reference and editable in/out points; mono and stereo source media are linked using the source channel layout.
+- Rally videos and Premiere XML can be enabled independently or together. Outputs use collision-safe per-run directories, cancellation cleans up temporary artifacts, and partial-success results are reported.
+- Improved timeline edge dragging for short clips and synchronized TTcut branding assets across the app, installer, and website.
+- Retained v1.2.5’s bundled BlurBall default, selectable TrackNet model, and batch-task stability fixes.
+
+See the [v1.2.6 release notes](docs/release-notes-v1.2.6.en.md) for the complete details.
 
 ## What's new in v1.2.5
 
@@ -46,13 +58,13 @@ The analysis page reports real processing progress. A running task can be cancel
 
 - **All rallies**: export every valid rally.
 - **Highlights**: retain rallies whose bounce-based count exceeds the selected threshold of 3, 5, or 7.
-- **Custom**: open the dedicated timeline to select rallies individually, preview each clip, and adjust its start and end boundaries.
+- **Custom**: open the dedicated timeline to select rallies individually, preview each clip, and adjust its start and end boundaries. Export can also create independent MP4 files per rally or a Premiere-importable FCP7 XML; both outputs can be enabled together.
 
 ![Choose a cutting mode](docs/images/cutting-modes.png)
 
 ### 4. Set boundaries and export
 
-For All rallies and Highlights, choose pre-roll and post-roll durations in Settings. Custom mode lets you adjust each clip's start and end directly on its dedicated timeline before exporting. Results are stored beside the source video:
+For All rallies and Highlights, choose pre-roll and post-roll durations in Settings. Custom mode lets you adjust each clip's start and end directly on its dedicated timeline before exporting. Custom export can retain the combined MP4 and optionally create one MP4 per rally and a Premiere-importable FCP7 XML. Results are stored beside the source video:
 
 - `match.mp4` or `match.mov` becomes `match_ttcut.mp4`.
 - Existing names are preserved; TTcut uses `match_ttcut_2.mp4`, `match_ttcut_3.mp4`, and so on.
