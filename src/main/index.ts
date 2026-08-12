@@ -245,6 +245,16 @@ function registerIpc(): void {
     }
     shell.showItemInFolder(path.resolve(value));
   });
+  ipcMain.handle(IPC.outputDirectoryOpen, async (_event, value: unknown) => {
+    if (typeof value !== 'string') throw new Error('INVALID_REQUEST');
+    const resolved = path.resolve(value);
+    if (e2eHarnessEnabled() && process.env.TTCUT_E2E_REVEAL_MARKER) {
+      await writeFile(process.env.TTCUT_E2E_REVEAL_MARKER, resolved, 'utf8');
+      return;
+    }
+    const result = await shell.openPath(resolved);
+    if (result) throw new Error('OUTPUT_DIRECTORY_OPEN_FAILED');
+  });
   ipcMain.handle(IPC.logsReveal, () => shell.openPath(getLogDirectory()));
   ipcMain.handle(IPC.licensesOpen, () => {
     const license = app.isPackaged

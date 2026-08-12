@@ -443,8 +443,8 @@ describe('App workflow notices and multi-task entry', () => {
     fireEvent.pointerDown(shortEndHandle, { pointerId: 82, clientX: 1 });
     expect(document.querySelector('.resize-feedback')).toHaveAttribute('data-edge', 'end');
     fireEvent.pointerUp(shortEndHandle, { pointerId: 82, clientX: 1 });
-    expect(screen.getAllByRole('checkbox')).toHaveLength(2);
-    expect(screen.getAllByRole('checkbox').every((input) => (input as HTMLInputElement).checked)).toBe(true);
+    expect(screen.getAllByRole('checkbox', { name: /Rally/ })).toHaveLength(2);
+    expect(screen.getAllByRole('checkbox', { name: /Rally/ }).every((input) => (input as HTMLInputElement).checked)).toBe(true);
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'Rally 2' }));
     expect(document.querySelectorAll('.timeline-clip')).toHaveLength(1);
@@ -463,24 +463,29 @@ describe('App workflow notices and multi-task entry', () => {
     const draggedEnd = Number(screen.getByRole('slider', { name: 'Resize clip end 1' }).getAttribute('aria-valuenow'));
     expect(draggedEnd).toBeLessThan(editedEnd);
 
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Export rally videos' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Export XML' }));
     fireEvent.click(screen.getByRole('button', { name: 'Start cutting' }));
     await waitFor(() => expect(window.ttcut.startExport).toHaveBeenCalledWith(expect.objectContaining({
       selection: {
         mode: 'custom',
         segments: [{ rally_id: 'rally_001', start_time_seconds: 0, end_time_seconds: draggedEnd }],
       },
+      outputs: { combined_video: false, rally_videos: true, premiere_xml: true },
     })));
     act(() => taskListener?.({
       type: 'error', taskId: 'export-task-1', code: 'EXPORT_CANCELLED', message: 'EXPORT_CANCELLED',
     }));
     expect(await screen.findByRole('region', { name: 'Custom cut timeline' })).toBeVisible();
     expect(Number(screen.getByRole('slider', { name: 'Resize clip end 1' }).getAttribute('aria-valuenow'))).toBe(draggedEnd);
+    expect(screen.getByRole('checkbox', { name: 'Export rally videos' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Export XML' })).toBeChecked();
 
     fireEvent.click(screen.getByRole('button', { name: 'Back' }));
     expect(await screen.findByRole('heading', { name: 'Choose a cutting mode' })).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: /Custom/ }));
     expect(Number(screen.getByRole('slider', { name: 'Resize clip end 1' }).getAttribute('aria-valuenow'))).toBe(defaultEnd);
-    expect(screen.getAllByRole('checkbox').every((input) => (input as HTMLInputElement).checked)).toBe(true);
+    expect(screen.getAllByRole('checkbox', { name: /Rally/ }).every((input) => (input as HTMLInputElement).checked)).toBe(true);
   });
 
   it('keeps the export support prompt visible across pages until it is rejected', async () => {

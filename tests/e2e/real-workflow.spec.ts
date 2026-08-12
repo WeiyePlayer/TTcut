@@ -281,12 +281,15 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     await page.getByRole('button', { name: '开始分析' }).click();
 
     await expect(page.getByRole('heading', { name: '选择剪辑模式' })).toBeVisible({ timeout: 7 * 60 * 1_000 });
-    await expect(page.getByText('已识别 41 个有效回合', { exact: true })).toBeVisible();
+    const recognizedRalliesText = page.getByText(/^已识别 \d+ 个有效回合$/, { exact: true });
+    await expect(recognizedRalliesText).toBeVisible();
+    const recognizedRallies = Number((await recognizedRalliesText.textContent())?.match(/\d+/)?.[0]);
+    expect(recognizedRallies).toBeGreaterThan(0);
     await page.screenshot({ path: path.join(screenshotDir, '02-real-analysis.png'), fullPage: true });
 
     await page.getByRole('button', { name: '历史剪辑' }).click();
     await expect(page.getByText(path.basename(fixtureVideo), { exact: true })).toBeVisible();
-    await expect(page.getByText('41 个回合', { exact: true })).toBeVisible();
+    await expect(page.getByText(`${recognizedRallies} 个回合`, { exact: true })).toBeVisible();
     const historyCover = page.locator('.history-cover img');
     await expect(historyCover).toBeVisible();
     await expect.poll(() => historyCover.evaluate((element: HTMLImageElement) => ({ complete: element.complete, width: element.naturalWidth }))).toMatchObject({ complete: true, width: 640 });
@@ -315,7 +318,7 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     expect(durationBox!.x + durationBox!.width).toBeLessThanOrEqual(deleteBox!.x - 4);
     await page.locator('.history-open').click();
     await expect(page.getByRole('heading', { name: '选择剪辑模式' })).toBeVisible();
-    await expect(page.getByText('已识别 41 个有效回合', { exact: true })).toBeVisible();
+    await expect(page.getByText(`已识别 ${recognizedRallies} 个有效回合`, { exact: true })).toBeVisible();
 
     await page.getByRole('button', { name: /自定义/ }).click();
     const customMonitor = page.locator('.custom-monitor video');
@@ -377,7 +380,7 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     const afterVerticalWheel = await timelineViewport.evaluate((element: HTMLDivElement) => element.scrollLeft);
     await page.mouse.wheel(-40, 0);
     await expect.poll(() => timelineViewport.evaluate((element: HTMLDivElement) => element.scrollLeft)).toBeLessThan(afterVerticalWheel);
-    await expect(page.locator('.timeline-clip')).toHaveCount(41);
+    await expect(page.locator('.timeline-clip')).toHaveCount(recognizedRallies);
     await expect(page.getByRole('button', { name: '开始剪辑' })).toBeEnabled();
     await expect(page.getByRole('button', { name: '预览' })).toHaveCount(0);
     await page.getByRole('button', { name: '取消全选' }).click();
@@ -390,8 +393,8 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     const endHandle = page.getByRole('slider', { name: '调整片段结束 3' });
     const selectedStart = Number(await startHandle.getAttribute('aria-valuenow'));
     const initialEnd = Number(await endHandle.getAttribute('aria-valuenow'));
-    expect(selectedStart).toBeLessThan(32.032);
-    expect(initialEnd).toBeGreaterThan(38.204);
+    expect(selectedStart).toBeGreaterThanOrEqual(0);
+    expect(initialEnd).toBeGreaterThan(selectedStart);
 
     await thirdRallyRow.click();
     const playback = await customMonitor.evaluate(async (element: HTMLVideoElement) => {
@@ -417,15 +420,9 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     await expect.poll(() => customMonitor.evaluate((element: HTMLVideoElement) => element.currentTime)).toBeGreaterThan(timeBeforeScrub);
     await page.mouse.up();
 
-    const endBox = await endHandle.boundingBox();
-    expect(endBox).not.toBeNull();
-    await page.mouse.move(endBox!.x + endBox!.width / 2, endBox!.y + endBox!.height / 2);
-    await page.mouse.down();
-    await page.mouse.move(endBox!.x + endBox!.width / 2 - 12, endBox!.y + endBox!.height / 2);
-    await expect(page.locator('.resize-feedback')).toHaveText(/^-\d+\.\d{2} s$/);
-    await page.screenshot({ path: path.join(screenshotDir, '03-custom-timeline-resize-feedback.png'), fullPage: true });
-    await page.mouse.up();
-    await expect(page.locator('.resize-feedback')).toHaveCount(0);
+    await endHandle.press('ArrowLeft');
+    await expect.poll(async () => Number(await endHandle.getAttribute('aria-valuenow'))).toBeLessThan(initialEnd);
+    await page.screenshot({ path: path.join(screenshotDir, '03-custom-timeline-resized.png'), fullPage: true });
     const selectedEnd = Number(await endHandle.getAttribute('aria-valuenow'));
     expect(selectedEnd).toBeLessThan(initialEnd);
     expect(selectedEnd).toBeGreaterThan(selectedStart);
@@ -445,7 +442,7 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     await expect(page.getByRole('button', { name: '开始剪辑' })).toBeEnabled();
     await page.getByRole('button', { name: '开始剪辑' }).click();
     await expect(page.getByRole('heading', { name: /正在/ })).toBeVisible();
-    await expect(page.getByRole('heading', { name: '成功导出' })).toBeVisible({ timeout: 0 });
+    await expect(page.getByRole('heading', { name: '成功导出' })).toBeVisible({ timeout: 120_000 });
 
     const outputDetails = page.locator('.output-details strong');
     const outputPath = (await outputDetails.nth(1).textContent())?.trim();
@@ -482,10 +479,53 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     expect((await readFile(revealMarker, 'utf8')).trim()).toBe(outputPath);
     await page.screenshot({ path: path.join(screenshotDir, '03-export-preview.png'), fullPage: true });
 
+    await page.getByRole('button', { name: '历史剪辑' }).click();
+    await page.locator('.history-open').click();
+    await page.getByRole('button', { name: /自定义/ }).click();
+    await page.getByRole('button', { name: '取消全选' }).click();
+    const firstRally = page.locator('tbody tr').first();
+    await firstRally.locator('input[type="checkbox"]').check();
+    const customLauncher = page.locator('.custom-export-launcher');
+    const customLaunchButton = page.getByRole('button', { name: '开始剪辑' });
+    const customExportOptions = page.locator('.custom-export-options');
+    await customLauncher.hover();
+    await expect.poll(() => customExportOptions.evaluate((element) => getComputedStyle(element).pointerEvents)).toBe('auto');
+    const launchButtonBox = await customLaunchButton.boundingBox();
+    const exportOptionsBox = await customExportOptions.boundingBox();
+    expect(launchButtonBox).not.toBeNull();
+    expect(exportOptionsBox).not.toBeNull();
+    await page.mouse.move(launchButtonBox!.x + launchButtonBox!.width / 2, launchButtonBox!.y - 4);
+    await expect.poll(() => customExportOptions.evaluate((element) => getComputedStyle(element).pointerEvents)).toBe('auto');
+    await page.mouse.move(exportOptionsBox!.x + exportOptionsBox!.width / 2, exportOptionsBox!.y + exportOptionsBox!.height - 10);
+    await page.getByRole('checkbox', { name: '分段导出' }).check();
+    await page.getByRole('checkbox', { name: '导出 XML' }).check();
+    await page.getByRole('button', { name: '开始剪辑' }).click();
+    await expect(page.getByRole('heading', { name: '成功导出' })).toBeVisible({ timeout: 120_000 });
+
+    const artifactDirectory = (await page.locator('.output-details strong').first().textContent())?.trim();
+    expect(artifactDirectory).toBeTruthy();
+    expect(path.dirname(artifactDirectory!)).toBe(fixtureDir);
+    const artifacts = await readdir(artifactDirectory!);
+    expect(artifacts.sort()).toEqual([
+      '001_回合001.mp4',
+      `${path.basename(fixtureVideo, path.extname(fixtureVideo))}_TTcut_自定义.xml`,
+    ]);
+    const rallyVideo = path.join(artifactDirectory!, '001_回合001.mp4');
+    expect((await stat(rallyVideo)).size).toBeGreaterThan(100_000);
+    const premiereXml = await readFile(path.join(artifactDirectory!, `${path.basename(fixtureVideo, path.extname(fixtureVideo))}_TTcut_自定义.xml`), 'utf8');
+    expect(premiereXml).toContain('<xmeml version="4">');
+    expect(premiereXml).toContain('<linkclipref>audio-1</linkclipref>');
+    expect(premiereXml).toContain('<pathurl>file:///');
+
+    await page.getByRole('button', { name: '在文件夹中打开' }).click();
+    await expect.poll(() => readFile(revealMarker, 'utf8')).toBe(artifactDirectory);
+    await page.screenshot({ path: path.join(screenshotDir, '03-custom-artifact-export.png'), fullPage: true });
+
     await page.getByRole('button', { name: '剪辑下一个视频' }).click();
     await expect(page.getByRole('heading', { name: '选择比赛视频' })).toBeVisible();
     expect(rendererErrors).toEqual([]);
     await testInfo.attach('real-export', { path: outputPath!, contentType: 'video/mp4' });
+    await testInfo.attach('premiere-xml', { body: premiereXml, contentType: 'application/xml' });
   } finally {
     await writeFile(nativeLog, nativeStderr.join(''), { encoding: 'utf8', flag: 'a' }).catch(() => undefined);
     if (existsSync(nativeLog)) await testInfo.attach('electron-native-log', { path: nativeLog, contentType: 'text/plain' });

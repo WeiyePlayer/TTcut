@@ -21,6 +21,11 @@ export type CustomExportSegment = {
   end_time_seconds: number;
 };
 
+export type ValidatedCustomExportSegment = CutGroup & {
+  rallyId: string;
+  rallyIndex: number;
+};
+
 export class InvalidCustomSegmentsError extends Error {
   readonly exportCode = 'INVALID_CUSTOM_SEGMENTS';
 
@@ -181,15 +186,15 @@ export function customExportSegments(clips: readonly CustomRallyClip[]): CustomE
   }));
 }
 
-export function validateAndBuildCustomCutGroups(
+export function validateCustomExportSegments(
   result: AnalysisResultV1,
   segments: readonly CustomExportSegment[],
-): CutGroup[] {
+): ValidatedCustomExportSegment[] {
   if (!segments.length) throw new InvalidCustomSegmentsError();
   const rallies = new Map(result.rallies.map((rally) => [rally.id, rally]));
   const seen = new Set<string>();
   const minimumDuration = frameDuration(result.video.fps);
-  const groups: CutGroup[] = [];
+  const groups: ValidatedCustomExportSegment[] = [];
   let previousStart = -1;
   let previousEnd = -1;
 
@@ -206,16 +211,41 @@ export function validateAndBuildCustomCutGroups(
       throw new InvalidCustomSegmentsError();
     }
     seen.add(segment.rally_id);
-    const previous = groups.at(-1);
-    if (previous && start === previous.end) {
-      previous.end = end;
-      previous.rawEnd = end;
-      previous.rallyIds.push(segment.rally_id);
-    } else {
-      groups.push({ rallyIds: [segment.rally_id], rawStart: start, rawEnd: end, start, end });
-    }
+    groups.push({
+      rallyId: segment.rally_id,
+      rallyIndex: rally.index,
+      rallyIds: [segment.rally_id],
+      rawStart: start,
+      rawEnd: end,
+      start,
+      end,
+    });
     previousStart = start;
     previousEnd = end;
+  }
+  return groups;
+}
+
+export function validateAndBuildCustomCutGroups(
+  result: AnalysisResultV1,
+  segments: readonly CustomExportSegment[],
+): CutGroup[] {
+  const groups: CutGroup[] = [];
+  for (const segment of validateCustomExportSegments(result, segments)) {
+    const previous = groups.at(-1);
+    if (previous && segment.start === previous.end) {
+      previous.end = segment.end;
+      previous.rawEnd = segment.end;
+      previous.rallyIds.push(segment.rallyId);
+    } else {
+      groups.push({
+        rallyIds: [segment.rallyId],
+        rawStart: segment.start,
+        rawEnd: segment.end,
+        start: segment.start,
+        end: segment.end,
+      });
+    }
   }
   return groups;
 }
