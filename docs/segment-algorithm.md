@@ -61,7 +61,7 @@ end   = min(videoDuration, rally.end + 1.0s finalRallyTail + postRoll)
 
 ## 自定义产物导出
 
-自定义页面可选择生成分段视频、Premiere XML，或保持默认的合并 MP4。所有模式都先执行相同的显式片段验证；只有合并 MP4 会将恰好相接的片段合并为 `CutGroup`。分段视频保留每个已选回合的独立起止范围，并按选择顺序命名。Premiere XML 是引用原始视频的 FCP7 `xmeml` v4 文件，按选择顺序连续排布 V1/A1 片段；可变帧率素材按 `nominal_fps`（无此值时按 `fps`）量化到最近帧。
+自定义页面可选择生成分段视频、Premiere XML，或保持默认的合并 MP4。所有模式都先执行相同的显式片段验证；只有合并 MP4 会将恰好相接的片段合并为 `CutGroup`。分段视频保留每个已选回合的独立起止范围，并按选择顺序命名。Premiere XML 是引用原始视频的 FCP7 `xmeml` v4 文件，按选择顺序连续排布 V1 与匹配源媒体声道数的链接音频片段；可变帧率素材按 `nominal_fps`（无此值时按 `fps`）量化到最近帧。
 
 ## 已覆盖边界
 
