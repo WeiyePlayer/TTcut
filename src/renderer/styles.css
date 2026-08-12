@@ -237,12 +237,16 @@ td input { accent-color: var(--blue); }
 }
 .timeline-clip > span { position: relative; z-index: 1; overflow: hidden; text-overflow: clip; pointer-events: none; }
 .clip-handle {
-  position: absolute; z-index: 2; top: -1px; bottom: -1px; width: 14px; padding: 0;
-  border: 1px solid rgba(255,255,255,.78); background: var(--blue-dark); cursor: ew-resize; touch-action: none;
+  position: absolute; z-index: 3; top: -1px; bottom: -1px; padding: 0;
+  border: 0; border-radius: 0; background: transparent; cursor: ew-resize; touch-action: none;
 }
-.clip-handle.start { left: -1px; border-radius: 999px 5px 5px 999px; }
-.clip-handle.end { right: -1px; border-radius: 5px 999px 999px 5px; }
-.clip-handle::after { content: ""; position: absolute; top: 12px; bottom: 12px; left: 6px; border-left: 1px solid rgba(255,255,255,.85); }
+.clip-handle:focus-visible { outline-offset: -3px; }
+.clip-boundary-marker {
+  position: absolute; z-index: 2; top: 13px; width: 2px; height: 14px;
+  border-radius: 999px; background: rgba(255,255,255,.88); pointer-events: none;
+}
+.clip-boundary-marker.start { left: 5px; }
+.clip-boundary-marker.end { right: 5px; }
 .resize-feedback {
   position: absolute; z-index: 7; top: 34px; min-width: 62px; padding: 3px 6px; transform: translate(-50%, -100%);
   border-radius: 4px; background: #242426; color: white; text-align: center; font-size: 11px; font-variant-numeric: tabular-nums;

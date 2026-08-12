@@ -426,6 +426,23 @@ describe('App workflow notices and multi-task entry', () => {
 
     expect(screen.queryByRole('button', { name: 'Preview' })).toBeNull();
     expect(document.querySelectorAll('.timeline-clip')).toHaveLength(2);
+    const shortClip = document.querySelector('.timeline-clip') as HTMLDivElement;
+    expect(shortClip.style.width).toBe('1px');
+    expect(shortClip.querySelectorAll('.clip-boundary-marker')).toHaveLength(0);
+    const shortStartHandle = screen.getByRole('slider', { name: 'Resize clip start 1' });
+    const shortEndHandle = screen.getByRole('slider', { name: 'Resize clip end 1' });
+    const clipWidth = Number.parseFloat(shortClip.style.width);
+    const startRight = Number.parseFloat(shortStartHandle.style.left) + Number.parseFloat(shortStartHandle.style.width);
+    const endLeft = clipWidth - Number.parseFloat(shortEndHandle.style.right) - Number.parseFloat(shortEndHandle.style.width);
+    expect(startRight).toBeCloseTo(endLeft, 5);
+    Object.defineProperty(shortStartHandle, 'setPointerCapture', { configurable: true, value: vi.fn() });
+    Object.defineProperty(shortEndHandle, 'setPointerCapture', { configurable: true, value: vi.fn() });
+    fireEvent.pointerDown(shortStartHandle, { pointerId: 81, clientX: 0 });
+    expect(document.querySelector('.resize-feedback')).toHaveAttribute('data-edge', 'start');
+    fireEvent.pointerUp(shortStartHandle, { pointerId: 81, clientX: 0 });
+    fireEvent.pointerDown(shortEndHandle, { pointerId: 82, clientX: 1 });
+    expect(document.querySelector('.resize-feedback')).toHaveAttribute('data-edge', 'end');
+    fireEvent.pointerUp(shortEndHandle, { pointerId: 82, clientX: 1 });
     expect(screen.getAllByRole('checkbox')).toHaveLength(2);
     expect(screen.getAllByRole('checkbox').every((input) => (input as HTMLInputElement).checked)).toBe(true);
 
