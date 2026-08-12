@@ -106,6 +106,7 @@ export interface TTcutApi {
   cancelTask(taskId: string): Promise<void>;
   onTaskEvent(listener: (event: AppEvent) => void): () => void;
   revealOutput(path: string): Promise<void>;
+  openOutputDirectory(path: string): Promise<void>;
   revealLogs(): Promise<void>;
   openLicenses(): Promise<void>;
   openExternalUrl(url: string): Promise<void>;

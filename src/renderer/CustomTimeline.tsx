@@ -3,6 +3,9 @@ import type { CustomRallyClip } from '../domain/custom-clips';
 
 const RULER_HEIGHT = 34;
 const LABEL_SPACING = 150;
+const CLIP_EDGE_HIT_OUTSET = 8;
+const CLIP_EDGE_HIT_INSET = 4;
+const CLIP_BOUNDARY_MARKER_MIN_WIDTH = 24;
 
 type Edge = 'start' | 'end';
 
@@ -31,6 +34,15 @@ export function formatResizeDelta(value: number): string {
   const rounded = Math.round(value * 100) / 100;
   if (rounded === 0) return '0.00 s';
   return `${rounded > 0 ? '+' : ''}${rounded.toFixed(2)} s`;
+}
+
+export function clipEdgeHitWidth(clipWidth: number): number {
+  const safeWidth = Number.isFinite(clipWidth) ? Math.max(0, clipWidth) : 0;
+  return CLIP_EDGE_HIT_OUTSET + Math.min(CLIP_EDGE_HIT_INSET, safeWidth / 2);
+}
+
+export function shouldShowClipBoundaryMarkers(clipWidth: number): boolean {
+  return Number.isFinite(clipWidth) && clipWidth >= CLIP_BOUNDARY_MARKER_MIN_WIDTH;
 }
 
 export function timelineWheelDelta(
@@ -332,6 +344,8 @@ export function CustomTimeline({
             {selectedClips.map((clip, index) => {
               const left = clip.start * pixelsPerSecond;
               const width = Math.max(1, (clip.end - clip.start) * pixelsPerSecond);
+              const edgeHitWidth = clipEdgeHitWidth(width);
+              const showBoundaryMarkers = shouldShowClipBoundaryMarkers(width);
               const minimumDuration = 1 / Math.max(fps, 1);
               const previous = selectedClips[index - 1];
               const following = selectedClips[index + 1];
@@ -352,6 +366,7 @@ export function CustomTimeline({
                     aria-valuemin={previous?.end ?? 0}
                     aria-valuemax={clip.end - minimumDuration}
                     aria-valuenow={clip.start}
+                    style={{ left: -CLIP_EDGE_HIT_OUTSET, width: edgeHitWidth }}
                     onPointerDown={(event) => beginResize(event, clip, 'start')}
                     onPointerMove={moveResize}
                     onPointerUp={endResize}
@@ -360,6 +375,12 @@ export function CustomTimeline({
                     onKeyDown={(event) => keyboardResize(event, clip, 'start')}
                   />
                   <span>{clip.rallyIndex}</span>
+                  {showBoundaryMarkers ? (
+                    <>
+                      <i className="clip-boundary-marker start" aria-hidden="true" />
+                      <i className="clip-boundary-marker end" aria-hidden="true" />
+                    </>
+                  ) : null}
                   <button
                     type="button"
                     className="clip-handle end"
@@ -369,6 +390,7 @@ export function CustomTimeline({
                     aria-valuemin={clip.start + minimumDuration}
                     aria-valuemax={following?.start ?? duration}
                     aria-valuenow={clip.end}
+                    style={{ right: -CLIP_EDGE_HIT_OUTSET, width: edgeHitWidth }}
                     onPointerDown={(event) => beginResize(event, clip, 'end')}
                     onPointerMove={moveResize}
                     onPointerUp={endResize}

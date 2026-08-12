@@ -46,7 +46,8 @@ button, a, summary { -webkit-tap-highlight-color: transparent; }
   backdrop-filter: saturate(160%) blur(22px);
   -webkit-backdrop-filter: saturate(160%) blur(22px);
 }
-.brand { font-size: 22px; font-weight: 760; letter-spacing: -0.04em; }
+.brand { display: inline-flex; align-items: center; gap: 8px; font-size: 22px; font-weight: 760; letter-spacing: -0.04em; }
+.brand img { width: 30px; height: 30px; border-radius: 8px; object-fit: cover; }
 .nav-links { margin: auto; display: flex; gap: 30px; font-size: 14px; color: #51545b; }
 .nav-links a, .site-footer a { transition: color 180ms ease; }
 .nav-links a:hover, .site-footer a:hover { color: var(--blue); }
