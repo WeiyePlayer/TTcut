@@ -83,6 +83,7 @@ TTcut 是一款面向乒乓球爱好者的本地乒乓球视频自动剪辑工�
 
 ## 分析组件
 
+若github资源下载缓慢，可使用网盘链接：链接: https://pan.baidu.com/s/1LXDzs74xOM1t50-IRM_Vvw?pwd=ttct 提取码: ttct
 安装包内置固定的球识别模型和球桌识别模型。按需安装的分析运行时组件包含 Python 3.12.13、PyTorch 2.12.1、NumPy、OpenCV 和最小分析 Worker，负责：
 运行时组件安装在所选安装根的 `<root>\data\components`。三个模型随应用安装并在打包前按固定大小和 SHA-256 校验；Python/PyTorch 运行时仍按需下载，支持 CPU、CUDA 12.6 和 CUDA 13.2。
 
