@@ -12,9 +12,10 @@ TTcut 是一款面向乒乓球爱好者的本地乒乓球视频自动剪辑工�
 
 ## 下载与安装
 
-1. 从 [TTcut v1.2.6 Release](https://github.com/WeiyePlayer/TTcut/releases/tag/v1.2.6) 下载 `TTcut-1.2.6-x64-Setup.exe`。
-2. 运行安装向导，选择安装根目录，并决定是否创建桌面快捷方式。程序写入 `<root>\app`，大型运行时、下载和导入暂存写入 `<root>\data\components`；开始菜单快捷方式始终创建。
-3. 首次启动进入设置，同意后分别安装“分析组件”和“视频处理组件”。
+1. Windows 从 [TTcut Release](https://github.com/WeiyePlayer/TTcut/releases) 下载。
+2. Android 从 [TTcut-Mobile-Releases](https://github.com/WeiyePlayer/TTcut-Mobile-Releases/releases) 下载。
+3. 运行安装向导，选择安装根目录，并决定是否创建桌面快捷方式。程序写入 `<root>\app`，大型运行时、下载和导入暂存写入 `<root>\data\components`；开始菜单快捷方式始终创建。
+4. 首次启动进入设置，同意后分别安装“分析组件”和“视频处理组件”。
 
 分析组件会自动检测 NVIDIA GPU：CUDA 环境安装或自检失败时回退到 CPU。视频处理组件用于读取视频信息、剪辑、合并和验证输出。
 
@@ -28,15 +29,6 @@ TTcut 是一款面向乒乓球爱好者的本地乒乓球视频自动剪辑工�
 
 详见 [v1.2.6 发布说明](docs/release-notes-v1.2.6.md)。
 
-## v1.2.5 更新
-
-- 默认使用随安装包提供的 BlurBall 球识别模型，支持 CPU 和 CUDA；仍可在设置中切换 TrackNet。
-- BlurBall、TrackNet 和球桌识别权重均随安装包提供，按固定大小和 SHA-256 校验，安装后不需要另行下载模型权重。
-- 移除旧的 B2/Uplifting 双模型组件；旧配置会回退到当前支持的 BlurBall 模型。
-- 修复批量任务在分析、导出完成时的任务状态竞争，避免下一个排队任务错误收到 `TASK_BUSY`。
-- 保留 v1.2.4 的长视频 CPU 导出、取消和组件设置修复。
-
-详见 [v1.2.5 发布说明](docs/release-notes-v1.2.5.md)。
 ## 欢迎大家加我微信 m2924931661
 
   欢迎反馈使用问题、bug反馈、新功能提交。
