@@ -160,7 +160,7 @@ npm run test:e2e
 
 ## 许可
 
-TTcut 自有源码采用 [MIT License](LICENSE)。TrackNet 派生代码、模型权重、Python、PyTorch、NumPy、OpenCV、FFmpeg、可选 GPL x264 组件、字体和 npm 依赖保留各自许可或权利声明，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+TTcut 自有源码采用 GPL-3.0 license。TrackNet 派生代码、模型权重、Python、PyTorch、NumPy、OpenCV、FFmpeg、可选 GPL x264 组件、字体和 npm 依赖保留各自许可或权利声明，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 更多实现和发行资料位于 [`docs`](docs) 目录。
 
