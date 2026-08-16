@@ -24,6 +24,7 @@ import {
   inspectComponents,
   managedComponentsRoot,
   activateManagedAnalysisRuntime,
+  formatAnalysisRuntimeDiagnostics,
   resolveUsableAnalysisComponents,
   validateAnalysisRuntime,
   validateMediaComponent,
@@ -132,6 +133,12 @@ function setupErrorCode(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   if (/^[A-Z][A-Z0-9_:-]+$/.test(message)) return message.split(':')[0] ?? 'COMPONENT_SETUP_FAILED';
   return 'COMPONENT_SETUP_FAILED';
+}
+
+function setupErrorLog(error: unknown): string {
+  const primary = error instanceof Error ? error.stack ?? error.message : String(error);
+  const diagnostics = formatAnalysisRuntimeDiagnostics(error);
+  return diagnostics ? `${primary}; CUDA runtime diagnostics: ${diagnostics}` : primary;
 }
 
 async function getDownloadResponse(
@@ -481,7 +488,7 @@ function runSetupTask(
     window.webContents.send(IPC.taskEvent, { type: 'component-result', taskId, data: components, imported, pendingImports });
   }).catch(async (error: unknown) => {
     const code = setupErrorCode(error);
-    await logLine(taskId, 'ERROR', error instanceof Error ? `${error.stack ?? error.message}` : String(error));
+    await logLine(taskId, 'ERROR', setupErrorLog(error));
     window.webContents.send(IPC.taskEvent, {
       type: 'error',
       taskId,
@@ -518,7 +525,7 @@ export async function startAnalysisComponentInstall(window: BrowserWindow, conse
         return { imported: ['analysis'], pendingImports: [] };
       } catch (error) {
         if (signal.aborted || !['CUDA_RUNTIME_SELF_TEST_FAILED', 'CUDA_RUNTIME_UNSUPPORTED_ARCHITECTURE'].includes(setupErrorCode(error))) throw error;
-        await logLine(taskId, 'WARN', `${cudaVariant} runtime installation/self-test failed; falling back to CPU: ${error instanceof Error ? error.message : String(error)}`);
+        await logLine(taskId, 'WARN', `${cudaVariant} runtime installation/self-test failed; falling back to CPU: ${setupErrorLog(error)}`);
       }
     }
     await installOnlineAnalysisRuntime(window, taskId, signal, 'cpu', cudaVariant ? 66 : 12, cudaVariant ? 32 : 86);
@@ -700,7 +707,7 @@ export async function startComponentImport(window: BrowserWindow, filePaths: str
         } catch (error) {
           if (variant === 'cpu' || !['CUDA_RUNTIME_SELF_TEST_FAILED', 'CUDA_RUNTIME_UNSUPPORTED_ARCHITECTURE'].includes(setupErrorCode(error)) || !runtimeGroups.has('cpu')) throw error;
           await rm(path.join(staging, ...group[0]!.asset.install_directory.split('/')), { recursive: true, force: true });
-          await logLine(taskId, 'WARN', `Imported CUDA runtime failed self-test; using imported CPU runtime: ${error instanceof Error ? error.message : String(error)}`);
+          await logLine(taskId, 'WARN', `Imported CUDA runtime failed self-test; using imported CPU runtime: ${setupErrorLog(error)}`);
         }
       }
 
