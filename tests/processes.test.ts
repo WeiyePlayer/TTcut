@@ -79,6 +79,21 @@ describe('tracked task lifecycle', () => {
     });
   });
 
+  it('preserves stdout, stderr and exit code for a failed process', async () => {
+    const result = runProcess(process.execPath, [
+      '-e',
+      "process.stdout.write('diagnostics'); process.stderr.write('failure'); process.exit(7);",
+    ]);
+
+    await expect(result).rejects.toMatchObject({
+      name: 'ProcessExecutionError',
+      stdout: 'diagnostics',
+      stderr: 'failure',
+      exitCode: 7,
+      signal: null,
+    });
+  });
+
   it('aborts the signal exposed by a tracked task when cancelled', async () => {
     beginTrackedTask('signal');
     const signal = getTaskController('signal')?.signal;
