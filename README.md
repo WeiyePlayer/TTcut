@@ -152,12 +152,6 @@ npm run test:e2e
 
 125%、150%、200% 的 Electron 布局用例用于当前机器上的自动化 DPI 回归检查，不构成跨 Windows 版本认证。系统、架构和组件兼容性由应用启动自检与任务前检查共同保证，详见 [Windows 兼容策略](docs/windows-compatibility.md)。
 
-## 已知限制
-
-- 单视频工作流一次处理一个 MP4 或 MOV；批量任务支持一次选择多个 MP4/MOV，并按“先标定、后处理”的串行队列运行，失败项目可手动恢复。
-- 板数是弹跳代理值，不是真实击球计数。
-- 不再做 Windows build / 系统版本硬拦截；组件与二进制仍以 Windows x64 为主。旧版 Windows、x86、ARM64 能否实际运行取决于本机组件与依赖，不保证可用。
-
 ## 许可
 
 TTcut 自有源码采用 GPL-3.0 license。TrackNet 派生代码、模型权重、Python、PyTorch、NumPy、OpenCV、FFmpeg、可选 GPL x264 组件、字体和 npm 依赖保留各自许可或权利声明，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
