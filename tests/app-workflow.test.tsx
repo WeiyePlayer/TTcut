@@ -396,9 +396,22 @@ describe('App workflow notices and multi-task entry', () => {
       },
     }));
 
+    expect(document.querySelector('.mode-card-navigate .mode-card-chevron')).not.toBeNull();
+    expect(document.querySelector('.mode-card-navigate .radio-dot')).toBeNull();
     fireEvent.click(await screen.findByRole('button', { name: /Custom/ }));
     expect(screen.getByRole('region', { name: 'Custom cut timeline' })).toBeVisible();
+    expect(document.querySelector('.custom-workspace-shell')).not.toBeNull();
+    expect(document.querySelector('.custom-workspace')).not.toBeNull();
     const monitor = document.querySelector('.custom-monitor video') as HTMLVideoElement;
+    expect(monitor.controls).toBe(false);
+    Object.defineProperty(monitor, 'paused', { configurable: true, value: true });
+    fireEvent.click(monitor);
+    expect(play).toHaveBeenCalledTimes(1);
+    Object.defineProperty(monitor, 'paused', { configurable: true, value: false });
+    fireEvent.click(monitor);
+    expect(pause).toHaveBeenCalledTimes(1);
+    play.mockClear();
+    pause.mockClear();
     Object.defineProperty(monitor, 'paused', { configurable: true, value: true });
     fireEvent.keyDown(window, { key: ' ', code: 'Space' });
     expect(play).toHaveBeenCalledTimes(1);
@@ -407,8 +420,24 @@ describe('App workflow notices and multi-task entry', () => {
     expect(pause).toHaveBeenCalledTimes(1);
 
     const viewport = document.querySelector('.timeline-viewport') as HTMLDivElement;
-    expect(document.querySelector('.timeline-track')).not.toBeNull();
+    const track = document.querySelector('.timeline-track') as HTMLDivElement;
+    expect(track).not.toBeNull();
+    const trackWindow = document.querySelector('.timeline-track-window') as HTMLDivElement;
+    expect(trackWindow).not.toBeNull();
+    expect(document.querySelector('.custom-rally-table thead')).toBeNull();
     expect(document.querySelector('.timeline-toolbar')).toBeNull();
+    expect(screen.getAllByText(/^\d{2}:\d{2}\.\d$/)).toHaveLength(4);
+    expect(screen.getAllByText(/^\d+\.\ds$/)).toHaveLength(2);
+    const zoomBefore = Number(viewport.dataset.zoom);
+    fireEvent.wheel(trackWindow, { ctrlKey: true, deltaY: -120, clientX: 0.5 });
+    expect(Number(viewport.dataset.zoom)).toBeGreaterThan(zoomBefore);
+    fireEvent.wheel(trackWindow, { ctrlKey: true, deltaY: 120, clientX: 0.5 });
+    expect(Number(viewport.dataset.zoom)).toBeCloseTo(zoomBefore, 5);
+    viewport.scrollLeft = 0.25;
+    fireEvent.scroll(viewport);
+    expect(track.style.transform).toBe('translateX(-0.25px)');
+    viewport.scrollLeft = 0;
+    fireEvent.scroll(viewport);
     vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue({
       x: 0, y: 0, left: 0, top: 0, right: 1, bottom: 78, width: 1, height: 78, toJSON: () => ({}),
     });

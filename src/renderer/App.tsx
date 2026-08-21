@@ -24,6 +24,16 @@ type PointName = keyof Calibration['points'];
 const appVersion = packageJson.version;
 const pointOrder: PointName[] = ['top_left', 'top_right', 'bottom_right', 'bottom_left'];
 
+function SidebarIcon({ kind }: { kind: 'scissors' | 'history' | 'settings' }) {
+  if (kind === 'scissors') {
+    return <svg className="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="2.5" /><circle cx="6" cy="18" r="2.5" /><path d="m8.2 7.4 10.3 10.3M8.2 16.6 18.5 6.3" /></svg>;
+  }
+  if (kind === 'history') {
+    return <svg className="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11a8 8 0 1 1 2.3 5.7" /><path d="M4 5.5v5.5h5.5M12 7v5l3.2 1.8" /></svg>;
+  }
+  return <svg className="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9.2 3.8.5-1.3h4.6l.5 1.3 1.6.7 1.3-.6 3.2 3.2-.6 1.3.7 1.6 1.3.5v4.6l-1.3.5-.7 1.6.6 1.3-3.2 3.2-1.3-.6-1.6.7-.5 1.3H9.7l-.5-1.3-1.6-.7-1.3.6-3.2-3.2.6-1.3L3 14.6l-1.3-.5V9.5L3 9l.7-1.6-.6-1.3 3.2-3.2 1.3.6 1.6-.7Z" /><circle cx="12" cy="12" r="3" /></svg>;
+}
+
 function fileSize(value: number): string {
   if (value >= 1024 ** 3) return `${(value / 1024 ** 3).toFixed(2)} GB`;
   if (value >= 1024 ** 2) return `${(value / 1024 ** 2).toFixed(1)} MB`;
@@ -490,6 +500,7 @@ export function App() {
       && !activeTask
       && !setupTask
   );
+  const customWorkspace = view === 'auto' && step === 'custom';
   const discardMulti = () => {
     multiActiveRef.current = false;
     setMultiVideos([]);
@@ -532,7 +543,7 @@ export function App() {
   };
 
   return (
-    <div className={`app-shell ${languageTransition ? 'language-changing' : ''}`}>
+    <div className={`app-shell ${languageTransition ? 'language-changing' : ''} ${customWorkspace ? 'custom-workspace-shell' : ''}`}>
       <header className="titlebar" onDoubleClick={() => void window.ttcut.toggleMaximize()}>
         {canReturnToSelection && (
           <button
@@ -554,10 +565,10 @@ export function App() {
       <aside className="sidebar">
         <div className="brand"><img className="brand-icon" src={ttcutIcon} alt="" /><span>TTcut</span><small>v{bootstrap?.version ?? appVersion}</small></div>
         <nav aria-label="Primary navigation">
-          <button className={view === 'auto' || view === 'multi' ? 'active' : ''} onClick={() => requestView('auto')}><i />{t.autoCut}</button>
-          <button className={view === 'history' ? 'active' : ''} onClick={() => requestView('history')}><i />{t.history}</button>
+          <button aria-label={t.autoCut} title={t.autoCut} className={view === 'auto' || view === 'multi' ? 'active' : ''} onClick={() => requestView('auto')}><i /><SidebarIcon kind="scissors" /><span className="sidebar-label">{t.autoCut}</span></button>
+          <button aria-label={t.history} title={t.history} className={view === 'history' ? 'active' : ''} onClick={() => requestView('history')}><i /><SidebarIcon kind="history" /><span className="sidebar-label">{t.history}</span></button>
         </nav>
-        <button className={`settings-link ${view === 'settings' ? 'active' : ''}`} onClick={() => requestView('settings')}><i />{t.settings}</button>
+        <button aria-label={t.settings} title={t.settings} className={`settings-link ${view === 'settings' ? 'active' : ''}`} onClick={() => requestView('settings')}><i /><SidebarIcon kind="settings" /><span className="sidebar-label">{t.settings}</span></button>
       </aside>
 
       <main className="main-content">
@@ -755,7 +766,10 @@ export function App() {
                   {([
                     ['all', t.all, t.allDetail], ['highlight', t.highlight, t.highlightDetail], ['custom', t.custom, t.customDetail],
                   ] as const).map(([value, title, detail]) => (
-                    <button key={value} className={`mode-card ${mode === value ? 'selected' : ''}`} onClick={() => { if (value === 'custom') openCustomEditor(); else setMode(value); }}><span className="radio-dot" /><strong>{title}</strong><small>{detail}</small></button>
+                    <button key={value} className={`mode-card ${value !== 'custom' && mode === value ? 'selected' : ''} ${value === 'custom' ? 'mode-card-navigate' : ''}`} onClick={() => { if (value === 'custom') openCustomEditor(); else setMode(value); }}>
+                      {value === 'custom' ? <span className="mode-card-chevron" aria-hidden="true" /> : <span className="radio-dot" />}
+                      <strong>{title}</strong><small>{detail}</small>
+                    </button>
                   ))}
                 </div>
                 {mode === 'highlight' && <div className="card inline-setting"><div><h2>{t.threshold}</h2><p>{t.highlightDetail}</p></div><div className="segmented">{([3, 5, 7] as const).map((value) => <button key={value} className={threshold === value ? 'selected' : ''} onClick={() => setThreshold(value)}>&gt; {value}</button>)}</div>{highlights.length === 0 && <span className="inline-error">{t.noHighlights}</span>}</div>}

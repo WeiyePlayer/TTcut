@@ -99,6 +99,7 @@ export function CustomTimeline({
   onPlayClip: (clip: CustomRallyClip) => void;
   onResize: (rallyId: string, edge: Edge, time: number) => number;
 }) {
+  const surfaceRef = useRef<HTMLElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [viewportWidth, setViewportWidth] = useState(1);
@@ -225,11 +226,11 @@ export function CustomTimeline({
   };
 
   useEffect(() => {
-    const viewport = viewportRef.current;
-    if (!viewport) return;
+    const surface = surfaceRef.current;
+    if (!surface) return;
     const handleWheel = (event: WheelEvent) => wheelHandlerRef.current(event);
-    viewport.addEventListener('wheel', handleWheel, { passive: false });
-    return () => viewport.removeEventListener('wheel', handleWheel);
+    surface.addEventListener('wheel', handleWheel, { passive: false });
+    return () => surface.removeEventListener('wheel', handleWheel);
   }, []);
 
   const seekFromPointer = (clientX: number) => {
@@ -329,7 +330,7 @@ export function CustomTimeline({
   };
 
   return (
-    <section className="custom-timeline" aria-label={timelineLabel}>
+    <section ref={surfaceRef} className="custom-timeline" aria-label={timelineLabel}>
       <div
         ref={viewportRef}
         className="timeline-viewport"
@@ -339,68 +340,6 @@ export function CustomTimeline({
         <div className="timeline-content" style={{ width: contentWidth }}>
           <div className="timeline-ruler" onPointerDown={(event) => seekFromPointer(event.clientX)}>
             <canvas ref={canvasRef} style={{ transform: `translateX(${scrollLeft}px)` }} />
-          </div>
-          <div className="timeline-track">
-            {selectedClips.map((clip, index) => {
-              const left = clip.start * pixelsPerSecond;
-              const width = Math.max(1, (clip.end - clip.start) * pixelsPerSecond);
-              const edgeHitWidth = clipEdgeHitWidth(width);
-              const showBoundaryMarkers = shouldShowClipBoundaryMarkers(width);
-              const minimumDuration = 1 / Math.max(fps, 1);
-              const previous = selectedClips[index - 1];
-              const following = selectedClips[index + 1];
-              return (
-                <div
-                  key={clip.rallyId}
-                  className="timeline-clip"
-                  data-rally-id={clip.rallyId}
-                  style={{ left, width }}
-                  onPointerDown={() => onPlayClip(clip)}
-                >
-                  <button
-                    type="button"
-                    className="clip-handle start"
-                    role="slider"
-                    aria-orientation="horizontal"
-                    aria-label={`${resizeStartLabel} ${clip.rallyIndex}`}
-                    aria-valuemin={previous?.end ?? 0}
-                    aria-valuemax={clip.end - minimumDuration}
-                    aria-valuenow={clip.start}
-                    style={{ left: -CLIP_EDGE_HIT_OUTSET, width: edgeHitWidth }}
-                    onPointerDown={(event) => beginResize(event, clip, 'start')}
-                    onPointerMove={moveResize}
-                    onPointerUp={endResize}
-                    onPointerCancel={endResize}
-                    onLostPointerCapture={endResize}
-                    onKeyDown={(event) => keyboardResize(event, clip, 'start')}
-                  />
-                  <span>{clip.rallyIndex}</span>
-                  {showBoundaryMarkers ? (
-                    <>
-                      <i className="clip-boundary-marker start" aria-hidden="true" />
-                      <i className="clip-boundary-marker end" aria-hidden="true" />
-                    </>
-                  ) : null}
-                  <button
-                    type="button"
-                    className="clip-handle end"
-                    role="slider"
-                    aria-orientation="horizontal"
-                    aria-label={`${resizeEndLabel} ${clip.rallyIndex}`}
-                    aria-valuemin={clip.start + minimumDuration}
-                    aria-valuemax={following?.start ?? duration}
-                    aria-valuenow={clip.end}
-                    style={{ right: -CLIP_EDGE_HIT_OUTSET, width: edgeHitWidth }}
-                    onPointerDown={(event) => beginResize(event, clip, 'end')}
-                    onPointerMove={moveResize}
-                    onPointerUp={endResize}
-                    onPointerCancel={endResize}
-                    onLostPointerCapture={endResize}
-                    onKeyDown={(event) => keyboardResize(event, clip, 'end')}
-                  />
-                </div>
-              );
-            })}
           </div>
           {resizeFeedback ? (
             <div
@@ -429,6 +368,70 @@ export function CustomTimeline({
             onLostPointerCapture={cancelPlayheadDrag}
             onKeyDown={keyboardSeek}
           ><i /></div>
+        </div>
+      </div>
+      <div className="timeline-track-window">
+        <div className="timeline-track" style={{ width: contentWidth, transform: `translateX(${-scrollLeft}px)` }}>
+          {selectedClips.map((clip, index) => {
+            const left = clip.start * pixelsPerSecond;
+            const width = Math.max(1, (clip.end - clip.start) * pixelsPerSecond);
+            const edgeHitWidth = clipEdgeHitWidth(width);
+            const showBoundaryMarkers = shouldShowClipBoundaryMarkers(width);
+            const minimumDuration = 1 / Math.max(fps, 1);
+            const previous = selectedClips[index - 1];
+            const following = selectedClips[index + 1];
+            return (
+              <div
+                key={clip.rallyId}
+                className="timeline-clip"
+                data-rally-id={clip.rallyId}
+                style={{ left, width }}
+                onPointerDown={() => onPlayClip(clip)}
+              >
+                <button
+                  type="button"
+                  className="clip-handle start"
+                  role="slider"
+                  aria-orientation="horizontal"
+                  aria-label={`${resizeStartLabel} ${clip.rallyIndex}`}
+                  aria-valuemin={previous?.end ?? 0}
+                  aria-valuemax={clip.end - minimumDuration}
+                  aria-valuenow={clip.start}
+                  style={{ left: -CLIP_EDGE_HIT_OUTSET, width: edgeHitWidth }}
+                  onPointerDown={(event) => beginResize(event, clip, 'start')}
+                  onPointerMove={moveResize}
+                  onPointerUp={endResize}
+                  onPointerCancel={endResize}
+                  onLostPointerCapture={endResize}
+                  onKeyDown={(event) => keyboardResize(event, clip, 'start')}
+                />
+                <span>{clip.rallyIndex}</span>
+                {showBoundaryMarkers ? (
+                  <>
+                    <i className="clip-boundary-marker start" aria-hidden="true" />
+                    <i className="clip-boundary-marker end" aria-hidden="true" />
+                  </>
+                ) : null}
+                <button
+                  type="button"
+                  className="clip-handle end"
+                  role="slider"
+                  aria-orientation="horizontal"
+                  aria-label={`${resizeEndLabel} ${clip.rallyIndex}`}
+                  aria-valuemin={clip.start + minimumDuration}
+                  aria-valuemax={following?.start ?? duration}
+                  aria-valuenow={clip.end}
+                  style={{ right: -CLIP_EDGE_HIT_OUTSET, width: edgeHitWidth }}
+                  onPointerDown={(event) => beginResize(event, clip, 'end')}
+                  onPointerMove={moveResize}
+                  onPointerUp={endResize}
+                  onPointerCancel={endResize}
+                  onLostPointerCapture={endResize}
+                  onKeyDown={(event) => keyboardResize(event, clip, 'end')}
+                />
+              </div>
+            );
+          })}
         </div>
       </div>
     </section>
