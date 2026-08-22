@@ -1,6 +1,24 @@
 import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from 'node:child_process';
 
 export type ProcessResult = { stdout: string; stderr: string; code: number };
+export class ProcessExecutionError extends Error {
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly exitCode: number | null;
+  readonly signal: NodeJS.Signals | null;
+
+  constructor(
+    message: string,
+    details: { stdout: string; stderr: string; exitCode: number | null; signal: NodeJS.Signals | null },
+  ) {
+    super(message);
+    this.name = 'ProcessExecutionError';
+    this.stdout = details.stdout;
+    this.stderr = details.stderr;
+    this.exitCode = details.exitCode;
+    this.signal = details.signal;
+  }
+}
 export type TaskCancellationReason = 'user' | 'app-exit';
 export type ProcessExitClassification = {
   kind: 'success' | 'cancelled' | 'terminated' | 'failed';
@@ -262,9 +280,15 @@ export function runProcess(executable: string, args: readonly string[], options:
       } else if (code === 0) {
         resolve({ stdout, stderr, code });
       } else if (code === null || signal !== null) {
-        reject(new Error(stderr.trim() || `Process terminated by signal ${String(signal)}`));
+        reject(new ProcessExecutionError(
+          stderr.trim() || `Process terminated by signal ${String(signal)}`,
+          { stdout, stderr, exitCode: code, signal },
+        ));
       } else {
-        reject(new Error(stderr.trim() || `Process exited with code ${code}`));
+        reject(new ProcessExecutionError(
+          stderr.trim() || `Process exited with code ${code}`,
+          { stdout, stderr, exitCode: code, signal },
+        ));
       }
     });
   });

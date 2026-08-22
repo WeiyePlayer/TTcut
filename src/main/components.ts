@@ -3,7 +3,7 @@ import path from 'node:path';
 import { app } from 'electron';
 import type { ComponentStatus } from '../shared/contracts';
 import { loadComponentCatalog } from './component-catalog';
-import { runProcess } from './processes';
+import { ProcessExecutionError, runProcess, type ProcessResult } from './processes';
 import {
   ACTIVE_RUNTIME_MANIFEST,
   ANALYSIS_PYTHON_VERSION,
@@ -19,6 +19,124 @@ import { resolveInstallationLayout } from './installation-layout';
 
 const ANALYSIS_NUMPY_VERSION = '2.5.1';
 const ANALYSIS_OPENCV_VERSION = '4.13.0';
+
+export type AnalysisRuntimeDiagnostics = {
+  pythonExecutable: string;
+  torchVersion: string | null;
+  torchCudaVersion: string | null;
+  cudaAvailable: boolean | null;
+  gpuName: string | null;
+  gpuCapability: unknown[] | null;
+  cudaArchList: unknown[] | null;
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+};
+
+export class AnalysisRuntimeValidationError extends Error {
+  readonly diagnostics: AnalysisRuntimeDiagnostics;
+
+  constructor(code: string, diagnostics: AnalysisRuntimeDiagnostics, options?: ErrorOptions) {
+    super(code, options);
+    this.name = 'AnalysisRuntimeValidationError';
+    this.diagnostics = diagnostics;
+  }
+}
+
+function parseRuntimeOutput(stdout: string): Record<string, unknown> {
+  const lines = stdout.trim().split(/\r?\n/).filter(Boolean);
+  const json = lines.at(-1);
+  if (!json) throw new Error('ANALYSIS_RUNTIME_EMPTY_OUTPUT');
+  return JSON.parse(json) as Record<string, unknown>;
+}
+
+function runtimeDiagnostics(
+  python: string,
+  result: { stdout: string; stderr: string; exitCode: number | null },
+  value: Record<string, unknown> = {},
+): AnalysisRuntimeDiagnostics {
+  return {
+    pythonExecutable: typeof value.python_executable === 'string' ? value.python_executable : python,
+    torchVersion: typeof value.torch === 'string' ? value.torch : null,
+    torchCudaVersion: typeof value.torch_cuda === 'string' ? value.torch_cuda : null,
+    cudaAvailable: typeof value.cuda_available === 'boolean' ? value.cuda_available : null,
+    gpuName: typeof value.device_name === 'string' ? value.device_name : null,
+    gpuCapability: Array.isArray(value.device_capability) ? value.device_capability : null,
+    cudaArchList: Array.isArray(value.cuda_arch_list) ? value.cuda_arch_list : null,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    exitCode: result.exitCode,
+  };
+}
+
+function runtimeFailure(
+  code: string,
+  python: string,
+  result: ProcessResult,
+  value: Record<string, unknown>,
+  cause?: unknown,
+): AnalysisRuntimeValidationError {
+  return new AnalysisRuntimeValidationError(
+    code,
+    runtimeDiagnostics(python, { ...result, exitCode: result.code }, value),
+    cause === undefined ? undefined : { cause },
+  );
+}
+
+function diagnosticsFromError(python: string, error: unknown): AnalysisRuntimeDiagnostics {
+  if (error instanceof AnalysisRuntimeValidationError) return error.diagnostics;
+  if (error instanceof ProcessExecutionError) {
+    let value: Record<string, unknown> = {};
+    try {
+      value = parseRuntimeOutput(error.stdout);
+    } catch {
+      // The raw streams below remain the source of truth when Python emitted no valid JSON.
+    }
+    return runtimeDiagnostics(python, {
+      stdout: error.stdout,
+      stderr: error.stderr,
+      exitCode: error.exitCode,
+    }, value);
+  }
+  return runtimeDiagnostics(python, {
+    stdout: '',
+    stderr: error instanceof Error ? error.stack ?? error.message : String(error),
+    exitCode: null,
+  });
+}
+
+export function analysisRuntimeDiagnostics(error: unknown): AnalysisRuntimeDiagnostics | null {
+  let current = error;
+  const seen = new Set<unknown>();
+  while (current instanceof Error && !seen.has(current)) {
+    seen.add(current);
+    if (current instanceof AnalysisRuntimeValidationError) return current.diagnostics;
+    current = current.cause;
+  }
+  return null;
+}
+
+export function formatAnalysisRuntimeDiagnostics(error: unknown): string | null {
+  const diagnostics = analysisRuntimeDiagnostics(error);
+  if (!diagnostics) return null;
+  const boundedStream = (value: string): string => {
+    const maximumLength = 7_000;
+    if (value.length <= maximumLength) return value;
+    return `${value.slice(0, maximumLength)}...[truncated ${value.length - maximumLength} chars]`;
+  };
+  return [
+    `python.exe path=${JSON.stringify(diagnostics.pythonExecutable)}`,
+    `torch.__version__=${JSON.stringify(diagnostics.torchVersion)}`,
+    `torch.version.cuda=${JSON.stringify(diagnostics.torchCudaVersion)}`,
+    `torch.cuda.is_available()=${JSON.stringify(diagnostics.cudaAvailable)}`,
+    `GPU name=${JSON.stringify(diagnostics.gpuName)}`,
+    `GPU capability=${JSON.stringify(diagnostics.gpuCapability)}`,
+    `torch.cuda.get_arch_list()=${JSON.stringify(diagnostics.cudaArchList)}`,
+    `exit code=${JSON.stringify(diagnostics.exitCode)}`,
+    `stdout=${JSON.stringify(boundedStream(diagnostics.stdout))}`,
+    `stderr=${JSON.stringify(boundedStream(diagnostics.stderr))}`,
+  ].join('; ');
+}
 
 async function exists(value: string): Promise<boolean> {
   try {
@@ -164,31 +282,54 @@ export async function validateAnalysisRuntime(
   python: string,
   expectedVariant?: AnalysisRuntimeVariant,
 ): Promise<{ version: string; pythonVersion: string; torchVersion: string; acceleration: 'cuda' | 'cpu'; variant: AnalysisRuntimeVariant }> {
-  const result = await runProcess(python, [
-    '-c',
-    'import cv2,json,numpy,sys,torch;value={"python":sys.version.split()[0],"torch":torch.__version__,"torch_cuda":torch.version.cuda,"opencv":cv2.__version__,"numpy":numpy.__version__,"acceleration":"cuda" if torch.cuda.is_available() else "cpu","cuda_smoke":False,"compiled_arch_list":getattr(torch._C,"_cuda_getArchFlags",lambda:" ")().split()};\nif torch.cuda.is_available():\n value["device_name"]=torch.cuda.get_device_name(0);value["device_capability"]=list(torch.cuda.get_device_capability(0));value["cuda_arch_list"]=torch.cuda.get_arch_list();\n try:\n  x=torch.ones((1,3,4,4),device="cuda");w=torch.ones((1,3,3,3),device="cuda");torch.nn.functional.conv2d(x,w);torch.cuda.synchronize();value["cuda_smoke"]=True\n except Exception as error:value["cuda_smoke_error"]=str(error)\nprint(json.dumps(value))',
-  ], { timeoutMs: 30_000 });
-  const value = JSON.parse(result.stdout.trim()) as Record<string, unknown>;
+  let result: ProcessResult;
+  try {
+    result = await runProcess(python, [
+      '-c',
+      'import json,sys\nvalue={"python_executable":sys.executable,"python":sys.version.split()[0],"torch":None,"torch_cuda":None,"opencv":None,"numpy":None,"acceleration":None,"cuda_available":None,"cuda_smoke":False,"device_name":None,"device_capability":None,"cuda_arch_list":None,"compiled_arch_list":None}\ntry:\n import cv2,numpy,torch\n value.update({"torch":torch.__version__,"torch_cuda":torch.version.cuda,"opencv":cv2.__version__,"numpy":numpy.__version__})\n value["cuda_available"]=torch.cuda.is_available();value["acceleration"]="cuda" if value["cuda_available"] else "cpu";value["compiled_arch_list"]=getattr(torch._C,"_cuda_getArchFlags",lambda:" ")().split();value["cuda_arch_list"]=torch.cuda.get_arch_list()\n if value["cuda_available"]:\n  value["device_name"]=torch.cuda.get_device_name(0);value["device_capability"]=list(torch.cuda.get_device_capability(0))\n  try:\n   x=torch.ones((1,3,4,4),device="cuda");w=torch.ones((1,3,3,3),device="cuda");torch.nn.functional.conv2d(x,w);torch.cuda.synchronize();value["cuda_smoke"]=True\n  except Exception as error:value["cuda_smoke_error"]=str(error)\nexcept Exception as error:\n value["diagnostic_error"]=repr(error);print(json.dumps(value),flush=True);raise\nprint(json.dumps(value),flush=True)',
+    ], {
+      timeoutMs: 30_000,
+      env: {
+        ...process.env,
+        PYTHONUTF8: '1',
+        PYTHONIOENCODING: 'utf-8',
+      },
+    });
+  } catch (error) {
+    const code = expectedVariant && expectedVariant !== 'cpu'
+      ? 'CUDA_RUNTIME_SELF_TEST_FAILED'
+      : 'ANALYSIS_RUNTIME_SELF_TEST_FAILED';
+    throw new AnalysisRuntimeValidationError(code, diagnosticsFromError(python, error), { cause: error });
+  }
+  let value: Record<string, unknown>;
+  try {
+    value = parseRuntimeOutput(result.stdout);
+  } catch (error) {
+    const code = expectedVariant && expectedVariant !== 'cpu'
+      ? 'CUDA_RUNTIME_SELF_TEST_FAILED'
+      : 'ANALYSIS_RUNTIME_SELF_TEST_FAILED';
+    throw runtimeFailure(code, python, result, {}, error);
+  }
   const acceptedTorchVersions = new Set<string>([
     ...ANALYSIS_RUNTIME_VARIANTS.map((variant) => expectedTorchVersion(variant)),
   ]);
   if (value.python !== ANALYSIS_PYTHON_VERSION || typeof value.torch !== 'string' || !acceptedTorchVersions.has(value.torch)) {
-    throw new Error('ANALYSIS_RUNTIME_VERSION_MISMATCH');
+    throw runtimeFailure('ANALYSIS_RUNTIME_VERSION_MISMATCH', python, result, value);
   }
-  if (value.numpy !== ANALYSIS_NUMPY_VERSION || value.opencv !== ANALYSIS_OPENCV_VERSION) throw new Error('ANALYSIS_RUNTIME_VERSION_MISMATCH');
-  if (value.acceleration !== 'cuda' && value.acceleration !== 'cpu') throw new Error('ANALYSIS_RUNTIME_SELF_TEST_FAILED');
+  if (value.numpy !== ANALYSIS_NUMPY_VERSION || value.opencv !== ANALYSIS_OPENCV_VERSION) throw runtimeFailure('ANALYSIS_RUNTIME_VERSION_MISMATCH', python, result, value);
+  if (value.acceleration !== 'cuda' && value.acceleration !== 'cpu') throw runtimeFailure('ANALYSIS_RUNTIME_SELF_TEST_FAILED', python, result, value);
   const inferredVariant = ANALYSIS_RUNTIME_VARIANTS.find((variant) => value.torch === expectedTorchVersion(variant));
-  if (!inferredVariant) throw new Error('ANALYSIS_RUNTIME_VERSION_MISMATCH');
-  if (expectedVariant && value.torch !== expectedTorchVersion(expectedVariant)) throw new Error('ANALYSIS_RUNTIME_VARIANT_MISMATCH');
-  if (expectedVariant === 'cpu' && (value.torch_cuda !== null || value.acceleration !== 'cpu')) throw new Error('ANALYSIS_RUNTIME_VARIANT_MISMATCH');
+  if (!inferredVariant) throw runtimeFailure('ANALYSIS_RUNTIME_VERSION_MISMATCH', python, result, value);
+  if (expectedVariant && value.torch !== expectedTorchVersion(expectedVariant)) throw runtimeFailure('ANALYSIS_RUNTIME_VARIANT_MISMATCH', python, result, value);
+  if (expectedVariant === 'cpu' && (value.torch_cuda !== null || value.acceleration !== 'cpu')) throw runtimeFailure('ANALYSIS_RUNTIME_VARIANT_MISMATCH', python, result, value);
   if (expectedVariant && expectedVariant !== 'cpu') {
     const expectedCuda = expectedVariant === 'cu132' ? '13.2' : '12.6';
-    if (value.torch_cuda !== expectedCuda || value.acceleration !== 'cuda') throw new Error('CUDA_RUNTIME_SELF_TEST_FAILED');
+    if (value.torch_cuda !== expectedCuda || value.acceleration !== 'cuda') throw runtimeFailure('CUDA_RUNTIME_SELF_TEST_FAILED', python, result, value);
     const capability = Array.isArray(value.device_capability) && value.device_capability.length === 2
       ? Number(value.device_capability[0]) + Number(value.device_capability[1]) / 10
       : null;
-    if (capability === null) throw new Error('CUDA_RUNTIME_UNSUPPORTED_ARCHITECTURE');
-    if (value.cuda_smoke !== true) throw new Error('CUDA_RUNTIME_SELF_TEST_FAILED');
+    if (capability === null) throw runtimeFailure('CUDA_RUNTIME_UNSUPPORTED_ARCHITECTURE', python, result, value);
+    if (value.cuda_smoke !== true) throw runtimeFailure('CUDA_RUNTIME_SELF_TEST_FAILED', python, result, value);
   }
   return {
     version: `Python ${value.python} / PyTorch ${value.torch}`,

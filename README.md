@@ -6,33 +6,33 @@
 
 TTcut 是一款面向乒乓球爱好者的本地乒乓球视频自动剪辑工具。它从比赛视频中定位乒乓球、识别弹跳和有效回合，并按所选模式导出剪辑成片。
 
-视频、分析结果和历史记录只保存在本机；软件不要求登录、不上传视频、不采集遥测。首次安装分析运行时和视频处理组件需要联网，组件安装完成后可以离线分析、预览和剪辑。
+视频、分析结果和历史记录只保存在本机；软件不要求登录、不上传视频、不采集遥测。首次安装运行所需资源时需要联网，安装完成后可以离线分析、预览和剪辑。
 
-> 当前稳定版本为 `v1.2.6`，面向 Windows x64。
+> 当前稳定版本为 `v1.2.7`，面向 Windows x64。
 
 ## 下载与安装
 
 1. Windows 从 [TTcut Release](https://github.com/WeiyePlayer/TTcut/releases) 下载。
 2. Android 从 [TTcut-Mobile-Releases](https://github.com/WeiyePlayer/TTcut-Mobile-Releases/releases) 下载。
-3. 运行安装向导，选择安装根目录，并决定是否创建桌面快捷方式。程序写入 `<root>\app`，大型运行时、下载和导入暂存写入 `<root>\data\components`；开始菜单快捷方式始终创建。
-4. 首次启动进入设置，同意后分别安装“分析组件”和“视频处理组件”。
+3. 若 GitHub 下载缓慢，可使用网盘备用下载：[链接](https://pan.baidu.com/s/1LXDzs74xOM1t50-IRM_Vvw?pwd=ttct)，提取码：`ttct`。
+4. 运行安装向导，选择安装根目录，并决定是否创建桌面快捷方式。程序写入 `<root>\app`，大型运行资源、下载和导入暂存写入 `<root>\data\components`；开始菜单快捷方式始终创建。
+5. 首次启动进入设置，同意后完成运行资源安装。
 
-分析组件会自动检测 NVIDIA GPU：CUDA 环境安装或自检失败时回退到 CPU。视频处理组件用于读取视频信息、剪辑、合并和验证输出。
+程序会自动检测 NVIDIA GPU；加速环境安装或自检失败时回退到 CPU。视频处理能力用于读取视频信息、剪辑、合并和验证输出。
 
-## v1.2.6 更新
+## v1.2.7 更新
 
-- 自定义模式支持将选中的每个回合分别导出为独立 MP4 文件，默认合并 MP4 行为保持不变。
-- 支持同时生成可导入 Premiere Pro 的 FCP7 `xmeml` v4 XML，保留原视频引用和每个片段可编辑的入点/出点；单声道和双声道媒体按源声道正确关联。
-- 分段视频和 Premiere XML 可单独或同时启用；输出使用独立、冲突安全的目录，取消时会清理本次临时产物，并报告部分成功结果。
-- 优化短片段时间轴边界拖动，并统一更新 TTcut 应用、安装包和官网品牌图标。
-- 保留 v1.2.5 的 BlurBall 默认模型、TrackNet 可选模型和批量任务稳定性修复。
+- 完善自定义剪辑页面：重新整理工作区、监视器、回合列表和紧凑导航，操作更集中。
+- 支持在时间轴中手动新增和删除回合片段，并保留独立调整片段边界、预览和选择导出的能力。
+- 增加回合滚动操作，优化短片段编辑和长列表浏览体验。
+- 修复自定义导出选项的交互问题，并加强手动与已识别回合在导出前的范围、顺序和重叠校验。
 
-详见 [v1.2.6 发布说明](docs/release-notes-v1.2.6.md)。
+详见 [v1.2.7 发布说明](docs/release-notes-v1.2.7.md)。
 
 ## 联系作者加微信 m2924931661
 
-  欢迎反馈使用问题、bug反馈、新功能提交。
-  
+欢迎反馈使用问题、bug 反馈和新功能建议。
+
 ## 使用方法
 
 ### 1. 选择视频与标定球桌
@@ -54,7 +54,7 @@ TTcut 是一款面向乒乓球爱好者的本地乒乓球视频自动剪辑工�
 
 - **所有回合**：剪辑全部有效回合。
 - **精彩回合**：只保留板数大于所选筛选值的回合，筛选值为 3、5 或 7。
-- **自定义**：进入独立时间轴逐项选择回合；每个片段均可预览并独立调整起止边界。导出时还可为每个回合生成独立 MP4，或生成 Premiere 可导入的 FCP7 XML；两种产物可同时启用。
+- **自定义**：进入独立时间轴逐项选择回合；每个片段均可预览并独立调整起止边界。还可手动新增或删除回合，并选择导出合并 MP4、独立 MP4 或 Premiere 可导入的 FCP7 XML。
 
 ![选择剪辑模式](docs/images/cutting-modes.png)
 
@@ -81,30 +81,27 @@ TTcut 是一款面向乒乓球爱好者的本地乒乓球视频自动剪辑工�
 - 每个剪辑组最后一个回合结束后额外保留 1 秒，再应用所选回合后时间；超过源视频结尾时直接在结尾结束。
 - 扩展后的片段重叠时再次合并，避免重复画面。
 
-## 分析组件
+## 本地分析
 
-若github资源下载缓慢，可使用网盘链接：链接: https://pan.baidu.com/s/1LXDzs74xOM1t50-IRM_Vvw?pwd=ttct 提取码: ttct
-安装包内置固定的球识别模型和球桌识别模型。按需安装的分析运行时组件包含 Python 3.12.13、PyTorch 2.12.1、NumPy、OpenCV 和最小分析 Worker，负责：
-运行时组件安装在所选安装根的 `<root>\data\components`。三个模型随应用安装并在打包前按固定大小和 SHA-256 校验；Python/PyTorch 运行时仍按需下载，支持 CPU、CUDA 12.6 和 CUDA 13.2。
+安装包内置运行所需的球识别和球桌识别资源，无需另行下载模型权重。本地分析负责：
 
-## 视频处理组件
+- 自动或手动球桌标定与坐标映射。
+- 定位乒乓球并识别弹跳事件。
+- 使用统一的球台区域、时间间隔和回合规则整理有效回合。
+- 根据本机环境选择 GPU 加速或 CPU 处理。
 
-视频处理组件采用固定的 FFmpeg/ffprobe Windows x64 构建，负责：
+运行资源安装在所选安装根的 `<root>\data\components`。随应用提供的模型会在打包前按固定大小和 SHA-256 校验。
 
-- 验证 MP4、旋转方向、时长、分辨率、帧率、音视频流和关键帧。
+## 视频处理
+
+视频处理能力负责：
+
+- 验证 MP4 的旋转方向、时长、分辨率、帧率、音视频流和关键帧。
 - 根据回合边界生成剪辑片段并合并。
-- 满足安全切点条件时尝试流复制，否则执行一次准确重编码。
+- 满足安全切点条件时尝试无损复制，否则执行一次准确重编码。
 - 保留分辨率、方向、宽高比和色彩信息，并校验输出时长、音画同步和可播放性。
 
-默认视频处理组件使用 OpenH264，在线安装行为和默认剪辑参数保持不变。需要 8K 或更高分辨率重编码时，可以在“设置”中下载并手动导入可选的 x264 组件：
-
-- 固定文件：`ffmpeg-N-125716-g1b1f602699-win64-gpl.zip`
-- 固定 SHA-256：`6dcf685c2fea98221b3f179961165e9c31f55bead576c4479ae4549858fbf826`
-- 导入成功后，所有必须重编码的导出使用 `libx264`、`veryfast` 和 `CRF 18`。
-- 满足边界条件的任务仍使用无损流复制，不会因为导入 x264 而强制重编码。
-- x264 组件与默认 OpenH264 组件并存；x264 损坏或未导入时自动回退 OpenH264。
-- x264 是 GPL 构建，组件不打入 TTcut 安装包，必须从设置页提供的固定 BtbN Release 手动下载并导入。
-- 不进行升频：输入为 8K 时保持 8K，低分辨率视频不会被放大。
+常规视频使用默认处理配置。需要高分辨率重编码时，可以在“设置”中安装可选的视频处理扩展；扩展损坏或未安装时会自动回退到默认配置。程序不会放大低分辨率视频。
 
 ## 从源码运行
 
@@ -112,16 +109,6 @@ TTcut 是一款面向乒乓球爱好者的本地乒乓球视频自动剪辑工�
 
 ```powershell
 npm install
-npm start
-```
-
-开发环境可以通过变量指定已有组件：
-
-```powershell
-$env:TTCUT_PYTHON='D:\path\to\python.exe'
-$env:TTCUT_TRACKNET_WEIGHTS='D:\path\to\TrackNet_best.pt'
-$env:TTCUT_FFMPEG='D:\path\to\ffmpeg.exe'
-$env:TTCUT_FFPROBE='D:\path\to\ffprobe.exe'
 npm start
 ```
 
@@ -137,28 +124,20 @@ npm run make
 npm run make:official
 ```
 
-`npm run make` 保留 Forge 的 Vite 编译、打包与 Fuse 配置，并在 `out\make\nsis\x64` 生成当前版本的未签名 NSIS Setup、blockmap 和更新元数据；它不修改版本，也不上传 Release。`npm run make:official` 继续执行签名门禁，并生成由固定发布私钥签署的 `update-manifest.json` 与 `update-manifest.json.sig`。
+`npm run make` 生成当前版本的本地未签名安装包和更新元数据；它不修改版本，也不上传 Release。`npm run make:official` 执行正式签名和发布校验。
 
-真实 E2E 不随仓库分发测试视频、模型权重或运行时。运行 `npm run test:e2e` 前，通过以下变量指定本机已验证的文件；`TTCUT_E2E_FFMPEG_ROOT` 指向同时包含 `ffmpeg.exe` 和 `ffprobe.exe` 的目录：
+真实端到端测试所需的视频、模型权重和运行资源不随仓库分发，需要在测试机器上使用已验证的本地文件。125%、150%、200% 的布局用例用于当前机器上的自动化 DPI 回归检查，不构成跨 Windows 版本认证。系统、架构和运行资源兼容性由应用启动自检与任务前检查共同保证，详见 [Windows 兼容策略](docs/windows-compatibility.md)。
 
-```powershell
-$env:TTCUT_E2E_VIDEO='D:\path\to\1-193.mp4'
-$env:TTCUT_E2E_PYTHON='D:\path\to\python.exe'
-$env:TTCUT_E2E_WEIGHTS='D:\path\to\TrackNet_best.pt'
-$env:TTCUT_E2E_FFMPEG_ROOT='D:\path\to\ffmpeg-bin'
-$env:TTCUT_E2E_ELECTRON='D:\path\to\electron.exe'
-npm run test:e2e
-```
+## 已知限制
 
-125%、150%、200% 的 Electron 布局用例用于当前机器上的自动化 DPI 回归检查，不构成跨 Windows 版本认证。系统、架构和组件兼容性由应用启动自检与任务前检查共同保证，详见 [Windows 兼容策略](docs/windows-compatibility.md)。
-
-## 许可
-
-TTcut 自有源码采用 GPL-3.0 license。TrackNet 派生代码、模型权重、Python、PyTorch、NumPy、OpenCV、FFmpeg、可选 GPL x264 组件、字体和 npm 依赖保留各自许可或权利声明，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+- 单视频工作流一次处理一个 MP4 或 MOV；批量任务支持一次选择多个 MP4/MOV，并按“先标定、后处理”的串行队列运行，失败项目可手动恢复。
+- 板数是弹跳代理值，不是真实击球计数。
+- 不再做 Windows build / 系统版本硬拦截；程序仍以 Windows x64 为主。旧版 Windows、x86、ARM64 能否实际运行取决于本机环境与依赖，不保证可用。
 
 更多实现和发行资料位于 [`docs`](docs) 目录。
 
 ## 打赏
+
 如果本程序对你有帮助，希望能得到你的打赏支持，感谢！
 
 爱发电：https://ifdian.net/a/weiye

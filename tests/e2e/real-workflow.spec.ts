@@ -334,6 +334,53 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     await expect(customMonitor).toHaveCSS('object-position', '50% 50%');
     await expect(customMonitor).toHaveCSS('position', 'absolute');
     await expect(page.locator('.custom-monitor')).toHaveCSS('background-color', 'rgb(0, 0, 0)');
+    await expect.poll(() => customMonitor.evaluate((element: HTMLVideoElement) => element.controls)).toBe(false);
+    const customLayout = await page.evaluate(() => {
+      const list = document.querySelector('.custom-rally-list')?.getBoundingClientRect();
+      const monitor = document.querySelector('.custom-monitor')?.getBoundingClientRect();
+      const timeline = document.querySelector('.custom-timeline')?.getBoundingClientRect();
+      const timelineTrack = document.querySelector('.timeline-track-window')?.getBoundingClientRect();
+      const exportLauncher = document.querySelector('.floating-launch-start')?.getBoundingClientRect();
+      const timelineActions = document.querySelector('.custom-timeline-actions')?.getBoundingClientRect();
+      const pageBounds = document.querySelector('.custom-cut-page')?.getBoundingClientRect();
+      const sidebar = document.querySelector('.sidebar')?.getBoundingClientRect();
+      const titlebar = document.querySelector('.titlebar')?.getBoundingClientRect();
+      const main = document.querySelector('.main-content');
+      const pageRoot = document.querySelector('.custom-cut-page');
+      const listViewport = document.querySelector('.custom-rally-list .table-scroll');
+      return {
+        listLeft: list?.left ?? 0,
+        listRight: list?.right ?? 0,
+        monitorLeft: monitor?.left ?? 0,
+        monitorRight: monitor?.right ?? 0,
+        timelineLeft: timeline?.left ?? 0,
+        timelineRight: timeline?.right ?? 0,
+        timelineTrackBottom: timelineTrack?.bottom ?? 0,
+        exportLauncherTop: exportLauncher?.top ?? 0,
+        exportLauncherRightInset: pageBounds && exportLauncher ? pageBounds.right - exportLauncher.right : 0,
+        exportLauncherBottomInset: pageBounds && exportLauncher ? pageBounds.bottom - exportLauncher.bottom : 0,
+        timelineActionsTop: timelineActions?.top ?? 0,
+        sidebarWidth: sidebar?.width ?? 0,
+        titlebarLeft: titlebar?.left ?? 0,
+        mainOverflow: main ? getComputedStyle(main).overflow : '',
+        pageOverflow: pageRoot ? getComputedStyle(pageRoot).overflow : '',
+        listOverflow: listViewport ? getComputedStyle(listViewport).overflowY : '',
+        pageFits: pageRoot ? pageRoot.scrollHeight <= pageRoot.clientHeight + 1 && pageRoot.scrollWidth <= pageRoot.clientWidth + 1 : false,
+      };
+    });
+    expect(customLayout.monitorLeft).toBeGreaterThan(customLayout.listRight);
+    expect(customLayout.timelineLeft).toBeCloseTo(customLayout.monitorLeft, 0);
+    expect(customLayout.timelineRight).toBeCloseTo(customLayout.monitorRight, 0);
+    expect(customLayout.timelineTrackBottom).toBeLessThanOrEqual(customLayout.exportLauncherTop + 1);
+    expect(customLayout.timelineActionsTop).toBeGreaterThanOrEqual(customLayout.timelineTrackBottom);
+    expect(customLayout.exportLauncherRightInset).toBeCloseTo(customLayout.exportLauncherBottomInset, 0);
+    expect(customLayout.titlebarLeft).toBeCloseTo(customLayout.sidebarWidth, 0);
+    expect(customLayout.mainOverflow).toBe('hidden');
+    expect(customLayout.pageOverflow).toBe('hidden');
+    expect(customLayout.listOverflow).toBe('auto');
+    expect(customLayout.pageFits).toBe(true);
+    const monitorRatio = await customMonitor.evaluate((element) => element.getBoundingClientRect().width / element.getBoundingClientRect().height);
+    expect(monitorRatio).toBeCloseTo(16 / 9, 2);
     await customMonitor.evaluate((element: HTMLVideoElement) => {
       element.muted = true;
       element.pause();
@@ -344,10 +391,16 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     await page.keyboard.press('Space');
     await expect.poll(() => customMonitor.evaluate((element: HTMLVideoElement) => element.paused)).toBe(true);
     await expect(page.locator('.timeline-toolbar')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '增加回合' })).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.getByRole('button', { name: '删除回合' })).toHaveAttribute('aria-pressed', 'false');
+    await page.getByRole('button', { name: '增加回合' }).click();
+    await expect(page.getByRole('button', { name: '增加回合' })).toHaveAttribute('aria-pressed', 'true');
+    await page.locator('.custom-workspace').click({ button: 'right' });
+    await expect(page.getByRole('button', { name: '增加回合' })).toHaveAttribute('aria-pressed', 'false');
     const timelineViewport = page.locator('.timeline-viewport');
     const timelineAppearance = await page.evaluate(() => {
       const viewport = document.querySelector('.timeline-viewport')!;
-      const track = document.querySelector('.timeline-track')!;
+      const track = document.querySelector('.timeline-track-window')!;
       const viewportStyle = getComputedStyle(viewport);
       const trackStyle = getComputedStyle(track);
       return {
@@ -367,10 +420,55 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     expect(timelineBox).not.toBeNull();
     await page.mouse.move(timelineBox!.x + timelineBox!.width / 2, timelineBox!.y + timelineBox!.height / 2);
     const initialZoom = Number(await timelineViewport.getAttribute('data-zoom'));
+    const layoutBeforeTimelineZoom = await page.evaluate(() => {
+      const monitor = document.querySelector('.custom-monitor')!.getBoundingClientRect();
+      const video = document.querySelector('.custom-monitor video')!.getBoundingClientRect();
+      return {
+        monitorWidth: monitor.width,
+        monitorHeight: monitor.height,
+        videoWidth: video.width,
+        videoHeight: video.height,
+        devicePixelRatio: window.devicePixelRatio,
+        visualScale: window.visualViewport?.scale ?? 1,
+      };
+    });
     await page.keyboard.down('Control');
     await page.mouse.wheel(0, -360);
     await page.keyboard.up('Control');
     await expect.poll(async () => Number(await timelineViewport.getAttribute('data-zoom'))).toBeGreaterThan(initialZoom);
+    const layoutAfterTimelineZoom = await page.evaluate(() => {
+      const monitor = document.querySelector('.custom-monitor')!.getBoundingClientRect();
+      const video = document.querySelector('.custom-monitor video')!.getBoundingClientRect();
+      return {
+        monitorWidth: monitor.width,
+        monitorHeight: monitor.height,
+        videoWidth: video.width,
+        videoHeight: video.height,
+        devicePixelRatio: window.devicePixelRatio,
+        visualScale: window.visualViewport?.scale ?? 1,
+      };
+    });
+    expect(layoutAfterTimelineZoom.monitorWidth).toBeCloseTo(layoutBeforeTimelineZoom.monitorWidth, 3);
+    expect(layoutAfterTimelineZoom.monitorHeight).toBeCloseTo(layoutBeforeTimelineZoom.monitorHeight, 3);
+    expect(layoutAfterTimelineZoom.videoWidth).toBeCloseTo(layoutBeforeTimelineZoom.videoWidth, 3);
+    expect(layoutAfterTimelineZoom.videoHeight).toBeCloseTo(layoutBeforeTimelineZoom.videoHeight, 3);
+    expect(layoutAfterTimelineZoom.devicePixelRatio).toBe(layoutBeforeTimelineZoom.devicePixelRatio);
+    expect(layoutAfterTimelineZoom.visualScale).toBe(layoutBeforeTimelineZoom.visualScale);
+    const zoomedTrackGeometry = await page.evaluate(() => {
+      const viewport = document.querySelector('.timeline-viewport')!.getBoundingClientRect();
+      const frame = document.querySelector('.timeline-track-window')!.getBoundingClientRect();
+      const content = document.querySelector('.timeline-track')!.getBoundingClientRect();
+      return {
+        viewportRight: viewport.right,
+        frameRight: frame.right,
+        frameWidth: frame.width,
+        contentWidth: content.width,
+        frameOverflow: getComputedStyle(document.querySelector('.timeline-track-window')!).overflow,
+      };
+    });
+    expect(zoomedTrackGeometry.frameRight).toBeCloseTo(zoomedTrackGeometry.viewportRight, 3);
+    expect(zoomedTrackGeometry.contentWidth).toBeGreaterThan(zoomedTrackGeometry.frameWidth);
+    expect(zoomedTrackGeometry.frameOverflow).toBe('hidden');
     const overflowState = await timelineViewport.evaluate((element: HTMLDivElement) => ({
       clientWidth: element.clientWidth, scrollWidth: element.scrollWidth, scrollLeft: element.scrollLeft,
     }));
@@ -381,6 +479,56 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     await page.mouse.wheel(-40, 0);
     await expect.poll(() => timelineViewport.evaluate((element: HTMLDivElement) => element.scrollLeft)).toBeLessThan(afterVerticalWheel);
     await expect(page.locator('.timeline-clip')).toHaveCount(recognizedRallies);
+    const deletionCandidate = await page.evaluate(() => {
+      const viewport = document.querySelector('.timeline-viewport') as HTMLDivElement | null;
+      const duration = Number(document.querySelector('.timeline-playhead')?.getAttribute('aria-valuemax'));
+      if (!viewport || !Number.isFinite(duration)) return null;
+      const oneSecond = Math.max(viewport.clientWidth, viewport.scrollWidth) / duration;
+      const clips = [...document.querySelectorAll<HTMLDivElement>('.timeline-clip')].reverse();
+      const candidate = clips.find((clip) => Number.parseFloat(clip.style.width) >= oneSecond * 1.5);
+      if (!candidate) return null;
+      return { clipId: candidate.dataset.clipId };
+    });
+    expect(deletionCandidate?.clipId).toBeTruthy();
+    await page.getByRole('button', { name: '删除回合' }).click();
+    const removedDetectedClip = page.locator(`.timeline-clip[data-clip-id="${deletionCandidate!.clipId}"]`);
+    await removedDetectedClip.hover();
+    await expect(removedDetectedClip).toHaveClass(/delete-target/);
+    await removedDetectedClip.click();
+    await expect(page.locator('.timeline-clip')).toHaveCount(recognizedRallies - 1);
+    const insertionTarget = await page.evaluate(() => {
+      const viewport = document.querySelector('.timeline-viewport') as HTMLDivElement | null;
+      const track = document.querySelector('.timeline-track-window');
+      const duration = Number(document.querySelector('.timeline-playhead')?.getAttribute('aria-valuemax'));
+      if (!viewport || !track || !Number.isFinite(duration)) return null;
+      const frame = track.getBoundingClientRect();
+      const oneSecond = viewport.scrollWidth / duration;
+      const clips = [...document.querySelectorAll<HTMLElement>('.timeline-clip')]
+        .map((clip) => clip.getBoundingClientRect())
+        .map((box) => ({ left: Math.max(frame.left, box.left), right: Math.min(frame.right, box.right) }))
+        .filter((box) => box.right > box.left)
+        .sort((left, right) => left.left - right.left);
+      let gapStart = frame.left;
+      for (const clip of [...clips, { left: frame.right, right: frame.right }]) {
+        if (clip.left - gapStart >= oneSecond) {
+          return { x: gapStart + (clip.left - gapStart - oneSecond) / 2, y: frame.top + frame.height / 2 };
+        }
+        gapStart = Math.max(gapStart, clip.right);
+      }
+      return null;
+    });
+    expect(insertionTarget).not.toBeNull();
+    await page.getByRole('button', { name: '增加回合' }).click();
+    await page.mouse.click(insertionTarget!.x, insertionTarget!.y);
+    await expect(page.locator('.timeline-clip')).toHaveCount(recognizedRallies);
+    const manualClip = page.locator('.timeline-clip[data-clip-id^="manual_"]');
+    await expect(manualClip).toHaveCount(1);
+    await page.getByRole('button', { name: '删除回合' }).click();
+    await manualClip.hover();
+    await expect(manualClip).toHaveClass(/delete-target/);
+    await manualClip.click();
+    await expect(page.locator('.timeline-clip')).toHaveCount(recognizedRallies - 1);
+    await page.locator('.custom-workspace').click({ button: 'right' });
     await expect(page.getByRole('button', { name: '开始剪辑' })).toBeEnabled();
     await expect(page.getByRole('button', { name: '预览' })).toHaveCount(0);
     await page.getByRole('button', { name: '取消全选' }).click();
@@ -404,7 +552,7 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
       element.pause();
       return state;
     });
-    expect(playback.controls).toBe(true);
+    expect(playback.controls).toBe(false);
     expect(playback.paused).toBe(false);
     expect(playback.start).toBeGreaterThan(selectedStart);
     const playheadLeft = await page.locator('.timeline-playhead').evaluate((element) => Number.parseFloat(getComputedStyle(element).left));
@@ -431,12 +579,21 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     await page.setViewportSize({ width: 840, height: 520 });
     const compactLayout = await page.evaluate(() => ({
       bodyWidth: document.body.scrollWidth,
+      bodyHeight: document.body.scrollHeight,
       viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
       monitorRight: document.querySelector('.custom-monitor')!.getBoundingClientRect().right,
       mainRight: document.querySelector('.main-content')!.getBoundingClientRect().right,
+      customPage: (() => {
+        const element = document.querySelector('.custom-cut-page')!;
+        return { scrollWidth: element.scrollWidth, clientWidth: element.clientWidth, scrollHeight: element.scrollHeight, clientHeight: element.clientHeight };
+      })(),
     }));
     expect(compactLayout.bodyWidth).toBeLessThanOrEqual(compactLayout.viewportWidth);
+    expect(compactLayout.bodyHeight).toBeLessThanOrEqual(compactLayout.viewportHeight);
     expect(compactLayout.monitorRight).toBeLessThanOrEqual(compactLayout.mainRight + 1);
+    expect(compactLayout.customPage.scrollWidth).toBeLessThanOrEqual(compactLayout.customPage.clientWidth + 1);
+    expect(compactLayout.customPage.scrollHeight).toBeLessThanOrEqual(compactLayout.customPage.clientHeight + 1);
     await page.screenshot({ path: path.join(screenshotDir, '03-custom-timeline-compact.png'), fullPage: true });
     if (originalViewport) await page.setViewportSize(originalViewport);
     await expect(page.getByRole('button', { name: '开始剪辑' })).toBeEnabled();
@@ -485,10 +642,12 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     await page.getByRole('button', { name: '取消全选' }).click();
     const firstRally = page.locator('tbody tr').first();
     await firstRally.locator('input[type="checkbox"]').check();
-    const customLauncher = page.locator('.custom-export-launcher');
     const customLaunchButton = page.getByRole('button', { name: '开始剪辑' });
     const customExportOptions = page.locator('.custom-export-options');
-    await customLauncher.hover();
+    await expect.poll(() => customExportOptions.evaluate((element) => getComputedStyle(element).pointerEvents)).toBe('none');
+    await page.locator('.timeline-tool-buttons').hover();
+    await expect.poll(() => customExportOptions.evaluate((element) => getComputedStyle(element).pointerEvents)).toBe('none');
+    await customLaunchButton.hover();
     await expect.poll(() => customExportOptions.evaluate((element) => getComputedStyle(element).pointerEvents)).toBe('auto');
     const launchButtonBox = await customLaunchButton.boundingBox();
     const exportOptionsBox = await customExportOptions.boundingBox();
@@ -514,7 +673,7 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     expect((await stat(rallyVideo)).size).toBeGreaterThan(100_000);
     const premiereXml = await readFile(path.join(artifactDirectory!, `${path.basename(fixtureVideo, path.extname(fixtureVideo))}_TTcut_自定义.xml`), 'utf8');
     expect(premiereXml).toContain('<xmeml version="4">');
-    expect(premiereXml).toContain('<linkclipref>audio-1</linkclipref>');
+    expect(premiereXml).toContain('<linkclipref>audio-1-1</linkclipref>');
     expect(premiereXml).toContain('<pathurl>file:///');
 
     await page.getByRole('button', { name: '在文件夹中打开' }).click();

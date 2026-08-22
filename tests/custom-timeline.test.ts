@@ -8,6 +8,17 @@ import {
   timelineWheelDelta,
   timelineWheelScroll,
 } from '../src/renderer/CustomTimeline';
+import { calculateRallyScrollbar } from '../src/renderer/CustomCutPage';
+
+describe('custom rally scrollbar', () => {
+  it('uses a draggable thumb at half the native scrollbar height without a visible track', () => {
+    expect(calculateRallyScrollbar(0, 400, 1600)).toMatchObject({
+      visible: true, height: 50, top: 0, maximumScroll: 1200,
+    });
+    expect(calculateRallyScrollbar(1200, 400, 1600).top).toBe(350);
+    expect(calculateRallyScrollbar(0, 400, 400).visible).toBe(false);
+  });
+});
 
 describe('custom timeline ruler', () => {
   it('uses five-minute labels when fifteen minutes fit in a 1000px viewport', () => {

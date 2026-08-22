@@ -237,7 +237,9 @@ describe('assisted NSIS installer contract', () => {
   it('backs up and restores the legacy app, registration, and shortcuts on uninstall failure', async () => {
     const source = await readFile(finalizeLegacyPath, 'utf8');
     expect(source).toContain('function Assert-MatchingTrees');
-    expect(source).toContain('Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256');
+    expect(source).toContain('function Get-Sha256');
+    expect(source).toContain('Get-Command Get-FileHash -ErrorAction SilentlyContinue');
+    expect(source).toContain('New-Object System.Security.Cryptography.SHA256Managed');
     expect(source).toContain('function Restore-LegacyInstall');
     expect(source).toContain('Restore-RegistryKey $RegistryBase $RegistryPath $RegistryBackup');
     expect(source).toContain("Copy-Item -LiteralPath $shortcut.source -Destination $shortcut.target -Force");
