@@ -40,6 +40,24 @@ function Write-TTcutReport {
     Set-Content -LiteralPath $ReportPath -Encoding UTF8
 }
 
+function Get-Sha256 {
+  param([string]$Path)
+
+  if (Get-Command Get-FileHash -ErrorAction SilentlyContinue) {
+    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
+  }
+
+  $algorithm = New-Object System.Security.Cryptography.SHA256Managed
+  $stream = $null
+  try {
+    $stream = [System.IO.File]::OpenRead($Path)
+    return ([System.BitConverter]::ToString($algorithm.ComputeHash($stream))).Replace('-', '')
+  } finally {
+    if ($stream) { $stream.Dispose() }
+    $algorithm.Dispose()
+  }
+}
+
 function Get-TreeManifest {
   param([string]$Root)
 
@@ -50,7 +68,7 @@ function Get-TreeManifest {
         [pscustomobject]@{
           path = $_.FullName.Substring($Root.Length).TrimStart('\').Replace('\', '/')
           bytes = $_.Length
-          sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+          sha256 = Get-Sha256 $_.FullName
         }
       } |
       Sort-Object path
@@ -161,8 +179,7 @@ function Restore-LegacyInstall {
     if ($shortcut.exists) {
       $mustRestore = -not (Test-Path -LiteralPath $shortcut.target -PathType Leaf)
       if (-not $mustRestore) {
-        $mustRestore = (Get-FileHash -LiteralPath $shortcut.source -Algorithm SHA256).Hash -ne
-          (Get-FileHash -LiteralPath $shortcut.target -Algorithm SHA256).Hash
+        $mustRestore = (Get-Sha256 $shortcut.source) -ne (Get-Sha256 $shortcut.target)
       }
       if ($mustRestore) {
         New-Item -ItemType Directory -Path (Split-Path -Parent $shortcut.target) -Force | Out-Null
@@ -292,6 +309,8 @@ try {
   Write-TTcutReport 'success' '' $uninstallerExitCode $false
   exit 0
 } catch {
-  try { Write-TTcutReport 'failed' 'UNEXPECTED_ERROR' $uninstallerExitCode $false } catch {}
+  $detail = $_.Exception.Message
+  try { Write-TTcutReport 'failed' 'UNEXPECTED_ERROR' $uninstallerExitCode $false $detail } catch {}
+  [Console]::Error.WriteLine($_.Exception.ToString())
   exit 30
 }

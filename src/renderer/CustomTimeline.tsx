@@ -260,7 +260,11 @@ export function CustomTimeline({
   const timeFromTrackPointer = (clientX: number) => {
     const track = trackWindowRef.current;
     if (!track) return 0;
-    return Math.max(0, Math.min(duration, (clientX - track.getBoundingClientRect().left + scrollLeft) / pixelsPerSecond));
+    const content = track.querySelector<HTMLElement>('.timeline-track');
+    // Use the rendered track position rather than either scroll state. This
+    // keeps insertion aligned with what the user sees during a scroll render.
+    const contentLeft = content?.getBoundingClientRect().left ?? track.getBoundingClientRect().left;
+    return Math.max(0, Math.min(duration, (clientX - contentLeft) / pixelsPerSecond));
   };
 
   const canAddAt = (time: number) => (

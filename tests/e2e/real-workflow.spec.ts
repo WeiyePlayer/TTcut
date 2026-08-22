@@ -487,19 +487,39 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
       const clips = [...document.querySelectorAll<HTMLDivElement>('.timeline-clip')].reverse();
       const candidate = clips.find((clip) => Number.parseFloat(clip.style.width) >= oneSecond * 1.5);
       if (!candidate) return null;
-      return { clipId: candidate.dataset.clipId, insertionOffset: (Number.parseFloat(candidate.style.width) - oneSecond) / 2 };
+      return { clipId: candidate.dataset.clipId };
     });
     expect(deletionCandidate?.clipId).toBeTruthy();
     await page.getByRole('button', { name: '删除回合' }).click();
     const removedDetectedClip = page.locator(`.timeline-clip[data-clip-id="${deletionCandidate!.clipId}"]`);
     await removedDetectedClip.hover();
     await expect(removedDetectedClip).toHaveClass(/delete-target/);
-    const insertionBox = await removedDetectedClip.boundingBox();
-    expect(insertionBox).not.toBeNull();
     await removedDetectedClip.click();
     await expect(page.locator('.timeline-clip')).toHaveCount(recognizedRallies - 1);
+    const insertionTarget = await page.evaluate(() => {
+      const viewport = document.querySelector('.timeline-viewport') as HTMLDivElement | null;
+      const track = document.querySelector('.timeline-track-window');
+      const duration = Number(document.querySelector('.timeline-playhead')?.getAttribute('aria-valuemax'));
+      if (!viewport || !track || !Number.isFinite(duration)) return null;
+      const frame = track.getBoundingClientRect();
+      const oneSecond = viewport.scrollWidth / duration;
+      const clips = [...document.querySelectorAll<HTMLElement>('.timeline-clip')]
+        .map((clip) => clip.getBoundingClientRect())
+        .map((box) => ({ left: Math.max(frame.left, box.left), right: Math.min(frame.right, box.right) }))
+        .filter((box) => box.right > box.left)
+        .sort((left, right) => left.left - right.left);
+      let gapStart = frame.left;
+      for (const clip of [...clips, { left: frame.right, right: frame.right }]) {
+        if (clip.left - gapStart >= oneSecond) {
+          return { x: gapStart + (clip.left - gapStart - oneSecond) / 2, y: frame.top + frame.height / 2 };
+        }
+        gapStart = Math.max(gapStart, clip.right);
+      }
+      return null;
+    });
+    expect(insertionTarget).not.toBeNull();
     await page.getByRole('button', { name: '增加回合' }).click();
-    await page.mouse.click(insertionBox!.x + deletionCandidate!.insertionOffset, insertionBox!.y + insertionBox!.height / 2);
+    await page.mouse.click(insertionTarget!.x, insertionTarget!.y);
     await expect(page.locator('.timeline-clip')).toHaveCount(recognizedRallies);
     const manualClip = page.locator('.timeline-clip[data-clip-id^="manual_"]');
     await expect(manualClip).toHaveCount(1);
