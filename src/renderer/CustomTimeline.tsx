@@ -389,7 +389,7 @@ export function CustomTimeline({
                 onPlayClip(clip);
               }}>
                 {!toolMode ? <button type="button" className="clip-handle start" role="slider" aria-orientation="horizontal" aria-label={`${resizeStartLabel} ${clip.rallyIndex}`} aria-valuemin={previous?.end ?? 0} aria-valuemax={clip.end - minimumDuration} aria-valuenow={clip.start} style={{ left: -CLIP_EDGE_HIT_OUTSET, width: edgeHitWidth }} onPointerDown={(event) => beginResize(event, clip, 'start')} onPointerMove={moveResize} onPointerUp={endResize} onPointerCancel={endResize} onLostPointerCapture={endResize} onKeyDown={(event) => keyboardResize(event, clip, 'start')} /> : null}
-                <span>{clip.rallyIndex}</span>
+                {!deleteTarget ? <span>{clip.rallyIndex}</span> : null}
                 {deleteTarget ? <i className="timeline-delete-overlay"><TrashIcon /></i> : null}
                 {showBoundaryMarkers ? <><i className="clip-boundary-marker start" aria-hidden="true" /><i className="clip-boundary-marker end" aria-hidden="true" /></> : null}
                 {!toolMode ? <button type="button" className="clip-handle end" role="slider" aria-orientation="horizontal" aria-label={`${resizeEndLabel} ${clip.rallyIndex}`} aria-valuemin={clip.start + minimumDuration} aria-valuemax={following?.start ?? duration} aria-valuenow={clip.end} style={{ right: -CLIP_EDGE_HIT_OUTSET, width: edgeHitWidth }} onPointerDown={(event) => beginResize(event, clip, 'end')} onPointerMove={moveResize} onPointerUp={endResize} onPointerCancel={endResize} onLostPointerCapture={endResize} onKeyDown={(event) => keyboardResize(event, clip, 'end')} /> : null}
