@@ -192,6 +192,7 @@ export const analysisResultSchema = z.object({
   schema_version: z.literal(1),
   video: videoMetadataSchema,
   rallies: z.array(rallySchema),
+  bounce_times_seconds: z.array(finiteNumber.nonnegative()).optional(),
   calibration: calibrationSchema.optional(),
   table_analysis: tableAnalysisSchema.optional(),
   model_provenance: z.object({
@@ -244,6 +245,34 @@ export const workerEventSchema = z.discriminatedUnion('type', [
   }).strict(),
 ]);
 
+const customExportSegmentTimingSchema = z.object({
+  start_time_seconds: finiteNumber.nonnegative(),
+  end_time_seconds: finiteNumber.positive(),
+});
+
+export const customExportSegmentSchema = z.discriminatedUnion('source', [
+  customExportSegmentTimingSchema.extend({
+    clip_id: z.string().min(1),
+    source: z.literal('detected'),
+    rally_id: z.string().min(1),
+    display_index: z.number().int().positive(),
+  }).strict(),
+  customExportSegmentTimingSchema.extend({
+    clip_id: z.string().min(1),
+    source: z.literal('manual'),
+    display_index: z.number().int().positive(),
+  }).strict(),
+]);
+
+export const legacyCustomExportSegmentSchema = customExportSegmentTimingSchema.extend({
+  rally_id: z.string().min(1),
+}).strict();
+
+export const customExportSegmentInputSchema = z.union([
+  customExportSegmentSchema,
+  legacyCustomExportSegmentSchema,
+]);
+
 export const cutSelectionSchema = z.discriminatedUnion('mode', [
   z.object({
     mode: z.literal('all'),
@@ -258,11 +287,7 @@ export const cutSelectionSchema = z.discriminatedUnion('mode', [
   }).strict(),
   z.object({
     mode: z.literal('custom'),
-    segments: z.array(z.object({
-      rally_id: z.string().min(1),
-      start_time_seconds: finiteNumber.nonnegative(),
-      end_time_seconds: finiteNumber.positive(),
-    }).strict()).min(1),
+    segments: z.array(customExportSegmentInputSchema).min(1),
   }).strict(),
 ]);
 
@@ -403,6 +428,9 @@ export type AnalysisResultV1 = z.infer<typeof analysisResultSchema>;
 export type CalibrationResultV1 = z.infer<typeof calibrationResultSchema>;
 export type WorkerEventV1 = z.infer<typeof workerEventSchema>;
 export type CutSelectionV1 = z.infer<typeof cutSelectionSchema>;
+export type CustomExportSegment = z.infer<typeof customExportSegmentSchema>;
+export type LegacyCustomExportSegment = z.infer<typeof legacyCustomExportSegmentSchema>;
+export type CustomExportSegmentInput = z.infer<typeof customExportSegmentInputSchema>;
 export type AppSettings = z.infer<typeof appSettingsSchema>;
 export type HistorySource = z.infer<typeof historySourceSchema>;
 export type HistoryRecordV1 = z.infer<typeof historyRecordSchema>;
@@ -456,6 +484,7 @@ export type CombinedVideoExportResult = {
 };
 
 export type CustomArtifactFailure = {
+  clipId?: string;
   rallyId?: string;
   rallyIndex?: number;
   code: string;
@@ -469,7 +498,8 @@ export type CustomArtifactExportResult = {
   outputDirectory: string;
   partialSuccess: boolean;
   rallyVideos: Array<{
-    rallyId: string;
+    clipId: string;
+    rallyId?: string;
     rallyIndex: number;
     outputPath: string;
   }>;

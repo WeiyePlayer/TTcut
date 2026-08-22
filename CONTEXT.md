@@ -20,8 +20,11 @@ and Analysis ROI. TrackNet and BlurBall keep the 1.25× ROI sampling policy.
 
 ## Board Count
 
-The displayed `bounce_count`: the number of detected table bounces in a rally.
-It is not a count of racket contacts.
+For a detected Rally, the displayed `bounce_count`: the number of detected
+table bounces in that Rally at analysis time. For a Manual Rally Clip, it is
+the number of Bounce Event Times inside its current `[start, end)` interval;
+it is unavailable for legacy analyses that did not retain those times. It is
+not a count of racket contacts.
 _Avoid_: stroke count, paddle-hit count
 
 ## Rally
@@ -32,11 +35,27 @@ detected exchange; they are not necessarily final export boundaries.
 
 ## Custom Rally Clip
 
-The editable export interval associated with exactly one Rally in the
-single-video custom workflow. Its default start includes Before-rally time; its
-default end includes the Rally end, one fixed closing second, and After-rally
-time. Selected Custom Rally Clips never overlap on the single track.
+The editable export interval in the single-video custom workflow. A detected
+Custom Rally Clip retains one source Rally; a Manual Rally Clip has no source
+Rally and begins as a user-created one-second interval. A detected clip's
+default start includes Before-rally time; its default end includes the Rally
+end, one fixed closing second, and After-rally time. Selected Custom Rally
+Clips never overlap on the single track.
 _Avoid_: Rally, CutGroup
+
+## Manual Rally Clip
+
+A Custom Rally Clip created directly on the timeline rather than from a
+detected Rally. It has a stable manual clip ID, no Rally ID, and a Board Count
+derived from retained Bounce Event Times when those are available.
+_Avoid_: manually created Rally, detected Rally
+
+## Bounce Event Time
+
+The finite source-video timestamp for one valid detected table-bounce event.
+`AnalysisResultV1.bounce_times_seconds` stores these times sorted and deduped,
+including events that do not become a formal Rally.
+_Avoid_: racket contact time, Rally boundary
 
 ## Custom Cut Draft
 

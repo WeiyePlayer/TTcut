@@ -1,7 +1,7 @@
 {
   "name": "ttcut",
   "productName": "TTcut",
-  "version": "1.2.6",
+  "version": "1.2.7",
   "description": "Local table-tennis rally cutter for Windows",
   "author": "weiye",
   "private": true,
