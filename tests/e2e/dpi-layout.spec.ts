@@ -152,6 +152,24 @@ for (const scale of [1.25, 1.5, 2] as const) {
       expect(layout.setup.right).toBeLessThanOrEqual(layout.main.right);
       expect(layout.mainScrollsVertically).toBe(true);
 
+      const componentActionLayout = await page.evaluate(() => {
+        const manual = document.querySelector('.setup-manual');
+        const label = manual?.querySelector('strong');
+        const actions = manual?.querySelector('.setup-manual-actions');
+        if (!(label instanceof HTMLElement) || !(actions instanceof HTMLElement)) throw new Error('Missing manual component actions.');
+        const labelBox = label.getBoundingClientRect();
+        const actionsBox = actions.getBoundingClientRect();
+        return {
+          labelRight: labelBox.right,
+          actionsLeft: actionsBox.left,
+          verticalOffset: Math.abs(labelBox.top + labelBox.height / 2 - (actionsBox.top + actionsBox.height / 2)),
+          buttonWraps: Array.from(actions.querySelectorAll('button')).some((button) => button.scrollHeight > button.clientHeight),
+        };
+      });
+      expect(componentActionLayout.actionsLeft).toBeGreaterThan(componentActionLayout.labelRight);
+      expect(componentActionLayout.verticalOffset).toBeLessThan(2);
+      expect(componentActionLayout.buttonWraps).toBe(false);
+
       await page.locator('.main-content').evaluate((element) => { element.scrollTop = element.scrollHeight; });
       await expect(page.locator('.actions-card')).toBeVisible();
       await page.screenshot({ path: path.join(outputRoot, `dpi-${percent}.png`), fullPage: true });
@@ -176,7 +194,7 @@ test('neutral controls use the shared hover surface without overriding semantic 
       `--remote-debugging-port=${port}`,
       '--remote-allow-origins=*',
       '--no-sandbox',
-      '--disable-gpu',
+      ...(process.env.TTCUT_E2E_ENABLE_GPU === '1' ? [] : ['--disable-gpu']),
       projectRoot,
     ], {
       cwd: projectRoot,
@@ -198,6 +216,44 @@ test('neutral controls use the shared hover surface without overriding semantic 
     await page.waitForLoadState('domcontentloaded');
     await expect(page.locator('.settings-page')).toBeVisible();
     await expect(page.locator('.settings-heading .eyebrow')).toHaveCount(0);
+    const aboutCardLayout = await page.locator('.about-card').evaluate((card) => {
+      const brand = card.querySelector('.about-brand');
+      const actions = card.querySelector('.about-actions');
+      if (!(brand instanceof HTMLElement) || !(actions instanceof HTMLElement)) throw new Error('Missing about-card content.');
+      const brandBox = brand.getBoundingClientRect();
+      const actionsBox = actions.getBoundingClientRect();
+      return {
+        actionsLeft: actionsBox.left,
+        brandRight: brandBox.right,
+        verticalOffset: Math.abs(brandBox.top + brandBox.height / 2 - (actionsBox.top + actionsBox.height / 2)),
+      };
+    });
+    expect(aboutCardLayout.actionsLeft).toBeGreaterThan(aboutCardLayout.brandRight);
+    expect(aboutCardLayout.verticalOffset).toBeLessThan(2);
+    const aboutActionRows = await page.locator('.about-actions').evaluate((actions) => {
+      const rowSizes = () => {
+        const rows: Array<{ top: number; count: number }> = [];
+        for (const button of actions.querySelectorAll('button')) {
+          const top = button.getBoundingClientRect().top;
+          const row = rows.find((candidate) => Math.abs(candidate.top - top) < 1);
+          if (row) row.count += 1;
+          else rows.push({ top, count: 1 });
+        }
+        return rows.sort((a, b) => a.top - b.top).map(({ count }) => count);
+      };
+
+      const defaultRows = rowSizes();
+      const card = actions.closest('.about-card');
+      if (!(card instanceof HTMLElement)) throw new Error('Missing about card.');
+      card.style.width = '480px';
+      card.style.gridTemplateColumns = '1fr';
+      const compactRows = rowSizes();
+      card.style.removeProperty('width');
+      card.style.removeProperty('grid-template-columns');
+      return { defaultRows, compactRows };
+    });
+    expect(aboutActionRows.defaultRows).toEqual([5]);
+    expect(aboutActionRows.compactRows).toEqual([3, 2]);
     await expect(page.locator('.timing-settings-card')).toHaveCount(1);
     await expect(page.locator('.timing-settings-card').getByRole('heading', { name: '回合前时间' })).toBeVisible();
     await expect(page.locator('.timing-settings-card').getByRole('heading', { name: '回合后时间' })).toBeVisible();
@@ -234,6 +290,18 @@ test('neutral controls use the shared hover surface without overriding semantic 
     await contactAuthor.hover();
     await expect(page.locator('.contact-author-qr')).toBeVisible();
     await expect(page.locator('.contact-author-qr img')).toHaveAttribute('alt', '联系作者微信二维码');
+    const contactAuthorAlignment = await page.locator('.contact-author').evaluate((container) => {
+      const button = container.querySelector('button');
+      const popup = container.querySelector('.contact-author-qr');
+      if (!(button instanceof HTMLElement) || !(popup instanceof HTMLElement)) throw new Error('Missing contact-author button or QR popup.');
+      const buttonBox = button.getBoundingClientRect();
+      const popupBox = popup.getBoundingClientRect();
+      return {
+        buttonCenter: buttonBox.left + buttonBox.width / 2,
+        popupCenter: popupBox.left + popupBox.width / 2,
+      };
+    });
+    expect(Math.abs(contactAuthorAlignment.buttonCenter - contactAuthorAlignment.popupCenter)).toBeLessThan(1);
     await page.screenshot({ path: path.join(outputRoot, 'contact-author-qr-open.png'), fullPage: true });
     await page.locator('.timing-settings-card').screenshot({ path: path.join(outputRoot, 'timing-controls.png') });
     await page.getByRole('button', { name: '历史剪辑' }).click();
@@ -274,10 +342,20 @@ test('neutral controls use the shared hover surface without overriding semantic 
         <button class="mode-card selected mode-selected-probe" type="button"><span class="radio-dot"></span><strong>Selected</strong><small>Mode</small></button>
         <div class="segmented"><button class="segmented-probe" type="button">Segment</button><button class="selected segmented-selected-probe" type="button">Selected</button></div>
         <div class="glass-radio-group" style="--glass-option-count:2;--glass-selected-index:1"><input id="radio-probe" name="radio-probe" type="radio"><label for="radio-probe">Radio</label><input id="radio-selected-probe" name="radio-probe" type="radio" checked><label for="radio-selected-probe">Selected</label><span class="glass-glider"></span></div>
-        <label class="export-checkbox"><input type="checkbox" checked><span class="export-checkbox-control"><span class="export-checkbox-gloss"></span><svg fill="currentColor" viewBox="0 0 20 20"><path d="M16.707 5.293 8 14 4 10"></path></svg></span><span class="export-checkbox-text">Export</span></label>
+        <label class="export-checkbox"><input type="checkbox" checked><span class="export-checkbox-control"><span class="export-checkbox-gloss"></span></span><span class="export-checkbox-text">Export</span></label>
+        <label class="rally-checkbox"><input type="checkbox" checked><span class="rally-checkbox-control"></span></label>
         <div class="batch-mode-options"><button class="batch-mode-probe" type="button">Batch</button><button class="selected batch-mode-selected-probe" type="button">Selected</button></div>
       `;
       settingsPage.appendChild(fixture);
+
+      const rallyFixture = document.createElement('section');
+      rallyFixture.id = 'rally-list-layout-fixture';
+      rallyFixture.className = 'custom-rally-list';
+      rallyFixture.setAttribute('style', 'width:280px;height:420px;margin-top:14px');
+      const rows = Array.from({ length: 42 }, (_, index) => `
+        <tr><td class="custom-rally-check"><label class="rally-checkbox"><input type="checkbox" ${index % 2 === 0 ? 'checked' : ''}><span class="rally-checkbox-control"></span></label></td><td><div class="custom-rally-meta"><strong>Rally ${index + 1}</strong><span>Bounces 3</span></div><div class="custom-rally-times"><span>00:00.0</span><div class="custom-rally-duration"><strong>5.5s</strong><i></i></div><span>00:05.5</span></div></td></tr>`).join('');
+      rallyFixture.innerHTML = `<div class="table-tools"><strong>42 / 42</strong></div><div class="custom-rally-scroll-shell"><div class="table-scroll"><table class="custom-rally-table"><tbody>${rows}</tbody></table></div></div>`;
+      settingsPage.appendChild(rallyFixture);
     });
 
     const hoverColor = async (selector: string, expected: string) => {
@@ -307,7 +385,56 @@ test('neutral controls use the shared hover surface without overriding semantic 
     await expect(page.locator('#hover-color-fixture .glass-radio-group')).toHaveCSS('background-color', 'rgb(255, 255, 255)');
     await expect(page.locator('#hover-color-fixture .glass-radio-group input:checked')).toHaveCount(1);
     await expect(page.locator('#hover-color-fixture .glass-radio-group .glass-glider')).toHaveCSS('border-radius', '16px');
-    await expect(page.locator('#hover-color-fixture .export-checkbox-control')).toHaveCSS('width', '32px');
+    await expect(page.locator('#hover-color-fixture .export-checkbox-control')).toHaveCSS('width', '16px');
+    await expect(page.locator('#hover-color-fixture .export-checkbox-control svg')).toHaveCount(0);
+    await expect(page.locator('#hover-color-fixture .rally-checkbox-control')).toHaveCSS('width', '14px');
+    await expect(page.locator('#hover-color-fixture .rally-checkbox-control svg')).toHaveCount(0);
+    await expect(page.locator('#hover-color-fixture .rally-checkbox .export-checkbox-gloss')).toHaveCount(0);
+    const rallyListLayout = await page.locator('#rally-list-layout-fixture .table-scroll').evaluate((scroll) => {
+      const table = scroll.querySelector('table');
+      const firstRow = scroll.querySelector('tbody tr:first-child');
+      const lastRow = scroll.querySelector('tbody tr:last-child');
+      if (!(table instanceof HTMLElement) || !(firstRow instanceof HTMLElement) || !(lastRow instanceof HTMLElement)) throw new Error('Missing rally-list fixture rows.');
+      const initial = {
+        clientHeight: scroll.clientHeight,
+        scrollHeight: scroll.scrollHeight,
+        tableHeight: table.getBoundingClientRect().height,
+        firstRowTop: firstRow.getBoundingClientRect().top,
+        scrollTop: scroll.getBoundingClientRect().top,
+      };
+      scroll.scrollTop = scroll.scrollHeight;
+      const afterScroll = {
+        lastRowBottom: lastRow.getBoundingClientRect().bottom,
+        scrollBottom: scroll.getBoundingClientRect().bottom,
+      };
+      return { initial, afterScroll };
+    });
+    expect(rallyListLayout.initial.clientHeight).toBeGreaterThan(200);
+    expect(rallyListLayout.initial.scrollHeight).toBeGreaterThan(rallyListLayout.initial.clientHeight);
+    expect(rallyListLayout.initial.tableHeight).toBeGreaterThan(rallyListLayout.initial.clientHeight);
+    expect(rallyListLayout.initial.firstRowTop).toBeGreaterThanOrEqual(rallyListLayout.initial.scrollTop - 1);
+    expect(rallyListLayout.afterScroll.lastRowBottom).toBeLessThanOrEqual(rallyListLayout.afterScroll.scrollBottom + 1);
+    const rallyScroll = page.locator('#rally-list-layout-fixture .table-scroll');
+    const rallyCheckboxes = page.locator('#rally-list-layout-fixture .rally-checkbox');
+    for (const index of [0, 20, 41]) {
+      await rallyCheckboxes.nth(index).scrollIntoViewIfNeeded();
+      await rallyCheckboxes.nth(index).click();
+      const toggledLayout = await rallyScroll.evaluate((scroll) => {
+        const viewport = scroll.getBoundingClientRect();
+        const rows = Array.from(scroll.querySelectorAll('tbody tr'));
+        return {
+          clientHeight: scroll.clientHeight,
+          scrollHeight: scroll.scrollHeight,
+          visibleRows: rows.filter((row) => {
+            const box = row.getBoundingClientRect();
+            return box.bottom > viewport.top && box.top < viewport.bottom;
+          }).length,
+        };
+      });
+      expect(toggledLayout.scrollHeight).toBeGreaterThan(toggledLayout.clientHeight);
+      expect(toggledLayout.visibleRows).toBeGreaterThan(3);
+    }
+    await page.locator('#rally-list-layout-fixture').screenshot({ path: path.join(outputRoot, 'rally-list-controls.png') });
     await hoverColor('#hover-color-fixture .batch-mode-selected-probe', 'rgb(255, 255, 255)');
     await hoverColor('#hover-color-fixture .primary:not(.destructive-confirm)', 'rgb(35, 105, 216)');
     await hoverColor('#hover-color-fixture .destructive-confirm', 'rgb(163, 33, 23)');

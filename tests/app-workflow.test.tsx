@@ -506,8 +506,11 @@ describe('App workflow notices and multi-task entry', () => {
     fireEvent.pointerDown(shortEndHandle, { pointerId: 82, clientX: 1 });
     expect(document.querySelector('.resize-feedback')).toHaveAttribute('data-edge', 'end');
     fireEvent.pointerUp(shortEndHandle, { pointerId: 82, clientX: 1 });
-    expect(screen.getAllByRole('checkbox', { name: /Rally/ })).toHaveLength(2);
-    expect(screen.getAllByRole('checkbox', { name: /Rally/ }).every((input) => (input as HTMLInputElement).checked)).toBe(true);
+    const rallyCheckboxes = screen.getAllByRole('checkbox', { name: /Rally/ });
+    expect(rallyCheckboxes).toHaveLength(2);
+    expect(rallyCheckboxes.every((input) => (input as HTMLInputElement).checked)).toBe(true);
+    expect(rallyCheckboxes.every((input) => input.closest('label')?.classList.contains('rally-checkbox'))).toBe(true);
+    expect(rallyCheckboxes.every((input) => input.closest('label')?.querySelector('.export-checkbox-gloss') === null)).toBe(true);
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'Rally 2' }));
     expect(document.querySelectorAll('.timeline-clip')).toHaveLength(1);
@@ -528,10 +531,21 @@ describe('App workflow notices and multi-task entry', () => {
 
     const startCutting = screen.getByRole('button', { name: 'Start cutting' });
     fireEvent.pointerEnter(startCutting);
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Export rally videos' }));
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Export XML' }));
-    expect(screen.getByRole('checkbox', { name: 'Export rally videos' }).closest('label')).toHaveClass('export-checkbox');
-    expect(screen.getByRole('checkbox', { name: 'Export XML' }).closest('label')).toHaveClass('export-checkbox');
+    const exportLauncher = startCutting.closest('.floating-launcher');
+    if (!exportLauncher) throw new Error('Missing export launcher.');
+    const rallyVideos = screen.getByRole('checkbox', { name: 'Export rally videos' });
+    const premiereXml = screen.getByRole('checkbox', { name: 'Export XML' });
+    fireEvent.click(rallyVideos);
+    expect(exportLauncher).toHaveClass('is-open');
+    fireEvent.click(rallyVideos);
+    fireEvent.blur(rallyVideos, { relatedTarget: null });
+    expect(exportLauncher).toHaveClass('is-open');
+    fireEvent.click(rallyVideos);
+    fireEvent.click(premiereXml);
+    expect(rallyVideos.closest('label')).toHaveClass('export-checkbox');
+    expect(premiereXml.closest('label')).toHaveClass('export-checkbox');
+    expect(rallyVideos.closest('label')?.querySelector('svg')).toBeNull();
+    expect(premiereXml.closest('label')?.querySelector('svg')).toBeNull();
     fireEvent.click(startCutting);
     await waitFor(() => expect(window.ttcut.startExport).toHaveBeenCalledWith(expect.objectContaining({
       selection: {

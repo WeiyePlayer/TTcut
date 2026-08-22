@@ -129,7 +129,6 @@ export function CustomCutPage({
   const videoRef = useRef<HTMLVideoElement>(null);
   const rallyScrollRef = useRef<HTMLDivElement>(null);
   const rallyTableRef = useRef<HTMLTableElement>(null);
-  const exportLauncherRef = useRef<HTMLDivElement>(null);
   const exportCloseTimerRef = useRef<number | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [toolMode, setToolMode] = useState<TimelineToolMode>(null);
@@ -214,11 +213,10 @@ export function CustomCutPage({
     return true;
   };
 
-  const closeExportOnBlur = (event: React.FocusEvent<HTMLDivElement>) => {
-    const nextTarget = event.relatedTarget;
-    if (nextTarget instanceof Node && exportLauncherRef.current?.contains(nextTarget)) return;
+  const updateExportOutputs = (nextOutputs: NonNullable<ExportRequest['outputs']>) => {
     cancelExportClose();
-    setExportOptionsOpen(false);
+    setExportOptionsOpen(true);
+    onOutputsChange(nextOutputs);
   };
 
   return (
@@ -238,7 +236,10 @@ export function CustomCutPage({
                   playClip(clip);
                 }}>
                   <td className="custom-rally-check" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
-                    <input type="checkbox" aria-label={`${translations.rally} ${clip.rallyIndex}`} checked={clip.selected} onChange={(event) => onClipsChange(setCustomClipSelected(clips, clip.clipId, event.currentTarget.checked, analysis.video.duration_seconds, analysis.video.fps))} />
+                    <label className="rally-checkbox">
+                      <input type="checkbox" aria-label={`${translations.rally} ${clip.rallyIndex}`} checked={clip.selected} onChange={(event) => onClipsChange(setCustomClipSelected(clips, clip.clipId, event.currentTarget.checked, analysis.video.duration_seconds, analysis.video.fps))} />
+                      <span className="rally-checkbox-control" aria-hidden="true" />
+                    </label>
                   </td>
                   <td colSpan={3}>
                     <div className="custom-rally-meta"><strong>{translations.rally} {clip.rallyIndex}</strong><span title={clip.bounceCount === null ? translations.manualBounceUnavailable : undefined}>{translations.strokes} {clip.bounceCount ?? '—'}</span></div>
@@ -268,16 +269,16 @@ export function CustomCutPage({
               <button className={`timeline-tool${toolMode === 'add' ? ' is-active' : ''}`} type="button" aria-label={translations.addManualRally} title={translations.addManualRally} aria-pressed={toolMode === 'add'} onClick={() => toggleTool('add')}><PlusIcon /></button>
               <button className={`timeline-tool${toolMode === 'delete' ? ' is-active' : ''}`} type="button" aria-label={translations.deleteRally} title={translations.deleteRally} aria-pressed={toolMode === 'delete'} onClick={() => toggleTool('delete')}><TrashIcon /></button>
             </div>
-            <div ref={exportLauncherRef} className={`custom-export-launcher floating-launcher${exportOptionsOpen ? ' is-open' : ''}`} onPointerLeave={scheduleExportClose} onBlur={closeExportOnBlur}>
+            <div className={`custom-export-launcher floating-launcher${exportOptionsOpen ? ' is-open' : ''}`} onPointerLeave={scheduleExportClose}>
               <div className="custom-export-options floating-launch-options" role="group" aria-label={translations.customExportOptions} onPointerEnter={cancelExportClose} onPointerLeave={scheduleExportClose}>
                 <label className="export-checkbox">
-                  <input type="checkbox" checked={outputs.rally_videos} disabled={!mediaAvailable} onChange={(event) => onOutputsChange({ combined_video: false, rally_videos: event.currentTarget.checked, premiere_xml: outputs.premiere_xml })} />
-                  <span className="export-checkbox-control" aria-hidden="true"><span className="export-checkbox-gloss" /><svg fill="currentColor" viewBox="0 0 20 20" focusable="false"><path clipRule="evenodd" d="M16.707 5.293a1 1 0 0 0-1.414 0L8 12.586 4.707 9.293a1 1 0 1 0-1.414 1.414l4 4a1 1 0 0 0 1.414 0l8-8a1 1 0 0 0 0-1.414Z" fillRule="evenodd" /></svg></span>
+                  <input type="checkbox" checked={outputs.rally_videos} disabled={!mediaAvailable} onChange={(event) => updateExportOutputs({ combined_video: false, rally_videos: event.currentTarget.checked, premiere_xml: outputs.premiere_xml })} />
+                  <span className="export-checkbox-control" aria-hidden="true"><span className="export-checkbox-gloss" /></span>
                   <span className="export-checkbox-text">{translations.exportRallyVideos}</span>
                 </label>
                 <label className="export-checkbox">
-                  <input type="checkbox" checked={outputs.premiere_xml} onChange={(event) => onOutputsChange({ combined_video: false, rally_videos: outputs.rally_videos, premiere_xml: event.currentTarget.checked })} />
-                  <span className="export-checkbox-control" aria-hidden="true"><span className="export-checkbox-gloss" /><svg fill="currentColor" viewBox="0 0 20 20" focusable="false"><path clipRule="evenodd" d="M16.707 5.293a1 1 0 0 0-1.414 0L8 12.586 4.707 9.293a1 1 0 1 0-1.414 1.414l4 4a1 1 0 0 0 1.414 0l8-8a1 1 0 0 0 0-1.414Z" fillRule="evenodd" /></svg></span>
+                  <input type="checkbox" checked={outputs.premiere_xml} onChange={(event) => updateExportOutputs({ combined_video: false, rally_videos: outputs.rally_videos, premiere_xml: event.currentTarget.checked })} />
+                  <span className="export-checkbox-control" aria-hidden="true"><span className="export-checkbox-gloss" /></span>
                   <span className="export-checkbox-text">{translations.exportPremiereXml}</span>
                 </label>
               </div>
