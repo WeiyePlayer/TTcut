@@ -341,6 +341,8 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
       const timeline = document.querySelector('.custom-timeline')?.getBoundingClientRect();
       const timelineTrack = document.querySelector('.timeline-track-window')?.getBoundingClientRect();
       const exportLauncher = document.querySelector('.floating-launch-start')?.getBoundingClientRect();
+      const timelineActions = document.querySelector('.custom-timeline-actions')?.getBoundingClientRect();
+      const pageBounds = document.querySelector('.custom-cut-page')?.getBoundingClientRect();
       const sidebar = document.querySelector('.sidebar')?.getBoundingClientRect();
       const titlebar = document.querySelector('.titlebar')?.getBoundingClientRect();
       const main = document.querySelector('.main-content');
@@ -355,6 +357,9 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
         timelineRight: timeline?.right ?? 0,
         timelineTrackBottom: timelineTrack?.bottom ?? 0,
         exportLauncherTop: exportLauncher?.top ?? 0,
+        exportLauncherRightInset: pageBounds && exportLauncher ? pageBounds.right - exportLauncher.right : 0,
+        exportLauncherBottomInset: pageBounds && exportLauncher ? pageBounds.bottom - exportLauncher.bottom : 0,
+        timelineActionsTop: timelineActions?.top ?? 0,
         sidebarWidth: sidebar?.width ?? 0,
         titlebarLeft: titlebar?.left ?? 0,
         mainOverflow: main ? getComputedStyle(main).overflow : '',
@@ -367,6 +372,8 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     expect(customLayout.timelineLeft).toBeCloseTo(customLayout.monitorLeft, 0);
     expect(customLayout.timelineRight).toBeCloseTo(customLayout.monitorRight, 0);
     expect(customLayout.timelineTrackBottom).toBeLessThanOrEqual(customLayout.exportLauncherTop + 1);
+    expect(customLayout.timelineActionsTop).toBeGreaterThanOrEqual(customLayout.timelineTrackBottom);
+    expect(customLayout.exportLauncherRightInset).toBeCloseTo(customLayout.exportLauncherBottomInset, 0);
     expect(customLayout.titlebarLeft).toBeCloseTo(customLayout.sidebarWidth, 0);
     expect(customLayout.mainOverflow).toBe('hidden');
     expect(customLayout.pageOverflow).toBe('hidden');
@@ -384,6 +391,12 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     await page.keyboard.press('Space');
     await expect.poll(() => customMonitor.evaluate((element: HTMLVideoElement) => element.paused)).toBe(true);
     await expect(page.locator('.timeline-toolbar')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '增加回合' })).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.getByRole('button', { name: '删除回合' })).toHaveAttribute('aria-pressed', 'false');
+    await page.getByRole('button', { name: '增加回合' }).click();
+    await expect(page.getByRole('button', { name: '增加回合' })).toHaveAttribute('aria-pressed', 'true');
+    await page.locator('.custom-workspace').click({ button: 'right' });
+    await expect(page.getByRole('button', { name: '增加回合' })).toHaveAttribute('aria-pressed', 'false');
     const timelineViewport = page.locator('.timeline-viewport');
     const timelineAppearance = await page.evaluate(() => {
       const viewport = document.querySelector('.timeline-viewport')!;
@@ -466,6 +479,36 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     await page.mouse.wheel(-40, 0);
     await expect.poll(() => timelineViewport.evaluate((element: HTMLDivElement) => element.scrollLeft)).toBeLessThan(afterVerticalWheel);
     await expect(page.locator('.timeline-clip')).toHaveCount(recognizedRallies);
+    const deletionCandidate = await page.evaluate(() => {
+      const viewport = document.querySelector('.timeline-viewport') as HTMLDivElement | null;
+      const duration = Number(document.querySelector('.timeline-playhead')?.getAttribute('aria-valuemax'));
+      if (!viewport || !Number.isFinite(duration)) return null;
+      const oneSecond = Math.max(viewport.clientWidth, viewport.scrollWidth) / duration;
+      const clips = [...document.querySelectorAll<HTMLDivElement>('.timeline-clip')].reverse();
+      const candidate = clips.find((clip) => Number.parseFloat(clip.style.width) >= oneSecond * 1.5);
+      if (!candidate) return null;
+      return { clipId: candidate.dataset.clipId, insertionOffset: (Number.parseFloat(candidate.style.width) - oneSecond) / 2 };
+    });
+    expect(deletionCandidate?.clipId).toBeTruthy();
+    await page.getByRole('button', { name: '删除回合' }).click();
+    const removedDetectedClip = page.locator(`.timeline-clip[data-clip-id="${deletionCandidate!.clipId}"]`);
+    await removedDetectedClip.hover();
+    await expect(removedDetectedClip).toHaveClass(/delete-target/);
+    const insertionBox = await removedDetectedClip.boundingBox();
+    expect(insertionBox).not.toBeNull();
+    await removedDetectedClip.click();
+    await expect(page.locator('.timeline-clip')).toHaveCount(recognizedRallies - 1);
+    await page.getByRole('button', { name: '增加回合' }).click();
+    await page.mouse.click(insertionBox!.x + deletionCandidate!.insertionOffset, insertionBox!.y + insertionBox!.height / 2);
+    await expect(page.locator('.timeline-clip')).toHaveCount(recognizedRallies);
+    const manualClip = page.locator('.timeline-clip[data-clip-id^="manual_"]');
+    await expect(manualClip).toHaveCount(1);
+    await page.getByRole('button', { name: '删除回合' }).click();
+    await manualClip.hover();
+    await expect(manualClip).toHaveClass(/delete-target/);
+    await manualClip.click();
+    await expect(page.locator('.timeline-clip')).toHaveCount(recognizedRallies - 1);
+    await page.locator('.custom-workspace').click({ button: 'right' });
     await expect(page.getByRole('button', { name: '开始剪辑' })).toBeEnabled();
     await expect(page.getByRole('button', { name: '预览' })).toHaveCount(0);
     await page.getByRole('button', { name: '取消全选' }).click();
@@ -579,10 +622,12 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     await page.getByRole('button', { name: '取消全选' }).click();
     const firstRally = page.locator('tbody tr').first();
     await firstRally.locator('input[type="checkbox"]').check();
-    const customLauncher = page.locator('.custom-export-launcher');
     const customLaunchButton = page.getByRole('button', { name: '开始剪辑' });
     const customExportOptions = page.locator('.custom-export-options');
-    await customLauncher.hover();
+    await expect.poll(() => customExportOptions.evaluate((element) => getComputedStyle(element).pointerEvents)).toBe('none');
+    await page.locator('.timeline-tool-buttons').hover();
+    await expect.poll(() => customExportOptions.evaluate((element) => getComputedStyle(element).pointerEvents)).toBe('none');
+    await customLaunchButton.hover();
     await expect.poll(() => customExportOptions.evaluate((element) => getComputedStyle(element).pointerEvents)).toBe('auto');
     const launchButtonBox = await customLaunchButton.boundingBox();
     const exportOptionsBox = await customExportOptions.boundingBox();
@@ -608,7 +653,7 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     expect((await stat(rallyVideo)).size).toBeGreaterThan(100_000);
     const premiereXml = await readFile(path.join(artifactDirectory!, `${path.basename(fixtureVideo, path.extname(fixtureVideo))}_TTcut_自定义.xml`), 'utf8');
     expect(premiereXml).toContain('<xmeml version="4">');
-    expect(premiereXml).toContain('<linkclipref>audio-1</linkclipref>');
+    expect(premiereXml).toContain('<linkclipref>audio-1-1</linkclipref>');
     expect(premiereXml).toContain('<pathurl>file:///');
 
     await page.getByRole('button', { name: '在文件夹中打开' }).click();

@@ -795,7 +795,7 @@ export function App() {
                   setCustomDraft((current) => current?.reduce(
                     (next, clip) => setCustomClipSelected(
                       next,
-                      clip.rallyId,
+                      clip.clipId,
                       true,
                       analysis.video.duration_seconds,
                       analysis.video.fps,

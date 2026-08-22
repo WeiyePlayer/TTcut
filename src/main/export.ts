@@ -873,7 +873,11 @@ function artifactFailure(
   segment?: ValidatedCustomExportSegment,
 ): CustomArtifactFailure {
   return {
-    ...(segment ? { rallyId: segment.rallyId, rallyIndex: segment.rallyIndex } : {}),
+    ...(segment ? {
+      clipId: segment.clipId,
+      ...(segment.sourceRallyId ? { rallyId: segment.sourceRallyId } : {}),
+      rallyIndex: segment.rallyIndex,
+    } : {}),
     code: exportCode(error) ?? fallbackCode,
     message: error instanceof Error ? error.message : String(error),
   };
@@ -929,7 +933,8 @@ async function executeCustomArtifactExport(
       if (!components) {
         for (const segment of segments) {
           failedRallies.push({
-            rallyId: segment.rallyId,
+            clipId: segment.clipId,
+            ...(segment.sourceRallyId ? { rallyId: segment.sourceRallyId } : {}),
             rallyIndex: segment.rallyIndex,
             code: 'MEDIA_COMPONENT_MISSING',
             message: 'MEDIA_COMPONENT_MISSING',
@@ -992,7 +997,12 @@ async function executeCustomArtifactExport(
           await logExportTiming(taskId, `Rally segment ${position} timing`, validation.timing, analysis.video);
           assertExportNotCancelled(taskId);
           await rename(partialPath, finalPath);
-          rallyVideos.push({ rallyId: segment.rallyId, rallyIndex: segment.rallyIndex, outputPath: finalPath });
+          rallyVideos.push({
+            clipId: segment.clipId,
+            ...(segment.sourceRallyId ? { rallyId: segment.sourceRallyId } : {}),
+            rallyIndex: segment.rallyIndex,
+            outputPath: finalPath,
+          });
         } catch (error) {
           if (exportCode(error) === 'EXPORT_CANCELLED' || getTaskController(taskId)?.cancelRequested) throw error;
           const failure = artifactFailure(error, 'EXPORT_SEGMENT_FAILED', segment);

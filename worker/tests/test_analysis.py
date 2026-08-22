@@ -408,6 +408,9 @@ def test_worker_v2_routes_blurball_profile_and_records_fixed_parameters(monkeypa
     assert captured["device"] == "cpu"
     assert captured["roi"].source_width == 1280
     assert result["rallies"][0]["bounce_count"] == 2
+    assert result["bounce_times_seconds"] == [0.0, 0.5]
+    assert result["bounce_times_seconds"] == sorted(set(result["bounce_times_seconds"]))
+    assert all(0 <= time <= result["video"]["duration_seconds"] for time in result["bounce_times_seconds"])
     assert result["model_provenance"]["profile"] == "blurball_v1"
     assert result["model_provenance"]["main_input"] == {"width": 512, "height": 288}
     assert result["model_provenance"]["aux_input"] is None

@@ -90,6 +90,12 @@ def analyze(request: dict) -> dict:
     )
     rallies = group_rallies(bounce_frames, points)
     duration = float(info.duration or 0.0)
+    points_by_frame = {point.frame: point for point in points}
+    bounce_times = sorted({
+        round(max(0.0, min(duration, float(point.time))) if duration else max(0.0, float(point.time)), 6)
+        for frame in bounce_frames
+        if (point := points_by_frame.get(frame)) is not None and math.isfinite(point.time)
+    })
     normalized = []
     for index, rally in enumerate(rallies, start=1):
         start = max(0.0, float(rally.start_time))
@@ -119,6 +125,7 @@ def analyze(request: dict) -> dict:
             "frame_count": info.decoded_frame_count,
         },
         "rallies": normalized,
+        "bounce_times_seconds": bounce_times,
         "calibration": {
             "video_width": calibration.video_width,
             "video_height": calibration.video_height,

@@ -426,6 +426,12 @@ describe('App workflow notices and multi-task entry', () => {
     expect(trackWindow).not.toBeNull();
     expect(document.querySelector('.custom-rally-table thead')).toBeNull();
     expect(document.querySelector('.timeline-toolbar')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Add rally' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: 'Delete rally' })).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(screen.getByRole('button', { name: 'Add rally' }));
+    expect(screen.getByRole('button', { name: 'Add rally' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.contextMenu(document.querySelector('.custom-workspace')!);
+    expect(screen.getByRole('button', { name: 'Add rally' })).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getAllByText(/^\d{2}:\d{2}\.\d$/)).toHaveLength(4);
     expect(screen.getAllByText(/^\d+\.\ds$/)).toHaveLength(2);
     const zoomBefore = Number(viewport.dataset.zoom);
@@ -492,13 +498,15 @@ describe('App workflow notices and multi-task entry', () => {
     const draggedEnd = Number(screen.getByRole('slider', { name: 'Resize clip end 1' }).getAttribute('aria-valuenow'));
     expect(draggedEnd).toBeLessThan(editedEnd);
 
+    const startCutting = screen.getByRole('button', { name: 'Start cutting' });
+    fireEvent.pointerEnter(startCutting);
     fireEvent.click(screen.getByRole('checkbox', { name: 'Export rally videos' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Export XML' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Start cutting' }));
+    fireEvent.click(startCutting);
     await waitFor(() => expect(window.ttcut.startExport).toHaveBeenCalledWith(expect.objectContaining({
       selection: {
         mode: 'custom',
-        segments: [{ rally_id: 'rally_001', start_time_seconds: 0, end_time_seconds: draggedEnd }],
+        segments: [{ clip_id: 'rally_001', source: 'detected', rally_id: 'rally_001', display_index: 1, start_time_seconds: 0, end_time_seconds: draggedEnd }],
       },
       outputs: { combined_video: false, rally_videos: true, premiere_xml: true },
     })));

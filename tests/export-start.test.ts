@@ -216,6 +216,29 @@ describe('export task start and terminal lifecycle', () => {
     expect(resolveUsableMediaComponents).not.toHaveBeenCalled();
   });
 
+  it('accepts a source-aware manual segment without a Rally ID in Main', async () => {
+    const taskId = await startExport(windowMock() as never, {
+      analysis_id: request.analysis_id,
+      selection: {
+        mode: 'custom',
+        segments: [{
+          clip_id: 'manual_11111111-1111-4111-8111-111111111111',
+          source: 'manual',
+          display_index: 1,
+          start_time_seconds: 3,
+          end_time_seconds: 4,
+        }],
+      },
+      destination: 'source',
+      outputs: { combined_video: false, rally_videos: false, premiere_xml: true },
+    });
+    await waitForTaskEnd(taskId);
+
+    const result = state.events.find((event): event is Extract<AppEvent, { type: 'export-result' }> => event.type === 'export-result');
+    expect(result?.data).toMatchObject({ kind: 'custom-artifacts', premiereXml: { quantizedForVfr: false } });
+    expect(state.keyframes).not.toHaveBeenCalled();
+  });
+
   it('uses an incrementing directory for repeated custom artifact exports', async () => {
     const customRequest: ExportRequest = {
       analysis_id: request.analysis_id,
