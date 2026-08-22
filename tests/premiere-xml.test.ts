@@ -4,8 +4,8 @@ import type { VideoMetadata } from '../src/shared/contracts';
 import type { ValidatedCustomExportSegment } from '../src/domain/custom-clips';
 
 const segments: ValidatedCustomExportSegment[] = [
-  { rallyId: 'rally_001', rallyIndex: 1, rallyIds: ['rally_001'], rawStart: 1, rawEnd: 3, start: 1, end: 3 },
-  { rallyId: 'rally_002', rallyIndex: 2, rallyIds: ['rally_002'], rawStart: 5, rawEnd: 7.5, start: 5, end: 7.5 },
+  { clipId: 'rally_001', source: 'detected', sourceRallyId: 'rally_001', rallyIndex: 1, rallyIds: ['rally_001'], rawStart: 1, rawEnd: 3, start: 1, end: 3 },
+  { clipId: 'rally_002', source: 'detected', sourceRallyId: 'rally_002', rallyIndex: 2, rallyIds: ['rally_002'], rawStart: 5, rawEnd: 7.5, start: 5, end: 7.5 },
 ];
 
 function metadata(overrides: Partial<VideoMetadata> = {}): VideoMetadata {
