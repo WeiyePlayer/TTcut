@@ -590,10 +590,10 @@ td input { accent-color: var(--blue); }
 .language-loader span { position: absolute; width: 60px; height: 3px; border-radius: 3px; background: var(--blue); animation: language-progress 320ms ease-in-out infinite alternate; }
 @keyframes language-progress { from { transform: translateX(-50px); } to { transform: translateX(50px); } }
 
-@media (max-width: 980px) {
-  .sidebar { width: 184px; }
-  .titlebar { left: 184px; }
-  .main-content { left: 184px; }
+@media (max-width: 1200px) {
+  .app-shell:not(.custom-workspace-shell) .sidebar { width: 184px; }
+  .app-shell:not(.custom-workspace-shell) .titlebar { left: 184px; }
+  .app-shell:not(.custom-workspace-shell) .main-content { left: 184px; }
   .file-summary { grid-template-columns: repeat(3, 1fr); }
   .mode-grid { grid-template-columns: 1fr; }
   .mode-card { min-height: 78px; }
