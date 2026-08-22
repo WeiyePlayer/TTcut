@@ -12,9 +12,11 @@ import { MultiTaskPage } from './MultiTaskPage';
 import { CalibrationSurface } from './CalibrationSurface';
 import { SupportPrompt } from './SupportPrompt';
 import { CustomCutPage } from './CustomCutPage';
+import { GlassRadioGroup } from './GlassRadioGroup';
 import packageJson from '../../package.json';
 import captureGuideImage from './assets/pingpong-table-with-pose-mannequins.png';
 import ttcutIcon from './assets/ttcut-icon.png';
+import contactAuthorQr from './assets/contact-author-qr.png';
 
 type View = 'auto' | 'history' | 'settings' | 'multi';
 type Step = 'select' | 'calibrate' | 'analyzing' | 'empty' | 'mode' | 'custom' | 'cutting' | 'complete' | 'error';
@@ -595,7 +597,13 @@ export function App() {
                 <div className="about-actions">
                   <button className="secondary" onClick={() => void window.ttcut.openExternalUrl(WEBSITE_URL)}>{settings.language === 'zh-CN' ? '官方网站' : 'Website'}</button>
                   <button className="secondary" onClick={() => void window.ttcut.openExternalUrl(GITHUB_URL)}>GitHub</button>
-                  <button className="secondary" onClick={() => void window.ttcut.openExternalUrl(RELEASES_URL)}>{settings.language === 'zh-CN' ? '更新日志' : 'Release notes'}</button>
+                  <div className="contact-author">
+                    <button className="secondary contact-author-button" type="button" aria-describedby="contact-author-qr">{settings.language === 'zh-CN' ? '联系作者' : 'Contact author'}</button>
+                    <div className="contact-author-qr" id="contact-author-qr" role="tooltip">
+                      <img src={contactAuthorQr} alt={settings.language === 'zh-CN' ? '联系作者微信二维码' : 'WeChat QR code for contacting the author'} />
+                      <span>{settings.language === 'zh-CN' ? '微信扫码联系作者' : 'Scan with WeChat to contact the author'}</span>
+                    </div>
+                  </div>
                   <button className="secondary donate-button" onClick={() => void window.ttcut.openExternalUrl(DONATION_URL)}>{settings.language === 'zh-CN' ? '打赏作者' : 'Support author'}</button>
                   <button className="secondary" disabled={updateState.status === 'checking'} onClick={() => updateState.status === 'downloaded' ? void window.ttcut.restartToUpdate() : void window.ttcut.checkForUpdates()}>{updateState.status === 'checking' ? (settings.language === 'zh-CN' ? '正在检查…' : 'Checking…') : updateState.status === 'downloaded' ? (settings.language === 'zh-CN' ? '立即重启' : 'Restart now') : (settings.language === 'zh-CN' ? '检查更新' : 'Check updates')}</button>
                   {updateState.status === 'error' && updateState.message === 'UPDATE_VERIFICATION_FAILED' && (
@@ -608,10 +616,15 @@ export function App() {
               </article>
               <article className="card setting-card">
                 <div><h2>{t.language}</h2></div>
-                <div className="segmented">
-                  <button className={settings.language === 'zh-CN' ? 'selected' : ''} onClick={() => void changeLanguage('zh-CN')}>{t.chinese}</button>
-                  <button className={settings.language === 'en' ? 'selected' : ''} onClick={() => void changeLanguage('en')}>{t.english}</button>
-                </div>
+                <GlassRadioGroup
+                  ariaLabel={t.language}
+                  className="compact"
+                  idPrefix="settings-language"
+                  name="settings-language"
+                  onChange={(language) => void changeLanguage(language)}
+                  options={[{ value: 'zh-CN', label: t.chinese }, { value: 'en', label: t.english }] as const}
+                  value={settings.language as Language}
+                />
               </article>
               <article className="card model-profile-card">
                 <div><h2>{settings.language === 'zh-CN' ? '球识别模型' : 'Ball recognition model'}</h2></div>
@@ -622,18 +635,44 @@ export function App() {
               </article>
               <article className="card setting-card">
                 <div><h2>{settings.language === 'zh-CN' ? '球台标定' : 'Table calibration'}</h2><p>{settings.language === 'zh-CN' ? '选择单视频流程使用的球台标定方式。多任务会先自动标定，失败项目可手动补充。' : 'Choose the calibration method for single videos. Batch tasks calibrate automatically first, with manual recovery for failed items.'}</p></div>
-                <div className="segmented">
-                  <button className={settings.calibration_method === 'manual' ? 'selected' : ''} onClick={() => void saveRolls({ calibration_method: 'manual' })}>{settings.language === 'zh-CN' ? '手动' : 'Manual'}</button>
-                  <button className={settings.calibration_method === 'automatic' ? 'selected' : ''} onClick={() => void saveRolls({ calibration_method: 'automatic' })}>{settings.language === 'zh-CN' ? '自动' : 'Automatic'}</button>
-                </div>
+                <GlassRadioGroup
+                  ariaLabel={settings.language === 'zh-CN' ? '球台标定方式' : 'Table calibration method'}
+                  className="compact"
+                  idPrefix="settings-calibration"
+                  name="settings-calibration"
+                  onChange={(calibration_method) => void saveRolls({ calibration_method })}
+                  options={[
+                    { value: 'manual', label: settings.language === 'zh-CN' ? '手动' : 'Manual' },
+                    { value: 'automatic', label: settings.language === 'zh-CN' ? '自动' : 'Automatic' },
+                  ] as const}
+                  value={settings.calibration_method}
+                />
               </article>
-              <article className="card timing-setting-card">
-                <div><h2>{t.preRoll}</h2><p>{t.preRollSettingDetail}</p></div>
-                <div className="choice-row">{([1.5, 2.5, 5] as const).map((value, index) => <button className={settings.pre_roll_seconds === value ? 'selected' : ''} key={value} onClick={() => void saveRolls({ pre_roll_seconds: value })}><strong>{[t.short, t.medium, t.long][index]}</strong><span>{value} s</span></button>)}</div>
-              </article>
-              <article className="card timing-setting-card">
-                <div><h2>{t.postRoll}</h2><p>{t.postRollSettingDetail}</p></div>
-                <div className="choice-row four">{([0.5, 1, 2, 4] as const).map((value, index) => <button className={settings.post_roll_seconds === value ? 'selected' : ''} key={value} onClick={() => void saveRolls({ post_roll_seconds: value })}><strong>{[t.veryShort, t.short, t.medium, t.long][index]}</strong><span>{value} s</span></button>)}</div>
+              <article className="card timing-settings-card">
+                <section className="timing-setting">
+                  <div><h2>{t.preRoll}</h2><p>{t.preRollSettingDetail}</p></div>
+                  <GlassRadioGroup
+                    ariaLabel={t.preRoll}
+                    className="timing-toggle"
+                    idPrefix="settings-pre-roll"
+                    name="settings-pre-roll"
+                    onChange={(pre_roll_seconds) => void saveRolls({ pre_roll_seconds })}
+                    options={([1.5, 2.5, 5] as const).map((value, index) => ({ value, label: [t.short, t.medium, t.long][index] }))}
+                    value={settings.pre_roll_seconds}
+                  />
+                </section>
+                <section className="timing-setting">
+                  <div><h2>{t.postRoll}</h2><p>{t.postRollSettingDetail}</p></div>
+                  <GlassRadioGroup
+                    ariaLabel={t.postRoll}
+                    className="timing-toggle"
+                    idPrefix="settings-post-roll"
+                    name="settings-post-roll"
+                    onChange={(post_roll_seconds) => void saveRolls({ post_roll_seconds })}
+                    options={([0.5, 1, 2, 4] as const).map((value, index) => ({ value, label: [t.veryShort, t.short, t.medium, t.long][index] }))}
+                    value={settings.post_roll_seconds}
+                  />
+                </section>
               </article>
               <article className="card components-card">
                 <h2>{t.components}</h2>
@@ -709,7 +748,7 @@ export function App() {
             )}
             {step === 'select' && (
               <div className="center-stage">
-                <div className="page-heading centered"><h1>{t.selectTitle}</h1><p>{t.selectDescription}</p></div>
+                <div className="page-heading centered"><h1>{t.selectTitle}</h1></div>
                 <button
                   type="button"
                   className={`drop-zone ${dragging ? 'dragging' : ''}`}
@@ -726,7 +765,8 @@ export function App() {
                     });
                   }}
                 >
-                  <span className="drop-icon">＋</span><strong>{t.chooseVideo}</strong><span>{t.dropVideo}</span><small>.mp4 / .mov</small>
+                  <span className="drop-icon" aria-hidden="true">＋</span>
+                  <strong>{t.chooseVideo}</strong>
                 </button>
               </div>
             )}
@@ -772,7 +812,7 @@ export function App() {
                     </button>
                   ))}
                 </div>
-                {mode === 'highlight' && <div className="card inline-setting"><div><h2>{t.threshold}</h2><p>{t.highlightDetail}</p></div><div className="segmented">{([3, 5, 7] as const).map((value) => <button key={value} className={threshold === value ? 'selected' : ''} onClick={() => setThreshold(value)}>&gt; {value}</button>)}</div>{highlights.length === 0 && <span className="inline-error">{t.noHighlights}</span>}</div>}
+                {mode === 'highlight' && <div className="card inline-setting"><div><h2>{t.threshold}</h2><p>{t.highlightDetail}</p></div><GlassRadioGroup ariaLabel={t.threshold} className="compact" idPrefix="single-threshold" name="single-threshold" onChange={setThreshold} options={[3, 5, 7].map((value) => ({ value: value as 3 | 5 | 7, label: `> ${value}` }))} value={threshold} />{highlights.length === 0 && <span className="inline-error">{t.noHighlights}</span>}</div>}
                 <div className="footer-actions"><span>{selectedCount} / {analysis.rallies.length}</span><button className="primary" disabled={selectedCount === 0 || !platformSupported || !bootstrap?.components.media.available} onClick={() => void startCutting()}>{t.startCutting}</button></div>
               </div>
             )}

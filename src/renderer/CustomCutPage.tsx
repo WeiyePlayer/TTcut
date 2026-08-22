@@ -270,8 +270,16 @@ export function CustomCutPage({
             </div>
             <div ref={exportLauncherRef} className={`custom-export-launcher floating-launcher${exportOptionsOpen ? ' is-open' : ''}`} onPointerLeave={scheduleExportClose} onBlur={closeExportOnBlur}>
               <div className="custom-export-options floating-launch-options" role="group" aria-label={translations.customExportOptions} onPointerEnter={cancelExportClose} onPointerLeave={scheduleExportClose}>
-                <label><input type="checkbox" checked={outputs.rally_videos} disabled={!mediaAvailable} onChange={(event) => onOutputsChange({ combined_video: false, rally_videos: event.currentTarget.checked, premiere_xml: outputs.premiere_xml })} /><span>{translations.exportRallyVideos}</span></label>
-                <label><input type="checkbox" checked={outputs.premiere_xml} onChange={(event) => onOutputsChange({ combined_video: false, rally_videos: outputs.rally_videos, premiere_xml: event.currentTarget.checked })} /><span>{translations.exportPremiereXml}</span></label>
+                <label className="export-checkbox">
+                  <input type="checkbox" checked={outputs.rally_videos} disabled={!mediaAvailable} onChange={(event) => onOutputsChange({ combined_video: false, rally_videos: event.currentTarget.checked, premiere_xml: outputs.premiere_xml })} />
+                  <span className="export-checkbox-control" aria-hidden="true"><span className="export-checkbox-gloss" /><svg fill="currentColor" viewBox="0 0 20 20" focusable="false"><path clipRule="evenodd" d="M16.707 5.293a1 1 0 0 0-1.414 0L8 12.586 4.707 9.293a1 1 0 1 0-1.414 1.414l4 4a1 1 0 0 0 1.414 0l8-8a1 1 0 0 0 0-1.414Z" fillRule="evenodd" /></svg></span>
+                  <span className="export-checkbox-text">{translations.exportRallyVideos}</span>
+                </label>
+                <label className="export-checkbox">
+                  <input type="checkbox" checked={outputs.premiere_xml} onChange={(event) => onOutputsChange({ combined_video: false, rally_videos: outputs.rally_videos, premiere_xml: event.currentTarget.checked })} />
+                  <span className="export-checkbox-control" aria-hidden="true"><span className="export-checkbox-gloss" /><svg fill="currentColor" viewBox="0 0 20 20" focusable="false"><path clipRule="evenodd" d="M16.707 5.293a1 1 0 0 0-1.414 0L8 12.586 4.707 9.293a1 1 0 1 0-1.414 1.414l4 4a1 1 0 0 0 1.414 0l8-8a1 1 0 0 0 0-1.414Z" fillRule="evenodd" /></svg></span>
+                  <span className="export-checkbox-text">{translations.exportPremiereXml}</span>
+                </label>
               </div>
               <button className="primary floating-launch-start" type="button" disabled={!selectedCount || (!outputs.premiere_xml && !outputs.rally_videos && !mediaAvailable)} onPointerEnter={() => { cancelExportClose(); setExportOptionsOpen(true); }} onFocus={() => { cancelExportClose(); setExportOptionsOpen(true); }} onClick={() => onExport({ combined_video: !outputs.rally_videos && !outputs.premiere_xml, rally_videos: outputs.rally_videos, premiere_xml: outputs.premiere_xml })}>{translations.startCutting}</button>
             </div>

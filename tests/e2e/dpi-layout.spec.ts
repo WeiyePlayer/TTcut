@@ -198,12 +198,52 @@ test('neutral controls use the shared hover surface without overriding semantic 
     await page.waitForLoadState('domcontentloaded');
     await expect(page.locator('.settings-page')).toBeVisible();
     await expect(page.locator('.settings-heading .eyebrow')).toHaveCount(0);
+    await expect(page.locator('.timing-settings-card')).toHaveCount(1);
+    await expect(page.locator('.timing-settings-card').getByRole('heading', { name: '回合前时间' })).toBeVisible();
+    await expect(page.locator('.timing-settings-card').getByRole('heading', { name: '回合后时间' })).toBeVisible();
+    const timingControlLayout = await page.locator('.timing-settings-card').evaluate((card) => {
+      const setting = card.querySelector('.timing-setting');
+      const heading = setting?.querySelector('h2');
+      const toggle = setting?.querySelector('.timing-toggle');
+      const calibrationToggle = document.querySelector('.setting-card .glass-radio-group');
+      if (!(heading instanceof HTMLElement) || !(toggle instanceof HTMLElement) || !(calibrationToggle instanceof HTMLElement)) throw new Error('Missing timing or calibration controls.');
+      const headingBox = heading.getBoundingClientRect();
+      const toggleBox = toggle.getBoundingClientRect();
+      return {
+        calibrationHeight: calibrationToggle.getBoundingClientRect().height,
+        headingRight: headingBox.right,
+        toggleHeight: toggleBox.height,
+        toggleLeft: toggleBox.left,
+        verticalOffset: Math.abs(toggleBox.top + toggleBox.height / 2 - (headingBox.top + headingBox.height / 2)),
+      };
+    });
+    expect(timingControlLayout.toggleLeft).toBeGreaterThan(timingControlLayout.headingRight);
+    expect(timingControlLayout.verticalOffset).toBeLessThan(48);
+    expect(timingControlLayout.toggleHeight).toBeCloseTo(timingControlLayout.calibrationHeight, 0);
+    const preRollToggle = page.getByRole('radiogroup', { name: '回合前时间' });
+    const postRollToggle = page.getByRole('radiogroup', { name: '回合后时间' });
+    await expect(preRollToggle.getByRole('radio', { name: '短', exact: true })).toBeVisible();
+    await expect(preRollToggle.getByRole('radio', { name: '中', exact: true })).toBeVisible();
+    await expect(preRollToggle.getByRole('radio', { name: '长', exact: true })).toBeVisible();
+    await expect(postRollToggle.getByRole('radio', { name: '极短', exact: true })).toBeVisible();
+    await expect(postRollToggle.getByRole('radio', { name: '短', exact: true })).toBeVisible();
+    await expect(preRollToggle.getByRole('radio', { name: '1.5 s' })).toHaveCount(0);
+    const contactAuthor = page.getByRole('button', { name: '联系作者' });
+    await expect(contactAuthor).toBeVisible();
+    await expect(page.locator('.contact-author-qr')).toBeHidden();
+    await contactAuthor.hover();
+    await expect(page.locator('.contact-author-qr')).toBeVisible();
+    await expect(page.locator('.contact-author-qr img')).toHaveAttribute('alt', '联系作者微信二维码');
+    await page.screenshot({ path: path.join(outputRoot, 'contact-author-qr-open.png'), fullPage: true });
+    await page.locator('.timing-settings-card').screenshot({ path: path.join(outputRoot, 'timing-controls.png') });
     await page.getByRole('button', { name: '历史剪辑' }).click();
     await expect(page.locator('.history-page')).toBeVisible();
     await expect(page.locator('.history-header .eyebrow')).toHaveCount(0);
     await page.getByRole('button', { name: '自动剪辑' }).click();
     await expect(page.getByRole('heading', { name: '选择比赛视频' })).toBeVisible();
     await expect(page.locator('.center-stage .eyebrow')).toHaveCount(0);
+    await expect(page.locator('.drop-zone .drop-icon')).toBeVisible();
+    await page.locator('.center-stage').screenshot({ path: path.join(outputRoot, 'home-upload.png') });
     const captureHelp = page.getByRole('button', { name: '推荐视频拍摄视角' });
     await expect(captureHelp).toBeVisible();
     await expect(page.locator('.capture-help-card')).toBeHidden();
@@ -233,7 +273,8 @@ test('neutral controls use the shared hover surface without overriding semantic 
         <button class="mode-card mode-probe" type="button"><span class="radio-dot"></span><strong>Mode</strong><small>Neutral</small></button>
         <button class="mode-card selected mode-selected-probe" type="button"><span class="radio-dot"></span><strong>Selected</strong><small>Mode</small></button>
         <div class="segmented"><button class="segmented-probe" type="button">Segment</button><button class="selected segmented-selected-probe" type="button">Selected</button></div>
-        <div class="choice-row"><button class="choice-probe" type="button"><strong>Choice</strong></button><button class="selected choice-selected-probe" type="button"><strong>Selected</strong></button></div>
+        <div class="glass-radio-group" style="--glass-option-count:2;--glass-selected-index:1"><input id="radio-probe" name="radio-probe" type="radio"><label for="radio-probe">Radio</label><input id="radio-selected-probe" name="radio-probe" type="radio" checked><label for="radio-selected-probe">Selected</label><span class="glass-glider"></span></div>
+        <label class="export-checkbox"><input type="checkbox" checked><span class="export-checkbox-control"><span class="export-checkbox-gloss"></span><svg fill="currentColor" viewBox="0 0 20 20"><path d="M16.707 5.293 8 14 4 10"></path></svg></span><span class="export-checkbox-text">Export</span></label>
         <div class="batch-mode-options"><button class="batch-mode-probe" type="button">Batch</button><button class="selected batch-mode-selected-probe" type="button">Selected</button></div>
       `;
       settingsPage.appendChild(fixture);
@@ -253,7 +294,6 @@ test('neutral controls use the shared hover surface without overriding semantic 
       '.window-controls button[aria-label="Minimize"]',
       '#hover-color-fixture .mode-probe',
       '#hover-color-fixture .segmented-probe',
-      '#hover-color-fixture .choice-probe',
       '#hover-color-fixture .batch-mode-probe',
     ]) {
       await hoverColor(selector, 'rgb(231, 232, 232)');
@@ -263,7 +303,11 @@ test('neutral controls use the shared hover surface without overriding semantic 
     await hoverColor('#hover-color-fixture .disabled-probe', 'rgb(255, 255, 255)');
     await hoverColor('#hover-color-fixture .mode-selected-probe', 'rgb(248, 251, 255)');
     await hoverColor('#hover-color-fixture .segmented-selected-probe', 'rgb(255, 255, 255)');
-    await hoverColor('#hover-color-fixture .choice-selected-probe', 'rgb(248, 251, 255)');
+    await expect(page.locator('#hover-color-fixture .glass-radio-group')).toBeVisible();
+    await expect(page.locator('#hover-color-fixture .glass-radio-group')).toHaveCSS('background-color', 'rgb(255, 255, 255)');
+    await expect(page.locator('#hover-color-fixture .glass-radio-group input:checked')).toHaveCount(1);
+    await expect(page.locator('#hover-color-fixture .glass-radio-group .glass-glider')).toHaveCSS('border-radius', '16px');
+    await expect(page.locator('#hover-color-fixture .export-checkbox-control')).toHaveCSS('width', '32px');
     await hoverColor('#hover-color-fixture .batch-mode-selected-probe', 'rgb(255, 255, 255)');
     await hoverColor('#hover-color-fixture .primary:not(.destructive-confirm)', 'rgb(35, 105, 216)');
     await hoverColor('#hover-color-fixture .destructive-confirm', 'rgb(163, 33, 23)');
@@ -271,7 +315,7 @@ test('neutral controls use the shared hover surface without overriding semantic 
     await hoverColor('.drop-zone', 'rgb(247, 250, 255)');
     await hoverColor('#hover-color-fixture .secondary:not(.disabled-probe):not(.donate-button)', 'rgb(231, 232, 232)');
 
-    await page.screenshot({ path: path.join(outputRoot, 'neutral-hover-colors.png'), fullPage: true });
+    await page.screenshot({ path: path.join(outputRoot, 'uiverse-controls.png'), fullPage: true });
   } finally {
     await stopElectron(page, browser, child);
   }

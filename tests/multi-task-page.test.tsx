@@ -123,7 +123,7 @@ describe('multi-task clipping', () => {
     await waitFor(() => expect(highlight).not.toBeDisabled());
     fireEvent.click(highlight);
     expect(highlight).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getAllByRole('button', { name: '5板' })[0]).toBeVisible();
+    expect(screen.getAllByRole('radio', { name: '5板' })[0]).toBeChecked();
   });
 
   it('runs ready videos serially with precalibrated analysis and 70/30 progress mapping', async () => {
