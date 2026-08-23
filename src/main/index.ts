@@ -184,9 +184,6 @@ function registerIpc(): void {
       calibrationChoice: calibrationChoiceSchema.parse(record.calibrationChoice),
       device,
       historyVisibility,
-      ballModelProfile: record.ballModelProfile === 'tracknet_v1' || record.ballModelProfile === 'blurball_v1'
-        ? record.ballModelProfile
-        : 'blurball_v1',
     });
   });
   ipcMain.handle(IPC.exportStart, async (_event, value: unknown) => {

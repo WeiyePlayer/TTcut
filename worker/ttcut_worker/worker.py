@@ -6,14 +6,11 @@ import os
 import sys
 import traceback
 
-from .bounce import detect_bounce_frames
 from .blurball_bounce import detect_blurball_bounce_frames
 from .blurball_models import load_blurball
 from .blurball_predictor import BlurBallPredictor
 from .calibration import TableCalibration
 from .errors import InvalidRequestError, ModelResourceError, TableModelResourceError, WorkerError
-from .model import load_tracknet
-from .predictor import TrackNetPredictor
 from .roi import AnalysisRoiConfig, build_analysis_roi
 from .rallies import group_rallies
 from .request import validate_request
@@ -54,20 +51,12 @@ def analyze(request: dict) -> dict:
             calibration_value["video_width"], calibration_value["video_height"], calibration_value["points"],
         )
     analysis_roi = build_analysis_roi(calibration, AnalysisRoiConfig())
-    profile = request.get("ball_model_profile", "blurball_v1")
     emit({"type": "progress", "task_id": task_id, "stage": "load_model", "current": 0, "total": 1, "percent": 0.0})
-    if profile == "tracknet_v1":
-        weight_path = os.environ.get("TTCUT_TRACKNET_WEIGHTS", "").strip()
-        if not weight_path:
-            raise ModelResourceError("Bundled analysis model path is not configured.")
-        loaded = load_tracknet(weight_path, request["device"])
-        predictor = TrackNetPredictor(loaded)
-    else:
-        blurball_path = os.environ.get("TTCUT_BLURBALL_WEIGHTS", "").strip()
-        if not blurball_path:
-            raise ModelResourceError("Bundled BlurBall model path is not configured.")
-        loaded = load_blurball(blurball_path, request["device"])
-        predictor = BlurBallPredictor(loaded)
+    blurball_path = os.environ.get("TTCUT_BLURBALL_WEIGHTS", "").strip()
+    if not blurball_path:
+        raise ModelResourceError("Bundled BlurBall model path is not configured.")
+    loaded = load_blurball(blurball_path, request["device"])
+    predictor = BlurBallPredictor(loaded)
     emit({"type": "progress", "task_id": task_id, "stage": "load_model", "current": 1, "total": 1, "percent": 100.0})
 
     def progress(current: int, total: int) -> None:
@@ -83,11 +72,7 @@ def analyze(request: dict) -> dict:
         analysis_roi=analysis_roi,
     )
     emit({"type": "progress", "task_id": task_id, "stage": "postprocess", "current": 0, "total": 1, "percent": 0.0})
-    bounce_frames = (
-        detect_blurball_bounce_frames(points, calibration)
-        if profile == "blurball_v1"
-        else detect_bounce_frames(points, calibration)
-    )
+    bounce_frames = detect_blurball_bounce_frames(points, calibration)
     rallies = group_rallies(bounce_frames, points)
     duration = float(info.duration or 0.0)
     points_by_frame = {point.frame: point for point in points}
@@ -134,8 +119,8 @@ def analyze(request: dict) -> dict:
             )},
         },
         "model_provenance": {
-            "profile": profile,
-            "component_version": loaded.component_version if profile != "tracknet_v1" else None,
+            "profile": "blurball_v1",
+            "component_version": loaded.component_version,
             "roi": {
                 "x": analysis_roi.x0,
                 "y": analysis_roi.y0,
@@ -147,14 +132,12 @@ def analyze(request: dict) -> dict:
                 "height": stats.model_height,
             },
             "aux_input": None,
-            **({
-                "detection": {
-                    "confidence_threshold": stats.confidence_threshold,
-                    "step": stats.step,
-                    "maximum_displacement_pixels": stats.maximum_displacement_pixels,
-                    "landing_region": "expanded_table",
-                },
-            } if profile == "blurball_v1" else {}),
+            "detection": {
+                "confidence_threshold": stats.confidence_threshold,
+                "step": stats.step,
+                "maximum_displacement_pixels": stats.maximum_displacement_pixels,
+                "landing_region": "expanded_table",
+            },
         },
     }
     if table_analysis is None and choice["method"] == "precalibrated":

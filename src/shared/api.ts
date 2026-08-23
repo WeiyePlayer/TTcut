@@ -1,7 +1,6 @@
 import type {
   AnalysisResultV1,
   AppSettings,
-  BallModelProfile,
   Calibration,
   CalibrationChoice,
   TableAnalysis,
@@ -95,7 +94,6 @@ export interface TTcutApi {
     calibrationChoice: CalibrationChoice;
     device: 'auto' | 'cuda' | 'cpu';
     historyVisibility: 'visible' | 'deferred';
-    ballModelProfile: BallModelProfile;
   }): Promise<string>;
   startExport(input: ExportRequest): Promise<string>;
   listHistory(): Promise<HistorySummaryV1[]>;

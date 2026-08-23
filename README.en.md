@@ -8,7 +8,7 @@ TTcut is a local automatic table-tennis video cutter for players and enthusiasts
 
 Videos, analysis results, and history stay on the local computer. TTcut requires no account, uploads no video, and collects no telemetry. An internet connection is required when installing the resources needed for the first run; analysis, preview, and cutting can run offline after setup.
 
-> The current stable release is `v1.2.7` for Windows x64.
+> The current stable release is `v1.2.8` for Windows x64.
 
 ## Download and installation
 
@@ -20,14 +20,14 @@ Videos, analysis results, and history stay on the local computer. TTcut requires
 
 TTcut detects an NVIDIA GPU automatically and falls back to CPU if accelerated setup or its self-test fails. Its video-processing capability reads media information, cuts and joins segments, and validates exported files.
 
-## What's new in v1.2.7
+## What's new in v1.2.8
 
-- Refined the custom-cut page by reorganizing the workspace, monitor, rally list, and compact navigation so related actions are easier to reach.
-- Create and delete rally clips manually on the timeline while retaining independent boundary adjustment, preview, and selection for export.
-- Added rally scrolling and improved short-clip editing and long-list browsing.
-- Fixed custom export-option interactions and strengthened pre-export range, ordering, and overlap validation for both manually created and detected rallies.
+- Refined the custom-cut page and timeline details so creating, deleting, previewing, and resizing clips is clearer and more reliable.
+- Improved desktop layout, control states, and upload guidance for small windows and high-DPI displays.
+- Unified the local analysis flow for new videos and automatically removes obsolete settings left by older versions.
+- Fixed timeline scroll bounds, batch-task behavior, and several UI interactions.
 
-See the [v1.2.7 release notes](docs/release-notes-v1.2.7.en.md) for the complete details.
+See the [v1.2.8 release notes](docs/release-notes-v1.2.8.en.md) for the complete details.
 
 ## Contact the author on WeChat: m2924931661
 

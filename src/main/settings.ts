@@ -6,7 +6,6 @@ import { appSettingsSchema, type AppSettings } from '../shared/contracts';
 const defaults: AppSettings = {
   language: 'zh-CN',
   calibration_method: 'automatic',
-  ball_model_profile: 'blurball_v1',
   pre_roll_seconds: 2.5,
   post_roll_seconds: 2,
 };
@@ -15,17 +14,22 @@ function settingsPath(): string {
   return path.join(app.getPath('userData'), 'settings.json');
 }
 
+async function writeSettings(settings: AppSettings): Promise<void> {
+  const target = settingsPath();
+  const temp = `${target}.${process.pid}.tmp`;
+  await mkdir(path.dirname(target), { recursive: true });
+  await writeFile(temp, `${JSON.stringify(settings, null, 2)}\n`, 'utf8');
+  await rename(temp, target);
+}
+
 export async function loadSettings(): Promise<AppSettings> {
   try {
     const raw = JSON.parse(await readFile(settingsPath(), 'utf8')) as Record<string, unknown>;
-    return appSettingsSchema.parse({
+    const settings = appSettingsSchema.parse({
       language: raw.language === 'en' || raw.language === 'zh-CN' ? raw.language : defaults.language,
       calibration_method: raw.calibration_method === 'automatic' || raw.calibration_method === 'manual'
         ? raw.calibration_method
         : defaults.calibration_method,
-      ball_model_profile: raw.ball_model_profile === 'tracknet_v1' || raw.ball_model_profile === 'blurball_v1'
-        ? raw.ball_model_profile
-        : defaults.ball_model_profile,
       pre_roll_seconds: [1.5, 2.5, 5].includes(Number(raw.pre_roll_seconds))
         ? raw.pre_roll_seconds
         : defaults.pre_roll_seconds,
@@ -33,6 +37,8 @@ export async function loadSettings(): Promise<AppSettings> {
         ? raw.post_roll_seconds
         : defaults.post_roll_seconds,
     });
+    if (Object.hasOwn(raw, 'ball_model_profile')) await writeSettings(settings).catch(() => undefined);
+    return settings;
   } catch {
     return { ...defaults };
   }
@@ -40,11 +46,7 @@ export async function loadSettings(): Promise<AppSettings> {
 
 export async function saveSettings(value: unknown): Promise<AppSettings> {
   const settings = appSettingsSchema.parse(value);
-  const target = settingsPath();
-  const temp = `${target}.${process.pid}.tmp`;
-  await mkdir(path.dirname(target), { recursive: true });
-  await writeFile(temp, `${JSON.stringify(settings, null, 2)}\n`, 'utf8');
-  await rename(temp, target);
+  await writeSettings(settings);
   return settings;
 }
 

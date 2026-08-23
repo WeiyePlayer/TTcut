@@ -362,13 +362,6 @@ td input { accent-color: var(--blue); }
 .timeline-tool svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .custom-workspace-right .custom-export-launcher { align-self: end; justify-self: end; }
 
-.model-profile-card { padding: 16px 18px; }
-.model-profile-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
-.model-profile-options button { min-height: 72px; display: grid; gap: 5px; text-align: left; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: white; cursor: pointer; }
-.model-profile-options button.selected { border-color: var(--blue); color: var(--blue); background: #f8fbff; }
-.model-profile-options button:disabled { cursor: not-allowed; opacity: .55; }
-.model-profile-options span { color: var(--muted); font-size: 11px; line-height: 1.4; }
-
 .success-heading { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
 .success-heading > span { display: grid; place-items: center; width: 46px; height: 46px; border-radius: 50%; background: #eaf6ed; color: #27833d; font-size: 22px; }
 .success-heading h1 { margin: 2px 0 0; font-size: var(--page-title-size); letter-spacing: -.03em; }

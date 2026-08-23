@@ -3,7 +3,6 @@ import type {
   AnalysisResultV1,
   Calibration,
   CutSelectionV1,
-  BallModelProfile,
   ExportWarning,
   TableAnalysis,
   VideoMetadata,
@@ -46,7 +45,6 @@ interface MultiTaskPageProps {
   initialVideos: SelectedVideo[];
   preRoll: 1.5 | 2.5 | 5;
   postRoll: 0.5 | 1 | 2 | 4;
-  ballModelProfile?: BallModelProfile;
   language?: 'zh-CN' | 'en';
   onOpenAnalysis: (analysisId: string) => void;
   onCompletableTasksFinished?: () => void;
@@ -104,7 +102,6 @@ export function MultiTaskPage({
   initialVideos,
   preRoll,
   postRoll,
-  ballModelProfile = 'blurball_v1',
   language = 'zh-CN',
   onOpenAnalysis,
   onCompletableTasksFinished = () => undefined,
@@ -130,7 +127,7 @@ export function MultiTaskPage({
   const scheduleRef = useRef<() => void>(() => undefined);
   const rowRefs = useRef(new Map<string, HTMLElement>());
   const previousRects = useRef(new Map<string, DOMRect>());
-  const optionsRef = useRef({ preRoll, postRoll, ballModelProfile });
+  const optionsRef = useRef({ preRoll, postRoll });
 
   const isEnglish = language === 'en';
   const text = {
@@ -302,7 +299,6 @@ export function MultiTaskPage({
       calibrationChoice,
       device: 'auto',
       historyVisibility: candidate.mode === 'analyze-only' ? 'visible' : 'deferred',
-      ballModelProfile: optionsRef.current.ballModelProfile,
     });
     pendingTaskStartRef.current = startPromise;
     void startPromise.then((taskId) => {

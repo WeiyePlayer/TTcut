@@ -8,7 +8,7 @@ import torch.nn as nn
 
 from .blurball_model import create_blurball
 from .errors import DeviceError, ModelResourceError
-from .model import resolve_device
+from .device import resolve_device
 
 
 @dataclass(frozen=True)

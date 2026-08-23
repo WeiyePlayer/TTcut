@@ -5,12 +5,6 @@ import path from 'node:path';
 const modelRoot = path.resolve('resources/models');
 const assets = [
   {
-    target: path.join(modelRoot, 'analyze.pt'),
-    source: process.env.TTCUT_TRACKNET_SOURCE?.trim(),
-    sourceVariable: 'TTCUT_TRACKNET_SOURCE',
-    label: 'TrackNet',
-  },
-  {
     target: path.join(modelRoot, 'table_analyze.pt'),
     source: process.env.TTCUT_TABLE_ANALYZE_SOURCE?.trim(),
     sourceVariable: 'TTCUT_TABLE_ANALYZE_SOURCE',

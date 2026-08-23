@@ -6,11 +6,10 @@ import type { AppEvent, BootstrapData, SelectedVideo, TTcutApi } from '../src/sh
 import type { VideoMetadata } from '../src/shared/contracts';
 
 const bootstrap: BootstrapData = {
-  version: '1.2.7',
+  version: '1.2.8',
   settings: {
     language: 'zh-CN',
     calibration_method: 'automatic',
-    ball_model_profile: 'blurball_v1',
     pre_roll_seconds: 2.5,
     post_roll_seconds: 2,
   },
@@ -117,7 +116,6 @@ describe('App workflow notices and multi-task entry', () => {
 
   afterEach(() => {
     bootstrap.settings.language = 'zh-CN';
-    bootstrap.settings.ball_model_profile = 'blurball_v1';
     bootstrap.components.analysis.acceleration = 'cuda';
     window.localStorage.clear();
     cleanup();
@@ -189,47 +187,17 @@ describe('App workflow notices and multi-task entry', () => {
     expect(within(tooltip).getByRole('img', { name: '联系作者微信二维码' })).toBeVisible();
   });
 
-  it('shows the simplified ball model profile copy', async () => {
+  it('does not expose a ball model selector', async () => {
     render(<App />);
     fireEvent.click(await screen.findByRole('button', { name: '设置' }));
 
-    expect(screen.getByRole('button', { name: '新模型速度更快，更精准' })).toBeVisible();
-    expect(screen.getByRole('button', { name: '旧模型速度快，精准度一般。' })).toBeVisible();
-    expect(screen.queryByText(/双检测模型|dual detection models/i)).toBeNull();
-    expect(screen.queryByText('单视频和多任务统一使用所选档位。板数仍表示落台反弹数。')).toBeNull();
+    expect(screen.queryByRole('heading', { name: '球识别模型' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Ball recognition model' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /新模型|旧模型|New model|Old model/ })).toBeNull();
   });
 
-  it('persists the bundled BlurBall profile directly when CUDA is available', async () => {
+  it('keeps the BlurBall flow ready when bootstrap resolves the CPU component', async () => {
     bootstrap.settings.language = 'en';
-    bootstrap.settings.ball_model_profile = 'tracknet_v1';
-    render(<App />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
-    fireEvent.click(screen.getByRole('button', { name: /New model/ }));
-
-    await waitFor(() => expect(window.ttcut.saveSettings).toHaveBeenCalledWith(expect.objectContaining({
-      ball_model_profile: 'blurball_v1',
-    })));
-  });
-
-  it('allows the bundled BlurBall profile when only the CPU component is active', async () => {
-    bootstrap.settings.language = 'en';
-    bootstrap.settings.ball_model_profile = 'tracknet_v1';
-    bootstrap.components.analysis.acceleration = 'cpu';
-    render(<App />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
-    const blurball = screen.getByRole('button', { name: /New model/ });
-
-    expect(blurball).toBeEnabled();
-    fireEvent.click(blurball);
-
-    await waitFor(() => expect(window.ttcut.saveSettings).toHaveBeenCalledWith(expect.objectContaining({
-      ball_model_profile: 'blurball_v1',
-    })));
-  });
-
-  it('keeps a persisted BlurBall profile ready when bootstrap resolves the CPU component', async () => {
-    bootstrap.settings.language = 'en';
-    bootstrap.settings.ball_model_profile = 'blurball_v1';
     bootstrap.components.analysis.acceleration = 'cpu';
 
     render(<App />);
