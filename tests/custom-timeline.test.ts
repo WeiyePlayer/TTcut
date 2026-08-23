@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  clampTimelineScrollLeft,
   clipEdgeHitWidth,
   chooseTimelineInterval,
   formatResizeDelta,
@@ -58,6 +59,13 @@ describe('custom timeline ruler', () => {
     expect(timelineWheelScroll(300, 100, 400, 0, 20, 0)).toEqual({
       nextScroll: 300, shouldPreventDefault: false,
     });
+  });
+
+  it('clamps stale scroll state to the real zoomed content boundary', () => {
+    expect(clampTimelineScrollLeft(420, 100, 400)).toBe(300);
+    expect(clampTimelineScrollLeft(-20, 100, 400)).toBe(0);
+    expect(clampTimelineScrollLeft(20, 100, 100)).toBe(0);
+    expect(clampTimelineScrollLeft(Number.NaN, 100, 400)).toBe(0);
   });
 });
 

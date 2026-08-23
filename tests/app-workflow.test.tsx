@@ -469,7 +469,7 @@ describe('App workflow notices and multi-task entry', () => {
     expect(Number(viewport.dataset.zoom)).toBeCloseTo(zoomBefore, 5);
     viewport.scrollLeft = 0.25;
     fireEvent.scroll(viewport);
-    expect(track.style.transform).toBe('translateX(-0.25px)');
+    expect(track.style.transform).toBe('translateX(0px)');
     viewport.scrollLeft = 0;
     fireEvent.scroll(viewport);
     vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue({
