@@ -14,6 +14,7 @@ import { validateCalibration } from '../domain/calibration';
 import { overallCalibrationProgress } from '../domain/analysis-progress';
 import { isSupportedVideoFileName } from '../domain/video-input';
 import { CalibrationSurface } from './CalibrationSurface';
+import { GlassRadioGroup } from './GlassRadioGroup';
 
 type BatchMode = 'all' | 'highlight' | 'analyze-only';
 type CalibrationStatus = 'pending' | 'calibrating' | 'ready' | 'manual-required' | 'error';
@@ -664,7 +665,16 @@ export function MultiTaskPage({
                         </button>
                       ))}
                     </div>
-                    {item.mode === 'highlight' && <div className="segmented compact">{([3, 5, 7] as const).map((value) => <button type="button" key={value} className={item.threshold === value ? 'selected' : ''} disabled={active} onClick={() => updateItem(item.id, (current) => ({ ...current, threshold: value }))}>{value}板</button>)}</div>}
+                    {item.mode === 'highlight' && <GlassRadioGroup
+                      ariaLabel={language === 'zh-CN' ? '板数筛选' : 'Bounce filter'}
+                      className="compact"
+                      disabled={active}
+                      idPrefix={`batch-threshold-${item.id}`}
+                      name={`batch-threshold-${item.id}`}
+                      onChange={(threshold) => updateItem(item.id, (current) => ({ ...current, threshold }))}
+                      options={([3, 5, 7] as const).map((value) => ({ value, label: `${value}${language === 'zh-CN' ? '板' : ' bounces'}` }))}
+                      value={item.threshold}
+                    />}
                   </div>
                   <button className="batch-remove" type="button" aria-label={`${text.remove} ${item.video.name}`} disabled={active} onClick={() => void remove(item)}>×</button>
                 </>
