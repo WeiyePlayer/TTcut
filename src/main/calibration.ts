@@ -50,7 +50,6 @@ export async function startAutoCalibration(
       ...analysisProcessEnvironment(process.env),
       PYTHONPATH: components.worker,
       PYTHONUTF8: '1',
-      TTCUT_TRACKNET_WEIGHTS: components.tracknetWeights,
       TTCUT_TABLE_ANALYZE_WEIGHTS: components.tableAnalyzeWeights,
     },
   });

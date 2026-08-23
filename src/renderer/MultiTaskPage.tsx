@@ -3,7 +3,6 @@ import type {
   AnalysisResultV1,
   Calibration,
   CutSelectionV1,
-  BallModelProfile,
   ExportWarning,
   TableAnalysis,
   VideoMetadata,
@@ -14,6 +13,7 @@ import { validateCalibration } from '../domain/calibration';
 import { overallCalibrationProgress } from '../domain/analysis-progress';
 import { isSupportedVideoFileName } from '../domain/video-input';
 import { CalibrationSurface } from './CalibrationSurface';
+import { GlassRadioGroup } from './GlassRadioGroup';
 
 type BatchMode = 'all' | 'highlight' | 'analyze-only';
 type CalibrationStatus = 'pending' | 'calibrating' | 'ready' | 'manual-required' | 'error';
@@ -45,7 +45,6 @@ interface MultiTaskPageProps {
   initialVideos: SelectedVideo[];
   preRoll: 1.5 | 2.5 | 5;
   postRoll: 0.5 | 1 | 2 | 4;
-  ballModelProfile?: BallModelProfile;
   language?: 'zh-CN' | 'en';
   onOpenAnalysis: (analysisId: string) => void;
   onCompletableTasksFinished?: () => void;
@@ -103,7 +102,6 @@ export function MultiTaskPage({
   initialVideos,
   preRoll,
   postRoll,
-  ballModelProfile = 'blurball_v1',
   language = 'zh-CN',
   onOpenAnalysis,
   onCompletableTasksFinished = () => undefined,
@@ -129,7 +127,7 @@ export function MultiTaskPage({
   const scheduleRef = useRef<() => void>(() => undefined);
   const rowRefs = useRef(new Map<string, HTMLElement>());
   const previousRects = useRef(new Map<string, DOMRect>());
-  const optionsRef = useRef({ preRoll, postRoll, ballModelProfile });
+  const optionsRef = useRef({ preRoll, postRoll });
 
   const isEnglish = language === 'en';
   const text = {
@@ -301,7 +299,6 @@ export function MultiTaskPage({
       calibrationChoice,
       device: 'auto',
       historyVisibility: candidate.mode === 'analyze-only' ? 'visible' : 'deferred',
-      ballModelProfile: optionsRef.current.ballModelProfile,
     });
     pendingTaskStartRef.current = startPromise;
     void startPromise.then((taskId) => {
@@ -664,7 +661,16 @@ export function MultiTaskPage({
                         </button>
                       ))}
                     </div>
-                    {item.mode === 'highlight' && <div className="segmented compact">{([3, 5, 7] as const).map((value) => <button type="button" key={value} className={item.threshold === value ? 'selected' : ''} disabled={active} onClick={() => updateItem(item.id, (current) => ({ ...current, threshold: value }))}>{value}板</button>)}</div>}
+                    {item.mode === 'highlight' && <GlassRadioGroup
+                      ariaLabel={language === 'zh-CN' ? '板数筛选' : 'Bounce filter'}
+                      className="compact"
+                      disabled={active}
+                      idPrefix={`batch-threshold-${item.id}`}
+                      name={`batch-threshold-${item.id}`}
+                      onChange={(threshold) => updateItem(item.id, (current) => ({ ...current, threshold }))}
+                      options={([3, 5, 7] as const).map((value) => ({ value, label: `${value}${language === 'zh-CN' ? '板' : ' bounces'}` }))}
+                      value={item.threshold}
+                    />}
                   </div>
                   <button className="batch-remove" type="button" aria-label={`${text.remove} ${item.video.name}`} disabled={active} onClick={() => void remove(item)}>×</button>
                 </>

@@ -17,7 +17,7 @@ from .errors import (
     TableModelResourceError,
     WorkerError,
 )
-from .model import resolve_device
+from .device import resolve_device
 from .table_model import FixedTableModel
 
 

@@ -6,11 +6,10 @@ import type { AppEvent, BootstrapData, SelectedVideo, TTcutApi } from '../src/sh
 import type { VideoMetadata } from '../src/shared/contracts';
 
 const bootstrap: BootstrapData = {
-  version: '1.2.7',
+  version: '1.2.8',
   settings: {
     language: 'zh-CN',
     calibration_method: 'automatic',
-    ball_model_profile: 'blurball_v1',
     pre_roll_seconds: 2.5,
     post_roll_seconds: 2,
   },
@@ -117,7 +116,6 @@ describe('App workflow notices and multi-task entry', () => {
 
   afterEach(() => {
     bootstrap.settings.language = 'zh-CN';
-    bootstrap.settings.ball_model_profile = 'blurball_v1';
     bootstrap.components.analysis.acceleration = 'cuda';
     window.localStorage.clear();
     cleanup();
@@ -152,56 +150,54 @@ describe('App workflow notices and multi-task entry', () => {
     expect(screen.queryByRole('button', { name: /Compatible mode|Fast segmented mode/ })).toBeNull();
   });
 
-  it('presents video selection as a single or multi-task workflow', async () => {
+  it('keeps the video selection page copy to its two requested messages', async () => {
     render(<App />);
 
     await screen.findByRole('heading', { name: '选择比赛视频' });
-    expect(screen.getByText('选择 MP4 或 MOV 比赛视频开始本地分析，支持多任务批量处理。')).toBeVisible();
-    expect(screen.getByText('或将 MP4 / MOV 文件拖到这里')).toBeVisible();
+    expect(screen.getByRole('button', { name: '选择或将文件拖到这里' })).toBeVisible();
+    expect(document.querySelector('.drop-zone .drop-icon')).toBeVisible();
+    expect(screen.queryByText('选择 MP4 或 MOV 比赛视频开始本地分析，支持多任务批量处理。')).toBeNull();
+    expect(screen.queryByText('或将 MP4 / MOV 文件拖到这里')).toBeNull();
     expect(screen.queryByText(/单个|一次只能处理一个/)).toBeNull();
   });
 
-  it('shows the simplified ball model profile copy', async () => {
+  it('groups both timing controls into one card and applies the glass-radio style to settings choices', async () => {
     render(<App />);
     fireEvent.click(await screen.findByRole('button', { name: '设置' }));
 
-    expect(screen.getByRole('button', { name: '新模型速度更快，更精准' })).toBeVisible();
-    expect(screen.getByRole('button', { name: '旧模型速度快，精准度一般。' })).toBeVisible();
-    expect(screen.queryByText(/双检测模型|dual detection models/i)).toBeNull();
-    expect(screen.queryByText('单视频和多任务统一使用所选档位。板数仍表示落台反弹数。')).toBeNull();
+    const timingCard = document.querySelector('.timing-settings-card');
+    expect(timingCard).not.toBeNull();
+    expect(document.querySelectorAll('.timing-settings-card')).toHaveLength(1);
+    expect(within(timingCard as HTMLElement).getByRole('heading', { name: '回合前时间' })).toBeVisible();
+    expect(within(timingCard as HTMLElement).getByRole('heading', { name: '回合后时间' })).toBeVisible();
+    expect(screen.getByRole('radio', { name: '简体中文' })).toBeChecked();
+    expect(screen.getByRole('radio', { name: '自动' })).toBeChecked();
+    expect(screen.getByRole('radiogroup', { name: '语言' })).toHaveClass('glass-radio-group');
   });
 
-  it('persists the bundled BlurBall profile directly when CUDA is available', async () => {
-    bootstrap.settings.language = 'en';
-    bootstrap.settings.ball_model_profile = 'tracknet_v1';
+  it('replaces release notes with an author-contact QR tooltip', async () => {
     render(<App />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
-    fireEvent.click(screen.getByRole('button', { name: /New model/ }));
+    fireEvent.click(await screen.findByRole('button', { name: '设置' }));
 
-    await waitFor(() => expect(window.ttcut.saveSettings).toHaveBeenCalledWith(expect.objectContaining({
-      ball_model_profile: 'blurball_v1',
-    })));
+    expect(screen.queryByRole('button', { name: '更新日志' })).toBeNull();
+    expect(screen.getByRole('button', { name: '联系作者' })).toBeVisible();
+    const tooltip = screen.getByRole('tooltip');
+    expect(tooltip).toHaveAttribute('id', 'contact-author-qr');
+    expect(within(tooltip).getByText('微信扫码联系作者')).toBeVisible();
+    expect(within(tooltip).getByRole('img', { name: '联系作者微信二维码' })).toBeVisible();
   });
 
-  it('allows the bundled BlurBall profile when only the CPU component is active', async () => {
-    bootstrap.settings.language = 'en';
-    bootstrap.settings.ball_model_profile = 'tracknet_v1';
-    bootstrap.components.analysis.acceleration = 'cpu';
+  it('does not expose a ball model selector', async () => {
     render(<App />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
-    const blurball = screen.getByRole('button', { name: /New model/ });
+    fireEvent.click(await screen.findByRole('button', { name: '设置' }));
 
-    expect(blurball).toBeEnabled();
-    fireEvent.click(blurball);
-
-    await waitFor(() => expect(window.ttcut.saveSettings).toHaveBeenCalledWith(expect.objectContaining({
-      ball_model_profile: 'blurball_v1',
-    })));
+    expect(screen.queryByRole('heading', { name: '球识别模型' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Ball recognition model' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /新模型|旧模型|New model|Old model/ })).toBeNull();
   });
 
-  it('keeps a persisted BlurBall profile ready when bootstrap resolves the CPU component', async () => {
+  it('keeps the BlurBall flow ready when bootstrap resolves the CPU component', async () => {
     bootstrap.settings.language = 'en';
-    bootstrap.settings.ball_model_profile = 'blurball_v1';
     bootstrap.components.analysis.acceleration = 'cpu';
 
     render(<App />);
@@ -248,7 +244,7 @@ describe('App workflow notices and multi-task entry', () => {
     render(<App />);
     await screen.findByRole('heading', { name: '选择比赛视频' });
 
-    fireEvent.click(screen.getByRole('button', { name: /选择 MP4 \/ MOV 视频/ }));
+    fireEvent.click(screen.getByRole('button', { name: '选择或将文件拖到这里' }));
 
     await screen.findByRole('heading', { name: '多任务剪辑' });
     await waitFor(() => expect(screen.getByText('first.mp4')).toBeVisible());
@@ -268,7 +264,7 @@ describe('App workflow notices and multi-task entry', () => {
       path: 'C:\\video\\first.mp4', name: 'first.mp4', size: 100, mediaUrl: 'ttcut-media://first',
     }]);
     render(<App />);
-    fireEvent.click(await screen.findByRole('button', { name: /Choose MP4 \/ MOV videos/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose or drop a file here' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Start analysis' }));
     expect(await screen.findByRole('heading', { name: 'Analyzing video' })).toBeVisible();
 
@@ -292,7 +288,7 @@ describe('App workflow notices and multi-task entry', () => {
     };
     selectVideos.mockResolvedValue([selected]);
     render(<App />);
-    fireEvent.click(await screen.findByRole('button', { name: /Choose MP4 \/ MOV videos/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose or drop a file here' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Start analysis' }));
     await screen.findByRole('heading', { name: 'Analyzing video' });
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
@@ -322,7 +318,7 @@ describe('App workflow notices and multi-task entry', () => {
     };
     selectVideos.mockResolvedValue([selected]);
     render(<App />);
-    fireEvent.click(await screen.findByRole('button', { name: /Choose MP4 \/ MOV videos/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose or drop a file here' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Start analysis' }));
     act(() => taskListener?.({
       type: 'analysis-result',
@@ -378,7 +374,7 @@ describe('App workflow notices and multi-task entry', () => {
       setTransform: vi.fn(), clearRect: vi.fn(), beginPath: vi.fn(), moveTo: vi.fn(), lineTo: vi.fn(), stroke: vi.fn(), fillText: vi.fn(),
     } as unknown as CanvasRenderingContext2D);
     render(<App />);
-    fireEvent.click(await screen.findByRole('button', { name: /Choose MP4 \/ MOV videos/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose or drop a file here' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Start analysis' }));
     act(() => taskListener?.({
       type: 'analysis-result',
@@ -441,7 +437,7 @@ describe('App workflow notices and multi-task entry', () => {
     expect(Number(viewport.dataset.zoom)).toBeCloseTo(zoomBefore, 5);
     viewport.scrollLeft = 0.25;
     fireEvent.scroll(viewport);
-    expect(track.style.transform).toBe('translateX(-0.25px)');
+    expect(track.style.transform).toBe('translateX(0px)');
     viewport.scrollLeft = 0;
     fireEvent.scroll(viewport);
     vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue({
@@ -478,8 +474,11 @@ describe('App workflow notices and multi-task entry', () => {
     fireEvent.pointerDown(shortEndHandle, { pointerId: 82, clientX: 1 });
     expect(document.querySelector('.resize-feedback')).toHaveAttribute('data-edge', 'end');
     fireEvent.pointerUp(shortEndHandle, { pointerId: 82, clientX: 1 });
-    expect(screen.getAllByRole('checkbox', { name: /Rally/ })).toHaveLength(2);
-    expect(screen.getAllByRole('checkbox', { name: /Rally/ }).every((input) => (input as HTMLInputElement).checked)).toBe(true);
+    const rallyCheckboxes = screen.getAllByRole('checkbox', { name: /Rally/ });
+    expect(rallyCheckboxes).toHaveLength(2);
+    expect(rallyCheckboxes.every((input) => (input as HTMLInputElement).checked)).toBe(true);
+    expect(rallyCheckboxes.every((input) => input.closest('label')?.classList.contains('rally-checkbox'))).toBe(true);
+    expect(rallyCheckboxes.every((input) => input.closest('label')?.querySelector('.export-checkbox-gloss') === null)).toBe(true);
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'Rally 2' }));
     expect(document.querySelectorAll('.timeline-clip')).toHaveLength(1);
@@ -500,8 +499,21 @@ describe('App workflow notices and multi-task entry', () => {
 
     const startCutting = screen.getByRole('button', { name: 'Start cutting' });
     fireEvent.pointerEnter(startCutting);
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Export rally videos' }));
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Export XML' }));
+    const exportLauncher = startCutting.closest('.floating-launcher');
+    if (!exportLauncher) throw new Error('Missing export launcher.');
+    const rallyVideos = screen.getByRole('checkbox', { name: 'Export rally videos' });
+    const premiereXml = screen.getByRole('checkbox', { name: 'Export XML' });
+    fireEvent.click(rallyVideos);
+    expect(exportLauncher).toHaveClass('is-open');
+    fireEvent.click(rallyVideos);
+    fireEvent.blur(rallyVideos, { relatedTarget: null });
+    expect(exportLauncher).toHaveClass('is-open');
+    fireEvent.click(rallyVideos);
+    fireEvent.click(premiereXml);
+    expect(rallyVideos.closest('label')).toHaveClass('export-checkbox');
+    expect(premiereXml.closest('label')).toHaveClass('export-checkbox');
+    expect(rallyVideos.closest('label')?.querySelector('svg')).toBeNull();
+    expect(premiereXml.closest('label')?.querySelector('svg')).toBeNull();
     fireEvent.click(startCutting);
     await waitFor(() => expect(window.ttcut.startExport).toHaveBeenCalledWith(expect.objectContaining({
       selection: {

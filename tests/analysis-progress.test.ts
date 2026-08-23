@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { overallAnalysisProgress, overallCalibrationProgress } from '../src/domain/analysis-progress';
 
 describe('analysis progress mapping', () => {
-  it('keeps the manual TrackNet analysis mapping unchanged', () => {
+  it('keeps the manual BlurBall analysis mapping unchanged', () => {
     expect(overallAnalysisProgress('load_model', 100)).toBe(10);
     expect(overallAnalysisProgress('analysis', 50)).toBe(53);
     expect(overallAnalysisProgress('postprocess', 100)).toBe(100);
@@ -17,7 +17,7 @@ describe('analysis progress mapping', () => {
     expect(overallAnalysisProgress('postprocess', 100, 'automatic')).toBe(100);
   });
 
-  it('treats precalibrated analysis as TrackNet-only work', () => {
+  it('treats precalibrated analysis as BlurBall-only work', () => {
     expect(overallAnalysisProgress('load_model', 100, 'precalibrated')).toBe(10);
     expect(overallAnalysisProgress('analysis', 50, 'precalibrated')).toBe(53);
   });

@@ -2,12 +2,6 @@
   "schema_version": 1,
   "models": [
     {
-      "model_id": "tracknet_analysis",
-      "filename": "analyze.pt",
-      "size_bytes": 136191005,
-      "sha256": "ffb5469161c4bd39a5a7e745c3d13f076b2c5e575f33279ea62f1e5803245a52"
-    },
-    {
       "model_id": "table_analysis",
       "filename": "table_analyze.pt",
       "size_bytes": 99028986,
