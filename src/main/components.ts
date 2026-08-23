@@ -154,7 +154,6 @@ export type ComponentPaths = {
   python: string | null;
   runtimeVariant: RuntimeLocation | null;
   worker: string;
-  tracknetWeights: string;
   blurballWeights: string;
   tableAnalyzeWeights: string;
   ffmpeg: string | null;
@@ -248,7 +247,6 @@ export async function resolveComponents(device: 'auto' | 'cuda' | 'cpu' = 'auto'
     python: runtimes[0]?.python ?? null,
     runtimeVariant: runtimes[0]?.variant ?? null,
     worker: resource('worker'),
-    tracknetWeights: process.env.TTCUT_TRACKNET_WEIGHTS || resource('resources', 'models', 'analyze.pt'),
     blurballWeights: process.env.TTCUT_BLURBALL_WEIGHTS || resource('resources', 'models', 'blurball_best.pt'),
     tableAnalyzeWeights: process.env.TTCUT_TABLE_ANALYZE_WEIGHTS || resource('resources', 'models', 'table_analyze.pt'),
     ffmpeg: media?.ffmpeg ?? null,
@@ -423,8 +421,7 @@ export async function inspectComponentPaths(paths: ComponentPaths, x264Available
   let analysisVersion: string | null = null;
   let acceleration: 'cuda' | 'cpu' | 'unavailable' = 'unavailable';
   let analysisDetail: string | null = null;
-  const modelsAvailable = await exists(paths.tracknetWeights)
-    && await exists(paths.blurballWeights)
+  const modelsAvailable = await exists(paths.blurballWeights)
     && await exists(paths.tableAnalyzeWeights);
   if (paths.python && modelsAvailable) {
     try {

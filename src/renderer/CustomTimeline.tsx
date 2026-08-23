@@ -74,6 +74,12 @@ export function timelineWheelScroll(
   return { nextScroll, shouldPreventDefault: Math.abs(nextScroll - scrollLeft) >= 0.01 };
 }
 
+export function clampTimelineScrollLeft(scrollLeft: number, viewportWidth: number, contentWidth: number): number {
+  const safeScrollLeft = Number.isFinite(scrollLeft) ? scrollLeft : 0;
+  const maximumScroll = Math.max(0, contentWidth - viewportWidth);
+  return Math.max(0, Math.min(maximumScroll, safeScrollLeft));
+}
+
 function TrashIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -136,6 +142,7 @@ export function CustomTimeline({
   const actualZoom = Math.min(zoom, maximumZoom);
   const contentWidth = Math.max(viewportWidth, viewportWidth * actualZoom);
   const pixelsPerSecond = contentWidth / Math.max(duration, 0.001);
+  const visibleScrollLeft = clampTimelineScrollLeft(scrollLeft, viewportWidth, contentWidth);
   const selectedClips = useMemo(() => clips.filter((clip) => clip.selected), [clips]);
 
   useEffect(() => {
@@ -158,6 +165,14 @@ export function CustomTimeline({
     return () => observer.disconnect();
   }, []);
 
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const nextScrollLeft = clampTimelineScrollLeft(viewport.scrollLeft, viewport.clientWidth, contentWidth);
+    if (Math.abs(viewport.scrollLeft - nextScrollLeft) >= 0.01) viewport.scrollLeft = nextScrollLeft;
+    setScrollLeft(nextScrollLeft);
+  }, [contentWidth]);
+
   const drawRuler = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -177,11 +192,11 @@ export function CustomTimeline({
     context.textBaseline = 'top';
     const interval = chooseTimelineInterval(1 / pixelsPerSecond);
     const minor = interval / 5;
-    const visibleStart = scrollLeft / pixelsPerSecond;
-    const visibleEnd = Math.min(duration, (scrollLeft + width) / pixelsPerSecond);
+    const visibleStart = visibleScrollLeft / pixelsPerSecond;
+    const visibleEnd = Math.min(duration, (visibleScrollLeft + width) / pixelsPerSecond);
     const firstMinor = Math.max(0, Math.floor(visibleStart / minor) * minor);
     for (let time = firstMinor; time <= visibleEnd + minor / 2; time += minor) {
-      const x = Math.round(time * pixelsPerSecond - scrollLeft) + 0.5;
+      const x = Math.round(time * pixelsPerSecond - visibleScrollLeft) + 0.5;
       const major = Math.abs(time / interval - Math.round(time / interval)) < 0.001;
       context.beginPath();
       context.moveTo(x, major ? 19 : 25);
@@ -193,7 +208,7 @@ export function CustomTimeline({
         context.fillText(formatTimelineLabel(Math.round(time)), x + (atRightEdge ? -4 : 4), 3);
       }
     }
-  }, [duration, pixelsPerSecond, scrollLeft, viewportWidth]);
+  }, [duration, pixelsPerSecond, viewportWidth, visibleScrollLeft]);
 
   useEffect(drawRuler, [drawRuler]);
 
@@ -203,9 +218,11 @@ export function CustomTimeline({
     const x = currentTime * pixelsPerSecond;
     const margin = Math.min(90, viewport.clientWidth * 0.15);
     if (x < viewport.scrollLeft + margin || x > viewport.scrollLeft + viewport.clientWidth - margin) {
-      viewport.scrollLeft = Math.max(0, x - viewport.clientWidth * 0.35);
+      const nextScrollLeft = clampTimelineScrollLeft(x - viewport.clientWidth * 0.35, viewport.clientWidth, contentWidth);
+      viewport.scrollLeft = nextScrollLeft;
+      setScrollLeft(nextScrollLeft);
     }
-  }, [currentTime, duration, pixelsPerSecond]);
+  }, [contentWidth, currentTime, duration, pixelsPerSecond]);
 
   const setZoomAnchored = (nextZoom: number, anchorClientX?: number) => {
     const viewport = viewportRef.current;
@@ -216,8 +233,11 @@ export function CustomTimeline({
     const time = (viewport.scrollLeft + anchor) / pixelsPerSecond;
     setZoom(bounded);
     window.requestAnimationFrame(() => {
-      const nextPixelsPerSecond = Math.max(viewport.clientWidth, viewport.clientWidth * bounded) / Math.max(duration, 0.001);
-      viewport.scrollLeft = Math.max(0, time * nextPixelsPerSecond - anchor);
+      const nextContentWidth = Math.max(viewport.clientWidth, viewport.clientWidth * bounded);
+      const nextPixelsPerSecond = nextContentWidth / Math.max(duration, 0.001);
+      const nextScrollLeft = clampTimelineScrollLeft(time * nextPixelsPerSecond - anchor, viewport.clientWidth, nextContentWidth);
+      viewport.scrollLeft = nextScrollLeft;
+      setScrollLeft(nextScrollLeft);
     });
   };
 
@@ -362,15 +382,15 @@ export function CustomTimeline({
 
   return (
     <section ref={surfaceRef} className={`custom-timeline${toolMode ? ` is-${toolMode}-mode` : ''}${toolMode === 'add' && addTargetValid === false ? ' is-add-unavailable' : ''}`} aria-label={timelineLabel}>
-      <div ref={viewportRef} className="timeline-viewport" data-zoom={actualZoom} onScroll={(event) => setScrollLeft(event.currentTarget.scrollLeft)}>
+      <div ref={viewportRef} className="timeline-viewport" data-zoom={actualZoom} onScroll={(event) => setScrollLeft(clampTimelineScrollLeft(event.currentTarget.scrollLeft, event.currentTarget.clientWidth, event.currentTarget.scrollWidth))}>
         <div className="timeline-content" style={{ width: contentWidth }}>
-          <div className="timeline-ruler" onPointerDown={(event) => seekFromPointer(event.clientX)}><canvas ref={canvasRef} style={{ transform: `translateX(${scrollLeft}px)` }} /></div>
+          <div className="timeline-ruler" onPointerDown={(event) => seekFromPointer(event.clientX)}><canvas ref={canvasRef} style={{ transform: `translateX(${visibleScrollLeft}px)` }} /></div>
           {resizeFeedback ? <div className="resize-feedback" style={{ left: resizeFeedback.boundaryTime * pixelsPerSecond }} data-clip-id={resizeFeedback.clipId} data-edge={resizeFeedback.edge}>{formatResizeDelta(resizeFeedback.durationDelta)}</div> : null}
           <div className={`timeline-playhead${isScrubbing ? ' dragging' : ''}`} style={{ left: currentTime * pixelsPerSecond }} role="slider" aria-orientation="horizontal" tabIndex={0} aria-label={timelineLabel} aria-valuemin={0} aria-valuemax={duration} aria-valuenow={currentTime} onPointerDown={beginPlayheadDrag} onPointerMove={movePlayhead} onPointerUp={endPlayheadDrag} onPointerCancel={cancelPlayheadDrag} onLostPointerCapture={cancelPlayheadDrag} onKeyDown={keyboardSeek}><i /></div>
         </div>
       </div>
       <div ref={trackWindowRef} className="timeline-track-window" onPointerMove={(event) => updateAddTarget(event.clientX)} onPointerLeave={() => setAddTargetValid(null)} onPointerDown={addAtPointer}>
-        <div className="timeline-track" style={{ width: contentWidth, transform: `translateX(${-scrollLeft}px)` }}>
+        <div className="timeline-track" style={{ width: contentWidth, transform: `translateX(${-visibleScrollLeft}px)` }}>
           {selectedClips.map((clip, index) => {
             const left = clip.start * pixelsPerSecond;
             const width = Math.max(1, (clip.end - clip.start) * pixelsPerSecond);
@@ -389,7 +409,7 @@ export function CustomTimeline({
                 onPlayClip(clip);
               }}>
                 {!toolMode ? <button type="button" className="clip-handle start" role="slider" aria-orientation="horizontal" aria-label={`${resizeStartLabel} ${clip.rallyIndex}`} aria-valuemin={previous?.end ?? 0} aria-valuemax={clip.end - minimumDuration} aria-valuenow={clip.start} style={{ left: -CLIP_EDGE_HIT_OUTSET, width: edgeHitWidth }} onPointerDown={(event) => beginResize(event, clip, 'start')} onPointerMove={moveResize} onPointerUp={endResize} onPointerCancel={endResize} onLostPointerCapture={endResize} onKeyDown={(event) => keyboardResize(event, clip, 'start')} /> : null}
-                <span>{clip.rallyIndex}</span>
+                {!deleteTarget ? <span>{clip.rallyIndex}</span> : null}
                 {deleteTarget ? <i className="timeline-delete-overlay"><TrashIcon /></i> : null}
                 {showBoundaryMarkers ? <><i className="clip-boundary-marker start" aria-hidden="true" /><i className="clip-boundary-marker end" aria-hidden="true" /></> : null}
                 {!toolMode ? <button type="button" className="clip-handle end" role="slider" aria-orientation="horizontal" aria-label={`${resizeEndLabel} ${clip.rallyIndex}`} aria-valuemin={clip.start + minimumDuration} aria-valuemax={following?.start ?? duration} aria-valuenow={clip.end} style={{ right: -CLIP_EDGE_HIT_OUTSET, width: edgeHitWidth }} onPointerDown={(event) => beginResize(event, clip, 'end')} onPointerMove={moveResize} onPointerUp={endResize} onPointerCancel={endResize} onLostPointerCapture={endResize} onKeyDown={(event) => keyboardResize(event, clip, 'end')} /> : null}

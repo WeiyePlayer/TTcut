@@ -16,19 +16,14 @@ def validate_request(value: object) -> dict:
         "video_metadata",
         "calibration_choice",
     }
-    if not isinstance(value, dict) or value.get("schema_version") not in {1, 2}:
+    if not isinstance(value, dict) or value.get("schema_version") != 1:
         raise InvalidRequestError("Unsupported analysis request schema.")
-    expected_fields = base_fields if value["schema_version"] == 1 else base_fields | {"ball_model_profile"}
-    if set(value) != expected_fields:
+    if set(value) != base_fields:
         raise InvalidRequestError("Unsupported analysis request schema fields.")
     try:
         uuid.UUID(str(value["task_id"]))
         if value["device"] not in {"auto", "cuda", "cpu"}:
             raise ValueError("device")
-        if value.get("ball_model_profile", "blurball_v1") not in {
-            "tracknet_v1", "blurball_v1",
-        }:
-            raise ValueError("ball_model_profile")
         if (
             not isinstance(value["video_path"], str)
             or Path(value["video_path"]).suffix.lower() not in {".mp4", ".mov"}

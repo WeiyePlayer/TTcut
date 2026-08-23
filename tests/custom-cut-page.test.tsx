@@ -72,6 +72,7 @@ describe('manual timeline tools', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Delete rally' }));
     fireEvent.pointerEnter(manualClip!);
     expect(manualClip).toHaveClass('delete-target');
+    expect(manualClip!.querySelector('span')).toBeNull();
     fireEvent.pointerDown(manualClip!, { button: 2, clientX: 75, clientY: 20 });
     fireEvent.contextMenu(manualClip!);
     expect(document.querySelector('.timeline-clip[data-clip-id^="manual_"]')).not.toBeNull();

@@ -2,9 +2,9 @@ export type Language = 'zh-CN' | 'en';
 
 const zh = {
   autoCut: '自动剪辑', history: '历史剪辑', settings: '设置', back: '返回',
-  selectTitle: '选择比赛视频', selectDescription: '选择 MP4 或 MOV 比赛视频开始本地分析，支持多任务批量处理。',
+  selectTitle: '选择比赛视频',
   captureGuideTitle: '推荐视频拍摄视角', captureGuideImageAlt: '推荐视频拍摄视角示意图',
-  chooseVideo: '选择 MP4 / MOV 视频', dropVideo: '或将 MP4 / MOV 文件拖到这里',
+  chooseVideo: '选择或将文件拖到这里',
   fileName: '文件名', filePath: '路径', fileSize: '大小', duration: '时长', resolution: '分辨率', frameRate: '帧率',
   calibrationTitle: '标定球桌', calibrationDescription: '依次标记左上、右上、右下、左下四个角点。拖动标记可修正位置。',
   point1: '1 左上', point2: '2 右上', point3: '3 右下', point4: '4 左下', resetPoints: '重置标定',
@@ -75,7 +75,6 @@ const zh = {
     X264_COMPONENT_REQUIRED_FOR_HIGH_RESOLUTION: '高于 4K 的视频需要 x264 组件。请在设置中下载并导入固定 x264 组件后重试。',
     RUNTIME_MISSING: '分析组件或固定权重不可用。请在设置中重新安装分析组件。',
     WEIGHT_MISSING: '固定分析权重缺失或不可读取。请重新安装应用。',
-    TRACKNET_WEIGHT_HASH_MISMATCH: '分析权重未通过完整性校验。请勿继续使用，并重新安装应用。',
     DEVICE_UNAVAILABLE: 'GPU 加速当前不可用或显存不足。请检查驱动，或改用 CPU 运行时。',
     INVALID_CALIBRATION: '球桌标定无效。请按左上、右上、右下、左下重新放置四个点。',
     ANALYSIS_ROI_FAILED: '分析裁切区域无法定位。请检查球桌标定或重新尝试。',
@@ -121,9 +120,9 @@ export type Messages = DeepStrings<typeof zh>;
 
 const en: Messages = {
   autoCut: 'Auto Cut', history: 'History', settings: 'Settings', back: 'Back',
-  selectTitle: 'Choose match videos', selectDescription: 'Choose MP4 or MOV match videos for local analysis with multi-task batch processing.',
+  selectTitle: 'Choose match videos',
   captureGuideTitle: 'Recommended video camera angle', captureGuideImageAlt: 'Recommended video camera angle illustration',
-  chooseVideo: 'Choose MP4 / MOV videos', dropVideo: 'or drop MP4 / MOV files here',
+  chooseVideo: 'Choose or drop a file here',
   fileName: 'File', filePath: 'Path', fileSize: 'Size', duration: 'Duration', resolution: 'Resolution', frameRate: 'Frame rate',
   calibrationTitle: 'Calibrate the table', calibrationDescription: 'Mark top-left, top-right, bottom-right, and bottom-left in order. Drag a marker to refine it.',
   point1: '1 Top left', point2: '2 Top right', point3: '3 Bottom right', point4: '4 Bottom left', resetPoints: 'Reset calibration',
@@ -194,7 +193,6 @@ const en: Messages = {
     X264_COMPONENT_REQUIRED_FOR_HIGH_RESOLUTION: 'Video above 4K requires the x264 component. Download and import the fixed x264 component in Settings, then retry.',
     RUNTIME_MISSING: 'The analysis runtime or fixed weight is unavailable. Reinstall the analysis component in Settings.',
     WEIGHT_MISSING: 'The fixed analysis weight is missing or unreadable. Reinstall the app.',
-    TRACKNET_WEIGHT_HASH_MISMATCH: 'The analysis weight failed integrity verification. Stop using it and reinstall the app.',
     DEVICE_UNAVAILABLE: 'GPU acceleration is unavailable or out of memory. Check the driver or use a CPU runtime.',
     INVALID_CALIBRATION: 'The table calibration is invalid. Place the points again in top-left, top-right, bottom-right, bottom-left order.',
     ANALYSIS_ROI_FAILED: 'The analysis crop region could not be computed. Check the table calibration and retry.',

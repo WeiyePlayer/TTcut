@@ -123,7 +123,7 @@ describe('multi-task clipping', () => {
     await waitFor(() => expect(highlight).not.toBeDisabled());
     fireEvent.click(highlight);
     expect(highlight).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getAllByRole('button', { name: '5板' })[0]).toBeVisible();
+    expect(screen.getAllByRole('radio', { name: '5板' })[0]).toBeChecked();
   });
 
   it('runs ready videos serially with precalibrated analysis and 70/30 progress mapping', async () => {
@@ -140,7 +140,6 @@ describe('multi-task clipping', () => {
       calibrationChoice: { method: 'precalibrated', calibration, table_analysis: tableAnalysis },
       device: 'auto',
       historyVisibility: 'deferred',
-      ballModelProfile: 'blurball_v1',
     });
 
     act(() => listener?.({
@@ -510,13 +509,12 @@ describe('multi-task clipping', () => {
     expect(startAnalysis).toHaveBeenCalledTimes(2);
   });
 
-  it('freezes processing settings for the lifetime of a batch', async () => {
+  it('freezes timing settings for the lifetime of a batch', async () => {
     const view = render(
       <MultiTaskPage
         initialVideos={videos}
         preRoll={2.5}
         postRoll={1}
-        ballModelProfile="tracknet_v1"
         onOpenAnalysis={vi.fn()}
       />,
     );
@@ -530,13 +528,12 @@ describe('multi-task clipping', () => {
         initialVideos={videos}
         preRoll={5}
         postRoll={4}
-        ballModelProfile="blurball_v1"
         onOpenAnalysis={vi.fn()}
       />,
     );
     fireEvent.click(document.querySelector('.batch-start')!);
     await waitFor(() => expect(startAnalysis).toHaveBeenCalledTimes(1));
-    expect(startAnalysis.mock.calls[0]?.[0]).toMatchObject({ ballModelProfile: 'tracknet_v1' });
+    expect(startAnalysis.mock.calls[0]?.[0]).not.toHaveProperty('ballModelProfile');
 
     act(() => listener?.({
       type: 'analysis-result',
