@@ -311,6 +311,7 @@ test('neutral controls use the shared hover surface without overriding semantic 
     await expect(page.getByRole('heading', { name: '选择比赛视频' })).toBeVisible();
     await expect(page.locator('.center-stage .eyebrow')).toHaveCount(0);
     await expect(page.locator('.drop-zone .drop-icon')).toBeVisible();
+    await expect(page.locator('.drop-zone strong')).toHaveCSS('font-weight', '400');
     await page.locator('.center-stage').screenshot({ path: path.join(outputRoot, 'home-upload.png') });
     const captureHelp = page.getByRole('button', { name: '推荐视频拍摄视角' });
     await expect(captureHelp).toBeVisible();
