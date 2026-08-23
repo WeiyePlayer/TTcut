@@ -34,8 +34,10 @@ def calibration() -> TableCalibration:
     )
 
 
-def point(frame: int, time: float, x: int, y: int) -> TrajectoryPoint:
-    return TrajectoryPoint(frame, time, 1, x, y, "blurball", 1.0)
+def point(
+    frame: int, time: float, x: int, y: int, confidence: float = 1.0,
+) -> TrajectoryPoint:
+    return TrajectoryPoint(frame, time, 1, x, y, "blurball", confidence)
 
 
 def test_bundled_blurball_architecture_strictly_matches_checkpoint():
@@ -133,3 +135,60 @@ def test_blurball_bounce_uses_ttcut_expanded_table_region_and_interval():
     values = [20, 24, 29, 35, 43, 35, 29, 24, 20]
     trajectory = [point(index, index * 0.1, 100, y) for index, y in enumerate(values)]
     assert detect_blurball_bounce_frames(trajectory, calibration()) == [4]
+
+
+def test_blurball_keeps_an_upward_flight_that_accelerates_after_contact():
+    xs = (100, 110, 120, 130, 140, 150, 160)
+    ys = (100, 98, 96, 94, 86, 76, 64)
+    trajectory = [
+        point(frame, frame * 0.01, x, y)
+        for frame, (x, y) in enumerate(zip(xs, ys))
+    ]
+
+    detected = detect_blurball_bounce_frames(trajectory, calibration())
+
+    assert len(detected) == 1
+    assert abs(detected[0] - 3) <= 1
+
+
+def test_blurball_rejects_an_acute_paddle_reversal():
+    xs = (190, 170, 150, 130, 150, 175, 205)
+    ys = (110, 120, 130, 140, 125, 110, 95)
+    trajectory = [
+        point(frame, frame * 0.1, x, y)
+        for frame, (x, y) in enumerate(zip(xs, ys))
+    ]
+
+    assert detect_blurball_bounce_frames(trajectory, calibration()) == []
+
+
+def test_blurball_local_window_survives_a_distant_observation_gap():
+    trajectory = [
+        point(0, 0.0, 100, 110),
+        point(1, 0.1, 110, 120),
+        point(2, 0.2, 120, 116),
+        TrajectoryPoint(3, 0.3, 0, 0, 0, "missing", 0.0),
+        TrajectoryPoint(4, 0.4, 0, 0, 0, "missing", 0.0),
+        TrajectoryPoint(5, 0.5, 0, 0, 0, "missing", 0.0),
+        point(6, 0.6, 150, 105),
+    ]
+
+    assert detect_blurball_bounce_frames(trajectory, calibration()) == [1]
+
+
+def test_blurball_short_gap_recovers_a_length_edge_contact():
+    trajectory = [
+        point(0, 0.0, 80, 135),
+        point(1, 0.1, 90, 138),
+        point(2, 0.2, 100, 141),
+        point(3, 0.3, 110, 144),
+        TrajectoryPoint(4, 0.4, 0, 0, 0, "missing", 0.0),
+        TrajectoryPoint(5, 0.5, 0, 0, 0, "missing", 0.0),
+        TrajectoryPoint(6, 0.6, 0, 0, 0, "missing", 0.0),
+        point(7, 0.7, 20, 147),
+        point(8, 0.8, 30, 135),
+        point(9, 0.9, 40, 123),
+        point(10, 1.0, 50, 111),
+    ]
+
+    assert detect_blurball_bounce_frames(trajectory, calibration()) == [7]
