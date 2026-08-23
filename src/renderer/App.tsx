@@ -66,7 +66,7 @@ export function App() {
   const [bootstrap, setBootstrap] = useState<BootstrapData | null>(null);
   const [settings, setSettings] = useState<AppSettings>({
     language: 'zh-CN', calibration_method: 'automatic',
-    ball_model_profile: 'blurball_v1', pre_roll_seconds: 2.5, post_roll_seconds: 2,
+    pre_roll_seconds: 2.5, post_roll_seconds: 2,
   });
   const [view, setView] = useState<View>('auto');
   const [step, setStep] = useState<Step>('select');
@@ -300,7 +300,6 @@ export function App() {
         calibrationChoice: useManualCalibration ? { method: 'manual', calibration: calibrationValue! } : { method: 'automatic' },
         device: 'auto',
         historyVisibility: 'visible',
-        ballModelProfile: settings.ball_model_profile,
       }));
     } catch (caught) {
       if (videoTaskOwnerRef.current === 'single') updateVideoTaskOwner(null);
@@ -477,11 +476,6 @@ export function App() {
     }
   };
 
-  const selectBallModelProfile = async (profile: AppSettings['ball_model_profile']) => {
-    if (profile === settings.ball_model_profile) return;
-    await saveRolls({ ball_model_profile: profile });
-  };
-
   const tableRecognitionStage = progress.stage === 'table_sampling'
     || progress.stage === 'table_model'
     || progress.stage === 'table_inference';
@@ -580,7 +574,6 @@ export function App() {
               initialVideos={multiVideos}
               preRoll={settings.pre_roll_seconds}
               postRoll={settings.post_roll_seconds}
-              ballModelProfile={settings.ball_model_profile}
               language={settings.language}
               onTaskStateChange={handleMultiTaskStateChange}
               onOpenAnalysis={(id) => { discardMulti(); void openHistory(id); }}
@@ -625,13 +618,6 @@ export function App() {
                   options={[{ value: 'zh-CN', label: t.chinese }, { value: 'en', label: t.english }] as const}
                   value={settings.language as Language}
                 />
-              </article>
-              <article className="card model-profile-card">
-                <div><h2>{settings.language === 'zh-CN' ? '球识别模型' : 'Ball recognition model'}</h2></div>
-                <div className="model-profile-options">
-                  <button disabled={Boolean(setupTask)} className={settings.ball_model_profile === 'blurball_v1' ? 'selected' : ''} onClick={() => void selectBallModelProfile('blurball_v1')}><strong>{settings.language === 'zh-CN' ? '新模型' : 'New model'}</strong><span>{settings.language === 'zh-CN' ? '速度更快，更精准' : 'Faster, more accurate.'}</span></button>
-                  <button className={settings.ball_model_profile === 'tracknet_v1' ? 'selected' : ''} onClick={() => void selectBallModelProfile('tracknet_v1')}><strong>{settings.language === 'zh-CN' ? '旧模型' : 'Old model'}</strong><span>{settings.language === 'zh-CN' ? '速度快，精准度一般。' : 'Fast, with average accuracy.'}</span></button>
-                </div>
               </article>
               <article className="card setting-card">
                 <div><h2>{settings.language === 'zh-CN' ? '球台标定' : 'Table calibration'}</h2><p>{settings.language === 'zh-CN' ? '选择单视频流程使用的球台标定方式。多任务会先自动标定，失败项目可手动补充。' : 'Choose the calibration method for single videos. Batch tasks calibrate automatically first, with manual recovery for failed items.'}</p></div>

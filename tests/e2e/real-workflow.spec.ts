@@ -13,8 +13,8 @@ const sourceVideo = process.env.TTCUT_E2E_VIDEO
   ?? path.join(projectRoot, '.baseline', 'fixtures', '1-193.mp4');
 const pythonPath = process.env.TTCUT_E2E_PYTHON
   ?? path.join(projectRoot, '.baseline', 'analysis-runtime', 'python.exe');
-const weightsPath = process.env.TTCUT_E2E_WEIGHTS
-  ?? path.join(projectRoot, 'resources', 'models', 'analyze.pt');
+const blurballWeightsPath = process.env.TTCUT_E2E_BLURBALL_WEIGHTS
+  ?? path.join(projectRoot, 'resources', 'models', 'blurball_best.pt');
 const ffmpegRoot = process.env.TTCUT_E2E_FFMPEG_ROOT
   ?? path.join(projectRoot, '.baseline', 'components', 'ffmpeg-n8.1.2-22-g94138f6973-win64-lgpl-shared-8.1', 'bin');
 const electronPath = process.env.TTCUT_E2E_ELECTRON
@@ -144,7 +144,7 @@ async function createCalibrationFailureVideo(outputPath: string): Promise<void> 
 
 test('real CUDA analysis, single-rally export, and final preview', async ({}, testInfo) => {
   test.slow();
-  for (const filePath of [sourceVideo, pythonPath, weightsPath, electronPath, path.join(ffmpegRoot, 'ffmpeg.exe'), path.join(ffmpegRoot, 'ffprobe.exe')]) {
+  for (const filePath of [sourceVideo, pythonPath, blurballWeightsPath, electronPath, path.join(ffmpegRoot, 'ffmpeg.exe'), path.join(ffmpegRoot, 'ffprobe.exe')]) {
     await requireFile(filePath);
   }
   await mkdir(fixtureDir, { recursive: true });
@@ -188,7 +188,7 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
         TTCUT_E2E_VIDEO: fixtureVideo,
         TTCUT_E2E_REVEAL_MARKER: revealMarker,
         TTCUT_PYTHON: pythonPath,
-        TTCUT_TRACKNET_WEIGHTS: weightsPath,
+        TTCUT_BLURBALL_WEIGHTS: blurballWeightsPath,
         TTCUT_FFMPEG: path.join(ffmpegRoot, 'ffmpeg.exe'),
         TTCUT_FFPROBE: path.join(ffmpegRoot, 'ffprobe.exe'),
       },
@@ -225,16 +225,16 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     await expect(page.getByRole('heading', { name: '导出方式', exact: true })).toHaveCount(0);
     await expect(page.getByText('可用', { exact: true })).toHaveCount(2, { timeout: 60_000 });
     await expect(page.getByText('GPU 加速', { exact: true })).toBeVisible();
-    await page.getByRole('radio', { name: 'English' }).check();
+    await page.locator('label[for="settings-language-1"]').click();
     await expect(page.locator('.language-loader')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Export strategy', exact: true })).toHaveCount(0);
-    await page.getByRole('radio', { name: '简体中文' }).check();
+    await page.locator('label[for="settings-language-0"]').click();
     await expect(page.getByRole('heading', { name: '设置', exact: true })).toBeVisible();
     await expect(page.getByRole('heading', { name: '回合前时间' })).toBeVisible();
     await expect(page.getByRole('heading', { name: '回合后时间' })).toBeVisible();
-    await page.locator('.timing-settings-card').getByRole('radiogroup', { name: '回合前时间' }).getByRole('radio').first().check();
-    await page.locator('.timing-settings-card').getByRole('radiogroup', { name: '回合后时间' }).getByRole('radio').first().check();
+    await page.locator('label[for="settings-pre-roll-0"]').click();
+    await page.locator('label[for="settings-post-roll-0"]').click();
 
     await page.getByRole('button', { name: '历史剪辑' }).click();
     await expect(page.getByRole('heading', { name: '还没有历史记录' })).toBeVisible();
@@ -535,7 +535,7 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     await expect(page.locator('.timeline-clip')).toHaveCount(0);
     await expect(page.getByRole('button', { name: '开始剪辑' })).toBeDisabled();
     const thirdRallyRow = page.locator('tbody tr').nth(2);
-    await thirdRallyRow.locator('input[type="checkbox"]').check();
+    await thirdRallyRow.locator('label.rally-checkbox').click();
     await expect(page.locator('.timeline-clip')).toHaveCount(1);
     const startHandle = page.getByRole('slider', { name: '调整片段开始 3' });
     const endHandle = page.getByRole('slider', { name: '调整片段结束 3' });
@@ -641,7 +641,7 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     await page.getByRole('button', { name: /自定义/ }).click();
     await page.getByRole('button', { name: '取消全选' }).click();
     const firstRally = page.locator('tbody tr').first();
-    await firstRally.locator('input[type="checkbox"]').check();
+    await firstRally.locator('label.rally-checkbox').click();
     const customLaunchButton = page.getByRole('button', { name: '开始剪辑' });
     const customExportOptions = page.locator('.custom-export-options');
     await expect.poll(() => customExportOptions.evaluate((element) => getComputedStyle(element).pointerEvents)).toBe('none');
@@ -656,8 +656,8 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     await page.mouse.move(launchButtonBox!.x + launchButtonBox!.width / 2, launchButtonBox!.y - 4);
     await expect.poll(() => customExportOptions.evaluate((element) => getComputedStyle(element).pointerEvents)).toBe('auto');
     await page.mouse.move(exportOptionsBox!.x + exportOptionsBox!.width / 2, exportOptionsBox!.y + exportOptionsBox!.height - 10);
-    await page.getByRole('checkbox', { name: '分段导出' }).check();
-    await page.getByRole('checkbox', { name: '导出 XML' }).check();
+    await page.getByText('分段导出', { exact: true }).click();
+    await page.getByText('导出 XML', { exact: true }).click();
     await page.getByRole('button', { name: '开始剪辑' }).click();
     await expect(page.getByRole('heading', { name: '成功导出' })).toBeVisible({ timeout: 120_000 });
 
@@ -694,7 +694,7 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
 
 test('automatic calibration completes serial multi-task analysis and records zero-rally results', async ({}, testInfo) => {
   test.slow();
-  for (const filePath of [sourceVideo, pythonPath, weightsPath, electronPath, path.join(ffmpegRoot, 'ffmpeg.exe'), path.join(ffmpegRoot, 'ffprobe.exe')]) {
+  for (const filePath of [sourceVideo, pythonPath, blurballWeightsPath, electronPath, path.join(ffmpegRoot, 'ffmpeg.exe'), path.join(ffmpegRoot, 'ffprobe.exe')]) {
     await requireFile(filePath);
   }
 
@@ -739,7 +739,7 @@ test('automatic calibration completes serial multi-task analysis and records zer
         TTCUT_E2E_COMPONENTS_ROOT: isolatedComponents,
         TTCUT_E2E_VIDEOS: JSON.stringify([firstVideo, secondVideo]),
         TTCUT_PYTHON: pythonPath,
-        TTCUT_TRACKNET_WEIGHTS: weightsPath,
+        TTCUT_BLURBALL_WEIGHTS: blurballWeightsPath,
         TTCUT_FFMPEG: path.join(ffmpegRoot, 'ffmpeg.exe'),
         TTCUT_FFPROBE: path.join(ffmpegRoot, 'ffprobe.exe'),
       },
@@ -831,7 +831,7 @@ test('automatic calibration completes serial multi-task analysis and records zer
 
 test('failed batch calibration can be repaired manually and returned to the running queue', async ({}, testInfo) => {
   test.slow();
-  for (const filePath of [sourceVideo, pythonPath, weightsPath, electronPath, path.join(ffmpegRoot, 'ffmpeg.exe'), path.join(ffmpegRoot, 'ffprobe.exe')]) {
+  for (const filePath of [sourceVideo, pythonPath, blurballWeightsPath, electronPath, path.join(ffmpegRoot, 'ffmpeg.exe'), path.join(ffmpegRoot, 'ffprobe.exe')]) {
     await requireFile(filePath);
   }
 
@@ -876,7 +876,7 @@ test('failed batch calibration can be repaired manually and returned to the runn
         TTCUT_E2E_COMPONENTS_ROOT: isolatedComponents,
         TTCUT_E2E_VIDEOS: JSON.stringify([failedVideo, readyVideo]),
         TTCUT_PYTHON: pythonPath,
-        TTCUT_TRACKNET_WEIGHTS: weightsPath,
+        TTCUT_BLURBALL_WEIGHTS: blurballWeightsPath,
         TTCUT_FFMPEG: path.join(ffmpegRoot, 'ffmpeg.exe'),
         TTCUT_FFPROBE: path.join(ffmpegRoot, 'ffprobe.exe'),
       },
@@ -1126,7 +1126,7 @@ test('online analysis resume followed by media component install', async ({}, te
     expect(status.analysis.available).toBe(true);
     expect(status.media.available).toBe(true);
     await requireFile(status.analysis.path!);
-    await requireFile(path.join(projectRoot, 'resources', 'models', 'analyze.pt'));
+    await requireFile(path.join(projectRoot, 'resources', 'models', 'blurball_best.pt'));
     await requireFile(status.media.path!);
     await requireFile(path.join(path.dirname(status.media.path!), 'ffprobe.exe'));
     expect(rendererErrors).toEqual([]);

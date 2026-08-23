@@ -5,13 +5,13 @@ import statistics
 from dataclasses import dataclass
 from typing import Sequence
 
-from .bounce import DEFAULT_MINIMUM_BOUNCE_INTERVAL_SECONDS
 from .calibration import TABLE_LENGTH_CM, TABLE_WIDTH_CM, TableCalibration
 from .types import TrajectoryPoint
 
 
 TABLE_LENGTH_MARGIN_CM = 35.0
 TABLE_WIDTH_MARGIN_CM = 25.0
+DEFAULT_MINIMUM_BOUNCE_INTERVAL_SECONDS = 0.315
 TRAJECTORY_WINDOW_FRAMES = 5
 MAX_INTERPOLATED_GAP_FRAMES = 2
 MIN_APPROACH_PIXELS_PER_FRAME = -5.0

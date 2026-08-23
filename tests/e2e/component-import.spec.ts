@@ -114,7 +114,7 @@ test('imports and configures the real local components', async () => {
       : path.join(componentsRoot, 'ffmpeg-8.1', 'bin', 'ffmpeg.exe'));
     expect(status.media.active_encoder).toBe(optionalX264Component ? 'libx264' : 'libopenh264');
     expect(status.media.x264_available).toBe(Boolean(optionalX264Component));
-    expect(existsSync(path.join(projectRoot, 'resources', 'models', 'analyze.pt'))).toBe(true);
+    expect(existsSync(path.join(projectRoot, 'resources', 'models', 'analyze.pt'))).toBe(false);
     expect(existsSync(path.join(projectRoot, 'resources', 'models', 'blurball_best.pt'))).toBe(true);
     expect(existsSync(path.join(projectRoot, 'resources', 'models', 'table_analyze.pt'))).toBe(true);
     expect(existsSync(path.join(componentsRoot, 'analysis-runtime', '3.12.13-2.12.1', 'cpu', 'python.exe'))).toBe(true);

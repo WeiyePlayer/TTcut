@@ -4,7 +4,7 @@ export const DEVICE_VALUES = ['auto', 'cuda', 'cpu'] as const;
 export const PRE_ROLL_VALUES = [1.5, 2.5, 5] as const;
 export const POST_ROLL_VALUES = [0.5, 1, 2, 4] as const;
 export const HIGHLIGHT_VALUES = [3, 5, 7] as const;
-export const BALL_MODEL_PROFILES = ['tracknet_v1', 'blurball_v1'] as const;
+const LEGACY_RESULT_MODEL_PROFILES = ['tracknet_v1', 'blurball_v1'] as const;
 
 const finiteNumber = z.number().finite();
 const point = z.tuple([finiteNumber, finiteNumber]);
@@ -133,17 +133,7 @@ export const analysisRequestV1Schema = z.object({
   calibration_choice: calibrationChoiceSchema,
 }).strict();
 
-export const analysisRequestV2Schema = z.object({
-  schema_version: z.literal(2),
-  task_id: z.string().uuid(),
-  video_path: z.string().min(1),
-  device: z.enum(DEVICE_VALUES),
-  ball_model_profile: z.enum(BALL_MODEL_PROFILES),
-  video_metadata: analysisVideoMetadataSchema,
-  calibration_choice: calibrationChoiceSchema,
-}).strict();
-
-export const analysisRequestSchema = z.union([analysisRequestV1Schema, analysisRequestV2Schema]);
+export const analysisRequestSchema = analysisRequestV1Schema;
 
 export const videoMetadataSchema = z.object({
   path: z.string().min(1),
@@ -196,7 +186,8 @@ export const analysisResultSchema = z.object({
   calibration: calibrationSchema.optional(),
   table_analysis: tableAnalysisSchema.optional(),
   model_provenance: z.object({
-    profile: z.enum(BALL_MODEL_PROFILES),
+    // TrackNet is accepted only when reading analyses created before it was retired.
+    profile: z.enum(LEGACY_RESULT_MODEL_PROFILES),
     component_version: z.string().min(1).nullable(),
     roi: z.object({
       x: z.number().int().nonnegative(),
@@ -294,7 +285,6 @@ export const cutSelectionSchema = z.discriminatedUnion('mode', [
 export const appSettingsSchema = z.object({
   language: z.enum(['zh-CN', 'en']),
   calibration_method: z.enum(['manual', 'automatic']),
-  ball_model_profile: z.enum(BALL_MODEL_PROFILES),
   pre_roll_seconds: z.union(PRE_ROLL_VALUES.map((value) => z.literal(value))),
   post_roll_seconds: z.union(POST_ROLL_VALUES.map((value) => z.literal(value))),
 }).strict();
@@ -418,9 +408,7 @@ export const platformCompatibilitySchema = z.object({
 export type Calibration = z.infer<typeof calibrationSchema>;
 export type CalibrationChoice = z.infer<typeof calibrationChoiceSchema>;
 export type TableAnalysis = z.infer<typeof tableAnalysisSchema>;
-export type BallModelProfile = typeof BALL_MODEL_PROFILES[number];
 export type AnalysisRequestV1 = z.infer<typeof analysisRequestV1Schema>;
-export type AnalysisRequestV2 = z.infer<typeof analysisRequestV2Schema>;
 export type AnalysisRequest = z.infer<typeof analysisRequestSchema>;
 export type VideoMetadata = z.infer<typeof videoMetadataSchema>;
 export type Rally = z.infer<typeof rallySchema>;
