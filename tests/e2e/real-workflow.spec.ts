@@ -235,6 +235,10 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     await expect(page.getByRole('heading', { name: '回合后时间' })).toBeVisible();
     await page.locator('label[for="settings-pre-roll-0"]').click();
     await page.locator('label[for="settings-post-roll-0"]').click();
+    const analysisPrecision = page.getByRole('radiogroup', { name: '分析精度' });
+    await expect(analysisPrecision.getByRole('radio', { name: '默认' })).toBeChecked();
+    await page.locator('label[for="settings-blurball-mode-1"]').click();
+    await expect(analysisPrecision.getByRole('radio', { name: '高精' })).toBeChecked();
 
     await page.getByRole('button', { name: '历史剪辑' }).click();
     await expect(page.getByRole('heading', { name: '还没有历史记录' })).toBeVisible();

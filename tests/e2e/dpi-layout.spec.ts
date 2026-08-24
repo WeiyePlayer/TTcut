@@ -302,9 +302,9 @@ test('neutral controls use the shared hover surface without overriding semantic 
     const analysisMode = page.getByRole('radiogroup', { name: '分析精度' });
     await expect(analysisMode.getByRole('radio', { name: '默认' })).toBeChecked();
     await expect(analysisMode.getByRole('radio', { name: '高精' })).toBeVisible();
-    await analysisMode.getByRole('radio', { name: '高精' }).click();
+    await page.locator('label[for="settings-blurball-mode-1"]').click();
     await expect(analysisPrecision.getByRole('slider')).toHaveCount(0);
-    await analysisMode.getByRole('radio', { name: '默认' }).click();
+    await page.locator('label[for="settings-blurball-mode-0"]').click();
     await expect(analysisPrecision.getByRole('slider')).toHaveCount(0);
     const contactAuthor = page.getByRole('button', { name: '联系作者' });
     await expect(contactAuthor).toBeVisible();
