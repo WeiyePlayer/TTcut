@@ -18,6 +18,9 @@ const zh = {
   timeline: '自定义剪辑时间轴', timelineTools: '时间轴工具', addManualRally: '增加回合', deleteRally: '删除回合', manualBounceUnavailable: '重新分析后可动态计算板数', togglePlayback: '播放或暂停监视窗口', zoomOut: '缩小时间轴', zoomIn: '放大时间轴', resizeStart: '调整片段开始', resizeEnd: '调整片段结束',
   preRoll: '回合前时间', postRoll: '回合后时间', short: '短', medium: '中', long: '长', veryShort: '极短',
   preRollSettingDetail: '在每个剪辑片段开始前保留的时间。', postRollSettingDetail: '在每个剪辑片段结束后保留的时间。',
+  blurballAnalysisMode: 'BlurBall 分析模式', blurballAnalysisModeDetail: '默认模式分析全视频；高精模式先筛选回合，再对扩张区间进行二次分析。', blurballModeDefault: '默认', blurballModeHighPrecision: '高精',
+  blurballConfidenceThreshold: '默认模式阈值', blurballConfidenceThresholdDetail: '仅对之后启动的分析生效；关闭应用后恢复默认值 0.70。',
+  blurballStage1Threshold: '阶段一阈值', blurballStage1ThresholdDetail: '用于全视频候选回合筛选，默认值 0.30。', blurballStage2Threshold: '阶段二阈值', blurballStage2ThresholdDetail: '用于扩张区间二次分析，默认值 0.70。',
   startCutting: '开始剪辑', exportPreparing: '正在准备剪辑', exportCutting: '正在剪辑视频', exportCombined: '正在剪辑与导出', exportComplete: '成功导出',
   customExportOptions: '自定义导出选项', exportRallyVideos: '分段导出', exportPremiereXml: '导出 XML', exportedRallyVideos: '已导出 {{count}} 个回合视频', exported: '已导出', notExported: '未导出', partialExportNotice: '部分导出成功，已保留成功产物。', xmlVfrNotice: '源视频为可变帧率，XML 剪辑点已按标称帧率量化。', rallyExportFailures: '{{count}} 个回合视频导出失败。', failedRallyDetails: '失败回合：{{rallies}}', xmlExportFailed: 'XML 导出失败，其他成功产物已保留。',
   openFolder: '在文件夹中打开', cutAnother: '剪辑下一个视频', outputName: '输出视频', outputPath: '输出路径',
@@ -110,7 +113,7 @@ const zh = {
     CUSTOM_ARTIFACT_EXPORT_FAILED: '分段视频和 XML 都未能导出，请查看日志后重试。',
     UNKNOWN: '无法完成操作。请重试；若问题持续，请打开技术日志。',
   },
-  stages: { probe: '正在读取视频', table_sampling: '正在识别球桌', table_model: '正在识别球桌', table_inference: '正在识别球桌', load_model: '正在准备分析', analysis: '正在分析视频', postprocess: '正在识别回合', preparing: '正在准备剪辑', 'preparing-artifacts': '正在准备导出', 'writing-xml': '正在写入 Premiere XML', 'exporting-rallies': '正在导出回合视频', cutting: '正在剪辑视频', 'cutting-and-exporting': '正在剪辑与导出', complete: '正在写入输出文件' },
+  stages: { probe: '正在读取视频', table_sampling: '正在识别球桌', table_model: '正在识别球桌', table_inference: '正在识别球桌', load_model: '正在准备分析', analysis: '正在分析视频', candidate_analysis: '正在筛选候选回合', interval_union: '正在生成精分析区间', refinement_analysis: '正在进行二次分析', postprocess: '正在识别回合', preparing: '正在准备剪辑', 'preparing-artifacts': '正在准备导出', 'writing-xml': '正在写入 Premiere XML', 'exporting-rallies': '正在导出回合视频', cutting: '正在剪辑视频', 'cutting-and-exporting': '正在剪辑与导出', complete: '正在写入输出文件' },
   setupStages: { download: '正在下载', verify: '正在校验文件', extract: '正在解压', self_test: '正在执行组件自检', install: '正在安全安装', complete: '正在完成设置' },
 } as const;
 
@@ -136,6 +139,9 @@ const en: Messages = {
   timeline: 'Custom cut timeline', timelineTools: 'Timeline tools', addManualRally: 'Add rally', deleteRally: 'Delete rally', manualBounceUnavailable: 'Reanalyze the video to calculate manual bounce counts dynamically', togglePlayback: 'Play or pause monitor', zoomOut: 'Zoom timeline out', zoomIn: 'Zoom timeline in', resizeStart: 'Resize clip start', resizeEnd: 'Resize clip end',
   preRoll: 'Before rally', postRoll: 'After rally', short: 'Short', medium: 'Medium', long: 'Long', veryShort: 'Very short',
   preRollSettingDetail: 'Time retained before each exported clip begins.', postRollSettingDetail: 'Time retained after each exported clip ends.',
+  blurballAnalysisMode: 'BlurBall analysis mode', blurballAnalysisModeDetail: 'Default analyzes the full video; High precision screens rallies first, then analyzes expanded intervals again.', blurballModeDefault: 'Default', blurballModeHighPrecision: 'High precision',
+  blurballConfidenceThreshold: 'Default-mode threshold', blurballConfidenceThresholdDetail: 'Applies only to analyses started next; resets to the default 0.70 when the app closes.',
+  blurballStage1Threshold: 'Stage 1 threshold', blurballStage1ThresholdDetail: 'Used to screen candidate rallies across the video; default 0.30.', blurballStage2Threshold: 'Stage 2 threshold', blurballStage2ThresholdDetail: 'Used for the second pass over expanded intervals; default 0.70.',
   startCutting: 'Start cutting', exportPreparing: 'Preparing', exportCutting: 'Cutting video', exportCombined: 'Cutting and exporting', exportComplete: 'Export complete',
   customExportOptions: 'Custom export options', exportRallyVideos: 'Export rally videos', exportPremiereXml: 'Export XML', exportedRallyVideos: '{{count}} rally videos exported', exported: 'Exported', notExported: 'Not exported', partialExportNotice: 'Some outputs succeeded; successful artifacts were kept.', xmlVfrNotice: 'The source uses variable frame rate, so XML edit points were quantized to the nominal frame rate.', rallyExportFailures: '{{count}} rally videos failed.', failedRallyDetails: 'Failed rallies: {{rallies}}', xmlExportFailed: 'XML export failed; successful artifacts were kept.',
   openFolder: 'Open in folder', cutAnother: 'Cut another video', outputName: 'Output video', outputPath: 'Output path',
@@ -228,7 +234,7 @@ const en: Messages = {
     CUSTOM_ARTIFACT_EXPORT_FAILED: 'Neither rally videos nor XML could be exported. Inspect the log and retry.',
     UNKNOWN: 'The operation could not be completed. Retry and open the technical log if it continues.',
   },
-  stages: { probe: 'Reading video', table_sampling: 'Recognizing table', table_model: 'Recognizing table', table_inference: 'Recognizing table', load_model: 'Preparing analysis', analysis: 'Analyzing video', postprocess: 'Detecting rallies', preparing: 'Preparing', 'preparing-artifacts': 'Preparing exports', 'writing-xml': 'Writing Premiere XML', 'exporting-rallies': 'Exporting rally videos', cutting: 'Cutting video', 'cutting-and-exporting': 'Cutting and exporting', complete: 'Writing output' },
+  stages: { probe: 'Reading video', table_sampling: 'Recognizing table', table_model: 'Recognizing table', table_inference: 'Recognizing table', load_model: 'Preparing analysis', analysis: 'Analyzing video', candidate_analysis: 'Screening candidate rallies', interval_union: 'Building refinement intervals', refinement_analysis: 'Running second-pass analysis', postprocess: 'Detecting rallies', preparing: 'Preparing', 'preparing-artifacts': 'Preparing exports', 'writing-xml': 'Writing Premiere XML', 'exporting-rallies': 'Exporting rally videos', cutting: 'Cutting video', 'cutting-and-exporting': 'Cutting and exporting', complete: 'Writing output' },
   setupStages: { download: 'Downloading', verify: 'Verifying files', extract: 'Extracting', self_test: 'Running component self-test', install: 'Installing safely', complete: 'Completing setup' },
 };
 

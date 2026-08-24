@@ -408,6 +408,12 @@ td input { accent-color: var(--blue); }
 .timing-setting + .timing-setting { border-top: 1px solid var(--line); }
 .glass-radio-group.timing-toggle { width: fit-content; margin-left: auto; }
 .timing-toggle label { min-width: 62px; height: 38px; min-height: 38px; padding: 0 .6rem; }
+.detector-setting { min-height: 112px; padding: 18px; display: grid; grid-template-columns: minmax(180px, .7fr) minmax(320px, 1.3fr); gap: 18px; align-items: center; }
+.detector-setting + .detector-setting { border-top: 1px solid var(--line); }
+.detector-setting > .glass-radio-group { width: fit-content; margin-left: auto; }
+.confidence-threshold-control { width: min(100%, 360px); margin-left: auto; display: grid; grid-template-columns: minmax(0, 1fr) 52px; gap: 12px; align-items: center; }
+.confidence-threshold-control input { width: 100%; min-width: 0; margin: 0; accent-color: var(--blue); cursor: pointer; }
+.confidence-threshold-control output { min-width: 52px; padding: 7px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--secondary); color: var(--text); font: 650 13px/1.2 "Cascadia Mono", Consolas, monospace; text-align: center; }
 .components-card > h2 { padding: 18px 18px 0; }
 .component-row { min-height: 66px; padding: 12px 18px; display: flex; align-items: center; border-top: 1px solid var(--line); }
 .component-row:first-of-type { margin-top: 12px; }

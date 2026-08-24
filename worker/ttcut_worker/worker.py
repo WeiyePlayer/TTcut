@@ -9,11 +9,12 @@ import traceback
 from .blurball_bounce import detect_blurball_bounce_frames
 from .blurball_models import load_blurball
 from .blurball_predictor import BlurBallPredictor
+from .analysis_intervals import REFINEMENT_EXPANSION_SECONDS, expanded_union_intervals
 from .calibration import TableCalibration
 from .errors import InvalidRequestError, ModelResourceError, TableModelResourceError, WorkerError
 from .roi import AnalysisRoiConfig, build_analysis_roi
 from .rallies import group_rallies
-from .request import validate_request
+from .request import analysis_config, validate_request
 from .table_analyze import analyze_table
 
 
@@ -56,21 +57,87 @@ def analyze(request: dict) -> dict:
     if not blurball_path:
         raise ModelResourceError("Bundled BlurBall model path is not configured.")
     loaded = load_blurball(blurball_path, request["device"])
-    predictor = BlurBallPredictor(loaded)
     emit({"type": "progress", "task_id": task_id, "stage": "load_model", "current": 1, "total": 1, "percent": 100.0})
 
-    def progress(current: int, total: int) -> None:
-        percent = min(99.9, current / total * 100) if total else 0.0
-        emit({
-            "type": "progress", "task_id": task_id, "stage": "analysis",
-            "current": current, "total": total, "percent": round(percent, 4),
-        })
+    config = analysis_config(request)
 
-    points, info, stats = predictor.predict(
-        request["video_path"],
-        progress_callback=progress,
-        analysis_roi=analysis_roi,
-    )
+    def progress(stage: str):
+        def callback(current: int, total: int) -> None:
+            percent = min(99.9, current / total * 100) if total else 0.0
+            emit({
+                "type": "progress", "task_id": task_id, "stage": stage,
+                "current": current, "total": total, "percent": round(percent, 4),
+            })
+        return callback
+
+    if config["mode"] == "full":
+        predictor = BlurBallPredictor(
+            loaded,
+            confidence_threshold=config["confidence_threshold"],
+        )
+        points, info, stats = predictor.predict(
+            request["video_path"],
+            progress_callback=progress("analysis"),
+            analysis_roi=analysis_roi,
+        )
+        final_threshold = stats.confidence_threshold
+        stages = [{
+            "name": "full",
+            "confidence_threshold": stats.confidence_threshold,
+            "window_size": 3,
+            "window_stride": 3,
+            "retained_output": "all_window_frames",
+        }]
+        expansion_seconds = None
+    else:
+        predictor = BlurBallPredictor(
+            loaded,
+            confidence_threshold=config["stage1_confidence_threshold"],
+        )
+        stage1_points, stage1_info, stage1_stats = predictor.predict(
+            request["video_path"],
+            progress_callback=progress("candidate_analysis"),
+            analysis_roi=analysis_roi,
+        )
+        stage1_bounce_frames = detect_blurball_bounce_frames(stage1_points, calibration)
+        stage1_rallies = group_rallies(stage1_bounce_frames, stage1_points)
+        duration = float(stage1_info.duration or 0.0)
+        intervals = expanded_union_intervals(
+            stage1_rallies,
+            duration,
+            REFINEMENT_EXPANSION_SECONDS,
+        ) if stage1_rallies else ()
+        emit({"type": "progress", "task_id": task_id, "stage": "interval_union", "current": 0, "total": 1, "percent": 0.0})
+        emit({"type": "progress", "task_id": task_id, "stage": "interval_union", "current": 1, "total": 1, "percent": 100.0})
+        stages = [
+            {
+                "name": "candidate",
+                "confidence_threshold": stage1_stats.confidence_threshold,
+                "window_size": 3,
+                "window_stride": 3,
+                "retained_output": "all_window_frames",
+            },
+            {
+                "name": "refinement",
+                "confidence_threshold": config["stage2_confidence_threshold"],
+                "window_size": 3,
+                "window_stride": 1,
+                "retained_output": "center_frame",
+            },
+        ]
+        expansion_seconds = REFINEMENT_EXPANSION_SECONDS
+        final_threshold = config["stage2_confidence_threshold"]
+        if intervals:
+            points, info, stats = predictor.predict_intervals(
+                request["video_path"],
+                intervals,
+                progress_callback=progress("refinement_analysis"),
+                analysis_roi=analysis_roi,
+                confidence_threshold=config["stage2_confidence_threshold"],
+            )
+        else:
+            points, info, stats = [], stage1_info, stage1_stats
+
     emit({"type": "progress", "task_id": task_id, "stage": "postprocess", "current": 0, "total": 1, "percent": 0.0})
     bounce_frames = detect_blurball_bounce_frames(points, calibration)
     rallies = group_rallies(bounce_frames, points)
@@ -133,10 +200,16 @@ def analyze(request: dict) -> dict:
             },
             "aux_input": None,
             "detection": {
-                "confidence_threshold": stats.confidence_threshold,
-                "step": stats.step,
+                "confidence_threshold": final_threshold,
+                "step": 1 if config["mode"] == "two_stage" else stats.step,
                 "maximum_displacement_pixels": stats.maximum_displacement_pixels,
                 "landing_region": "expanded_table",
+            },
+            "analysis": {
+                "schema_version": 2,
+                "mode": config["mode"],
+                **({"interval_expansion_seconds": expansion_seconds} if expansion_seconds is not None else {}),
+                "stages": stages,
             },
         },
     }

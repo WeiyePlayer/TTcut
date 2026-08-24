@@ -5,6 +5,31 @@
 An immutable checkpoint bundled with the application and verified by filename,
 size, and SHA-256 before packaging.
 
+## BlurBall Analysis Mode
+
+The selected execution route for a new BlurBall analysis. `full` (shown as
+“默认”) runs the existing whole-video pass. `two_stage` (shown as “高精”)
+runs a full-video candidate pass followed by a center-frame refinement pass.
+The label is a product name, not an accuracy guarantee.
+
+## Candidate Rally
+
+A Rally produced by the stage-one pass of a two-stage analysis. It is used only
+to construct refinement intervals and is never returned as final analysis data.
+
+## Refinement Interval
+
+The closed time interval produced by expanding a Candidate Rally by 0.75 seconds
+on both sides, clamping it to the source duration, and taking the union of
+overlapping or touching intervals. Stage-two results are retained only when the
+center-frame timestamp belongs to one of these intervals.
+
+## Final Analysis Result
+
+The Bounce Event Times, Rally records, and Board Counts returned to the UI. In
+two-stage mode all three are computed only from the stage-two trajectory; if
+stage one produces no Candidate Rally, the final result is empty.
+
 ## Ball Model Profile
 
 The global ball-recognition route recorded on every new analysis. Bundled

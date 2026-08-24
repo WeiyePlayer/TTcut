@@ -8,6 +8,7 @@ const defaults: AppSettings = {
   calibration_method: 'automatic',
   pre_roll_seconds: 2.5,
   post_roll_seconds: 2,
+  analysis_mode: 'full',
 };
 
 function settingsPath(): string {
@@ -36,6 +37,9 @@ export async function loadSettings(): Promise<AppSettings> {
       post_roll_seconds: [0.5, 1, 2, 4].includes(Number(raw.post_roll_seconds))
         ? raw.post_roll_seconds
         : defaults.post_roll_seconds,
+      analysis_mode: raw.analysis_mode === 'two_stage' || raw.analysis_mode === 'full'
+        ? raw.analysis_mode
+        : defaults.analysis_mode,
     });
     if (Object.hasOwn(raw, 'ball_model_profile')) await writeSettings(settings).catch(() => undefined);
     return settings;

@@ -12,6 +12,7 @@ const bootstrap: BootstrapData = {
     calibration_method: 'automatic',
     pre_roll_seconds: 2.5,
     post_roll_seconds: 2,
+    analysis_mode: 'full',
   },
   components: {
     analysis: {
@@ -173,6 +174,51 @@ describe('App workflow notices and multi-task entry', () => {
     expect(screen.getByRole('radio', { name: '简体中文' })).toBeChecked();
     expect(screen.getByRole('radio', { name: '自动' })).toBeChecked();
     expect(screen.getByRole('radiogroup', { name: '语言' })).toHaveClass('glass-radio-group');
+  });
+
+  it('passes the temporary BlurBall threshold to new analysis without persisting it', async () => {
+    const selected = {
+      path: 'C:\\video\\threshold.mp4', name: 'threshold.mp4', size: 100, mediaUrl: 'ttcut-media://threshold',
+    };
+    selectVideos.mockResolvedValue([selected]);
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '设置' }));
+    const slider = screen.getByRole('slider', { name: '默认模式阈值' });
+    expect(slider).toHaveAttribute('min', '0.1');
+    expect(slider).toHaveAttribute('max', '0.95');
+    expect(slider).toHaveAttribute('step', '0.05');
+    expect(screen.getByText('仅对之后启动的分析生效；关闭应用后恢复默认值 0.70。')).toBeVisible();
+    fireEvent.change(slider, { target: { value: '0.55' } });
+    expect(document.querySelector('output[for="blurball-confidence-threshold"]')).toHaveTextContent('0.55');
+    expect(window.ttcut.saveSettings).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: '自动剪辑' }));
+    fireEvent.click(await screen.findByRole('button', { name: '选择或将文件拖到这里' }));
+    fireEvent.click(await screen.findByRole('button', { name: '开始分析' }));
+
+    await waitFor(() => expect(window.ttcut.startAnalysis).toHaveBeenCalledWith(expect.objectContaining({
+      videoPath: selected.path,
+      analysisMode: 'full',
+      blurballConfidenceThreshold: 0.55,
+      blurballStage1ConfidenceThreshold: 0.3,
+      blurballStage2ConfidenceThreshold: 0.7,
+    })));
+  });
+
+  it('switches to high-precision controls without resetting session thresholds', async () => {
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: '设置' }));
+    fireEvent.change(screen.getByRole('slider', { name: '默认模式阈值' }), { target: { value: '0.55' } });
+    fireEvent.click(screen.getByRole('radio', { name: '高精' }));
+
+    await waitFor(() => expect(screen.queryByRole('slider', { name: '默认模式阈值' })).toBeNull());
+    expect(screen.getByRole('slider', { name: '阶段一阈值' })).toHaveValue('0.3');
+    expect(screen.getByRole('slider', { name: '阶段二阈值' })).toHaveValue('0.7');
+    expect(window.ttcut.saveSettings).toHaveBeenCalledWith(expect.objectContaining({ analysis_mode: 'two_stage' }));
+
+    fireEvent.click(screen.getByRole('radio', { name: '默认' }));
+    await waitFor(() => expect(screen.getByRole('slider', { name: '默认模式阈值' })).toHaveValue('0.55'));
   });
 
   it('replaces release notes with an author-contact QR tooltip', async () => {

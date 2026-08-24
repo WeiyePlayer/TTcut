@@ -1,6 +1,7 @@
 import type {
   AnalysisResultV1,
   AppSettings,
+  BlurBallAnalysisMode,
   Calibration,
   CalibrationChoice,
   TableAnalysis,
@@ -94,6 +95,10 @@ export interface TTcutApi {
     calibrationChoice: CalibrationChoice;
     device: 'auto' | 'cuda' | 'cpu';
     historyVisibility: 'visible' | 'deferred';
+    analysisMode: BlurBallAnalysisMode;
+    blurballConfidenceThreshold: number;
+    blurballStage1ConfidenceThreshold: number;
+    blurballStage2ConfidenceThreshold: number;
   }): Promise<string>;
   startExport(input: ExportRequest): Promise<string>;
   listHistory(): Promise<HistorySummaryV1[]>;

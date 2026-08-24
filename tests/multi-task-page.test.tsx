@@ -140,6 +140,10 @@ describe('multi-task clipping', () => {
       calibrationChoice: { method: 'precalibrated', calibration, table_analysis: tableAnalysis },
       device: 'auto',
       historyVisibility: 'deferred',
+      analysisMode: 'full',
+      blurballConfidenceThreshold: 0.7,
+      blurballStage1ConfidenceThreshold: 0.3,
+      blurballStage2ConfidenceThreshold: 0.7,
     });
 
     act(() => listener?.({
@@ -335,6 +339,10 @@ describe('multi-task clipping', () => {
         initialVideos={videos}
         preRoll={2.5}
         postRoll={1}
+        analysisMode="two_stage"
+        blurballConfidenceThreshold={0.55}
+        blurballStage1ConfidenceThreshold={0.3}
+        blurballStage2ConfidenceThreshold={0.7}
         onOpenAnalysis={vi.fn()}
         onCompletableTasksFinished={onCompletableTasksFinished}
       />,
@@ -515,6 +523,10 @@ describe('multi-task clipping', () => {
         initialVideos={videos}
         preRoll={2.5}
         postRoll={1}
+        analysisMode="two_stage"
+        blurballConfidenceThreshold={0.55}
+        blurballStage1ConfidenceThreshold={0.3}
+        blurballStage2ConfidenceThreshold={0.7}
         onOpenAnalysis={vi.fn()}
       />,
     );
@@ -528,12 +540,22 @@ describe('multi-task clipping', () => {
         initialVideos={videos}
         preRoll={5}
         postRoll={4}
+        analysisMode="full"
+        blurballConfidenceThreshold={0.8}
+        blurballStage1ConfidenceThreshold={0.8}
+        blurballStage2ConfidenceThreshold={0.9}
         onOpenAnalysis={vi.fn()}
       />,
     );
     fireEvent.click(document.querySelector('.batch-start')!);
     await waitFor(() => expect(startAnalysis).toHaveBeenCalledTimes(1));
     expect(startAnalysis.mock.calls[0]?.[0]).not.toHaveProperty('ballModelProfile');
+    expect(startAnalysis.mock.calls[0]?.[0]).toMatchObject({
+      analysisMode: 'two_stage',
+      blurballConfidenceThreshold: 0.55,
+      blurballStage1ConfidenceThreshold: 0.3,
+      blurballStage2ConfidenceThreshold: 0.7,
+    });
 
     act(() => listener?.({
       type: 'analysis-result',

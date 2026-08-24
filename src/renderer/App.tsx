@@ -1,5 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { AnalysisResultV1, AppSettings, Calibration, CutSelectionV1, ExportRequest, ExportResult, HistorySummaryV1, UpdateState, VideoMetadata } from '../shared/contracts';
+import {
+  BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT,
+  BLURBALL_STAGE1_CONFIDENCE_THRESHOLD_DEFAULT,
+  BLURBALL_CONFIDENCE_THRESHOLD_MAX,
+  BLURBALL_CONFIDENCE_THRESHOLD_MIN,
+  BLURBALL_CONFIDENCE_THRESHOLD_STEP,
+  type AnalysisResultV1,
+  type AppSettings,
+  type Calibration,
+  type CutSelectionV1,
+  type ExportRequest,
+  type ExportResult,
+  type HistorySummaryV1,
+  type UpdateState,
+  type VideoMetadata,
+} from '../shared/contracts';
 import type { AppEvent, BootstrapData, PendingComponentImport, SelectedVideo } from '../shared/api';
 import { DONATION_URL, GITHUB_URL, RELEASES_URL, WEBSITE_URL } from '../shared/urls';
 import { formatTimestamp } from '../domain/time';
@@ -67,6 +82,7 @@ export function App() {
   const [settings, setSettings] = useState<AppSettings>({
     language: 'zh-CN', calibration_method: 'automatic',
     pre_roll_seconds: 2.5, post_roll_seconds: 2,
+    analysis_mode: 'full',
   });
   const [view, setView] = useState<View>('auto');
   const [step, setStep] = useState<Step>('select');
@@ -80,6 +96,9 @@ export function App() {
   const [updateState, setUpdateState] = useState<UpdateState>({ status: 'idle', version: null, message: null });
   const [mode, setMode] = useState<'all' | 'highlight' | 'custom'>('all');
   const [threshold, setThreshold] = useState<3 | 5 | 7>(5);
+  const [blurballConfidenceThreshold, setBlurballConfidenceThreshold] = useState(BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT);
+  const [blurballStage1ConfidenceThreshold, setBlurballStage1ConfidenceThreshold] = useState(BLURBALL_STAGE1_CONFIDENCE_THRESHOLD_DEFAULT);
+  const [blurballStage2ConfidenceThreshold, setBlurballStage2ConfidenceThreshold] = useState(BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT);
   const [customDraft, setCustomDraft] = useState<CustomRallyClip[] | null>(null);
   const [customOutputs, setCustomOutputs] = useState<NonNullable<ExportRequest['outputs']>>({
     combined_video: true,
@@ -300,6 +319,10 @@ export function App() {
         calibrationChoice: useManualCalibration ? { method: 'manual', calibration: calibrationValue! } : { method: 'automatic' },
         device: 'auto',
         historyVisibility: 'visible',
+        analysisMode: settings.analysis_mode,
+        blurballConfidenceThreshold,
+        blurballStage1ConfidenceThreshold,
+        blurballStage2ConfidenceThreshold,
       }));
     } catch (caught) {
       if (videoTaskOwnerRef.current === 'single') updateVideoTaskOwner(null);
@@ -347,9 +370,12 @@ export function App() {
   };
 
   const saveRolls = async (partial: Partial<AppSettings>) => {
-    const next = await window.ttcut.saveSettings({ ...settings, ...partial });
+    const next = { ...settings, ...partial };
     setSettings(next);
     settingsRef.current = next;
+    const saved = await window.ttcut.saveSettings(next);
+    setSettings(saved);
+    settingsRef.current = saved;
   };
 
   const loadHistory = async () => {
@@ -574,6 +600,10 @@ export function App() {
               initialVideos={multiVideos}
               preRoll={settings.pre_roll_seconds}
               postRoll={settings.post_roll_seconds}
+              analysisMode={settings.analysis_mode}
+              blurballConfidenceThreshold={blurballConfidenceThreshold}
+              blurballStage1ConfidenceThreshold={blurballStage1ConfidenceThreshold}
+              blurballStage2ConfidenceThreshold={blurballStage2ConfidenceThreshold}
               language={settings.language}
               onTaskStateChange={handleMultiTaskStateChange}
               onOpenAnalysis={(id) => { discardMulti(); void openHistory(id); }}
@@ -659,6 +689,91 @@ export function App() {
                     value={settings.post_roll_seconds}
                   />
                 </section>
+              </article>
+              <article className="card detector-settings-card">
+                <section className="detector-setting">
+                  <div>
+                    <h2>{t.blurballAnalysisMode}</h2>
+                    <p>{t.blurballAnalysisModeDetail}</p>
+                  </div>
+                  <GlassRadioGroup
+                    ariaLabel={t.blurballAnalysisMode}
+                    className="compact"
+                    idPrefix="settings-blurball-mode"
+                    name="settings-blurball-mode"
+                    onChange={(analysis_mode) => void saveRolls({ analysis_mode })}
+                    options={[
+                      { value: 'full', label: t.blurballModeDefault },
+                      { value: 'two_stage', label: t.blurballModeHighPrecision },
+                    ] as const}
+                    value={settings.analysis_mode}
+                  />
+                </section>
+                {settings.analysis_mode === 'full' ? (
+                <section className="detector-setting">
+                  <div>
+                    <h2>{t.blurballConfidenceThreshold}</h2>
+                    <p>{t.blurballConfidenceThresholdDetail}</p>
+                  </div>
+                  <div className="confidence-threshold-control">
+                    <input
+                      aria-label={t.blurballConfidenceThreshold}
+                      aria-valuetext={blurballConfidenceThreshold.toFixed(2)}
+                      id="blurball-confidence-threshold"
+                      max={BLURBALL_CONFIDENCE_THRESHOLD_MAX}
+                      min={BLURBALL_CONFIDENCE_THRESHOLD_MIN}
+                      onChange={(event) => setBlurballConfidenceThreshold(Number(event.currentTarget.value))}
+                      step={BLURBALL_CONFIDENCE_THRESHOLD_STEP}
+                      type="range"
+                      value={blurballConfidenceThreshold}
+                    />
+                    <output htmlFor="blurball-confidence-threshold">{blurballConfidenceThreshold.toFixed(2)}</output>
+                  </div>
+                </section>
+                ) : (
+                  <>
+                    <section className="detector-setting">
+                      <div>
+                        <h2>{t.blurballStage1Threshold}</h2>
+                        <p>{t.blurballStage1ThresholdDetail}</p>
+                      </div>
+                      <div className="confidence-threshold-control">
+                        <input
+                          aria-label={t.blurballStage1Threshold}
+                          aria-valuetext={blurballStage1ConfidenceThreshold.toFixed(2)}
+                          id="blurball-stage1-confidence-threshold"
+                          max={BLURBALL_CONFIDENCE_THRESHOLD_MAX}
+                          min={BLURBALL_CONFIDENCE_THRESHOLD_MIN}
+                          onChange={(event) => setBlurballStage1ConfidenceThreshold(Number(event.currentTarget.value))}
+                          step={BLURBALL_CONFIDENCE_THRESHOLD_STEP}
+                          type="range"
+                          value={blurballStage1ConfidenceThreshold}
+                        />
+                        <output htmlFor="blurball-stage1-confidence-threshold">{blurballStage1ConfidenceThreshold.toFixed(2)}</output>
+                      </div>
+                    </section>
+                    <section className="detector-setting">
+                      <div>
+                        <h2>{t.blurballStage2Threshold}</h2>
+                        <p>{t.blurballStage2ThresholdDetail}</p>
+                      </div>
+                      <div className="confidence-threshold-control">
+                        <input
+                          aria-label={t.blurballStage2Threshold}
+                          aria-valuetext={blurballStage2ConfidenceThreshold.toFixed(2)}
+                          id="blurball-stage2-confidence-threshold"
+                          max={BLURBALL_CONFIDENCE_THRESHOLD_MAX}
+                          min={BLURBALL_CONFIDENCE_THRESHOLD_MIN}
+                          onChange={(event) => setBlurballStage2ConfidenceThreshold(Number(event.currentTarget.value))}
+                          step={BLURBALL_CONFIDENCE_THRESHOLD_STEP}
+                          type="range"
+                          value={blurballStage2ConfidenceThreshold}
+                        />
+                        <output htmlFor="blurball-stage2-confidence-threshold">{blurballStage2ConfidenceThreshold.toFixed(2)}</output>
+                      </div>
+                    </section>
+                  </>
+                )}
               </article>
               <article className="card components-card">
                 <h2>{t.components}</h2>

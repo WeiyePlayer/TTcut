@@ -1,6 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type {
+import {
+  BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT,
+  BLURBALL_STAGE1_CONFIDENCE_THRESHOLD_DEFAULT,
   AnalysisResultV1,
+  BlurBallAnalysisMode,
   Calibration,
   CutSelectionV1,
   ExportWarning,
@@ -45,6 +48,10 @@ interface MultiTaskPageProps {
   initialVideos: SelectedVideo[];
   preRoll: 1.5 | 2.5 | 5;
   postRoll: 0.5 | 1 | 2 | 4;
+  analysisMode?: BlurBallAnalysisMode;
+  blurballConfidenceThreshold?: number;
+  blurballStage1ConfidenceThreshold?: number;
+  blurballStage2ConfidenceThreshold?: number;
   language?: 'zh-CN' | 'en';
   onOpenAnalysis: (analysisId: string) => void;
   onCompletableTasksFinished?: () => void;
@@ -102,6 +109,10 @@ export function MultiTaskPage({
   initialVideos,
   preRoll,
   postRoll,
+  analysisMode = 'full',
+  blurballConfidenceThreshold = BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT,
+  blurballStage1ConfidenceThreshold = BLURBALL_STAGE1_CONFIDENCE_THRESHOLD_DEFAULT,
+  blurballStage2ConfidenceThreshold = BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT,
   language = 'zh-CN',
   onOpenAnalysis,
   onCompletableTasksFinished = () => undefined,
@@ -127,7 +138,14 @@ export function MultiTaskPage({
   const scheduleRef = useRef<() => void>(() => undefined);
   const rowRefs = useRef(new Map<string, HTMLElement>());
   const previousRects = useRef(new Map<string, DOMRect>());
-  const optionsRef = useRef({ preRoll, postRoll });
+  const optionsRef = useRef({
+    preRoll,
+    postRoll,
+    analysisMode,
+    blurballConfidenceThreshold,
+    blurballStage1ConfidenceThreshold,
+    blurballStage2ConfidenceThreshold,
+  });
 
   const isEnglish = language === 'en';
   const text = {
@@ -299,6 +317,10 @@ export function MultiTaskPage({
       calibrationChoice,
       device: 'auto',
       historyVisibility: candidate.mode === 'analyze-only' ? 'visible' : 'deferred',
+      analysisMode: optionsRef.current.analysisMode,
+      blurballConfidenceThreshold: optionsRef.current.blurballConfidenceThreshold,
+      blurballStage1ConfidenceThreshold: optionsRef.current.blurballStage1ConfidenceThreshold,
+      blurballStage2ConfidenceThreshold: optionsRef.current.blurballStage2ConfidenceThreshold,
     });
     pendingTaskStartRef.current = startPromise;
     void startPromise.then((taskId) => {

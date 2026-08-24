@@ -284,6 +284,43 @@ test('neutral controls use the shared hover surface without overriding semantic 
     await expect(postRollToggle.getByRole('radio', { name: '极短', exact: true })).toBeVisible();
     await expect(postRollToggle.getByRole('radio', { name: '短', exact: true })).toBeVisible();
     await expect(preRollToggle.getByRole('radio', { name: '1.5 s' })).toHaveCount(0);
+    const blurballThreshold = page.getByRole('slider', { name: '默认模式阈值' });
+    await expect(blurballThreshold).toHaveAttribute('min', '0.1');
+    await expect(blurballThreshold).toHaveAttribute('max', '0.95');
+    await expect(blurballThreshold).toHaveAttribute('step', '0.05');
+    await expect(blurballThreshold).toHaveValue('0.7');
+    const analysisMode = page.getByRole('radiogroup', { name: 'BlurBall 分析模式' });
+    await expect(analysisMode.getByRole('radio', { name: '默认' })).toBeChecked();
+    await expect(analysisMode.getByRole('radio', { name: '高精' })).toBeVisible();
+    await analysisMode.getByRole('radio', { name: '高精' }).click();
+    await expect(page.getByRole('slider', { name: '阶段一阈值' })).toHaveValue('0.3');
+    await expect(page.getByRole('slider', { name: '阶段二阈值' })).toHaveValue('0.7');
+    await analysisMode.getByRole('radio', { name: '默认' }).click();
+    await expect(page.getByRole('slider', { name: '默认模式阈值' })).toHaveValue('0.7');
+    const thresholdLayout = await page.locator('.detector-settings-card').evaluate((card) => {
+      const heading = card.querySelector('h2');
+      const input = card.querySelector('input[type="range"]');
+      const output = card.querySelector('output');
+      if (!(heading instanceof HTMLElement) || !(input instanceof HTMLInputElement) || !(output instanceof HTMLOutputElement)) {
+        throw new Error('Missing BlurBall threshold controls.');
+      }
+      const headingBox = heading.getBoundingClientRect();
+      const inputBox = input.getBoundingClientRect();
+      const outputBox = output.getBoundingClientRect();
+      return {
+        inputLeft: inputBox.left,
+        outputLeft: outputBox.left,
+        verticalOffset: Math.abs(inputBox.top + inputBox.height / 2 - (headingBox.top + headingBox.height / 2)),
+      };
+    });
+    expect(thresholdLayout.inputLeft).toBeGreaterThan(timingControlLayout.headingRight);
+    expect(thresholdLayout.outputLeft).toBeGreaterThan(thresholdLayout.inputLeft);
+    expect(thresholdLayout.verticalOffset).toBeLessThan(48);
+    await blurballThreshold.press('ArrowLeft');
+    await blurballThreshold.press('ArrowLeft');
+    await blurballThreshold.press('ArrowLeft');
+    await expect(blurballThreshold).toHaveValue('0.55');
+    await expect(page.locator('output[for="blurball-confidence-threshold"]')).toHaveText('0.55');
     const contactAuthor = page.getByRole('button', { name: '联系作者' });
     await expect(contactAuthor).toBeVisible();
     await expect(page.locator('.contact-author-qr')).toBeHidden();
@@ -304,6 +341,7 @@ test('neutral controls use the shared hover surface without overriding semantic 
     expect(Math.abs(contactAuthorAlignment.buttonCenter - contactAuthorAlignment.popupCenter)).toBeLessThan(1);
     await page.screenshot({ path: path.join(outputRoot, 'contact-author-qr-open.png'), fullPage: true });
     await page.locator('.timing-settings-card').screenshot({ path: path.join(outputRoot, 'timing-controls.png') });
+    await page.locator('.detector-settings-card').screenshot({ path: path.join(outputRoot, 'blurball-threshold-control.png') });
     await page.getByRole('button', { name: '历史剪辑' }).click();
     await expect(page.locator('.history-page')).toBeVisible();
     await expect(page.locator('.history-header .eyebrow')).toHaveCount(0);
