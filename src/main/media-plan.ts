@@ -63,13 +63,13 @@ export function buildStreamCopyArgs(input: string, output: string, group: CutGro
   ];
 }
 
-function normalizedSar(value: string | null | undefined): string {
+export function normalizedSar(value: string | null | undefined): string {
   const match = /^(\d+):(\d+)$/.exec(value ?? '');
   if (!match || Number(match[1]) <= 0 || Number(match[2]) <= 0) return '1/1';
   return `${match[1]}/${match[2]}`;
 }
 
-function videoEncodingOptions(metadata: VideoMetadata, encoder: MediaEncoder): string[] {
+export function videoEncodingOptions(metadata: VideoMetadata, encoder: MediaEncoder): string[] {
   const sourceVideoBitrate = metadata.average_bitrate ?? 8_000_000;
   const videoBitrate = Math.round(Math.max(
     sourceVideoBitrate,
@@ -80,7 +80,7 @@ function videoEncodingOptions(metadata: VideoMetadata, encoder: MediaEncoder): s
     : ['-c:v', 'libopenh264', '-profile:v', 'high', '-b:v', String(videoBitrate)];
 }
 
-function outputPixelFormat(metadata: VideoMetadata, encoder: MediaEncoder): string {
+export function outputPixelFormat(metadata: VideoMetadata, encoder: MediaEncoder): string {
   const x264PixelFormats = new Set([
     'yuv420p', 'yuvj420p', 'yuv422p', 'yuvj422p', 'yuv444p', 'yuvj444p',
     'nv12', 'nv16', 'nv21', 'yuv420p10le', 'yuv422p10le', 'yuv444p10le',
@@ -91,7 +91,7 @@ function outputPixelFormat(metadata: VideoMetadata, encoder: MediaEncoder): stri
     : 'yuv420p';
 }
 
-function appendAudioEncodingOptions(args: string[], metadata: VideoMetadata): void {
+export function appendAudioEncodingOptions(args: string[], metadata: VideoMetadata): void {
   args.push('-c:a', 'aac', '-b:a', String(Math.round(metadata.audio_bitrate ?? 192_000)));
   if (metadata.audio_sample_rate) args.push('-ar', String(metadata.audio_sample_rate));
   if (metadata.audio_channels) args.push('-ac', String(metadata.audio_channels));
@@ -103,12 +103,19 @@ function appendMediaOutputOptions(
   encoder: MediaEncoder,
   hasAudio: boolean,
 ): void {
+  // Legacy history records predate exact frame-rate ratios and retain their old VFR export semantics.
+  const hasExactFrameRate = Boolean(metadata.nominal_fps_ratio ?? metadata.average_fps_ratio);
+  const outputIsCfr = !metadata.variable_frame_rate && hasExactFrameRate;
   args.push(
     '-map_metadata', '0', '-sn', '-dn',
     ...videoEncodingOptions(metadata, encoder),
     '-pix_fmt', outputPixelFormat(metadata, encoder),
-    '-fps_mode', 'vfr', '-max_muxing_queue_size', '2048',
+    '-fps_mode', outputIsCfr ? 'cfr' : 'vfr',
+    '-max_muxing_queue_size', '2048',
   );
+  if (outputIsCfr) {
+    args.push('-r', metadata.nominal_fps_ratio ?? metadata.average_fps_ratio ?? String(metadata.fps));
+  }
   if (hasAudio) appendAudioEncodingOptions(args, metadata);
   args.push('-metadata:s:v:0', 'rotate=0');
   const colorOptions: Array<[string, string | null | undefined]> = [
@@ -192,6 +199,50 @@ export function buildReencodeArgs(
   ];
   appendMediaOutputOptions(args, metadata, encoder, hasAudio);
   args.push(output);
+  return args;
+}
+
+export function buildCfrNormalizationArgs(
+  input: string,
+  output: string,
+  metadata: VideoMetadata,
+  targetFpsRatio: string,
+  encoder: MediaEncoder,
+): string[] {
+  const hasAudio = metadata.audio_codec !== null;
+  const filters = [`fps=${targetFpsRatio}`, `setsar=${normalizedSar(metadata.sample_aspect_ratio)}`];
+  const args = [
+    '-hide_banner', '-y', '-autorotate', '-i', input,
+    '-map', '0:v:0', '-map', '0:a?',
+    '-vf', filters.join(','),
+    '-map_metadata', '0', '-sn', '-dn',
+    ...videoEncodingOptions(metadata, encoder),
+    '-pix_fmt', outputPixelFormat(metadata, encoder),
+    '-fps_mode:v', 'cfr',
+    '-max_muxing_queue_size', '2048',
+  ];
+  if (hasAudio) {
+    appendAudioEncodingOptions(args, metadata);
+    args.push(
+      '-af', `aresample=async=1:first_pts=0,apad=whole_dur=${metadata.duration_seconds.toFixed(6)}`,
+      '-shortest',
+    );
+  }
+  const colorOptions: Array<[string, string | null | undefined]> = [
+    ['-color_range', metadata.color_range],
+    ['-colorspace', metadata.color_space],
+    ['-color_trc', metadata.color_transfer],
+    ['-color_primaries', metadata.color_primaries],
+  ];
+  for (const [flag, value] of colorOptions) {
+    if (value && value !== 'unknown') args.push(flag, value);
+  }
+  args.push(
+    '-metadata:s:v:0', 'rotate=0',
+    '-avoid_negative_ts', 'make_zero',
+    '-movflags', '+faststart',
+    '-progress', 'pipe:1', '-nostats', output,
+  );
   return args;
 }
 

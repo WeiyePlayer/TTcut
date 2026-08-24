@@ -13,6 +13,7 @@ import {
 import { resolveUsableMediaComponents } from './components';
 import { logLine } from './logger';
 import { runProcess } from './processes';
+import { clearProcessingMediaCache, processingCachePath, removeProcessingCache } from './processing-media';
 
 const historyIndexSchema = z.object({
   schema_version: z.literal(1),
@@ -194,7 +195,7 @@ export class HistoryStore {
     calibration: Calibration,
     visibleInHistory = true,
   ): Promise<HistoryRecordV1> {
-    const source = await this.sourceFor(analysis.video.path);
+    const source = await this.sourceFor(analysis.source_video?.path ?? analysis.video.path);
     const index = await this.loadIndex();
     const existing = await this.findMatchingRecord(source);
     const record = historyRecordSchema.parse({
@@ -215,6 +216,16 @@ export class HistoryStore {
     ] : index.entries.filter((entry) => entry.id !== record.id));
     await rm(this.coverPath(record.id), { force: true }).catch(() => undefined);
     await this.ensureCover(record);
+    const previousCache = existing ? processingCachePath(existing.analysis) : null;
+    const currentCache = processingCachePath(record.analysis);
+    if (previousCache && previousCache !== currentCache) {
+      const remaining = await Promise.all((await readdir(this.recordsRoot(), { withFileTypes: true }).catch(() => []))
+        .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+        .map((entry) => this.loadRecord(entry.name.slice(0, -5))));
+      if (!remaining.some((candidate) => candidate && processingCachePath(candidate.analysis) === previousCache)) {
+        await removeProcessingCache(existing!.analysis);
+      }
+    }
     return record;
   }
 
@@ -256,17 +267,39 @@ export class HistoryStore {
     const status = await this.sourceStatus(record.source);
     if (status === 'missing') throw new Error('HISTORY_SOURCE_MISSING');
     if (status === 'changed') throw new Error('HISTORY_SOURCE_CHANGED');
+    if (record.analysis.processing?.mode === 'normalized_cfr') {
+      const processingInfo = await stat(record.analysis.video.path).catch(() => null);
+      if (!processingInfo?.isFile() || processingInfo.size <= 0) throw new Error('HISTORY_PROCESSING_MEDIA_MISSING');
+    }
     return record;
+  }
+
+  async hasProcessingMediaReference(mediaPath: string): Promise<boolean> {
+    const target = normalizedIdentityPath(mediaPath);
+    const records = await Promise.all((await readdir(this.recordsRoot(), { withFileTypes: true }).catch(() => []))
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+      .map((entry) => this.loadRecord(entry.name.slice(0, -5))));
+    return records.some((record) => record && record.analysis.processing?.mode === 'normalized_cfr'
+      && normalizedIdentityPath(record.analysis.video.path) === target);
   }
 
   async delete(id: string): Promise<void> {
     const parsedId = z.string().uuid().parse(id);
+    const record = await this.loadRecord(parsedId);
     const index = await this.loadIndex();
     await Promise.all([
       rm(this.recordPath(parsedId), { force: true }),
       rm(this.coverPath(parsedId), { force: true }),
     ]);
     await this.saveIndex(index.entries.filter((entry) => entry.id !== parsedId));
+    if (record && processingCachePath(record.analysis)) {
+      const remaining = await Promise.all((await readdir(this.recordsRoot(), { withFileTypes: true }).catch(() => []))
+        .filter((entry) => entry.isFile() && entry.name.endsWith('.json') && entry.name !== `${parsedId}.json`)
+        .map((entry) => this.loadRecord(entry.name.slice(0, -5))));
+      const deletedCache = processingCachePath(record.analysis);
+      const stillReferenced = remaining.some((candidate) => candidate && processingCachePath(candidate.analysis) === deletedCache);
+      if (!stillReferenced) await removeProcessingCache(record.analysis);
+    }
   }
 
   async clear(): Promise<void> {
@@ -275,6 +308,7 @@ export class HistoryStore {
       rm(this.coversRoot(), { recursive: true, force: true }),
     ]);
     await this.saveIndex([]);
+    await clearProcessingMediaCache();
   }
 }
 

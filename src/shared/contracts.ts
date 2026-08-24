@@ -186,6 +186,8 @@ export const videoMetadataSchema = z.object({
   height: z.number().int().positive(),
   fps: finiteNumber.positive(),
   nominal_fps: finiteNumber.positive().nullable().optional(),
+  average_fps_ratio: z.string().regex(/^\d+\/\d+$/).nullable().optional(),
+  nominal_fps_ratio: z.string().regex(/^\d+\/\d+$/).nullable().optional(),
   variable_frame_rate: z.boolean(),
   video_codec: z.string().min(1),
   audio_codec: z.string().nullable(),
@@ -225,6 +227,13 @@ export const rallySchema = z.object({
 export const analysisResultSchema = z.object({
   schema_version: z.literal(1),
   video: videoMetadataSchema,
+  source_video: videoMetadataSchema.optional(),
+  processing: z.object({
+    mode: z.enum(['source_cfr', 'normalized_cfr', 'vfr_fallback']),
+    target_fps_ratio: z.string().regex(/^\d+\/\d+$/).nullable(),
+    encoder: z.enum(['libopenh264', 'libx264']).nullable(),
+    warning_code: z.string().min(1).nullable(),
+  }).strict().optional(),
   rallies: z.array(rallySchema),
   bounce_times_seconds: z.array(finiteNumber.nonnegative()).optional(),
   calibration: calibrationSchema.optional(),
