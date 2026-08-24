@@ -53,6 +53,16 @@ function rational(value?: string): number {
   return (first ?? 0) / second;
 }
 
+function rationalRatio(value?: string): string | null {
+  if (!value || !/^\d+\/\d+$/.test(value)) return null;
+  const [numeratorText, denominatorText] = value.split('/');
+  const numerator = Number(numeratorText);
+  const denominator = Number(denominatorText);
+  if (!Number.isSafeInteger(numerator) || !Number.isSafeInteger(denominator)
+    || numerator <= 0 || denominator <= 0) return null;
+  return `${numerator}/${denominator}`;
+}
+
 function optionalInteger(value?: string): number | null {
   if (!value) return null;
   const parsed = Number(value);
@@ -135,6 +145,8 @@ export async function probeVideo(videoPath: string, signal?: AbortSignal): Promi
     height: displayDimensions.height,
     fps: averageFps,
     nominal_fps: nominalFps > 0 ? nominalFps : null,
+    average_fps_ratio: rationalRatio(video.avg_frame_rate),
+    nominal_fps_ratio: rationalRatio(video.r_frame_rate),
     variable_frame_rate: fieldRatesDiffer || packetDurationsDiffer,
     video_codec: video.codec_name ?? 'unknown',
     audio_codec: audio?.codec_name ?? null,

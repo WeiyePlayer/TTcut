@@ -1,5 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { AnalysisResultV1, AppSettings, Calibration, CutSelectionV1, ExportRequest, ExportResult, HistorySummaryV1, UpdateState, VideoMetadata } from '../shared/contracts';
+import {
+  BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT,
+  BLURBALL_STAGE1_CONFIDENCE_THRESHOLD_DEFAULT,
+  type AnalysisResultV1,
+  type AppSettings,
+  type Calibration,
+  type CutSelectionV1,
+  type ExportRequest,
+  type ExportResult,
+  type ExportWarning,
+  type HistorySummaryV1,
+  type UpdateState,
+  type VideoMetadata,
+} from '../shared/contracts';
 import type { AppEvent, BootstrapData, PendingComponentImport, SelectedVideo } from '../shared/api';
 import { DONATION_URL, GITHUB_URL, RELEASES_URL, WEBSITE_URL } from '../shared/urls';
 import { formatTimestamp } from '../domain/time';
@@ -66,7 +79,8 @@ export function App() {
   const [bootstrap, setBootstrap] = useState<BootstrapData | null>(null);
   const [settings, setSettings] = useState<AppSettings>({
     language: 'zh-CN', calibration_method: 'automatic',
-    pre_roll_seconds: 2.5, post_roll_seconds: 2,
+    pre_roll_seconds: 2.5, post_roll_seconds: 1,
+    analysis_mode: 'full',
   });
   const [view, setView] = useState<View>('auto');
   const [step, setStep] = useState<Step>('select');
@@ -74,12 +88,16 @@ export function App() {
   const [metadata, setMetadata] = useState<VideoMetadata | null>(null);
   const [points, setPoints] = useState<Partial<Record<PointName, [number, number]>>>({});
   const [analysis, setAnalysis] = useState<AnalysisResultV1 | null>(null);
+  const [analysisWarning, setAnalysisWarning] = useState<ExportWarning | null>(null);
   const [analysisId, setAnalysisId] = useState<string | null>(null);
   const [forceManual, setForceManual] = useState(false);
   const [multiVideos, setMultiVideos] = useState<SelectedVideo[]>([]);
   const [updateState, setUpdateState] = useState<UpdateState>({ status: 'idle', version: null, message: null });
   const [mode, setMode] = useState<'all' | 'highlight' | 'custom'>('all');
   const [threshold, setThreshold] = useState<3 | 5 | 7>(5);
+  const blurballConfidenceThreshold = BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT;
+  const blurballStage1ConfidenceThreshold = BLURBALL_STAGE1_CONFIDENCE_THRESHOLD_DEFAULT;
+  const blurballStage2ConfidenceThreshold = BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT;
   const [customDraft, setCustomDraft] = useState<CustomRallyClip[] | null>(null);
   const [customOutputs, setCustomOutputs] = useState<NonNullable<ExportRequest['outputs']>>({
     combined_video: true,
@@ -160,6 +178,20 @@ export function App() {
         if (videoTaskOwnerRef.current === 'single') updateVideoTaskOwner(null);
         setAnalysisId(event.analysisId);
         setAnalysis(event.data);
+        setAnalysisWarning(event.data.processing?.mode === 'vfr_fallback' && event.data.processing.warning_code
+          ? { code: event.data.processing.warning_code, message: event.data.processing.warning_code }
+          : null);
+        if (event.data.processing?.mode === 'normalized_cfr' && event.data.video.path !== video?.path) {
+          void Promise.resolve(window.ttcut.acceptDroppedVideo(event.data.video.path)).then((processed) => {
+            if (!processed) return;
+            setVideo((current) => current ? { ...processed, name: current.name } : processed);
+          }).catch(() => undefined);
+        }
+        if (event.data.processing?.mode === 'vfr_fallback') {
+          setToast(settingsRef.current.language === 'zh-CN'
+            ? `固定帧率预处理失败，已使用原始可变帧率视频继续分析（${event.data.processing.warning_code ?? 'CFR_FALLBACK'}）。`
+            : `CFR preprocessing failed; analysis continued with the original VFR video (${event.data.processing.warning_code ?? 'CFR_FALLBACK'}).`);
+        }
         setPoints(event.calibration.points);
         setStep(event.data.rallies.length ? 'mode' : 'empty');
       } else if (event.type === 'calibration-result') {
@@ -204,6 +236,12 @@ export function App() {
           setStep(exportOriginRef.current);
           return;
         }
+        if (event.code === 'ANALYSIS_CANCELLED') {
+          setActiveTask(null);
+          if (videoTaskOwnerRef.current === 'single') updateVideoTaskOwner(null);
+          setStep('calibrate');
+          return;
+        }
         setActiveTask(null);
         if (videoTaskOwnerRef.current === 'single') updateVideoTaskOwner(null);
         setError({
@@ -235,6 +273,7 @@ export function App() {
 
   const reset = useCallback(() => {
     setStep('select'); setVideo(null); setMetadata(null); setPoints({}); setAnalysis(null); setAnalysisId(null); setForceManual(false);
+    setAnalysisWarning(null);
     setMode('all'); setThreshold(5); setCustomDraft(null); setCustomOutputs({ combined_video: true, rally_videos: false, premiere_xml: false }); setProgress({ percent: 0, stage: 'probe' });
     setActiveTask(null); setExportResult(null); setError(null);
     if (videoTaskOwnerRef.current === 'single') updateVideoTaskOwner(null);
@@ -244,7 +283,7 @@ export function App() {
     if (!selected) return;
     try {
       const info = await window.ttcut.probeVideo(selected.path);
-      setVideo(selected); setMetadata(info); setPoints({}); setAnalysisId(null); setForceManual(false); setError(null); setStep('calibrate'); setView('auto');
+      setVideo(selected); setMetadata(info); setPoints({}); setAnalysis(null); setAnalysisId(null); setAnalysisWarning(null); setForceManual(false); setError(null); setStep('calibrate'); setView('auto');
     } catch (caught) {
       setError({ code: errorCode(caught) }); setStep('error');
     }
@@ -300,6 +339,10 @@ export function App() {
         calibrationChoice: useManualCalibration ? { method: 'manual', calibration: calibrationValue! } : { method: 'automatic' },
         device: 'auto',
         historyVisibility: 'visible',
+        analysisMode: settings.analysis_mode,
+        blurballConfidenceThreshold,
+        blurballStage1ConfidenceThreshold,
+        blurballStage2ConfidenceThreshold,
       }));
     } catch (caught) {
       if (videoTaskOwnerRef.current === 'single') updateVideoTaskOwner(null);
@@ -347,9 +390,12 @@ export function App() {
   };
 
   const saveRolls = async (partial: Partial<AppSettings>) => {
-    const next = await window.ttcut.saveSettings({ ...settings, ...partial });
+    const next = { ...settings, ...partial };
     setSettings(next);
     settingsRef.current = next;
+    const saved = await window.ttcut.saveSettings(next);
+    setSettings(saved);
+    settingsRef.current = saved;
   };
 
   const loadHistory = async () => {
@@ -376,6 +422,9 @@ export function App() {
       setVideo(opened.video);
       setMetadata(opened.analysis.video);
       setAnalysis(opened.analysis);
+      setAnalysisWarning(opened.analysis.processing?.mode === 'vfr_fallback' && opened.analysis.processing.warning_code
+        ? { code: opened.analysis.processing.warning_code, message: opened.analysis.processing.warning_code }
+        : null);
       setAnalysisId(opened.analysisId);
       setPoints(opened.calibration.points);
       setMode('all');
@@ -574,6 +623,10 @@ export function App() {
               initialVideos={multiVideos}
               preRoll={settings.pre_roll_seconds}
               postRoll={settings.post_roll_seconds}
+              analysisMode={settings.analysis_mode}
+              blurballConfidenceThreshold={blurballConfidenceThreshold}
+              blurballStage1ConfidenceThreshold={blurballStage1ConfidenceThreshold}
+              blurballStage2ConfidenceThreshold={blurballStage2ConfidenceThreshold}
               language={settings.language}
               onTaskStateChange={handleMultiTaskStateChange}
               onOpenAnalysis={(id) => { discardMulti(); void openHistory(id); }}
@@ -618,6 +671,26 @@ export function App() {
                   options={[{ value: 'zh-CN', label: t.chinese }, { value: 'en', label: t.english }] as const}
                   value={settings.language as Language}
                 />
+              </article>
+              <article className="card detector-settings-card">
+                <section className="detector-setting">
+                  <div>
+                    <h2>{t.blurballAnalysisMode}</h2>
+                    <p>{t.blurballAnalysisModeDetail}</p>
+                  </div>
+                  <GlassRadioGroup
+                    ariaLabel={t.blurballAnalysisMode}
+                    className="compact"
+                    idPrefix="settings-blurball-mode"
+                    name="settings-blurball-mode"
+                    onChange={(analysis_mode) => void saveRolls({ analysis_mode })}
+                    options={[
+                      { value: 'full', label: t.blurballModeDefault },
+                      { value: 'two_stage', label: t.blurballModeHighPrecision },
+                    ] as const}
+                    value={settings.analysis_mode}
+                  />
+                </section>
               </article>
               <article className="card setting-card">
                 <div><h2>{settings.language === 'zh-CN' ? '球台标定' : 'Table calibration'}</h2><p>{settings.language === 'zh-CN' ? '选择单视频流程使用的球台标定方式。多任务会先自动标定，失败项目可手动补充。' : 'Choose the calibration method for single videos. Batch tasks calibrate automatically first, with manual recovery for failed items.'}</p></div>
@@ -731,6 +804,16 @@ export function App() {
             )}
             {bootstrap && platformSupported && (!bootstrap.components.analysis.available || !bootstrap.components.media.available) && step === 'select' && (
               <div className="notice"><strong>{t.componentMissing}</strong><span>{t.componentMissingDetail}</span><button className="secondary" onClick={() => setView('settings')}>{t.openSetup}</button></div>
+            )}
+            {analysisWarning && analysis && !['select', 'calibrate', 'analyzing', 'cutting'].includes(step) && (
+              <section className="export-warning processing-warning" role="alert" aria-labelledby="processing-warning-title">
+                <div className="export-warning-heading">
+                  <span aria-hidden="true">!</span>
+                  <div><strong id="processing-warning-title">{settings.language === 'zh-CN' ? '已回退使用原始可变帧率视频' : 'Fell back to the original variable-frame-rate video'}</strong><p>{localizedError(analysisWarning.code, t)}</p></div>
+                  <button className="secondary" type="button" onClick={() => void window.ttcut.revealLogs()}>{t.logs}</button>
+                </div>
+                <div className="export-warning-summary"><code>{analysisWarning.code}</code><span>{localizedError(analysisWarning.code, t)}</span></div>
+              </section>
             )}
             {step === 'select' && (
               <div className="center-stage">

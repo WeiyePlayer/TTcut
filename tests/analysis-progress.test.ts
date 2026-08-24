@@ -22,6 +22,26 @@ describe('analysis progress mapping', () => {
     expect(overallAnalysisProgress('analysis', 50, 'precalibrated')).toBe(53);
   });
 
+  it('reserves the first 25% for CFR preparation in a pre-calibrated VFR run', () => {
+    expect(overallAnalysisProgress('analysis', 0, 'precalibrated', 'full', 'normalized')).toBe(25);
+    expect(overallAnalysisProgress('analysis', 100, 'precalibrated', 'full', 'normalized')).toBe(96);
+    expect(overallAnalysisProgress('postprocess', 100, 'precalibrated', 'full', 'normalized')).toBe(100);
+  });
+
+  it('reserves 5% for calibration and 25% for CFR preparation in an automatic VFR run', () => {
+    expect(overallAnalysisProgress('table_inference', 100, 'automatic', 'full', 'normalized')).toBe(5);
+    expect(overallAnalysisProgress('analysis', 0, 'automatic', 'full', 'normalized')).toBe(30);
+    expect(overallAnalysisProgress('analysis', 100, 'automatic', 'full', 'normalized')).toBe(100);
+  });
+
+  it('keeps two-stage progress monotonic across candidate and refinement passes', () => {
+    expect(overallAnalysisProgress('candidate_analysis', 100, 'precalibrated', 'two_stage')).toBe(55);
+    expect(overallAnalysisProgress('interval_union', 100, 'precalibrated', 'two_stage')).toBe(56);
+    expect(overallAnalysisProgress('refinement_analysis', 0, 'precalibrated', 'two_stage')).toBe(56);
+    expect(overallAnalysisProgress('refinement_analysis', 100, 'precalibrated', 'two_stage')).toBe(96);
+    expect(overallAnalysisProgress('postprocess', 100, 'precalibrated', 'two_stage')).toBe(100);
+  });
+
   it('maps the three automatic calibration stages onto one continuous bar', () => {
     expect(overallCalibrationProgress('table_sampling', 50)).toBe(20);
     expect(overallCalibrationProgress('table_sampling', 100)).toBe(40);

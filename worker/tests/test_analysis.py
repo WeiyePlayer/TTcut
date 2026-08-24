@@ -111,6 +111,20 @@ def test_worker_request_accepts_mov_and_precalibrated_diagnostics():
     assert validate_request(request) is request
 
 
+def test_worker_request_validates_the_optional_blurball_threshold():
+    request = valid_request()
+    request["blurball_confidence_threshold"] = 0.55
+    assert validate_request(request) is request
+
+    request["blurball_confidence_threshold"] = 0.99
+    try:
+        validate_request(request)
+    except Exception as exc:
+        assert "invalid" in str(exc).lower()
+    else:
+        raise AssertionError("an out-of-range BlurBall threshold must be rejected")
+
+
 def test_calibration_worker_runs_table_model(monkeypatch):
     request = valid_request()
     request["calibration_choice"] = {"method": "automatic"}
@@ -128,18 +142,19 @@ def test_calibration_worker_runs_table_model(monkeypatch):
     assert result["calibration"]["video_width"] == 274
 
 
-def test_worker_always_uses_blurball_and_records_fixed_parameters(monkeypatch):
+def test_worker_uses_requested_blurball_threshold_and_records_it(monkeypatch):
     captured = {}
 
     class FakeBlurBallPredictor:
-        def __init__(self, loaded):
+        def __init__(self, loaded, confidence_threshold=0.7):
             captured["loaded"] = loaded
+            captured["confidence_threshold"] = confidence_threshold
 
         def predict(self, video_path, progress_callback=None, analysis_roi=None):
             captured["roi"] = analysis_roi
             points = [TrajectoryPoint(i, i * 0.1, 1, 640, 360, "blurball", 1.0) for i in range(6)]
             return points, VideoInfo(Path(video_path), 1280, 720, 10.0, 6, 6, 0.6), SimpleNamespace(
-                model_width=512, model_height=288, confidence_threshold=0.7,
+                model_width=512, model_height=288, confidence_threshold=captured["confidence_threshold"],
                 step=3, maximum_displacement_pixels=100.0,
             )
 
@@ -149,15 +164,107 @@ def test_worker_always_uses_blurball_and_records_fixed_parameters(monkeypatch):
     monkeypatch.setattr("ttcut_worker.worker.BlurBallPredictor", FakeBlurBallPredictor)
     monkeypatch.setattr("ttcut_worker.worker.detect_blurball_bounce_frames", lambda points, calibration: [0, 5])
 
-    result = analyze(valid_request())
+    request = valid_request()
+    request["blurball_confidence_threshold"] = 0.55
+    result = analyze(request)
     assert captured["loaded"] is fake_loaded
     assert captured["weight_path"] == "blurball.pt"
     assert captured["device"] == "cpu"
+    assert captured["confidence_threshold"] == 0.55
     assert captured["roi"].source_width == 1280
     assert result["rallies"][0]["bounce_count"] == 2
     assert result["bounce_times_seconds"] == [0.0, 0.5]
     assert result["model_provenance"]["profile"] == "blurball_v1"
     assert result["model_provenance"]["detection"] == {
-        "confidence_threshold": 0.7, "step": 3,
+        "confidence_threshold": 0.55, "step": 3,
         "maximum_displacement_pixels": 100.0, "landing_region": "expanded_table",
     }
+
+
+def test_worker_two_stage_uses_separate_thresholds_and_only_refinement_results(monkeypatch):
+    captured = {"predict": [], "predict_intervals": []}
+
+    class FakeBlurBallPredictor:
+        def __init__(self, loaded, confidence_threshold=0.7):
+            captured.setdefault("thresholds", []).append(confidence_threshold)
+            self.confidence_threshold = confidence_threshold
+
+        def predict(self, video_path, progress_callback=None, analysis_roi=None):
+            captured["predict"].append(self.confidence_threshold)
+            points = [point(0, 1.0), point(1, 2.0), point(2, 3.0), point(3, 4.0)]
+            return points, VideoInfo(Path(video_path), 1280, 720, 1.0, 4, 4, 5.0), SimpleNamespace(
+                model_width=512, model_height=288, confidence_threshold=self.confidence_threshold,
+                step=3, maximum_displacement_pixels=100.0,
+            )
+
+        def predict_intervals(self, video_path, intervals, progress_callback=None, analysis_roi=None, confidence_threshold=None):
+            captured["predict_intervals"].append((tuple(intervals), confidence_threshold))
+            points = [point(1, 2.0), point(2, 3.0)]
+            return points, VideoInfo(Path(video_path), 1280, 720, 1.0, 4, 4, 5.0), SimpleNamespace(
+                model_width=512, model_height=288, confidence_threshold=confidence_threshold,
+                step=1, maximum_displacement_pixels=100.0,
+            )
+
+    fake_loaded = SimpleNamespace(component_version="1.0.0")
+    monkeypatch.setenv("TTCUT_BLURBALL_WEIGHTS", "blurball.pt")
+    monkeypatch.setattr("ttcut_worker.worker.load_blurball", lambda path, device: fake_loaded)
+    monkeypatch.setattr("ttcut_worker.worker.BlurBallPredictor", FakeBlurBallPredictor)
+    monkeypatch.setattr("ttcut_worker.worker.detect_blurball_bounce_frames", lambda points, calibration: [0, 3] if len(points) == 4 else [1, 2])
+
+    request = valid_request()
+    request["schema_version"] = 2
+    request.pop("blurball_confidence_threshold", None)
+    request["analysis"] = {
+        "mode": "two_stage",
+        "stage1_confidence_threshold": 0.3,
+        "stage2_confidence_threshold": 0.7,
+    }
+    result = analyze(request)
+
+    assert captured["predict"] == [0.3]
+    assert captured["predict_intervals"] == [(((0.25, 4.75),), 0.7)]
+    assert result["bounce_times_seconds"] == [2.0, 3.0]
+    assert result["rallies"][0]["bounce_count"] == 2
+    assert result["model_provenance"]["analysis"]["schema_version"] == 2
+    assert result["model_provenance"]["analysis"]["mode"] == "two_stage"
+    assert [stage["confidence_threshold"] for stage in result["model_provenance"]["analysis"]["stages"]] == [0.3, 0.7]
+    assert result["model_provenance"]["detection"]["step"] == 1
+
+
+def test_worker_two_stage_with_no_candidate_rallies_returns_empty_result(monkeypatch):
+    calls = {"refine": 0}
+
+    class FakeBlurBallPredictor:
+        def __init__(self, loaded, confidence_threshold=0.7):
+            self.confidence_threshold = confidence_threshold
+
+        def predict(self, video_path, progress_callback=None, analysis_roi=None):
+            points = [point(0, 1.0), point(1, 2.0)]
+            return points, VideoInfo(Path(video_path), 1280, 720, 1.0, 2, 2, 3.0), SimpleNamespace(
+                model_width=512, model_height=288, confidence_threshold=self.confidence_threshold,
+                step=3, maximum_displacement_pixels=100.0,
+            )
+
+        def predict_intervals(self, *args, **kwargs):
+            calls["refine"] += 1
+            raise AssertionError("stage two must be skipped when stage one has no rallies")
+
+    fake_loaded = SimpleNamespace(component_version="1.0.0")
+    monkeypatch.setenv("TTCUT_BLURBALL_WEIGHTS", "blurball.pt")
+    monkeypatch.setattr("ttcut_worker.worker.load_blurball", lambda path, device: fake_loaded)
+    monkeypatch.setattr("ttcut_worker.worker.BlurBallPredictor", FakeBlurBallPredictor)
+    monkeypatch.setattr("ttcut_worker.worker.detect_blurball_bounce_frames", lambda points, calibration: [])
+
+    request = valid_request()
+    request["schema_version"] = 2
+    request.pop("blurball_confidence_threshold", None)
+    request["analysis"] = {
+        "mode": "two_stage",
+        "stage1_confidence_threshold": 0.3,
+        "stage2_confidence_threshold": 0.7,
+    }
+    result = analyze(request)
+
+    assert calls["refine"] == 0
+    assert result["bounce_times_seconds"] == []
+    assert result["rallies"] == []

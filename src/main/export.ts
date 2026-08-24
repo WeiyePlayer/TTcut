@@ -1,4 +1,4 @@
-import { access, mkdir, open, rename, rm, stat, statfs, writeFile } from 'node:fs/promises';
+import { access, copyFile, mkdir, open, rename, rm, stat, statfs, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { dialog, type BrowserWindow } from 'electron';
@@ -893,6 +893,7 @@ async function executeCustomArtifactExport(
   components: { ffmpeg: string; ffprobe: string; mediaEncoder: MediaEncoder } | null,
 ): Promise<void> {
   const analysis = record.analysis;
+  const sourceVideoPath = analysis.source_video?.path ?? analysis.video.path;
   let terminalEvent: Extract<AppEvent, { type: 'export-result' | 'error' }> | null = null;
   const rallyVideos: CustomArtifactExportResult['rallyVideos'] = [];
   const failedRallies: CustomArtifactFailure[] = [];
@@ -909,13 +910,27 @@ async function executeCustomArtifactExport(
 
     if (outputs.premiereXml) {
       let partialPath: string | null = null;
+      let cfrPartialPath: string | null = null;
+      let cfrFinalPath: string | null = null;
       try {
         assertExportNotCancelled(taskId);
         send(window, { type: 'progress', data: { taskId, kind: 'export', stage: 'writing-xml', percent: 2, current: 0, total: segments.length } });
-        const base = path.basename(analysis.video.path, path.extname(analysis.video.path));
+        const base = path.basename(sourceVideoPath, path.extname(sourceVideoPath));
         const finalPath = path.join(outputDirectory, `${base}_TTcut_自定义.xml`);
         partialPath = path.join(outputDirectory, `.${base}_TTcut_自定义.${taskId}.partial.xml`);
-        const generated = buildPremiereXml(analysis.video, segments, `${base}_TTcut_自定义`);
+        let xmlMetadata = analysis.video;
+        if (analysis.processing?.mode === 'normalized_cfr') {
+          const cfrName = `${base}_TTcut_CFR.mp4`;
+          const cfrPath = path.join(outputDirectory, cfrName);
+          cfrPartialPath = path.join(outputDirectory, `.${cfrName}.${taskId}.partial`);
+          await copyFile(analysis.video.path, cfrPartialPath);
+          assertExportNotCancelled(taskId);
+          await rename(cfrPartialPath, cfrPath);
+          cfrPartialPath = null;
+          cfrFinalPath = cfrPath;
+          xmlMetadata = { ...analysis.video, path: cfrPath };
+        }
+        const generated = buildPremiereXml(xmlMetadata, segments, `${base}_TTcut_自定义`);
         await writeFile(partialPath, generated.xml, 'utf8');
         assertExportNotCancelled(taskId);
         await rename(partialPath, finalPath);
@@ -924,6 +939,8 @@ async function executeCustomArtifactExport(
       } catch (error) {
         assertExportNotCancelled(taskId);
         if (partialPath) await rm(partialPath, { force: true }).catch(() => undefined);
+        if (cfrPartialPath) await rm(cfrPartialPath, { force: true }).catch(() => undefined);
+        if (cfrFinalPath) await rm(cfrFinalPath, { force: true }).catch(() => undefined);
         xmlFailure = artifactFailure(error, 'PREMIERE_XML_FAILED');
         await logLine(taskId, 'ERROR', `Premiere XML failed: ${xmlFailure.message}`);
       }
@@ -1060,6 +1077,7 @@ export async function startExport(window: BrowserWindow, rawRequest: ExportReque
   const selection = request.selection;
   const record = await getHistoryStore().open(request.analysis_id);
   const analysis = record.analysis;
+  const sourceVideoPath = analysis.source_video?.path ?? analysis.video.path;
   if (hasActiveTasks()) throw new Error('TASK_BUSY');
   const outputs = customArtifactOutputs(request);
   const artifactExport = outputs.rallyVideos || outputs.premiereXml;
@@ -1078,7 +1096,7 @@ export async function startExport(window: BrowserWindow, rawRequest: ExportReque
   if (outputs.rallyVideos && !outputs.premiereXml && !mediaAvailable) throw new Error('MEDIA_COMPONENT_MISSING');
   const taskId = randomUUID();
   if (artifactExport) {
-    const outputDirectory = await createCustomArtifactDirectory(analysis.video.path);
+    const outputDirectory = await createCustomArtifactDirectory(sourceVideoPath);
     let taskTracked = false;
     try {
       beginTrackedTask(taskId);
@@ -1109,7 +1127,7 @@ export async function startExport(window: BrowserWindow, rawRequest: ExportReque
     ffprobe: components.ffprobe,
     mediaEncoder: components.mediaEncoder,
   };
-  const output = await chooseOutput(window, analysis.video.path, request);
+  const output = await chooseOutput(window, sourceVideoPath, request);
   const partial = path.join(path.dirname(output), `.${path.basename(output, '.mp4')}.${taskId}.partial.mp4`);
   const duration = expectedOutputDuration(groups);
   beginTrackedTask(taskId);

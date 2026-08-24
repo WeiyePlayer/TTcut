@@ -10,6 +10,7 @@ import numpy as np
 import torch
 
 from .blurball_models import LoadedBlurBall
+from .analysis_intervals import interval_index_for_time
 from .errors import DeviceError, VideoError
 from .roi import AnalysisRoi, model_dimensions
 from .types import TrajectoryPoint
@@ -127,14 +128,15 @@ def _decode_heatmap(
     model_to_roi: np.ndarray,
     origin_x: int,
     origin_y: int,
+    confidence_threshold: float = BLURBALL_CONFIDENCE_THRESHOLD,
 ) -> tuple[tuple[float, float, float], ...]:
     import cv2
 
-    if heatmap.ndim != 2 or not np.isfinite(heatmap).all() or float(np.max(heatmap)) <= BLURBALL_CONFIDENCE_THRESHOLD:
+    if heatmap.ndim != 2 or not np.isfinite(heatmap).all() or float(np.max(heatmap)) <= confidence_threshold:
         return ()
     _, thresholded = cv2.threshold(
         heatmap,
-        BLURBALL_CONFIDENCE_THRESHOLD,
+        confidence_threshold,
         1,
         cv2.THRESH_BINARY,
     )
@@ -157,15 +159,23 @@ def _decode_heatmap(
 
 
 class BlurBallPredictor:
-    def __init__(self, loaded: LoadedBlurBall, batch_size: int | None = None):
+    def __init__(
+        self,
+        loaded: LoadedBlurBall,
+        batch_size: int | None = None,
+        confidence_threshold: float = BLURBALL_CONFIDENCE_THRESHOLD,
+    ):
         if loaded.device.type not in {"cpu", "cuda"}:
             raise ValueError("BlurBall inference requires a CPU or CUDA device.")
         if batch_size is None:
             batch_size = BLURBALL_CPU_BATCH_SIZE if loaded.device.type == "cpu" else BLURBALL_BATCH_SIZE
         if batch_size <= 0:
             raise ValueError("BlurBall inference requires a positive batch size.")
+        if not math.isfinite(confidence_threshold) or not 0 <= confidence_threshold <= 1:
+            raise ValueError("BlurBall confidence threshold must be between 0 and 1.")
         self.loaded = loaded
         self.batch_size = batch_size
+        self.confidence_threshold = confidence_threshold
 
     @staticmethod
     def _window(
@@ -263,6 +273,7 @@ class BlurBallPredictor:
                         model_to_roi,
                         origin_x,
                         origin_y,
+                        self.confidence_threshold,
                     )
                     selected = tracker.update(detections)
                     if selected is None:
@@ -317,6 +328,188 @@ class BlurBallPredictor:
             average_predictor_fps=len(points) / elapsed if elapsed else 0.0,
             model_width=input_width,
             model_height=input_height,
+            confidence_threshold=self.confidence_threshold,
+            peak_cuda_memory_bytes=(
+                int(torch.cuda.max_memory_allocated(self.loaded.device)) if is_cuda else 0
+            ),
+        )
+
+    def predict_intervals(
+        self,
+        video_path: str | Path,
+        intervals: Sequence[tuple[float, float]],
+        progress_callback=None,
+        analysis_roi: AnalysisRoi | None = None,
+        confidence_threshold: float | None = None,
+    ) -> tuple[list[TrajectoryPoint], VideoInfo, BlurBallPredictionStats]:
+        """Predict one center-frame result per source frame inside disjoint intervals."""
+        threshold = self.confidence_threshold if confidence_threshold is None else confidence_threshold
+        if not math.isfinite(threshold) or not 0 <= threshold <= 1:
+            raise ValueError("BlurBall confidence threshold must be between 0 and 1.")
+        normalized_intervals = tuple((float(start), float(end)) for start, end in intervals)
+        if any(
+            not math.isfinite(start)
+            or not math.isfinite(end)
+            or start < 0
+            or end < start
+            or (index and start <= normalized_intervals[index - 1][1])
+            for index, (start, end) in enumerate(normalized_intervals)
+        ):
+            raise ValueError("BlurBall refinement intervals must be sorted and disjoint.")
+        if not normalized_intervals:
+            raise ValueError("BlurBall refinement requires at least one interval.")
+
+        started = time.perf_counter()
+        reader = StreamingVideoReader(video_path)
+        if analysis_roi is not None and (
+            analysis_roi.source_width != reader.info.width
+            or analysis_roi.source_height != reader.info.height
+        ):
+            raise VideoError("The BlurBall analysis ROI dimensions do not match the video.")
+        roi_width = analysis_roi.width if analysis_roi is not None else reader.info.width
+        roi_height = analysis_roi.height if analysis_roi is not None else reader.info.height
+        if roi_width <= 0 or roi_height <= 0:
+            raise VideoError("The BlurBall analysis ROI is empty.")
+        input_width, input_height = model_dimensions(
+            analysis_roi,
+            reader.info.width,
+            reader.info.height,
+        )
+        source_to_model, model_to_roi = _affine_transforms(
+            roi_width,
+            roi_height,
+            input_width,
+            input_height,
+        )
+        origin_x = analysis_roi.x0 if analysis_roi is not None else 0
+        origin_y = analysis_roi.y0 if analysis_roi is not None else 0
+        total = reader.info.metadata_frame_count or 0
+        if progress_callback:
+            progress_callback(0, total)
+        is_cuda = self.loaded.device.type == "cuda"
+        if is_cuda:
+            torch.cuda.reset_peak_memory_stats(self.loaded.device)
+        tracker = _OnlineTracker(BLURBALL_MAX_DISPLACEMENT_PIXELS)
+        current_interval: int | None = None
+        points: list[TrajectoryPoint] = []
+        windows: list[_PreparedWindow] = []
+        centers: list[FramePacket] = []
+        inference_seconds = 0.0
+
+        def run_batch() -> None:
+            nonlocal inference_seconds
+            if not windows:
+                return
+            inputs = np.stack([window.input for window in windows])
+            tensor = torch.from_numpy(inputs).to(self.loaded.device, non_blocking=is_cuda)
+            try:
+                if is_cuda:
+                    torch.cuda.synchronize(self.loaded.device)
+                inference_started = time.perf_counter()
+                if is_cuda:
+                    with torch.inference_mode(), torch.autocast(
+                        device_type="cuda",
+                        dtype=torch.float16,
+                    ):
+                        output = self.loaded.model(tensor)[0].sigmoid()
+                    torch.cuda.synchronize(self.loaded.device)
+                else:
+                    with torch.inference_mode():
+                        output = self.loaded.model(tensor)[0].sigmoid()
+                inference_seconds += time.perf_counter() - inference_started
+                heatmaps = output.float().cpu().numpy()
+            except RuntimeError as error:
+                if is_cuda and "out of memory" in str(error).lower():
+                    torch.cuda.empty_cache()
+                    raise DeviceError("CUDA ran out of memory during BlurBall inference.") from error
+                raise
+            for window_index, center in enumerate(centers):
+                detections = _decode_heatmap(
+                    heatmaps[window_index, 1],
+                    model_to_roi,
+                    origin_x,
+                    origin_y,
+                    threshold,
+                )
+                selected = tracker.update(detections)
+                if selected is None:
+                    points.append(TrajectoryPoint(
+                        center.index, center.time, 0, 0, 0, "missing", 0.0, center.time_source,
+                    ))
+                else:
+                    x, y, score = selected
+                    points.append(TrajectoryPoint(
+                        center.index, center.time, 1, int(round(x)), int(round(y)),
+                        "blurball", float(score), center.time_source,
+                    ).normalized(reader.info.width, reader.info.height))
+            windows.clear()
+            centers.clear()
+
+        def enqueue(window_packets: list[FramePacket], center: FramePacket) -> None:
+            nonlocal current_interval, tracker
+            interval_index = interval_index_for_time(normalized_intervals, center.time)
+            if interval_index is None:
+                run_batch()
+                current_interval = None
+            else:
+                if interval_index != current_interval:
+                    run_batch()
+                    tracker = _OnlineTracker(BLURBALL_MAX_DISPLACEMENT_PIXELS)
+                    current_interval = interval_index
+                windows.append(self._window(
+                    window_packets,
+                    source_to_model,
+                    analysis_roi,
+                    input_width,
+                    input_height,
+                ))
+                centers.append(center)
+                if len(windows) == self.batch_size:
+                    run_batch()
+            if progress_callback:
+                progress_callback(center.index + 1, total)
+
+        first: FramePacket | None = None
+        older: FramePacket | None = None
+        previous: FramePacket | None = None
+        for packet in reader:
+            if first is None:
+                first = packet
+                continue
+            if previous is None:
+                enqueue([first, first, packet], first)
+                older = first
+                previous = packet
+                continue
+            if older is None:
+                raise VideoError("BlurBall refinement lost rolling frame context.")
+            enqueue([older, previous, packet], previous)
+            older = previous
+            previous = packet
+        if first is not None:
+            if previous is None:
+                enqueue([first, first, first], first)
+            else:
+                if older is None:
+                    raise VideoError("BlurBall refinement lost trailing frame context.")
+                enqueue([older, previous, previous], previous)
+        run_batch()
+        info = reader.final_info()
+        if progress_callback:
+            progress_callback(total or info.decoded_frame_count or 0, total or info.decoded_frame_count or 0)
+        elapsed = time.perf_counter() - started
+        detected = sum(point.visibility for point in points)
+        return points, info, BlurBallPredictionStats(
+            detected_frames=detected,
+            missing_frames=len(points) - detected,
+            inference_seconds=inference_seconds,
+            average_inference_fps=len(points) / inference_seconds if inference_seconds else 0.0,
+            predictor_seconds=elapsed,
+            average_predictor_fps=len(points) / elapsed if elapsed else 0.0,
+            model_width=input_width,
+            model_height=input_height,
+            confidence_threshold=threshold,
+            step=1,
             peak_cuda_memory_bytes=(
                 int(torch.cuda.max_memory_allocated(self.loaded.device)) if is_cuda else 0
             ),

@@ -8,7 +8,7 @@ TTcut is a local automatic table-tennis video cutter for players and enthusiasts
 
 Videos, analysis results, and history stay on the local computer. TTcut requires no account, uploads no video, and collects no telemetry. An internet connection is required when installing the resources needed for the first run; analysis, preview, and cutting can run offline after setup.
 
-> The current stable release is `v1.2.8` for Windows x64.
+> The current stable release is `v1.2.9` for Windows x64.
 
 ## Download and installation
 
@@ -20,14 +20,14 @@ Videos, analysis results, and history stay on the local computer. TTcut requires
 
 TTcut detects an NVIDIA GPU automatically and falls back to CPU if accelerated setup or its self-test fails. Its video-processing capability reads media information, cuts and joins segments, and validates exported files.
 
-## What's new in v1.2.8
+## What's new in v1.2.9
 
-- Refined the custom-cut page and timeline details so creating, deleting, previewing, and resizing clips is clearer and more reliable.
-- Improved desktop layout, control states, and upload guidance for small windows and high-DPI displays.
-- Unified the local analysis flow for new videos and automatically removes obsolete settings left by older versions.
-- Fixed timeline scroll bounds, batch-task behavior, and several UI interactions.
+- Settings now offers Analysis precision: Default retains the established full-video analysis, while High precision first finds candidate rallies and then runs a finer second analysis over those intervals. It takes longer.
+- After calibration, variable-frame-rate video is preferentially converted to constant-frame-rate processing media for analysis, preview, cutting, and newly created XML. The original video remains the identity, calibration, and default-output source.
+- If constant-frame-rate preparation runs out of space, transcoding fails, or output validation fails, TTcut shows a clear warning and continues analysis with the original variable-frame-rate video.
+- Improved the rally-analysis flow and settings defaults, and fixed related progress, history, and export hand-offs.
 
-See the [v1.2.8 release notes](docs/release-notes-v1.2.8.en.md) for the complete details.
+See the [v1.2.9 release notes](docs/release-notes-v1.2.9.en.md) for the complete details.
 
 ## Contact the author on WeChat: m2924931661
 
