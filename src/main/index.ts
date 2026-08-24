@@ -8,7 +8,15 @@ import {
   protocol,
   shell,
 } from 'electron';
-import { appSettingsSchema, calibrationChoiceSchema, exportRequestSchema, historySummarySchema } from '../shared/contracts';
+import {
+  BLURBALL_CONFIDENCE_THRESHOLD_MAX,
+  BLURBALL_CONFIDENCE_THRESHOLD_MIN,
+  BLURBALL_ANALYSIS_MODE_VALUES,
+  appSettingsSchema,
+  calibrationChoiceSchema,
+  exportRequestSchema,
+  historySummarySchema,
+} from '../shared/contracts';
 import { IPC } from '../shared/ipc';
 import { startAnalysis } from './analysis';
 import { startAutoCalibration } from './calibration';
@@ -179,11 +187,27 @@ function registerIpc(): void {
     if (device !== 'auto' && device !== 'cuda' && device !== 'cpu') throw new Error('INVALID_REQUEST');
     const historyVisibility = record.historyVisibility;
     if (historyVisibility !== 'visible' && historyVisibility !== 'deferred') throw new Error('INVALID_REQUEST');
+    const analysisMode = record.analysisMode;
+    if (!BLURBALL_ANALYSIS_MODE_VALUES.includes(analysisMode as typeof BLURBALL_ANALYSIS_MODE_VALUES[number])) throw new Error('INVALID_REQUEST');
+    const validateThreshold = (value: unknown): value is number => typeof value === 'number'
+      && Number.isFinite(value)
+      && value >= BLURBALL_CONFIDENCE_THRESHOLD_MIN
+      && value <= BLURBALL_CONFIDENCE_THRESHOLD_MAX;
+    const blurballConfidenceThreshold = record.blurballConfidenceThreshold;
+    const blurballStage1ConfidenceThreshold = record.blurballStage1ConfidenceThreshold;
+    const blurballStage2ConfidenceThreshold = record.blurballStage2ConfidenceThreshold;
+    if (!validateThreshold(blurballConfidenceThreshold)
+      || !validateThreshold(blurballStage1ConfidenceThreshold)
+      || !validateThreshold(blurballStage2ConfidenceThreshold)) throw new Error('INVALID_REQUEST');
     return startAnalysis(currentWindow(), {
       videoPath: record.videoPath,
       calibrationChoice: calibrationChoiceSchema.parse(record.calibrationChoice),
       device,
       historyVisibility,
+      analysisMode: analysisMode as 'full' | 'two_stage',
+      blurballConfidenceThreshold,
+      blurballStage1ConfidenceThreshold,
+      blurballStage2ConfidenceThreshold,
     });
   });
   ipcMain.handle(IPC.exportStart, async (_event, value: unknown) => {

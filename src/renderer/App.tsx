@@ -1,5 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { AnalysisResultV1, AppSettings, Calibration, CutSelectionV1, ExportRequest, ExportResult, HistorySummaryV1, UpdateState, VideoMetadata } from '../shared/contracts';
+import {
+  BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT,
+  BLURBALL_STAGE1_CONFIDENCE_THRESHOLD_DEFAULT,
+  type AnalysisResultV1,
+  type AppSettings,
+  type Calibration,
+  type CutSelectionV1,
+  type ExportRequest,
+  type ExportResult,
+  type HistorySummaryV1,
+  type UpdateState,
+  type VideoMetadata,
+} from '../shared/contracts';
 import type { AppEvent, BootstrapData, PendingComponentImport, SelectedVideo } from '../shared/api';
 import { DONATION_URL, GITHUB_URL, RELEASES_URL, WEBSITE_URL } from '../shared/urls';
 import { formatTimestamp } from '../domain/time';
@@ -66,7 +78,8 @@ export function App() {
   const [bootstrap, setBootstrap] = useState<BootstrapData | null>(null);
   const [settings, setSettings] = useState<AppSettings>({
     language: 'zh-CN', calibration_method: 'automatic',
-    pre_roll_seconds: 2.5, post_roll_seconds: 2,
+    pre_roll_seconds: 2.5, post_roll_seconds: 1,
+    analysis_mode: 'full',
   });
   const [view, setView] = useState<View>('auto');
   const [step, setStep] = useState<Step>('select');
@@ -80,6 +93,9 @@ export function App() {
   const [updateState, setUpdateState] = useState<UpdateState>({ status: 'idle', version: null, message: null });
   const [mode, setMode] = useState<'all' | 'highlight' | 'custom'>('all');
   const [threshold, setThreshold] = useState<3 | 5 | 7>(5);
+  const blurballConfidenceThreshold = BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT;
+  const blurballStage1ConfidenceThreshold = BLURBALL_STAGE1_CONFIDENCE_THRESHOLD_DEFAULT;
+  const blurballStage2ConfidenceThreshold = BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT;
   const [customDraft, setCustomDraft] = useState<CustomRallyClip[] | null>(null);
   const [customOutputs, setCustomOutputs] = useState<NonNullable<ExportRequest['outputs']>>({
     combined_video: true,
@@ -300,6 +316,10 @@ export function App() {
         calibrationChoice: useManualCalibration ? { method: 'manual', calibration: calibrationValue! } : { method: 'automatic' },
         device: 'auto',
         historyVisibility: 'visible',
+        analysisMode: settings.analysis_mode,
+        blurballConfidenceThreshold,
+        blurballStage1ConfidenceThreshold,
+        blurballStage2ConfidenceThreshold,
       }));
     } catch (caught) {
       if (videoTaskOwnerRef.current === 'single') updateVideoTaskOwner(null);
@@ -347,9 +367,12 @@ export function App() {
   };
 
   const saveRolls = async (partial: Partial<AppSettings>) => {
-    const next = await window.ttcut.saveSettings({ ...settings, ...partial });
+    const next = { ...settings, ...partial };
     setSettings(next);
     settingsRef.current = next;
+    const saved = await window.ttcut.saveSettings(next);
+    setSettings(saved);
+    settingsRef.current = saved;
   };
 
   const loadHistory = async () => {
@@ -574,6 +597,10 @@ export function App() {
               initialVideos={multiVideos}
               preRoll={settings.pre_roll_seconds}
               postRoll={settings.post_roll_seconds}
+              analysisMode={settings.analysis_mode}
+              blurballConfidenceThreshold={blurballConfidenceThreshold}
+              blurballStage1ConfidenceThreshold={blurballStage1ConfidenceThreshold}
+              blurballStage2ConfidenceThreshold={blurballStage2ConfidenceThreshold}
               language={settings.language}
               onTaskStateChange={handleMultiTaskStateChange}
               onOpenAnalysis={(id) => { discardMulti(); void openHistory(id); }}
@@ -618,6 +645,26 @@ export function App() {
                   options={[{ value: 'zh-CN', label: t.chinese }, { value: 'en', label: t.english }] as const}
                   value={settings.language as Language}
                 />
+              </article>
+              <article className="card detector-settings-card">
+                <section className="detector-setting">
+                  <div>
+                    <h2>{t.blurballAnalysisMode}</h2>
+                    <p>{t.blurballAnalysisModeDetail}</p>
+                  </div>
+                  <GlassRadioGroup
+                    ariaLabel={t.blurballAnalysisMode}
+                    className="compact"
+                    idPrefix="settings-blurball-mode"
+                    name="settings-blurball-mode"
+                    onChange={(analysis_mode) => void saveRolls({ analysis_mode })}
+                    options={[
+                      { value: 'full', label: t.blurballModeDefault },
+                      { value: 'two_stage', label: t.blurballModeHighPrecision },
+                    ] as const}
+                    value={settings.analysis_mode}
+                  />
+                </section>
               </article>
               <article className="card setting-card">
                 <div><h2>{settings.language === 'zh-CN' ? '球台标定' : 'Table calibration'}</h2><p>{settings.language === 'zh-CN' ? '选择单视频流程使用的球台标定方式。多任务会先自动标定，失败项目可手动补充。' : 'Choose the calibration method for single videos. Batch tasks calibrate automatically first, with manual recovery for failed items.'}</p></div>

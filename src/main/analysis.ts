@@ -7,6 +7,7 @@ import {
   workerEventSchema,
   type Calibration,
   type CalibrationChoice,
+  type BlurBallAnalysisMode,
   type WorkerEventV1,
 } from '../shared/contracts';
 import type { AppEvent } from '../shared/api';
@@ -31,6 +32,10 @@ export async function startAnalysis(
     calibrationChoice: CalibrationChoice;
     device: 'auto' | 'cuda' | 'cpu';
     historyVisibility: 'visible' | 'deferred';
+    analysisMode: BlurBallAnalysisMode;
+    blurballConfidenceThreshold: number;
+    blurballStage1ConfidenceThreshold: number;
+    blurballStage2ConfidenceThreshold: number;
   },
 ): Promise<string> {
   if (hasActiveTasks()) throw new Error('TASK_BUSY');
@@ -45,7 +50,7 @@ export async function startAnalysis(
   const components = await resolveUsableAnalysisComponents(requestedDevice);
   if (!components.python) throw new Error('RUNTIME_MISSING');
   const request = analysisRequestSchema.parse({
-    schema_version: 1,
+    schema_version: 2,
     task_id: taskId,
     video_path: metadata.path,
     device: requestedDevice,
@@ -56,6 +61,13 @@ export async function startAnalysis(
       variable_frame_rate: metadata.variable_frame_rate,
     },
     calibration_choice: value.calibrationChoice,
+    analysis: value.analysisMode === 'full'
+      ? { mode: 'full', confidence_threshold: value.blurballConfidenceThreshold }
+      : {
+        mode: 'two_stage',
+        stage1_confidence_threshold: value.blurballStage1ConfidenceThreshold,
+        stage2_confidence_threshold: value.blurballStage2ConfidenceThreshold,
+      },
   });
   const child = spawnTracked(taskId, components.python, ['-m', 'ttcut_worker.worker'], {
     cwd: components.worker,
@@ -89,7 +101,7 @@ export async function startAnalysis(
             taskId,
             kind: 'analysis',
             stage: parsed.stage,
-            percent: overallAnalysisProgress(parsed.stage, parsed.percent, value.calibrationChoice.method),
+            percent: overallAnalysisProgress(parsed.stage, parsed.percent, value.calibrationChoice.method, value.analysisMode),
             current: parsed.current,
             total: parsed.total,
           },

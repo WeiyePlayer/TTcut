@@ -7,6 +7,11 @@ from pathlib import Path
 from .errors import InvalidRequestError
 
 
+BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT = 0.7
+BLURBALL_CONFIDENCE_THRESHOLD_MIN = 0.1
+BLURBALL_CONFIDENCE_THRESHOLD_MAX = 0.95
+
+
 def validate_request(value: object) -> dict:
     base_fields = {
         "schema_version",
@@ -16,10 +21,16 @@ def validate_request(value: object) -> dict:
         "video_metadata",
         "calibration_choice",
     }
-    if not isinstance(value, dict) or value.get("schema_version") != 1:
+    if not isinstance(value, dict) or value.get("schema_version") not in {1, 2}:
         raise InvalidRequestError("Unsupported analysis request schema.")
-    if set(value) != base_fields:
-        raise InvalidRequestError("Unsupported analysis request schema fields.")
+    version = value["schema_version"]
+    threshold_field = "blurball_confidence_threshold"
+    if version == 1:
+        if set(value) not in (base_fields, base_fields | {threshold_field}):
+            raise InvalidRequestError("Unsupported analysis request schema fields.")
+    else:
+        if set(value) != base_fields | {"analysis"}:
+            raise InvalidRequestError("Unsupported analysis request schema fields.")
     try:
         uuid.UUID(str(value["task_id"]))
         if value["device"] not in {"auto", "cuda", "cpu"}:
@@ -60,6 +71,22 @@ def validate_request(value: object) -> dict:
             raise ValueError("frame_count")
         if not isinstance(metadata["variable_frame_rate"], bool):
             raise ValueError("variable_frame_rate")
+        if version == 1:
+            confidence_threshold = value.get(threshold_field, BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT)
+            _validate_threshold(confidence_threshold, threshold_field)
+        else:
+            analysis = value["analysis"]
+            if not isinstance(analysis, dict) or analysis.get("mode") not in {"full", "two_stage"}:
+                raise ValueError("analysis")
+            if analysis["mode"] == "full":
+                if set(analysis) != {"mode", "confidence_threshold"}:
+                    raise ValueError("analysis")
+                _validate_threshold(analysis["confidence_threshold"], "confidence_threshold")
+            else:
+                if set(analysis) != {"mode", "stage1_confidence_threshold", "stage2_confidence_threshold"}:
+                    raise ValueError("analysis")
+                _validate_threshold(analysis["stage1_confidence_threshold"], "stage1_confidence_threshold")
+                _validate_threshold(analysis["stage2_confidence_threshold"], "stage2_confidence_threshold")
         choice = value["calibration_choice"]
         if not isinstance(choice, dict) or choice.get("method") not in {"manual", "automatic", "precalibrated"}:
             raise ValueError("calibration_choice")
@@ -98,3 +125,26 @@ def validate_request(value: object) -> dict:
     except (KeyError, TypeError, ValueError) as exc:
         raise InvalidRequestError("Analysis request fields are invalid.") from exc
     return value
+
+
+def _validate_threshold(value: object, name: str) -> None:
+    if (
+        not isinstance(value, (int, float))
+        or isinstance(value, bool)
+        or not math.isfinite(value)
+        or not BLURBALL_CONFIDENCE_THRESHOLD_MIN <= value <= BLURBALL_CONFIDENCE_THRESHOLD_MAX
+    ):
+        raise ValueError(name)
+
+
+def analysis_config(request: dict) -> dict:
+    """Return the normalized BlurBall mode config while preserving v1 requests."""
+    if request.get("schema_version") == 1:
+        return {
+            "mode": "full",
+            "confidence_threshold": request.get(
+                "blurball_confidence_threshold",
+                BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT,
+            ),
+        }
+    return request["analysis"]
