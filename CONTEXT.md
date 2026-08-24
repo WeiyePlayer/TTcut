@@ -5,6 +5,31 @@
 An immutable checkpoint bundled with the application and verified by filename,
 size, and SHA-256 before packaging.
 
+## BlurBall Analysis Mode
+
+The selected execution route for a new BlurBall analysis. `full` (shown as
+“默认”) runs the existing whole-video pass. `two_stage` (shown as “高精”)
+runs a full-video candidate pass followed by a center-frame refinement pass.
+The label is a product name, not an accuracy guarantee.
+
+## Candidate Rally
+
+A Rally produced by the stage-one pass of a two-stage analysis. It is used only
+to construct refinement intervals and is never returned as final analysis data.
+
+## Refinement Interval
+
+The closed time interval produced by expanding a Candidate Rally by 0.75 seconds
+on both sides, clamping it to the source duration, and taking the union of
+overlapping or touching intervals. Stage-two results are retained only when the
+center-frame timestamp belongs to one of these intervals.
+
+## Final Analysis Result
+
+The Bounce Event Times, Rally records, and Board Counts returned to the UI. In
+two-stage mode all three are computed only from the stage-two trajectory; if
+stage one produces no Candidate Rally, the final result is empty.
+
 ## Ball Model Profile
 
 The global ball-recognition route recorded on every new analysis. Bundled
@@ -126,6 +151,22 @@ _Avoid_: 3D column, crop video
 Ball positions expressed in the original video's pixel coordinate system,
 regardless of the Analysis ROI or model tensor size used for detection.
 _Avoid_: Crop-relative trajectory
+
+## 原始媒体（Source Media）
+
+用户选中的媒体文件及其路径、大小、修改时间和原始元数据。文件身份、历史指纹、封面、显示名称和默认输出名称始终绑定原始媒体。标定也读取原始媒体。
+
+## 处理媒体（Processing Media）
+
+球路分析、分析后预览和剪辑实际读取的媒体。源本来就是固定帧率时处理媒体就是原始媒体；可变帧率源优先使用 CFR 派生媒体。
+
+## CFR 派生媒体（CFR Derived Media）
+
+由 FFmpeg 从原始 VFR 媒体生成的 H.264/AAC 固定帧率 MP4，按精确目标帧率、编码器和源指纹缓存在 `<Installation Root>\data\processing-media\v1`。只有成功历史记录仍引用它时才保留。
+
+## VFR 回退（VFR Fallback）
+
+CFR 转码因空间不足、FFmpeg 失败或输出校验失败时，继续使用原始 VFR 媒体的显式结果状态。回退会在单任务和批处理行显示警告；取消或应用退出不会触发回退。
 
 ## Batch Task
 

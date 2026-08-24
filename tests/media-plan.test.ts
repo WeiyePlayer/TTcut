@@ -3,6 +3,7 @@ import type { CutGroup, VideoMetadata } from '../src/shared/contracts';
 import {
   buildConcatArgs,
   buildConcatManifest,
+  buildCfrNormalizationArgs,
   buildReencodeArgs,
   buildSegmentReencodeArgs,
   buildStreamCopyArgs,
@@ -52,6 +53,23 @@ const oneGroup: CutGroup = {
 };
 
 describe('media export planning', () => {
+  it.each(['libopenh264', 'libx264'] as const)('builds exact CFR normalization arguments for %s', (encoder) => {
+    const args = buildCfrNormalizationArgs(
+      metadata.path,
+      'processing.partial.mp4',
+      { ...metadata, variable_frame_rate: true, nominal_fps_ratio: '60000/1001', rotation: -90 },
+      '60000/1001',
+      encoder,
+    );
+    expect(args).toEqual(expect.arrayContaining([
+      '-autorotate', '-vf', 'fps=60000/1001,setsar=1/1', '-fps_mode:v', 'cfr',
+      '-metadata:s:v:0', 'rotate=0', '-af', 'aresample=async=1:first_pts=0,apad=whole_dur=30.000000', '-shortest',
+    ]));
+    expect(args).toContain(encoder);
+    expect(args).toContain(metadata.path);
+    expect(args).toContain('processing.partial.mp4');
+  });
+
   it('keeps every path as its own argument and never forces CFR', () => {
     const output = 'D:\\output folder\\match_ttcut.partial.mp4';
     const args = buildReencodeArgs(metadata.path, output, [oneGroup], metadata);

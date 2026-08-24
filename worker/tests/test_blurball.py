@@ -100,6 +100,45 @@ def test_cpu_predictor_uses_bounded_batch_and_skips_cuda_calls(monkeypatch):
     assert stats.peak_cuda_memory_bytes == 0
 
 
+def test_interval_predictor_keeps_only_center_frames_and_resets_gaps(monkeypatch):
+    class FakeReader:
+        def __init__(self, value):
+            self.info = VideoInfo(Path(value), 96, 64, 30.0, 5, None, 5 / 30)
+
+        def __iter__(self):
+            for index in range(5):
+                yield FramePacket(
+                    index, index / 30, "fps_estimation",
+                    np.zeros((64, 96, 3), dtype=np.uint8),
+                )
+
+        def final_info(self):
+            return VideoInfo(self.info.path, 96, 64, 30.0, 5, 5, 5 / 30, "fps_estimation")
+
+    class FakeModel:
+        def __init__(self):
+            self.calls = 0
+
+        def __call__(self, tensor):
+            self.calls += 1
+            batch, _, height, width = tensor.shape
+            logits = torch.full((batch, 3, height, width), -10.0, device=tensor.device)
+            logits[:, :, height // 2, width // 2] = 10.0
+            return {0: logits}
+
+    model = FakeModel()
+    predictor = BlurBallPredictor(LoadedBlurBall(model, torch.device("cpu")))
+    monkeypatch.setattr("ttcut_worker.blurball_predictor.StreamingVideoReader", FakeReader)
+
+    points, _, stats = predictor.predict_intervals("fake.mp4", ((1 / 30, 3 / 30),))
+
+    assert [item.frame for item in points] == [1, 2, 3]
+    assert [round(item.time, 6) for item in points] == [round(1 / 30, 6), round(2 / 30, 6), round(3 / 30, 6)]
+    assert all(item.source == "blurball" for item in points)
+    assert stats.step == 1
+    assert model.calls == 1
+
+
 def test_fixed_blurball_parameters_match_product_contract():
     assert BLURBALL_CONFIDENCE_THRESHOLD == 0.7
     assert BLURBALL_STEP == 3
@@ -124,6 +163,14 @@ def test_affine_decode_maps_weighted_blob_back_to_roi_coordinates():
     assert 230.0 < x < 231.0
     assert abs(y - 140.0) < 1e-4
     assert 1.69 < score < 1.71
+
+
+def test_affine_decode_uses_the_requested_confidence_threshold():
+    _, inverse = _affine_transforms(512, 288)
+    heatmap = np.zeros((288, 512), dtype=np.float32)
+    heatmap[100, 200] = 0.6
+    assert _decode_heatmap(heatmap, inverse, 0, 0) == ()
+    assert len(_decode_heatmap(heatmap, inverse, 0, 0, confidence_threshold=0.55)) == 1
 
 
 def test_blurball_bounce_uses_ttcut_expanded_table_region_and_interval():

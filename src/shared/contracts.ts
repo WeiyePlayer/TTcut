@@ -4,6 +4,14 @@ export const DEVICE_VALUES = ['auto', 'cuda', 'cpu'] as const;
 export const PRE_ROLL_VALUES = [1.5, 2.5, 5] as const;
 export const POST_ROLL_VALUES = [0.5, 1, 2, 4] as const;
 export const HIGHLIGHT_VALUES = [3, 5, 7] as const;
+export const BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT = 0.7;
+export const BLURBALL_STAGE1_CONFIDENCE_THRESHOLD_DEFAULT = 0.3;
+export const BLURBALL_CONFIDENCE_THRESHOLD_MIN = 0.1;
+export const BLURBALL_CONFIDENCE_THRESHOLD_MAX = 0.95;
+export const BLURBALL_CONFIDENCE_THRESHOLD_STEP = 0.05;
+export const BLURBALL_ANALYSIS_MODE_VALUES = ['full', 'two_stage'] as const;
+export const BLURBALL_ANALYSIS_MODE_DEFAULT = 'full' as const;
+export const BLURBALL_REFINEMENT_EXPANSION_SECONDS = 0.75;
 const LEGACY_RESULT_MODEL_PROFILES = ['tracknet_v1', 'blurball_v1'] as const;
 
 const finiteNumber = z.number().finite();
@@ -131,9 +139,45 @@ export const analysisRequestV1Schema = z.object({
   device: z.enum(DEVICE_VALUES),
   video_metadata: analysisVideoMetadataSchema,
   calibration_choice: calibrationChoiceSchema,
+  blurball_confidence_threshold: finiteNumber
+    .min(BLURBALL_CONFIDENCE_THRESHOLD_MIN)
+    .max(BLURBALL_CONFIDENCE_THRESHOLD_MAX)
+    .default(BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT),
 }).strict();
 
-export const analysisRequestSchema = analysisRequestV1Schema;
+const blurballFullAnalysisConfigSchema = z.object({
+  mode: z.literal('full'),
+  confidence_threshold: finiteNumber
+    .min(BLURBALL_CONFIDENCE_THRESHOLD_MIN)
+    .max(BLURBALL_CONFIDENCE_THRESHOLD_MAX),
+}).strict();
+
+const blurballTwoStageAnalysisConfigSchema = z.object({
+  mode: z.literal('two_stage'),
+  stage1_confidence_threshold: finiteNumber
+    .min(BLURBALL_CONFIDENCE_THRESHOLD_MIN)
+    .max(BLURBALL_CONFIDENCE_THRESHOLD_MAX),
+  stage2_confidence_threshold: finiteNumber
+    .min(BLURBALL_CONFIDENCE_THRESHOLD_MIN)
+    .max(BLURBALL_CONFIDENCE_THRESHOLD_MAX),
+}).strict();
+
+export const blurballAnalysisConfigSchema = z.discriminatedUnion('mode', [
+  blurballFullAnalysisConfigSchema,
+  blurballTwoStageAnalysisConfigSchema,
+]);
+
+export const analysisRequestV2Schema = z.object({
+  schema_version: z.literal(2),
+  task_id: z.string().uuid(),
+  video_path: z.string().min(1),
+  device: z.enum(DEVICE_VALUES),
+  video_metadata: analysisVideoMetadataSchema,
+  calibration_choice: calibrationChoiceSchema,
+  analysis: blurballAnalysisConfigSchema,
+}).strict();
+
+export const analysisRequestSchema = z.union([analysisRequestV1Schema, analysisRequestV2Schema]);
 
 export const videoMetadataSchema = z.object({
   path: z.string().min(1),
@@ -142,6 +186,8 @@ export const videoMetadataSchema = z.object({
   height: z.number().int().positive(),
   fps: finiteNumber.positive(),
   nominal_fps: finiteNumber.positive().nullable().optional(),
+  average_fps_ratio: z.string().regex(/^\d+\/\d+$/).nullable().optional(),
+  nominal_fps_ratio: z.string().regex(/^\d+\/\d+$/).nullable().optional(),
   variable_frame_rate: z.boolean(),
   video_codec: z.string().min(1),
   audio_codec: z.string().nullable(),
@@ -181,6 +227,13 @@ export const rallySchema = z.object({
 export const analysisResultSchema = z.object({
   schema_version: z.literal(1),
   video: videoMetadataSchema,
+  source_video: videoMetadataSchema.optional(),
+  processing: z.object({
+    mode: z.enum(['source_cfr', 'normalized_cfr', 'vfr_fallback']),
+    target_fps_ratio: z.string().regex(/^\d+\/\d+$/).nullable(),
+    encoder: z.enum(['libopenh264', 'libx264']).nullable(),
+    warning_code: z.string().min(1).nullable(),
+  }).strict().optional(),
   rallies: z.array(rallySchema),
   bounce_times_seconds: z.array(finiteNumber.nonnegative()).optional(),
   calibration: calibrationSchema.optional(),
@@ -199,9 +252,21 @@ export const analysisResultSchema = z.object({
     aux_input: z.object({ width: z.number().int().positive(), height: z.number().int().positive() }).strict().nullable(),
     detection: z.object({
       confidence_threshold: finiteNumber.min(0).max(1),
-      step: z.literal(3),
+      step: z.union([z.literal(1), z.literal(3)]),
       maximum_displacement_pixels: finiteNumber.positive(),
       landing_region: z.literal('expanded_table'),
+    }).strict().optional(),
+    analysis: z.object({
+      schema_version: z.literal(2),
+      mode: z.enum(BLURBALL_ANALYSIS_MODE_VALUES),
+      interval_expansion_seconds: finiteNumber.nonnegative().optional(),
+      stages: z.array(z.object({
+        name: z.enum(['full', 'candidate', 'refinement']),
+        confidence_threshold: finiteNumber.min(0).max(1),
+        window_size: z.literal(3),
+        window_stride: z.union([z.literal(1), z.literal(3)]),
+        retained_output: z.enum(['all_window_frames', 'center_frame']),
+      }).strict()).min(1),
     }).strict().optional(),
   }).strict().optional(),
 }).strict();
@@ -218,7 +283,7 @@ const workerBase = z.object({
 export const workerEventSchema = z.discriminatedUnion('type', [
   workerBase.extend({
     type: z.literal('progress'),
-    stage: z.enum(['probe', 'table_sampling', 'table_model', 'table_inference', 'load_model', 'analysis', 'postprocess']),
+    stage: z.enum(['probe', 'table_sampling', 'table_model', 'table_inference', 'load_model', 'analysis', 'candidate_analysis', 'interval_union', 'refinement_analysis', 'postprocess']),
     current: z.number().int().nonnegative(),
     total: z.number().int().nonnegative(),
     percent: finiteNumber.min(0).max(100),
@@ -287,6 +352,7 @@ export const appSettingsSchema = z.object({
   calibration_method: z.enum(['manual', 'automatic']),
   pre_roll_seconds: z.union(PRE_ROLL_VALUES.map((value) => z.literal(value))),
   post_roll_seconds: z.union(POST_ROLL_VALUES.map((value) => z.literal(value))),
+  analysis_mode: z.enum(BLURBALL_ANALYSIS_MODE_VALUES).default(BLURBALL_ANALYSIS_MODE_DEFAULT),
 }).strict();
 
 export const historySourceSchema = z.object({
@@ -409,7 +475,10 @@ export type Calibration = z.infer<typeof calibrationSchema>;
 export type CalibrationChoice = z.infer<typeof calibrationChoiceSchema>;
 export type TableAnalysis = z.infer<typeof tableAnalysisSchema>;
 export type AnalysisRequestV1 = z.infer<typeof analysisRequestV1Schema>;
+export type AnalysisRequestV2 = z.infer<typeof analysisRequestV2Schema>;
 export type AnalysisRequest = z.infer<typeof analysisRequestSchema>;
+export type BlurBallAnalysisConfig = z.infer<typeof blurballAnalysisConfigSchema>;
+export type BlurBallAnalysisMode = typeof BLURBALL_ANALYSIS_MODE_VALUES[number];
 export type VideoMetadata = z.infer<typeof videoMetadataSchema>;
 export type Rally = z.infer<typeof rallySchema>;
 export type AnalysisResultV1 = z.infer<typeof analysisResultSchema>;
