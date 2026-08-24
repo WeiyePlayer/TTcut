@@ -2,9 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT,
   BLURBALL_STAGE1_CONFIDENCE_THRESHOLD_DEFAULT,
-  BLURBALL_CONFIDENCE_THRESHOLD_MAX,
-  BLURBALL_CONFIDENCE_THRESHOLD_MIN,
-  BLURBALL_CONFIDENCE_THRESHOLD_STEP,
   type AnalysisResultV1,
   type AppSettings,
   type Calibration,
@@ -96,9 +93,9 @@ export function App() {
   const [updateState, setUpdateState] = useState<UpdateState>({ status: 'idle', version: null, message: null });
   const [mode, setMode] = useState<'all' | 'highlight' | 'custom'>('all');
   const [threshold, setThreshold] = useState<3 | 5 | 7>(5);
-  const [blurballConfidenceThreshold, setBlurballConfidenceThreshold] = useState(BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT);
-  const [blurballStage1ConfidenceThreshold, setBlurballStage1ConfidenceThreshold] = useState(BLURBALL_STAGE1_CONFIDENCE_THRESHOLD_DEFAULT);
-  const [blurballStage2ConfidenceThreshold, setBlurballStage2ConfidenceThreshold] = useState(BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT);
+  const blurballConfidenceThreshold = BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT;
+  const blurballStage1ConfidenceThreshold = BLURBALL_STAGE1_CONFIDENCE_THRESHOLD_DEFAULT;
+  const blurballStage2ConfidenceThreshold = BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT;
   const [customDraft, setCustomDraft] = useState<CustomRallyClip[] | null>(null);
   const [customOutputs, setCustomOutputs] = useState<NonNullable<ExportRequest['outputs']>>({
     combined_video: true,
@@ -649,6 +646,26 @@ export function App() {
                   value={settings.language as Language}
                 />
               </article>
+              <article className="card detector-settings-card">
+                <section className="detector-setting">
+                  <div>
+                    <h2>{t.blurballAnalysisMode}</h2>
+                    <p>{t.blurballAnalysisModeDetail}</p>
+                  </div>
+                  <GlassRadioGroup
+                    ariaLabel={t.blurballAnalysisMode}
+                    className="compact"
+                    idPrefix="settings-blurball-mode"
+                    name="settings-blurball-mode"
+                    onChange={(analysis_mode) => void saveRolls({ analysis_mode })}
+                    options={[
+                      { value: 'full', label: t.blurballModeDefault },
+                      { value: 'two_stage', label: t.blurballModeHighPrecision },
+                    ] as const}
+                    value={settings.analysis_mode}
+                  />
+                </section>
+              </article>
               <article className="card setting-card">
                 <div><h2>{settings.language === 'zh-CN' ? '球台标定' : 'Table calibration'}</h2><p>{settings.language === 'zh-CN' ? '选择单视频流程使用的球台标定方式。多任务会先自动标定，失败项目可手动补充。' : 'Choose the calibration method for single videos. Batch tasks calibrate automatically first, with manual recovery for failed items.'}</p></div>
                 <GlassRadioGroup
@@ -689,91 +706,6 @@ export function App() {
                     value={settings.post_roll_seconds}
                   />
                 </section>
-              </article>
-              <article className="card detector-settings-card">
-                <section className="detector-setting">
-                  <div>
-                    <h2>{t.blurballAnalysisMode}</h2>
-                    <p>{t.blurballAnalysisModeDetail}</p>
-                  </div>
-                  <GlassRadioGroup
-                    ariaLabel={t.blurballAnalysisMode}
-                    className="compact"
-                    idPrefix="settings-blurball-mode"
-                    name="settings-blurball-mode"
-                    onChange={(analysis_mode) => void saveRolls({ analysis_mode })}
-                    options={[
-                      { value: 'full', label: t.blurballModeDefault },
-                      { value: 'two_stage', label: t.blurballModeHighPrecision },
-                    ] as const}
-                    value={settings.analysis_mode}
-                  />
-                </section>
-                {settings.analysis_mode === 'full' ? (
-                <section className="detector-setting">
-                  <div>
-                    <h2>{t.blurballConfidenceThreshold}</h2>
-                    <p>{t.blurballConfidenceThresholdDetail}</p>
-                  </div>
-                  <div className="confidence-threshold-control">
-                    <input
-                      aria-label={t.blurballConfidenceThreshold}
-                      aria-valuetext={blurballConfidenceThreshold.toFixed(2)}
-                      id="blurball-confidence-threshold"
-                      max={BLURBALL_CONFIDENCE_THRESHOLD_MAX}
-                      min={BLURBALL_CONFIDENCE_THRESHOLD_MIN}
-                      onChange={(event) => setBlurballConfidenceThreshold(Number(event.currentTarget.value))}
-                      step={BLURBALL_CONFIDENCE_THRESHOLD_STEP}
-                      type="range"
-                      value={blurballConfidenceThreshold}
-                    />
-                    <output htmlFor="blurball-confidence-threshold">{blurballConfidenceThreshold.toFixed(2)}</output>
-                  </div>
-                </section>
-                ) : (
-                  <>
-                    <section className="detector-setting">
-                      <div>
-                        <h2>{t.blurballStage1Threshold}</h2>
-                        <p>{t.blurballStage1ThresholdDetail}</p>
-                      </div>
-                      <div className="confidence-threshold-control">
-                        <input
-                          aria-label={t.blurballStage1Threshold}
-                          aria-valuetext={blurballStage1ConfidenceThreshold.toFixed(2)}
-                          id="blurball-stage1-confidence-threshold"
-                          max={BLURBALL_CONFIDENCE_THRESHOLD_MAX}
-                          min={BLURBALL_CONFIDENCE_THRESHOLD_MIN}
-                          onChange={(event) => setBlurballStage1ConfidenceThreshold(Number(event.currentTarget.value))}
-                          step={BLURBALL_CONFIDENCE_THRESHOLD_STEP}
-                          type="range"
-                          value={blurballStage1ConfidenceThreshold}
-                        />
-                        <output htmlFor="blurball-stage1-confidence-threshold">{blurballStage1ConfidenceThreshold.toFixed(2)}</output>
-                      </div>
-                    </section>
-                    <section className="detector-setting">
-                      <div>
-                        <h2>{t.blurballStage2Threshold}</h2>
-                        <p>{t.blurballStage2ThresholdDetail}</p>
-                      </div>
-                      <div className="confidence-threshold-control">
-                        <input
-                          aria-label={t.blurballStage2Threshold}
-                          aria-valuetext={blurballStage2ConfidenceThreshold.toFixed(2)}
-                          id="blurball-stage2-confidence-threshold"
-                          max={BLURBALL_CONFIDENCE_THRESHOLD_MAX}
-                          min={BLURBALL_CONFIDENCE_THRESHOLD_MIN}
-                          onChange={(event) => setBlurballStage2ConfidenceThreshold(Number(event.currentTarget.value))}
-                          step={BLURBALL_CONFIDENCE_THRESHOLD_STEP}
-                          type="range"
-                          value={blurballStage2ConfidenceThreshold}
-                        />
-                        <output htmlFor="blurball-stage2-confidence-threshold">{blurballStage2ConfidenceThreshold.toFixed(2)}</output>
-                      </div>
-                    </section>
-                  </>
-                )}
               </article>
               <article className="card components-card">
                 <h2>{t.components}</h2>
