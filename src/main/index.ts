@@ -232,12 +232,18 @@ function registerIpc(): void {
     if (hasActiveTasks()) throw new Error('TASK_BUSY');
     if (typeof id !== 'string') throw new Error('INVALID_REQUEST');
     const record = await getHistoryStore().open(id);
-    const metadata = await probeVideo(record.source.path);
+    const previewPath = record.analysis.processing?.mode === 'normalized_cfr'
+      ? record.analysis.video.path
+      : record.source.path;
+    const preview = await selectedVideo(previewPath);
+    const analysis = record.analysis.processing
+      ? record.analysis
+      : { ...record.analysis, video: await probeVideo(record.source.path) };
     return {
       analysisId: record.id,
-      video: await selectedVideo(record.source.path),
+      video: { ...preview, name: record.source.name },
       calibration: record.calibration,
-      analysis: { ...record.analysis, video: metadata },
+      analysis,
     };
   });
   ipcMain.handle(IPC.historyDelete, async (_event, id: unknown) => {

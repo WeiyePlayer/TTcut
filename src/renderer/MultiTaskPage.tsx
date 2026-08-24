@@ -27,6 +27,7 @@ type PointName = keyof Calibration['points'];
 type BatchItem = {
   id: string;
   video: SelectedVideo;
+  previewVideo: SelectedVideo | null;
   metadata: VideoMetadata;
   mode: BatchMode;
   threshold: 3 | 5 | 7;
@@ -68,6 +69,7 @@ async function createItems(videos: SelectedVideo[]): Promise<BatchItem[]> {
   return Promise.all(videos.map(async (video) => ({
     id: makeId(video),
     video,
+    previewVideo: null,
     metadata: await window.ttcut.probeVideo(video.path),
     mode: 'all' as const,
     threshold: 5 as const,
@@ -157,6 +159,7 @@ export function MultiTaskPage({
     remove: isEnglish ? 'Remove' : '删除',
     openRecovered: isEnglish ? 'Open retained file' : '打开保留文件',
     warning: isEnglish ? 'Exported with warning' : '已导出，但存在异常',
+    processingWarning: isEnglish ? 'Analysis used the original VFR video' : '分析已回退使用原始可变帧率视频',
     logs: isEnglish ? 'Open logs' : '打开日志',
     preview: isEnglish ? 'Preview' : '预览',
     cancel: isEnglish ? 'Cancel' : '取消',
@@ -377,9 +380,13 @@ export function MultiTaskPage({
       const mapped = active.phase === 'calibration'
         ? overallCalibrationProgress(event.data.stage, event.data.percent)
         : active.phase === 'analysis'
-          ? (itemsRef.current.find((item) => item.id === active.itemId)?.mode === 'analyze-only' ? event.data.percent : event.data.percent * 0.7)
+          ? (itemsRef.current.find((item) => item.id === active.itemId)?.mode === 'analyze-only'
+            ? event.data.percent
+            : event.data.stage === 'video_normalization'
+              ? event.data.percent
+              : event.data.percent * 0.7)
           : 70 + event.data.percent * 0.3;
-      updateItem(active.itemId, (item) => ({ ...item, progress: Math.min(100, mapped) }));
+      updateItem(active.itemId, (item) => ({ ...item, progress: Math.min(100, Math.max(item.progress, mapped)) }));
       return;
     }
     if (event.type === 'calibration-result') {
@@ -404,7 +411,16 @@ export function MultiTaskPage({
         analysis: event.data,
         processingStatus: finishedAtAnalysis ? 'done' : 'waiting',
         progress: finishedAtAnalysis ? 100 : 70,
+        exportWarning: event.data.processing?.mode === 'vfr_fallback' && event.data.processing.warning_code
+          ? { code: event.data.processing.warning_code, message: event.data.processing.warning_code }
+          : null,
       }));
+      if (event.data.processing?.mode === 'normalized_cfr') {
+        void Promise.resolve(window.ttcut.acceptDroppedVideo(event.data.video.path)).then((processed) => {
+          if (!processed) return;
+          updateItem(active.itemId, (item) => ({ ...item, previewVideo: { ...processed, name: item.video.name } }));
+        }).catch(() => undefined);
+      }
       finishActive();
       setTimeout(() => scheduleRef.current(), 0);
       return;
@@ -419,7 +435,7 @@ export function MultiTaskPage({
         outputPath: exportData.outputPath,
         outputMediaUrl: exportData.mediaUrl,
         recoveredOutputPath: null,
-        exportWarning: exportData.warning ?? null,
+        exportWarning: exportData.warning ?? item.exportWarning,
         error: null,
       }));
       finishActive();
@@ -460,7 +476,7 @@ export function MultiTaskPage({
       analysisId: active.phase === 'analysis' ? null : item.analysisId,
       analysis: active.phase === 'analysis' ? null : item.analysis,
       recoveredOutputPath: event.recoveredOutputPath ?? null,
-      exportWarning: null,
+      exportWarning: item.exportWarning,
       error: cancelled ? null : event.code,
     }));
     if (cancelled) {
@@ -492,9 +508,10 @@ export function MultiTaskPage({
   const chooseMore = async () => addVideos(await window.ttcut.selectVideos());
   const start = () => {
     if (runningRef.current || hasPendingCalibration(itemsRef.current)) return;
+    cancelRequested.current = false;
     replaceItems((current) => current.map((item) => (
       item.processingStatus === 'failed' || item.processingStatus === 'cancelled'
-        ? { ...item, processingStatus: 'waiting', recoveredOutputPath: null, error: null }
+        ? { ...item, processingStatus: 'waiting', recoveredOutputPath: null, exportWarning: null, error: null }
         : item
     )));
     runningRef.current = true;
@@ -541,6 +558,7 @@ export function MultiTaskPage({
       calibration: manualCalibration,
       tableAnalysis: null,
       processingStatus: item.processingStatus === 'done' ? 'waiting' : item.processingStatus,
+      exportWarning: null,
       error: null,
       progress: 0,
     }));
@@ -625,13 +643,13 @@ export function MultiTaskPage({
                     : active
                       ? void cancel()
                       : setPreview({
-                        source: item.video.mediaUrl,
+                        source: (item.previewVideo ?? item.video).mediaUrl,
                         name: item.video.name,
                         width: item.metadata.width,
                         height: item.metadata.height,
                       })}
               >
-                <video src={item.video.mediaUrl} preload="metadata" muted playsInline />
+                <video src={(item.previewVideo ?? item.video).mediaUrl} preload="metadata" muted playsInline />
                 {active && <span className="batch-progress"><b>{Math.round(item.progress)}%</b><i style={{ width: `${item.progress}%` }} /></span>}
                 {active && activePhase !== 'calibration' && <span className="batch-cancel">{text.cancel}</span>}
                 {manualRequired && <span className="batch-calibration-failed"><b>{text.calibrationFailed}</b><b>{text.calibrateManually}</b></span>}
@@ -642,7 +660,7 @@ export function MultiTaskPage({
                 {item.error && !manualRequired && <small>{item.error}</small>}
                 {item.exportWarning && (
                   <div className="batch-export-warning" role="alert">
-                    <span><b>{text.warning}</b><code>{item.exportWarning.code}</code></span>
+                    <span><b>{item.analysis?.processing?.mode === 'vfr_fallback' ? text.processingWarning : text.warning}</b><code>{item.exportWarning.code}</code></span>
                     <button className="text-button" type="button" onClick={() => void window.ttcut.revealLogs()}>{text.logs}</button>
                   </div>
                 )}

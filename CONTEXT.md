@@ -152,6 +152,22 @@ Ball positions expressed in the original video's pixel coordinate system,
 regardless of the Analysis ROI or model tensor size used for detection.
 _Avoid_: Crop-relative trajectory
 
+## 原始媒体（Source Media）
+
+用户选中的媒体文件及其路径、大小、修改时间和原始元数据。文件身份、历史指纹、封面、显示名称和默认输出名称始终绑定原始媒体。标定也读取原始媒体。
+
+## 处理媒体（Processing Media）
+
+球路分析、分析后预览和剪辑实际读取的媒体。源本来就是固定帧率时处理媒体就是原始媒体；可变帧率源优先使用 CFR 派生媒体。
+
+## CFR 派生媒体（CFR Derived Media）
+
+由 FFmpeg 从原始 VFR 媒体生成的 H.264/AAC 固定帧率 MP4，按精确目标帧率、编码器和源指纹缓存在 `<Installation Root>\data\processing-media\v1`。只有成功历史记录仍引用它时才保留。
+
+## VFR 回退（VFR Fallback）
+
+CFR 转码因空间不足、FFmpeg 失败或输出校验失败时，继续使用原始 VFR 媒体的显式结果状态。回退会在单任务和批处理行显示警告；取消或应用退出不会触发回退。
+
 ## Batch Task
 
 A serial queue that calibrates each video first and only then processes ready
