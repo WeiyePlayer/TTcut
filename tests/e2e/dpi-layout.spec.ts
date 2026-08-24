@@ -281,8 +281,10 @@ test('neutral controls use the shared hover surface without overriding semantic 
     await expect(preRollToggle.getByRole('radio', { name: '短', exact: true })).toBeVisible();
     await expect(preRollToggle.getByRole('radio', { name: '中', exact: true })).toBeVisible();
     await expect(preRollToggle.getByRole('radio', { name: '长', exact: true })).toBeVisible();
+    await expect(preRollToggle.getByRole('radio', { name: '中', exact: true })).toBeChecked();
     await expect(postRollToggle.getByRole('radio', { name: '极短', exact: true })).toBeVisible();
     await expect(postRollToggle.getByRole('radio', { name: '短', exact: true })).toBeVisible();
+    await expect(postRollToggle.getByRole('radio', { name: '短', exact: true })).toBeChecked();
     await expect(preRollToggle.getByRole('radio', { name: '1.5 s' })).toHaveCount(0);
     const analysisPrecision = page.locator('.detector-settings-card');
     await expect(analysisPrecision.getByRole('heading', { name: '分析精度' })).toBeVisible();

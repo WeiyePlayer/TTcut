@@ -78,7 +78,7 @@ export function App() {
   const [bootstrap, setBootstrap] = useState<BootstrapData | null>(null);
   const [settings, setSettings] = useState<AppSettings>({
     language: 'zh-CN', calibration_method: 'automatic',
-    pre_roll_seconds: 2.5, post_roll_seconds: 2,
+    pre_roll_seconds: 2.5, post_roll_seconds: 1,
     analysis_mode: 'full',
   });
   const [view, setView] = useState<View>('auto');

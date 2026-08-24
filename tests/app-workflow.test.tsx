@@ -11,7 +11,7 @@ const bootstrap: BootstrapData = {
     language: 'zh-CN',
     calibration_method: 'automatic',
     pre_roll_seconds: 2.5,
-    post_roll_seconds: 2,
+    post_roll_seconds: 1,
     analysis_mode: 'full',
   },
   components: {
@@ -174,6 +174,8 @@ describe('App workflow notices and multi-task entry', () => {
     expect(screen.getByRole('radio', { name: '简体中文' })).toBeChecked();
     expect(screen.getByRole('radio', { name: '自动' })).toBeChecked();
     expect(screen.getByRole('radiogroup', { name: '语言' })).toHaveClass('glass-radio-group');
+    expect(within(screen.getByRole('radiogroup', { name: '回合前时间' })).getByRole('radio', { name: '中' })).toBeChecked();
+    expect(within(screen.getByRole('radiogroup', { name: '回合后时间' })).getByRole('radio', { name: '短' })).toBeChecked();
   });
 
   it('hides the temporary BlurBall threshold controls and uses session defaults', async () => {

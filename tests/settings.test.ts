@@ -31,6 +31,16 @@ describe('settings migration', () => {
     });
   });
 
+  it('defaults missing timing values to medium before-rally and short after-rally padding', async () => {
+    await writeFile(path.join(state.userData, 'settings.json'), JSON.stringify({
+      language: 'zh-CN', calibration_method: 'automatic',
+    }), 'utf8');
+    await expect(loadSettings()).resolves.toMatchObject({
+      pre_roll_seconds: 2.5,
+      post_roll_seconds: 1,
+    });
+  });
+
   it('saves settings without an export strategy atomically', async () => {
     const settings = {
       language: 'zh-CN' as const, calibration_method: 'automatic' as const,
