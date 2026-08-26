@@ -9,12 +9,13 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const required = process.env.TTCUT_PUBLIC_RC === '1' || process.env.TTCUT_OFFICIAL_RELEASE === '1';
 const expectedPublisher = process.env.TTCUT_PUBLISHER_NAME?.trim() || 'weiye';
 const expectedThumbprint = process.env.WINDOWS_CERTIFICATE_THUMBPRINT?.replace(/\s+/g, '').toUpperCase() || null;
+const onlineModelInstaller = process.env.TTCUT_ONLINE_MODEL_INSTALLER === '1';
 const signTool = process.env.WINDOWS_SIGNTOOL_PATH?.trim()
   || path.join(root, 'node_modules', '@electron', 'windows-sign', 'vendor', 'signtool.exe');
 const packagedApp = path.join(root, 'out', 'TTcut-win32-x64', 'TTcut.exe');
-const releaseDirectory = path.join(root, 'out', 'make', 'nsis', 'x64');
+const releaseDirectory = path.join(root, 'out', 'make', onlineModelInstaller ? 'nsis-online' : 'nsis', 'x64');
 const setupName = existsSync(releaseDirectory)
-  ? readdirSync(releaseDirectory).find((name) => /-Setup\.exe$/i.test(name))
+  ? readdirSync(releaseDirectory).find((name) => onlineModelInstaller ? /-Online-Setup\.exe$/i.test(name) : /-Setup\.exe$/i.test(name))
   : null;
 const setup = setupName ? path.join(releaseDirectory, setupName) : null;
 const capturedUninstaller = path.join(releaseDirectory, '.verification', 'Uninstall TTcut.exe');
@@ -30,7 +31,7 @@ function inspectSignature(file) {
     '-NoProfile',
     '-NonInteractive',
     '-Command',
-    '$signature=Get-AuthenticodeSignature -LiteralPath $env:TTCUT_VERIFY_SIGNATURE_FILE; if($null -eq $signature.SignerCertificate){throw "Artifact is not signed."}; $chain=New-Object System.Security.Cryptography.X509Certificates.X509Chain; $chain.ChainPolicy.RevocationMode=[System.Security.Cryptography.X509Certificates.X509RevocationMode]::NoCheck; [void]$chain.Build($signature.SignerCertificate); [pscustomobject]@{Status=[string]$signature.Status;SignatureType=[string]$signature.SignatureType;Subject=[string]$signature.SignerCertificate.Subject;Thumbprint=[string]$signature.SignerCertificate.Thumbprint;TimestampSubject=[string]$signature.TimeStamperCertificate.Subject;ChainStatus=@($chain.ChainStatus|ForEach-Object{[string]$_.Status});CertificateRawData=[Convert]::ToBase64String($signature.SignerCertificate.RawData)}|ConvertTo-Json -Compress',
+    '$env:PSModulePath=[Environment]::ExpandEnvironmentVariables("%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\Modules"); Import-Module Microsoft.PowerShell.Security -ErrorAction Stop; $signature=Get-AuthenticodeSignature -LiteralPath $env:TTCUT_VERIFY_SIGNATURE_FILE; if($null -eq $signature.SignerCertificate){throw "Artifact is not signed."}; $chain=New-Object System.Security.Cryptography.X509Certificates.X509Chain; $chain.ChainPolicy.RevocationMode=[System.Security.Cryptography.X509Certificates.X509RevocationMode]::NoCheck; [void]$chain.Build($signature.SignerCertificate); [pscustomobject]@{Status=[string]$signature.Status;SignatureType=[string]$signature.SignatureType;Subject=[string]$signature.SignerCertificate.Subject;Thumbprint=[string]$signature.SignerCertificate.Thumbprint;TimestampSubject=[string]$signature.TimeStamperCertificate.Subject;ChainStatus=@($chain.ChainStatus|ForEach-Object{[string]$_.Status});CertificateRawData=[Convert]::ToBase64String($signature.SignerCertificate.RawData)}|ConvertTo-Json -Compress',
   ], {
     encoding: 'utf8',
     windowsHide: true,

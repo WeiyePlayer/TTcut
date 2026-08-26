@@ -68,6 +68,20 @@ end, one fixed closing second, and After-rally time. Selected Custom Rally
 Clips never overlap on the single track.
 _Avoid_: Rally, CutGroup
 
+## Playback Target Clip
+
+The selected Custom Rally Clip whose half-open time interval contains the
+current playback time. At most one Playback Target Clip exists at a time; a
+gap or an unselected clip has no target.
+_Avoid_: current selection, active Rally
+
+## Rally Location Cue
+
+A transient list-row indicator that connects playback or an explicit jump to
+its Playback Target Clip. It does not change clip selection, focus, or the
+Custom Rally Clip itself.
+_Avoid_: persistent active row, selected Rally
+
 ## Manual Rally Clip
 
 A Custom Rally Clip created directly on the timeline rather than from a

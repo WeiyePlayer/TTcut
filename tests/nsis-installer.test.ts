@@ -9,6 +9,8 @@ const makeNsisPath = path.join(process.cwd(), 'scripts', 'make-nsis.mjs');
 const compareVersionsPath = path.join(process.cwd(), 'build', 'installer', 'compare-versions.ps1');
 const chooseDefaultRootPath = path.join(process.cwd(), 'build', 'installer', 'choose-default-root.ps1');
 const checkInstallSpacePath = path.join(process.cwd(), 'build', 'installer', 'check-install-space.ps1');
+const downloadModelsPath = path.join(process.cwd(), 'build', 'installer', 'download-models.ps1');
+const updateManifestPath = path.join(process.cwd(), 'scripts', 'generate-update-manifest.mjs');
 const commitRegistrationPath = path.join(process.cwd(), 'build', 'installer', 'commit-install-registration.ps1');
 const finalizeLegacyPath = path.join(process.cwd(), 'build', 'installer', 'finalize-legacy-install.ps1');
 const legacyRegistryKey = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\TTcut';
@@ -125,6 +127,29 @@ describe('assisted NSIS installer contract', () => {
     expect(compareVersions).not.toContain('[Parameter(');
     expect(compareVersions).not.toContain('[pscustomobject]');
     expect(compareVersions).toContain('New-Object -TypeName PSObject -Property');
+    expect(checkInstallSpace).toContain('[int64]$AdditionalRequiredBytes = 0');
+    expect(checkInstallSpace).toContain('$required += $AdditionalRequiredBytes');
+  });
+
+  it('gates verified model delivery to the distinct online installer build', async () => {
+    const [installer, modelDownload, makeNsis, updateManifest] = await Promise.all([
+      readFile(installerPath, 'utf8'),
+      readFile(downloadModelsPath, 'utf8'),
+      readFile(makeNsisPath, 'utf8'),
+      readFile(updateManifestPath, 'utf8'),
+    ]);
+    expect(installer).toContain('online-model-installer.nsh');
+    expect(installer).toContain('Function TTcutInstallOnlineModels');
+    expect(installer).toContain('download-models.ps1');
+    expect(installer).toContain('AdditionalRequiredBytes "204214006"');
+    expect(modelDownload).toContain("'weiye76/TTcut-runtime-assets'");
+    expect(modelDownload).toContain('"/weiye76/TTcut-runtime-assets/releases/download/models-1.0.0/$filename"');
+    expect(modelDownload).toContain('MODEL_HASH_MISMATCH');
+    expect(modelDownload).toContain('MODEL_DELIVERY_MISMATCH');
+    expect(makeNsis).toContain("'scripts', 'stage-online-installer-resources.mjs'");
+    expect(makeNsis).toContain('!define TTCUT_ONLINE_MODEL_INSTALLER');
+    expect(updateManifest).toContain("process.env.TTCUT_ONLINE_MODEL_INSTALLER === '1'");
+    expect(updateManifest).toContain('x64-Online-Setup.exe');
   });
 
   it.skipIf(powerShell2Unavailable)('writes a valid registration failure report in PowerShell 2', async () => {

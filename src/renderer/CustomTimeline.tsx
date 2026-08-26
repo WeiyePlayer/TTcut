@@ -8,6 +8,7 @@ const CLIP_EDGE_HIT_INSET = 4;
 const CLIP_BOUNDARY_MARKER_MIN_WIDTH = 24;
 
 export type TimelineToolMode = 'add' | 'delete' | null;
+export type TimelineSeekIntent = 'preview' | 'commit';
 type Edge = 'start' | 'end';
 
 type ResizeFeedback = {
@@ -98,6 +99,7 @@ export function CustomTimeline({
   resizeEndLabel,
   toolMode,
   onSeek,
+  onScrubCancel,
   onPlayClip,
   onResize,
   onAddAt,
@@ -111,7 +113,8 @@ export function CustomTimeline({
   resizeStartLabel: string;
   resizeEndLabel: string;
   toolMode: TimelineToolMode;
-  onSeek: (time: number) => void;
+  onSeek: (time: number, intent: TimelineSeekIntent) => void;
+  onScrubCancel: () => void;
   onPlayClip: (clip: CustomRallyClip) => void;
   onResize: (clipId: string, edge: Edge, time: number) => number;
   onAddAt: (time: number) => boolean;
@@ -294,11 +297,11 @@ export function CustomTimeline({
     && !clips.some((clip) => time < clip.end && time + 1 > clip.start)
   );
 
-  const seekFromPointer = (clientX: number) => {
+  const seekFromPointer = (clientX: number, intent: TimelineSeekIntent) => {
     const viewport = viewportRef.current;
     if (!viewport) return;
     const x = clientX - viewport.getBoundingClientRect().left + viewport.scrollLeft;
-    onSeek(Math.max(0, Math.min(duration, x / pixelsPerSecond)));
+    onSeek(Math.max(0, Math.min(duration, x / pixelsPerSecond)), intent);
   };
 
   const beginResize = (event: React.PointerEvent<HTMLButtonElement>, clip: CustomRallyClip, edge: Edge) => {
@@ -336,16 +339,16 @@ export function CustomTimeline({
     event.currentTarget.setPointerCapture(event.pointerId);
     playheadDraggingRef.current = event.pointerId;
     setIsScrubbing(true);
-    seekFromPointer(event.clientX);
+    seekFromPointer(event.clientX, 'preview');
   };
 
   const movePlayhead = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (playheadDraggingRef.current === event.pointerId) seekFromPointer(event.clientX);
+    if (playheadDraggingRef.current === event.pointerId) seekFromPointer(event.clientX, 'preview');
   };
 
   const endPlayheadDrag = (event: React.PointerEvent<HTMLDivElement>) => {
     if (playheadDraggingRef.current !== event.pointerId) return;
-    seekFromPointer(event.clientX);
+    seekFromPointer(event.clientX, 'commit');
     playheadDraggingRef.current = null;
     setIsScrubbing(false);
   };
@@ -354,18 +357,19 @@ export function CustomTimeline({
     if (playheadDraggingRef.current !== event.pointerId) return;
     playheadDraggingRef.current = null;
     setIsScrubbing(false);
+    onScrubCancel();
   };
 
   const keyboardSeek = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'Home' || event.key === 'End') {
       event.preventDefault();
-      onSeek(event.key === 'Home' ? 0 : duration);
+      onSeek(event.key === 'Home' ? 0 : duration, 'commit');
       return;
     }
     if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
     event.preventDefault();
     const step = event.shiftKey ? 1 : 1 / Math.max(fps, 1);
-    onSeek(currentTime + (event.key === 'ArrowLeft' ? -step : step));
+    onSeek(currentTime + (event.key === 'ArrowLeft' ? -step : step), 'commit');
   };
 
   const updateAddTarget = (clientX: number) => {
@@ -384,7 +388,7 @@ export function CustomTimeline({
     <section ref={surfaceRef} className={`custom-timeline${toolMode ? ` is-${toolMode}-mode` : ''}${toolMode === 'add' && addTargetValid === false ? ' is-add-unavailable' : ''}`} aria-label={timelineLabel}>
       <div ref={viewportRef} className="timeline-viewport" data-zoom={actualZoom} onScroll={(event) => setScrollLeft(clampTimelineScrollLeft(event.currentTarget.scrollLeft, event.currentTarget.clientWidth, event.currentTarget.scrollWidth))}>
         <div className="timeline-content" style={{ width: contentWidth }}>
-          <div className="timeline-ruler" onPointerDown={(event) => seekFromPointer(event.clientX)}><canvas ref={canvasRef} style={{ transform: `translateX(${visibleScrollLeft}px)` }} /></div>
+          <div className="timeline-ruler" onPointerDown={(event) => seekFromPointer(event.clientX, 'commit')}><canvas ref={canvasRef} style={{ transform: `translateX(${visibleScrollLeft}px)` }} /></div>
           {resizeFeedback ? <div className="resize-feedback" style={{ left: resizeFeedback.boundaryTime * pixelsPerSecond }} data-clip-id={resizeFeedback.clipId} data-edge={resizeFeedback.edge}>{formatResizeDelta(resizeFeedback.durationDelta)}</div> : null}
           <div className={`timeline-playhead${isScrubbing ? ' dragging' : ''}`} style={{ left: currentTime * pixelsPerSecond }} role="slider" aria-orientation="horizontal" tabIndex={0} aria-label={timelineLabel} aria-valuemin={0} aria-valuemax={duration} aria-valuenow={currentTime} onPointerDown={beginPlayheadDrag} onPointerMove={movePlayhead} onPointerUp={endPlayheadDrag} onPointerCancel={cancelPlayheadDrag} onLostPointerCapture={cancelPlayheadDrag} onKeyDown={keyboardSeek}><i /></div>
         </div>

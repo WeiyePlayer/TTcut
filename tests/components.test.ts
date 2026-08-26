@@ -4,13 +4,28 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 const mediaMock = vi.hoisted(() => ({ x264Valid: true }));
+const appMock = vi.hoisted(() => ({
+  isPackaged: false,
+  getAppPath: () => process.cwd(),
+  getPath: () => process.cwd(),
+}));
+const installationMock = vi.hoisted(() => ({
+  localForgePackage: false,
+  layout: {
+    root: '',
+    appRoot: '',
+    componentRoot: '',
+    userDataRoot: '',
+  },
+}));
 
 vi.mock('electron', () => ({
-  app: {
-    isPackaged: false,
-    getAppPath: () => process.cwd(),
-    getPath: () => process.cwd(),
-  },
+  app: appMock,
+}));
+
+vi.mock('../src/main/installation-layout', () => ({
+  isLocalForgePackage: () => installationMock.localForgePackage,
+  resolveInstallationLayout: () => installationMock.layout,
 }));
 
 vi.mock('../src/main/processes', () => ({
@@ -39,7 +54,7 @@ vi.mock('../src/main/processes', () => ({
   }),
 }));
 
-import { resolveUsableMediaComponents } from '../src/main/components';
+import { resolveComponents, resolveUsableMediaComponents } from '../src/main/components';
 
 let root = '';
 
@@ -74,5 +89,45 @@ describe('media component selection', () => {
     const fallback = await resolveUsableMediaComponents();
     expect(fallback.mediaEncoder).toBe('libopenh264');
     expect(fallback.ffmpeg).toContain('ffmpeg-8.1');
+  });
+});
+
+describe('packaged model lookup', () => {
+  it('reuses models from the registered installation when an unpacked Forge build reuses its component store', async () => {
+    const packageResources = await mkdtemp(path.join(os.tmpdir(), 'ttcut-forge-package-resources-'));
+    const installedRoot = await mkdtemp(path.join(os.tmpdir(), 'ttcut-registered-install-'));
+    const installedModels = path.join(installedRoot, 'app', 'resources', 'resources', 'models');
+    const originalExecPath = process.execPath;
+    const originalResourcesPath = process.resourcesPath;
+    await mkdir(installedModels, { recursive: true });
+    await writeFile(path.join(installedModels, 'blurball_best.pt'), 'blurball');
+    await writeFile(path.join(installedModels, 'table_analyze.pt'), 'table');
+    Object.defineProperty(process, 'resourcesPath', { configurable: true, value: packageResources });
+    Object.defineProperty(process, 'execPath', {
+      configurable: true,
+      value: path.join(process.cwd(), 'out', 'TTcut-win32-x64', 'TTcut.exe'),
+    });
+    appMock.isPackaged = true;
+    installationMock.localForgePackage = true;
+    installationMock.layout = {
+      root: installedRoot,
+      appRoot: path.join(installedRoot, 'app'),
+      componentRoot: root,
+      userDataRoot: installedRoot,
+    };
+
+    try {
+      const components = await resolveComponents();
+      expect(components.blurballWeights).toBe(path.join(installedModels, 'blurball_best.pt'));
+      expect(components.tableAnalyzeWeights).toBe(path.join(installedModels, 'table_analyze.pt'));
+    } finally {
+      appMock.isPackaged = false;
+      installationMock.localForgePackage = false;
+      installationMock.layout = { root: '', appRoot: '', componentRoot: '', userDataRoot: '' };
+      Object.defineProperty(process, 'execPath', { configurable: true, value: originalExecPath });
+      Object.defineProperty(process, 'resourcesPath', { configurable: true, value: originalResourcesPath });
+      await rm(packageResources, { recursive: true, force: true });
+      await rm(installedRoot, { recursive: true, force: true });
+    }
   });
 });

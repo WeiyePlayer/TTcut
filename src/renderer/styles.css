@@ -334,13 +334,17 @@ td input { accent-color: var(--blue); }
 .custom-list-selection strong { color: var(--text); font-size: 12px; }
 .custom-list-actions { gap: 4px; }
 .custom-rally-table { table-layout: fixed; }
-.custom-rally-table td:first-child { width: 42px; }
-.custom-rally-table td { padding: 10px; border-top: 0; vertical-align: middle; }
+.custom-rally-table td { padding: 0; border-top: 0; vertical-align: middle; }
+.custom-rally-cell { position: relative; }
+.custom-rally-row-content {
+  position: relative; display: grid; grid-template-columns: 42px minmax(0, 1fr); align-items: center;
+  min-height: 62px; padding: 10px; border-radius: 8px;
+}
 .custom-rally-table tbody tr + tr { border-top: 1px solid var(--line); }
 .custom-rally-table tbody tr { cursor: pointer; }
-.custom-rally-table tbody tr:hover { background: #f7faff; }
+.custom-rally-table tbody tr:hover .custom-rally-row-content { background: #f7faff; }
 .custom-rally-table tbody tr:focus-visible { outline: 2px solid rgba(58,131,247,.4); outline-offset: -2px; }
-.custom-rally-check { padding: 10px !important; text-align: center; }
+.custom-rally-check { text-align: center; }
 .rally-checkbox { position: relative; display: inline-flex; width: 14px; height: 14px; cursor: pointer; }
 .rally-checkbox > input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; border: 0; padding: 0; opacity: 0; pointer-events: none; }
 .rally-checkbox-control { width: 14px; height: 14px; flex: 0 0 14px; display: block; border: 2px solid #9daabd; border-radius: 4px; background: #f4f7fb; box-shadow: 0 1px 3px rgba(30,40,55,.14); transition: border-color 180ms ease, background-color 180ms ease; }
@@ -354,6 +358,32 @@ td input { accent-color: var(--blue); }
 .custom-rally-duration strong { line-height: 10px; }
 .custom-rally-duration i { display: block; width: 45.333%; height: 2px; min-height: 2px; border-radius: 0; background: var(--blue); }
 .custom-rally-list tbody tr { cursor: pointer; }
+.custom-rally-table tbody tr.is-playback-cue .custom-rally-row-content::after {
+  content: ""; position: absolute; z-index: 3; inset: 2px; border: 3px solid var(--blue);
+  border-radius: 8px; pointer-events: none;
+}
+.custom-rally-table tbody tr.playback-cue-odd .custom-rally-row-content::after { animation: rally-playback-cue-odd 500ms ease-out both; }
+.custom-rally-table tbody tr.playback-cue-even .custom-rally-row-content::after { animation: rally-playback-cue-even 500ms ease-out both; }
+@keyframes rally-playback-cue-odd {
+  0%, 30% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@keyframes rally-playback-cue-even {
+  0%, 30% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .custom-rally-table tbody tr.playback-cue-odd .custom-rally-row-content::after,
+  .custom-rally-table tbody tr.playback-cue-even .custom-rally-row-content::after {
+    animation-name: rally-playback-cue-reduced;
+    animation-duration: 500ms;
+    animation-timing-function: linear;
+  }
+}
+@keyframes rally-playback-cue-reduced {
+  0%, 99.9% { opacity: 1; }
+  100% { opacity: 0; }
+}
 .custom-timeline-actions { min-height: 48px; display: flex; align-items: end; justify-content: space-between; gap: 12px; }
 .timeline-tool-buttons { display: flex; align-items: center; gap: 8px; }
 .timeline-tool { display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 1px solid var(--line-strong); border-radius: 8px; background: white; color: var(--text); cursor: pointer; }

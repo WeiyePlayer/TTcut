@@ -27,6 +27,7 @@ const version = values.version ?? '';
 const channel = values.channel ?? '';
 const signerSubject = values['signer-subject'] ?? '';
 const signerThumbprint = (values['signer-thumbprint'] ?? '').replace(/\s+/g, '').toUpperCase();
+const onlineModelInstaller = process.env.TTCUT_ONLINE_MODEL_INSTALLER === '1';
 
 if (!installerPath || !outputPath) throw new Error('--installer and --output are required.');
 if (!VERSION_PATTERN.test(version)) throw new Error('--version is invalid.');
@@ -39,7 +40,9 @@ if (installerPath.toLocaleLowerCase() === outputPath.toLocaleLowerCase()) {
   throw new Error('The update manifest cannot overwrite the installer.');
 }
 
-const expectedInstallerName = `TTcut-${version}-x64-Setup.exe`;
+const expectedInstallerName = onlineModelInstaller
+  ? `TTcut-${version}-x64-Online-Setup.exe`
+  : `TTcut-${version}-x64-Setup.exe`;
 if (path.basename(installerPath) !== expectedInstallerName) {
   throw new Error(`The installer must be named ${expectedInstallerName}.`);
 }

@@ -8,7 +8,8 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const packaged = path.join(root, 'out', 'TTcut-win32-x64');
-const output = path.join(root, 'out', 'make', 'nsis', 'x64');
+const onlineModelInstaller = process.env.TTCUT_ONLINE_MODEL_INSTALLER === '1';
+const output = path.join(root, 'out', 'make', onlineModelInstaller ? 'nsis-online' : 'nsis', 'x64');
 const assets = path.join(root, '.runtime', 'installer-assets');
 const official = process.env.TTCUT_OFFICIAL_RELEASE === '1' || process.env.TTCUT_PUBLIC_RC === '1';
 const packageJson = require('../package.json');
@@ -18,6 +19,16 @@ const updateChannel = packageVersion.includes('-') ? 'beta' : 'latest';
 
 if (updatePublisherName !== 'weiye') {
   throw new Error('The Windows update publisher must be weiye.');
+}
+
+if (onlineModelInstaller) {
+  const stageResult = spawnSync(process.execPath, [
+    path.join(root, 'scripts', 'stage-online-installer-resources.mjs'),
+  ], { cwd: root, encoding: 'utf8' });
+  if (stageResult.status !== 0) {
+    throw new Error(`Online installer resource staging failed: ${stageResult.stderr || stageResult.stdout}`);
+  }
+  process.stdout.write(stageResult.stdout);
 }
 
 const { api } = require('@electron-forge/core');
@@ -34,6 +45,11 @@ await writeFile(path.join(packaged, 'resources', 'app-update.yml'), [
 ].join('\n'), 'utf8');
 
 await mkdir(assets, { recursive: true });
+await writeFile(
+  path.join(assets, 'online-model-installer.nsh'),
+  `!define TTCUT_ONLINE_MODEL_INSTALLER ${onlineModelInstaller ? '1' : '0'}\n`,
+  'utf8',
+);
 const assetResult = spawnSync('powershell.exe', [
   '-NoProfile',
   '-NonInteractive',
@@ -95,6 +111,8 @@ if (!capturedUninstaller || !existsSync(verificationUninstaller)) {
 const artifacts = (await readdir(output))
   .filter((name) => /\.(exe|blockmap|yml)$/i.test(name))
   .sort();
-if (!artifacts.some((name) => name.endsWith('-Setup.exe'))) throw new Error('NSIS Setup artifact is missing.');
+if (!artifacts.some((name) => onlineModelInstaller ? name.endsWith('-Online-Setup.exe') : name.endsWith('-Setup.exe'))) {
+  throw new Error('NSIS Setup artifact is missing.');
+}
 if (!artifacts.some((name) => name.endsWith('.yml'))) throw new Error('NSIS update metadata is missing.');
 for (const artifact of artifacts) console.log(`Created NSIS artifact: ${path.join(output, artifact)}`);
