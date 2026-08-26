@@ -3,7 +3,9 @@ param(
   [string]$CertificateThumbprint = '',
 
   [ValidatePattern('^https?://')]
-  [string]$TimestampServer = 'http://timestamp.digicert.com'
+  [string]$TimestampServer = 'http://timestamp.digicert.com',
+
+  [switch]$OnlineModelInstaller
 )
 
 $ErrorActionPreference = 'Stop'
@@ -64,6 +66,7 @@ function Invoke-NodeScript([string]$RelativePath) {
 
 $env:TTCUT_OFFICIAL_RELEASE = '1'
 $env:TTCUT_PUBLIC_RC = '0'
+$env:TTCUT_ONLINE_MODEL_INSTALLER = if ($OnlineModelInstaller) { '1' } else { '0' }
 $env:TTCUT_PUBLISHER_NAME = 'weiye'
 $env:WINDOWS_CERTIFICATE_THUMBPRINT = $normalizedThumbprint
 $env:WINDOWS_SIGNTOOL_PATH = $signTool.FullName
@@ -92,8 +95,9 @@ Invoke-NodeScript 'scripts\make-nsis.mjs'
 $packageJson = Get-Content -LiteralPath (Join-Path $projectRoot 'package.json') -Raw | ConvertFrom-Json
 $releaseVersion = [string]$packageJson.version
 $releaseChannel = if ($releaseVersion.Contains('-')) { 'beta' } else { 'latest' }
-$releaseDirectory = Join-Path $projectRoot 'out\make\nsis\x64'
-$setupPath = Join-Path $releaseDirectory "TTcut-$releaseVersion-x64-Setup.exe"
+$releaseDirectory = Join-Path $projectRoot $(if ($OnlineModelInstaller) { 'out\make\nsis-online\x64' } else { 'out\make\nsis\x64' })
+$setupFileName = if ($OnlineModelInstaller) { "TTcut-$releaseVersion-x64-Online-Setup.exe" } else { "TTcut-$releaseVersion-x64-Setup.exe" }
+$setupPath = Join-Path $releaseDirectory $setupFileName
 $manifestPath = Join-Path $releaseDirectory 'update-manifest.json'
 $manifestSignaturePath = Join-Path $releaseDirectory 'update-manifest.json.sig'
 & $node (Join-Path $projectRoot 'scripts\generate-update-manifest.mjs') `

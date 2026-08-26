@@ -559,6 +559,15 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     expect(playback.controls).toBe(false);
     expect(playback.paused).toBe(false);
     expect(playback.start).toBeGreaterThan(selectedStart);
+    await expect(thirdRallyRow).toHaveAttribute('data-playback-cue', 'true');
+    const cueStyle = await thirdRallyRow.locator('.custom-rally-row-content').evaluate((element) => {
+      const style = getComputedStyle(element, '::after');
+      return { borderRadius: style.borderRadius, borderColor: style.borderColor };
+    });
+    expect(cueStyle.borderRadius).toBe('8px');
+    expect(cueStyle.borderColor).not.toBe('rgba(0, 0, 0, 0)');
+    await page.waitForTimeout(650);
+    await expect(thirdRallyRow).not.toHaveAttribute('data-playback-cue', 'true');
     const playheadLeft = await page.locator('.timeline-playhead').evaluate((element) => Number.parseFloat(getComputedStyle(element).left));
     expect(playheadLeft).toBeGreaterThan(0);
 

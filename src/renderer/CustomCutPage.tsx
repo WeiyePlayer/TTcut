@@ -8,8 +8,42 @@ import {
   setCustomClipSelected,
   type CustomRallyClip,
 } from '../domain/custom-clips';
-import { CustomTimeline, type TimelineToolMode } from './CustomTimeline';
+import { CustomTimeline, type TimelineSeekIntent, type TimelineToolMode } from './CustomTimeline';
 import type { Messages } from './i18n';
+
+const PLAYBACK_CUE_DURATION_MS = 500;
+const PLAYBACK_SCROLL_TIMEOUT_MS = 800;
+
+export function findPlaybackTargetClip(
+  clips: readonly CustomRallyClip[],
+  time: number,
+): CustomRallyClip | null {
+  if (!Number.isFinite(time)) return null;
+  return clips.find((clip) => (
+    clip.selected
+    && Number.isFinite(clip.start)
+    && Number.isFinite(clip.end)
+    && time >= clip.start
+    && time < clip.end
+  )) ?? null;
+}
+
+export function calculateRallyPlaybackScrollTop(
+  targetIndex: number,
+  rowOffsets: readonly number[],
+  clientHeight: number,
+  scrollHeight: number,
+): number {
+  const previousRowOffset = targetIndex > 0 ? rowOffsets[targetIndex - 1] ?? 0 : 0;
+  const safeOffset = Number.isFinite(previousRowOffset) ? Math.max(0, previousRowOffset) : 0;
+  const maximumScroll = Math.max(0, scrollHeight - Math.max(0, clientHeight));
+  return Math.max(0, Math.min(maximumScroll, safeOffset));
+}
+
+type PlaybackCue = {
+  clipId: string;
+  sequence: number;
+};
 
 export function formatCustomClipTime(seconds: number): string {
   const safeSeconds = Math.max(0, Number.isFinite(seconds) ? seconds : 0);
@@ -129,11 +163,160 @@ export function CustomCutPage({
   const videoRef = useRef<HTMLVideoElement>(null);
   const rallyScrollRef = useRef<HTMLDivElement>(null);
   const rallyTableRef = useRef<HTMLTableElement>(null);
+  const rallyRowRefs = useRef(new Map<string, HTMLTableRowElement>());
   const exportCloseTimerRef = useRef<number | null>(null);
+  const playbackCueTimerRef = useRef<number | null>(null);
+  const playbackScrollFrameRef = useRef<number | null>(null);
+  const playbackScrollTimeoutRef = useRef<number | null>(null);
+  const playbackFrameRequestRef = useRef<number | null>(null);
+  const playbackLocationSequenceRef = useRef(0);
+  const lastPlaybackClipIdRef = useRef<string | null>(null);
+  const locatePlaybackClipRef = useRef<(time: number, reason: 'continuous' | 'commit') => void>(() => undefined);
+  const currentTimeRef = useRef(0);
+  const isPreviewSeekingRef = useRef(false);
   const [currentTime, setCurrentTime] = useState(0);
+  const [playbackCue, setPlaybackCue] = useState<PlaybackCue | null>(null);
   const [toolMode, setToolMode] = useState<TimelineToolMode>(null);
   const [exportOptionsOpen, setExportOptionsOpen] = useState(false);
   const selectedCount = clips.filter((clip) => clip.selected).length;
+
+  const clearPlaybackScrollWait = useCallback(() => {
+    if (playbackScrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(playbackScrollFrameRef.current);
+      playbackScrollFrameRef.current = null;
+    }
+    if (playbackScrollTimeoutRef.current !== null) {
+      window.clearTimeout(playbackScrollTimeoutRef.current);
+      playbackScrollTimeoutRef.current = null;
+    }
+  }, []);
+
+  const cancelPlaybackLocation = useCallback(() => {
+    playbackLocationSequenceRef.current += 1;
+    clearPlaybackScrollWait();
+    if (playbackCueTimerRef.current !== null) {
+      window.clearTimeout(playbackCueTimerRef.current);
+      playbackCueTimerRef.current = null;
+    }
+    setPlaybackCue(null);
+  }, [clearPlaybackScrollWait]);
+
+  const showPlaybackCue = useCallback((clipId: string, sequence: number) => {
+    if (playbackLocationSequenceRef.current !== sequence) return;
+    if (playbackCueTimerRef.current !== null) window.clearTimeout(playbackCueTimerRef.current);
+    setPlaybackCue({ clipId, sequence });
+    playbackCueTimerRef.current = window.setTimeout(() => {
+      playbackCueTimerRef.current = null;
+      if (playbackLocationSequenceRef.current === sequence) setPlaybackCue(null);
+    }, PLAYBACK_CUE_DURATION_MS);
+  }, []);
+
+  const beginPlaybackLocation = useCallback((clipId: string) => {
+    cancelPlaybackLocation();
+    const sequence = playbackLocationSequenceRef.current;
+    const scroll = rallyScrollRef.current;
+    const targetRow = rallyRowRefs.current.get(clipId);
+    const targetIndex = clips.findIndex((clip) => clip.clipId === clipId);
+    if (!scroll || !targetRow || targetIndex < 0) return;
+
+    const rowOffsets = clips.map((clip) => rallyRowRefs.current.get(clip.clipId)?.offsetTop ?? 0);
+    const targetScrollTop = calculateRallyPlaybackScrollTop(
+      targetIndex,
+      rowOffsets,
+      scroll.clientHeight,
+      scroll.scrollHeight,
+    );
+    const targetTop = targetRow.offsetTop;
+    const targetBottom = targetTop + targetRow.offsetHeight;
+    const viewportTop = scroll.scrollTop;
+    const viewportBottom = viewportTop + scroll.clientHeight;
+    const fullyVisible = scroll.clientHeight > 0
+      && targetRow.offsetHeight > 0
+      && targetTop >= viewportTop - 1
+      && targetBottom <= viewportBottom + 1;
+    if (fullyVisible || scroll.clientHeight <= 0) {
+      showPlaybackCue(clipId, sequence);
+      return;
+    }
+
+    const prefersReducedMotion = typeof window.matchMedia === 'function'
+      && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    try {
+      scroll.scrollTo({ top: targetScrollTop, behavior: prefersReducedMotion ? 'auto' : 'smooth' });
+    } catch {
+      scroll.scrollTop = targetScrollTop;
+    }
+
+    const finish = () => {
+      if (playbackLocationSequenceRef.current !== sequence) return;
+      clearPlaybackScrollWait();
+      if (Math.abs(scroll.scrollTop - targetScrollTop) > 1) scroll.scrollTop = targetScrollTop;
+      showPlaybackCue(clipId, sequence);
+    };
+
+    if (prefersReducedMotion || Math.abs(scroll.scrollTop - targetScrollTop) <= 1) {
+      finish();
+      return;
+    }
+
+    let stableFrames = 0;
+    const startedAt = performance.now();
+    const checkScroll = () => {
+      if (playbackLocationSequenceRef.current !== sequence) return;
+      if (Math.abs(scroll.scrollTop - targetScrollTop) <= 1) stableFrames += 1;
+      else stableFrames = 0;
+      if (stableFrames >= 2 || performance.now() - startedAt >= PLAYBACK_SCROLL_TIMEOUT_MS) {
+        finish();
+        return;
+      }
+      playbackScrollFrameRef.current = window.requestAnimationFrame(checkScroll);
+    };
+    playbackScrollFrameRef.current = window.requestAnimationFrame(checkScroll);
+    playbackScrollTimeoutRef.current = window.setTimeout(finish, PLAYBACK_SCROLL_TIMEOUT_MS);
+  }, [cancelPlaybackLocation, clearPlaybackScrollWait, clips, showPlaybackCue]);
+
+  const locatePlaybackClip = useCallback((time: number, reason: 'continuous' | 'commit') => {
+    const target = findPlaybackTargetClip(clips, time);
+    if (!target) {
+      lastPlaybackClipIdRef.current = null;
+      if (reason === 'commit') cancelPlaybackLocation();
+      return;
+    }
+    if (reason === 'continuous' && lastPlaybackClipIdRef.current === target.clipId) return;
+    lastPlaybackClipIdRef.current = target.clipId;
+    beginPlaybackLocation(target.clipId);
+  }, [beginPlaybackLocation, cancelPlaybackLocation, clips]);
+  locatePlaybackClipRef.current = locatePlaybackClip;
+
+  const requestNextVideoFrame = useCallback(() => {
+    const player = videoRef.current;
+    if (!player || player.paused || player.ended) return;
+    const requestVideoFrameCallback = player.requestVideoFrameCallback;
+    if (typeof requestVideoFrameCallback !== 'function') return;
+    playbackFrameRequestRef.current = requestVideoFrameCallback.call(player, (_now, metadata) => {
+      playbackFrameRequestRef.current = null;
+      if (!isPreviewSeekingRef.current) locatePlaybackClipRef.current(metadata.mediaTime, 'continuous');
+      requestNextVideoFrame();
+    });
+  }, []);
+
+  const stopVideoFrameTracking = useCallback(() => {
+    const player = videoRef.current;
+    if (playbackFrameRequestRef.current === null) return;
+    if (player && typeof player.cancelVideoFrameCallback === 'function') {
+      player.cancelVideoFrameCallback(playbackFrameRequestRef.current);
+    }
+    playbackFrameRequestRef.current = null;
+  }, []);
+
+  const startVideoFrameTracking = useCallback(() => {
+    if (playbackFrameRequestRef.current === null) requestNextVideoFrame();
+  }, [requestNextVideoFrame]);
+
+  const updatePlaybackTime = useCallback((time: number) => {
+    currentTimeRef.current = time;
+    setCurrentTime(time);
+  }, []);
 
   const cancelExportClose = useCallback(() => {
     if (exportCloseTimerRef.current === null) return;
@@ -151,17 +334,31 @@ export function CustomCutPage({
 
   useEffect(() => () => cancelExportClose(), [cancelExportClose]);
 
-  const seek = useCallback((time: number) => {
+  useEffect(() => () => {
+    stopVideoFrameTracking();
+    cancelPlaybackLocation();
+  }, [cancelPlaybackLocation, stopVideoFrameTracking]);
+
+  useEffect(() => {
+    if (!playbackCue) return;
+    const target = findPlaybackTargetClip(clips, currentTimeRef.current);
+    if (target?.clipId !== playbackCue.clipId) cancelPlaybackLocation();
+  }, [cancelPlaybackLocation, clips, playbackCue]);
+
+  const seek = useCallback((time: number, intent: TimelineSeekIntent) => {
     const player = videoRef.current;
     if (!player) return;
-    player.currentTime = Math.max(0, Math.min(analysis.video.duration_seconds, time));
-    setCurrentTime(player.currentTime);
-  }, [analysis.video.duration_seconds]);
+    const nextTime = Math.max(0, Math.min(analysis.video.duration_seconds, time));
+    isPreviewSeekingRef.current = intent === 'preview';
+    player.currentTime = nextTime;
+    updatePlaybackTime(nextTime);
+    if (intent === 'commit') locatePlaybackClip(nextTime, 'commit');
+  }, [analysis.video.duration_seconds, locatePlaybackClip, updatePlaybackTime]);
 
   const togglePlayback = useCallback(() => {
     const player = videoRef.current;
     if (!player) return;
-    if (player.paused) void player.play().catch(() => undefined);
+    if (player.paused) void Promise.resolve(player.play()).catch(() => undefined);
     else player.pause();
   }, []);
 
@@ -189,9 +386,11 @@ export function CustomCutPage({
   const playClip = (clip: CustomRallyClip) => {
     const player = videoRef.current;
     if (!player) return;
+    isPreviewSeekingRef.current = false;
     player.currentTime = clip.start;
-    setCurrentTime(clip.start);
-    void player.play().catch(() => undefined);
+    updatePlaybackTime(clip.start);
+    locatePlaybackClip(clip.start, 'commit');
+    void Promise.resolve(player.play()).catch(() => undefined);
   };
 
   const toggleTool = (nextTool: Exclude<TimelineToolMode, null>) => {
@@ -230,20 +429,32 @@ export function CustomCutPage({
           <div className="custom-rally-scroll-shell">
             <div ref={rallyScrollRef} id="custom-rally-scroll" className="table-scroll">
               <table ref={rallyTableRef} className="custom-rally-table"><tbody>{clips.map((clip) => (
-                <tr key={clip.clipId} tabIndex={0} onClick={() => playClip(clip)} onKeyDown={(event) => {
+                <tr
+                  key={clip.clipId}
+                  ref={(row) => { if (row) rallyRowRefs.current.set(clip.clipId, row); else rallyRowRefs.current.delete(clip.clipId); }}
+                  className={playbackCue?.clipId === clip.clipId ? `is-playback-cue playback-cue-${playbackCue.sequence % 2 === 0 ? 'even' : 'odd'}` : undefined}
+                  data-playback-cue={playbackCue?.clipId === clip.clipId ? 'true' : undefined}
+                  tabIndex={0}
+                  onClick={() => playClip(clip)}
+                  onKeyDown={(event) => {
                   if (event.key !== 'Enter' && event.key !== ' ') return;
                   event.preventDefault();
                   playClip(clip);
-                }}>
-                  <td className="custom-rally-check" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
-                    <label className="rally-checkbox">
-                      <input type="checkbox" aria-label={`${translations.rally} ${clip.rallyIndex}`} checked={clip.selected} onChange={(event) => onClipsChange(setCustomClipSelected(clips, clip.clipId, event.currentTarget.checked, analysis.video.duration_seconds, analysis.video.fps))} />
-                      <span className="rally-checkbox-control" aria-hidden="true" />
-                    </label>
-                  </td>
-                  <td colSpan={3}>
-                    <div className="custom-rally-meta"><strong>{translations.rally} {clip.rallyIndex}</strong><span title={clip.bounceCount === null ? translations.manualBounceUnavailable : undefined}>{translations.strokes} {clip.bounceCount ?? '—'}</span></div>
-                    <div className="custom-rally-times"><span>{formatCustomClipTime(clip.start)}</span><div className="custom-rally-duration"><strong>{formatCustomClipDuration(clip.start, clip.end)}</strong><i /></div><span>{formatCustomClipTime(clip.end)}</span></div>
+                }}
+                >
+                  <td colSpan={4} className="custom-rally-cell">
+                    <div className="custom-rally-row-content">
+                      <div className="custom-rally-check" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+                        <label className="rally-checkbox">
+                          <input type="checkbox" aria-label={`${translations.rally} ${clip.rallyIndex}`} checked={clip.selected} onChange={(event) => onClipsChange(setCustomClipSelected(clips, clip.clipId, event.currentTarget.checked, analysis.video.duration_seconds, analysis.video.fps))} />
+                          <span className="rally-checkbox-control" aria-hidden="true" />
+                        </label>
+                      </div>
+                      <div>
+                        <div className="custom-rally-meta"><strong>{translations.rally} {clip.rallyIndex}</strong><span title={clip.bounceCount === null ? translations.manualBounceUnavailable : undefined}>{translations.strokes} {clip.bounceCount ?? '—'}</span></div>
+                        <div className="custom-rally-times"><span>{formatCustomClipTime(clip.start)}</span><div className="custom-rally-duration"><strong>{formatCustomClipDuration(clip.start, clip.end)}</strong><i /></div><span>{formatCustomClipTime(clip.end)}</span></div>
+                      </div>
+                    </div>
                   </td>
                 </tr>
               ))}</tbody></table>
@@ -254,10 +465,10 @@ export function CustomCutPage({
 
         <div className="custom-workspace-right">
           <div className="custom-monitor-slot"><div className="custom-monitor">
-            <video ref={videoRef} src={video.mediaUrl} controls={false} preload="metadata" playsInline tabIndex={0} aria-label={translations.togglePlayback} onClick={togglePlayback} onKeyDown={handleVideoKeyDown} onLoadedMetadata={(event) => { event.currentTarget.currentTime = 0; setCurrentTime(0); }} onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)} onSeeked={(event) => setCurrentTime(event.currentTarget.currentTime)} />
+            <video ref={videoRef} src={video.mediaUrl} controls={false} preload="metadata" playsInline tabIndex={0} aria-label={translations.togglePlayback} onClick={togglePlayback} onKeyDown={handleVideoKeyDown} onLoadedMetadata={(event) => { lastPlaybackClipIdRef.current = null; isPreviewSeekingRef.current = false; event.currentTarget.currentTime = 0; updatePlaybackTime(0); }} onPlay={startVideoFrameTracking} onPause={stopVideoFrameTracking} onEnded={stopVideoFrameTracking} onTimeUpdate={(event) => { const time = event.currentTarget.currentTime; updatePlaybackTime(time); if (!isPreviewSeekingRef.current) locatePlaybackClip(time, 'continuous'); }} onSeeked={(event) => updatePlaybackTime(event.currentTarget.currentTime)} />
           </div></div>
 
-          <CustomTimeline clips={clips} duration={analysis.video.duration_seconds} fps={analysis.video.fps} currentTime={currentTime} timelineLabel={translations.timeline} resizeStartLabel={translations.resizeStart} resizeEndLabel={translations.resizeEnd} toolMode={toolMode} onSeek={seek} onPlayClip={playClip} onAddAt={addManualAt} onDeleteClip={(clipId) => onClipsChange(deleteCustomClip(clips, clipId))} onResize={(clipId, edge, time) => {
+          <CustomTimeline clips={clips} duration={analysis.video.duration_seconds} fps={analysis.video.fps} currentTime={currentTime} timelineLabel={translations.timeline} resizeStartLabel={translations.resizeStart} resizeEndLabel={translations.resizeEnd} toolMode={toolMode} onSeek={seek} onScrubCancel={() => { isPreviewSeekingRef.current = false; }} onPlayClip={playClip} onAddAt={addManualAt} onDeleteClip={(clipId) => onClipsChange(deleteCustomClip(clips, clipId))} onResize={(clipId, edge, time) => {
             const nextClips = resizeCustomClip(clips, clipId, edge, time, analysis.video.duration_seconds, analysis.video.fps, analysis.bounce_times_seconds);
             onClipsChange(nextClips);
             const resized = nextClips.find((clip) => clip.clipId === clipId);

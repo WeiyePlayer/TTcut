@@ -1,5 +1,6 @@
 import type { ForgeConfig } from '@electron-forge/shared-types';
 import { existsSync } from 'node:fs';
+import { readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { VitePlugin } from '@electron-forge/plugin-vite';
 import { FusesPlugin } from '@electron-forge/plugin-fuses';
@@ -9,10 +10,33 @@ import type { SignToolOptions as EsmSignToolOptions } from '@electron/windows-si
 const publicReleaseCandidate = process.env.TTCUT_PUBLIC_RC === '1';
 const officialRelease = process.env.TTCUT_OFFICIAL_RELEASE === '1';
 const releaseSigningRequired = publicReleaseCandidate || officialRelease;
+const onlineModelInstaller = process.env.TTCUT_ONLINE_MODEL_INSTALLER === '1';
+const retainedWindowsLocales = new Set(['en-US.pak', 'zh-CN.pak']);
 
 function ignoreUnbuiltSource(file: string): boolean {
   if (!file) return false;
   return !file.startsWith('/.vite');
+}
+
+function retainSupportedWindowsLocales(
+  buildPath: string,
+  _electronVersion: string,
+  platform: string,
+  _arch: string,
+  callback: (error?: Error | null) => void,
+): void {
+  if (platform !== 'win32') {
+    callback();
+    return;
+  }
+  const localesDirectory = path.join(buildPath, 'locales');
+  readdir(localesDirectory, { withFileTypes: true })
+    .then((entries) => Promise.all(entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.pak') && !retainedWindowsLocales.has(entry.name))
+      .map((entry) => rm(path.join(localesDirectory, entry.name))))
+    )
+    .then(() => callback())
+    .catch((error: unknown) => callback(error instanceof Error ? error : new Error(String(error))));
 }
 
 const publisherName = process.env.TTCUT_PUBLISHER_NAME?.trim() || 'weiye';
@@ -62,7 +86,12 @@ const config: ForgeConfig = {
     icon: path.resolve('public/ttcut.ico'),
     executableName: 'TTcut',
     ignore: ignoreUnbuiltSource,
-    extraResource: ['.runtime/worker', '.runtime/release-metadata', 'resources'],
+    afterExtract: [retainSupportedWindowsLocales],
+    extraResource: [
+      '.runtime/worker',
+      '.runtime/release-metadata',
+      onlineModelInstaller ? '.runtime/online-installer/resources' : 'resources',
+    ],
     win32metadata: {
       CompanyName: publisherName,
       FileDescription: 'TTcut local table-tennis rally cutter',

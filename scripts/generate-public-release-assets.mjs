@@ -3,7 +3,8 @@ import { copyFile, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 
 const projectRoot = resolve(import.meta.dirname, '..');
-const releaseDirectory = join(projectRoot, 'out', 'make', 'nsis', 'x64');
+const onlineModelInstaller = process.env.TTCUT_ONLINE_MODEL_INSTALLER === '1';
+const releaseDirectory = join(projectRoot, 'out', 'make', onlineModelInstaller ? 'nsis-online' : 'nsis', 'x64');
 const sbomSourcePath = join(projectRoot, '.runtime', 'release-metadata', 'sbom.cdx.json');
 const sbomDestinationPath = join(releaseDirectory, 'sbom.cdx.json');
 const sumsPath = join(releaseDirectory, 'SHA256SUMS.txt');
@@ -13,7 +14,7 @@ async function sha256(filePath) {
 }
 
 const names = await readdir(releaseDirectory);
-const setupName = names.find((name) => /-Setup\.exe$/i.test(name));
+const setupName = names.find((name) => onlineModelInstaller ? /-Online-Setup\.exe$/i.test(name) : /-Setup\.exe$/i.test(name));
 if (!setupName) throw new Error(`NSIS Setup is missing from ${releaseDirectory}.`);
 
 const requiredNames = [

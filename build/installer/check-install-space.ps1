@@ -1,5 +1,6 @@
 param(
-  [int64]$EstimatedSizeKb
+  [int64]$EstimatedSizeKb,
+  [int64]$AdditionalRequiredBytes = 0
 )
 
 $ErrorActionPreference = 'Stop'
@@ -26,7 +27,7 @@ function Get-TTcutTreeBytes {
 }
 
 try {
-  if ($EstimatedSizeKb -le 0) {
+  if ($EstimatedSizeKb -le 0 -or $AdditionalRequiredBytes -lt 0) {
     exit 2
   }
 
@@ -43,6 +44,7 @@ try {
   # Construct the object through New-Object for the PowerShell 2 runtime.
   $drive = New-Object -TypeName System.IO.DriveInfo -ArgumentList @($driveRoot)
   $required = ([int64]$EstimatedSizeKb * [int64]1024)
+  $required += $AdditionalRequiredBytes
   $required += Get-TTcutTreeBytes ([string]$env:TTCUT_INSTALLER_LEGACY)
 
   $legacyUpdate = [string]$env:TTCUT_INSTALLER_LEGACY_APP

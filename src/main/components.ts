@@ -15,7 +15,7 @@ import {
   isAnalysisRuntimeVariant,
   type AnalysisRuntimeVariant,
 } from './runtime-layout';
-import { resolveInstallationLayout } from './installation-layout';
+import { isLocalForgePackage, resolveInstallationLayout } from './installation-layout';
 
 const ANALYSIS_NUMPY_VERSION = '2.5.1';
 const ANALYSIS_OPENCV_VERSION = '4.13.0';
@@ -168,6 +168,19 @@ function resource(...parts: string[]): string {
   return path.join(app.isPackaged ? process.resourcesPath : app.getAppPath(), ...parts);
 }
 
+async function modelResource(filename: string): Promise<string> {
+  const bundled = resource('resources', 'models', filename);
+  if (!app.isPackaged || !isLocalForgePackage(path.dirname(process.execPath))) return bundled;
+
+  try {
+    const installed = path.join(resolveInstallationLayout().appRoot, 'resources', 'resources', 'models', filename);
+    return await firstExisting([bundled, installed]) ?? bundled;
+  } catch {
+    // A standalone local package has no registered install to reuse; its missing model remains visible to setup.
+    return bundled;
+  }
+}
+
 export function managedComponentsRoot(): string {
   if (!app.isPackaged && process.env.TTCUT_E2E === '1' && process.env.TTCUT_E2E_COMPONENTS_ROOT) {
     return path.resolve(process.env.TTCUT_E2E_COMPONENTS_ROOT);
@@ -247,8 +260,8 @@ export async function resolveComponents(device: 'auto' | 'cuda' | 'cpu' = 'auto'
     python: runtimes[0]?.python ?? null,
     runtimeVariant: runtimes[0]?.variant ?? null,
     worker: resource('worker'),
-    blurballWeights: process.env.TTCUT_BLURBALL_WEIGHTS || resource('resources', 'models', 'blurball_best.pt'),
-    tableAnalyzeWeights: process.env.TTCUT_TABLE_ANALYZE_WEIGHTS || resource('resources', 'models', 'table_analyze.pt'),
+    blurballWeights: process.env.TTCUT_BLURBALL_WEIGHTS || await modelResource('blurball_best.pt'),
+    tableAnalyzeWeights: process.env.TTCUT_TABLE_ANALYZE_WEIGHTS || await modelResource('table_analyze.pt'),
     ffmpeg: media?.ffmpeg ?? null,
     ffprobe: media?.ffprobe ?? null,
     mediaEncoder: media?.encoder ?? 'unavailable',
