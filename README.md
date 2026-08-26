@@ -14,11 +14,8 @@ TTcut 是一款面向乒乓球爱好者的本地乒乓球视频自动剪辑工�
 
 1. Windows 从 [TTcut Release](https://github.com/WeiyePlayer/TTcut/releases) 下载。
 2. Android 从 [TTcut-Mobile-Releases](https://github.com/WeiyePlayer/TTcut-Mobile-Releases/releases) 下载。
-3. 若 GitHub 下载缓慢，可使用网盘备用下载：[链接](https://pan.baidu.com/s/1LXDzs74xOM1t50-IRM_Vvw?pwd=ttct)，提取码：`ttct`。
-4. 运行安装向导，选择安装根目录，并决定是否创建桌面快捷方式。程序写入 `<root>\app`，大型运行资源、下载和导入暂存写入 `<root>\data\components`；开始菜单快捷方式始终创建。
-5. 首次启动进入设置，同意后完成运行资源安装。
-
-程序会自动检测 NVIDIA GPU；加速环境安装或自检失败时回退到 CPU。视频处理能力用于读取视频信息、剪辑、合并和验证输出。
+3. 首次启动进入设置，同意后完成分析、视频处理组件安装。
+4. 若分析、视频处理组件下载缓慢，可根据电脑硬件情况使用网盘按需下载：[链接](https://pan.baidu.com/s/1LXDzs74xOM1t50-IRM_Vvw?pwd=ttct)，提取码：`ttct`，然后取消软件内下载改为手动导入。
 
 ## v1.2.9 更新
 
