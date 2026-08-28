@@ -123,6 +123,10 @@ describe('BlurBall analysis request contracts', () => {
           minimum_monotonic_duration_seconds: 0.6,
           short_vertical_filter_seconds: 1.2,
           maximum_short_vertical_range_ratio: 0.5,
+          vertical_exchange_enabled: true,
+          minimum_vertical_to_horizontal_range_ratio: 1,
+          end_on_min_opposing_edge_balance: 0.85,
+          end_on_min_screen_aspect_ratio: 2,
         },
         fragment_bridge: {
           maximum_gap_seconds: 1.5,

@@ -6,7 +6,11 @@ from pathlib import Path
 import pytest
 
 from ttcut_worker.types import TrajectoryPoint
-from ttcut_worker.visibility_rallies import VisibilityMotionConfig, continuous_visibility_rallies
+from ttcut_worker.visibility_rallies import (
+    VisibilityMotionConfig,
+    continuous_visibility_rallies,
+    is_end_on_table_view,
+)
 
 
 MOTION_CONFIG = VisibilityMotionConfig(analysis_width_pixels=200, analysis_height_pixels=100)
@@ -86,6 +90,34 @@ def test_motion_filter_keeps_a_robust_horizontal_exchange() -> None:
     xs = [0, 30, 60, 90, 60, 30, 0, 30, 60]
     points = [point(frame, 1, x=x, y=20) for frame, x in enumerate(xs)]
     assert len(continuous_visibility_rallies(points, 10, motion_config=MOTION_CONFIG)) == 1
+
+
+def test_end_on_view_enables_a_dominant_robust_vertical_exchange() -> None:
+    ys = [0, 30, 60, 90, 60, 30, 0, 30, 60]
+    points = [point(frame, 1, x=20, y=y) for frame, y in enumerate(ys)]
+
+    assert continuous_visibility_rallies(points, 10, motion_config=MOTION_CONFIG) == ()
+    assert len(continuous_visibility_rallies(
+        points,
+        10,
+        motion_config=VisibilityMotionConfig(200, 100, vertical_exchange_enabled=True),
+    )) == 1
+
+
+def test_end_on_vertical_exchange_must_dominate_horizontal_range() -> None:
+    ys = [0, 30, 60, 30, 0, 30, 60, 30, 0]
+    points = [point(frame, 1, x=frame * 20, y=y) for frame, y in enumerate(ys)]
+
+    assert continuous_visibility_rallies(
+        points,
+        10,
+        motion_config=VisibilityMotionConfig(200, 100, vertical_exchange_enabled=True),
+    ) == ()
+
+
+def test_end_on_view_detection_is_conservative() -> None:
+    assert is_end_on_table_view(((764, 410), (1193, 413), (1208, 599), (740, 599)))
+    assert not is_end_on_table_view(((692, 298), (933, 314), (827, 416), (465, 381)))
 
 
 def test_motion_filter_keeps_a_short_robust_horizontal_exchange() -> None:

@@ -335,6 +335,10 @@ export const continuousVisibilityAnalysisResultV2Schema = analysisResultBaseSche
       minimum_monotonic_duration_seconds: finiteNumber.positive().optional(),
       short_vertical_filter_seconds: finiteNumber.positive().optional(),
       maximum_short_vertical_range_ratio: finiteNumber.positive().optional(),
+      vertical_exchange_enabled: z.boolean().optional(),
+      minimum_vertical_to_horizontal_range_ratio: finiteNumber.positive().optional(),
+      end_on_min_opposing_edge_balance: finiteNumber.positive().max(1).optional(),
+      end_on_min_screen_aspect_ratio: finiteNumber.positive().optional(),
     }).strict().optional(),
     fragment_bridge: z.object({
       maximum_gap_seconds: finiteNumber.positive(),

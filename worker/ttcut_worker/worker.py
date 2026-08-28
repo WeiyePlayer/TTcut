@@ -23,6 +23,8 @@ from .table_analyze import analyze_table
 from .visibility_rallies import (
     CONTINUOUS_VISIBILITY_CONFIDENCE_THRESHOLD,
     CONTINUOUS_VISIBILITY_END_SECONDS,
+    CONTINUOUS_VISIBILITY_END_ON_MIN_EDGE_BALANCE,
+    CONTINUOUS_VISIBILITY_END_ON_MIN_SCREEN_ASPECT_RATIO,
     CONTINUOUS_VISIBILITY_FRAGMENT_MERGE_DISPLACEMENT_RATIO,
     CONTINUOUS_VISIBILITY_FRAGMENT_MERGE_SECONDS,
     CONTINUOUS_VISIBILITY_FRAGMENT_MERGE_SPEED_RATIO_PER_SECOND,
@@ -33,10 +35,12 @@ from .visibility_rallies import (
     CONTINUOUS_VISIBILITY_MIN_HORIZONTAL_TO_VERTICAL_RANGE_RATIO,
     CONTINUOUS_VISIBILITY_MIN_MONOTONIC_DURATION_SECONDS,
     CONTINUOUS_VISIBILITY_MIN_MONOTONIC_HORIZONTAL_RANGE_RATIO,
+    CONTINUOUS_VISIBILITY_MIN_VERTICAL_TO_HORIZONTAL_RANGE_RATIO,
     CONTINUOUS_VISIBILITY_SHORT_VERTICAL_FILTER_SECONDS,
     CONTINUOUS_VISIBILITY_START_SECONDS,
     VisibilityMotionConfig,
     continuous_visibility_rallies,
+    is_end_on_table_view,
 )
 
 
@@ -172,12 +176,14 @@ def analyze(request: dict) -> dict:
         bounce_frames = detect_blurball_bounce_frames(points, calibration)
         rallies = group_rallies(bounce_frames, points)
     else:
+        vertical_exchange_enabled = is_end_on_table_view(calibration.points)
         rallies = continuous_visibility_rallies(
             points,
             float(info.fps or 0.0),
             motion_config=VisibilityMotionConfig(
                 analysis_width_pixels=analysis_roi.width,
                 analysis_height_pixels=analysis_roi.height,
+                vertical_exchange_enabled=vertical_exchange_enabled,
             ),
         )
     duration = float(info.duration or 0.0)
@@ -250,6 +256,16 @@ def analyze(request: dict) -> dict:
                     ),
                     "maximum_short_vertical_range_ratio": (
                         CONTINUOUS_VISIBILITY_MAX_SHORT_VERTICAL_RANGE_RATIO
+                    ),
+                    "vertical_exchange_enabled": vertical_exchange_enabled,
+                    "minimum_vertical_to_horizontal_range_ratio": (
+                        CONTINUOUS_VISIBILITY_MIN_VERTICAL_TO_HORIZONTAL_RANGE_RATIO
+                    ),
+                    "end_on_min_opposing_edge_balance": (
+                        CONTINUOUS_VISIBILITY_END_ON_MIN_EDGE_BALANCE
+                    ),
+                    "end_on_min_screen_aspect_ratio": (
+                        CONTINUOUS_VISIBILITY_END_ON_MIN_SCREEN_ASPECT_RATIO
                     ),
                 },
                 "fragment_bridge": {

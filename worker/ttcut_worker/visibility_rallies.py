@@ -24,6 +24,9 @@ CONTINUOUS_VISIBILITY_MAX_SHORT_VERTICAL_RANGE_RATIO = 0.50
 CONTINUOUS_VISIBILITY_FRAGMENT_MERGE_SECONDS = 1.50
 CONTINUOUS_VISIBILITY_FRAGMENT_MERGE_DISPLACEMENT_RATIO = 0.35
 CONTINUOUS_VISIBILITY_FRAGMENT_MERGE_SPEED_RATIO_PER_SECOND = 0.26
+CONTINUOUS_VISIBILITY_END_ON_MIN_EDGE_BALANCE = 0.85
+CONTINUOUS_VISIBILITY_END_ON_MIN_SCREEN_ASPECT_RATIO = 2.0
+CONTINUOUS_VISIBILITY_MIN_VERTICAL_TO_HORIZONTAL_RANGE_RATIO = 1.0
 
 
 @dataclass(frozen=True)
@@ -38,6 +41,28 @@ class VisibilityRallySummary:
 class VisibilityMotionConfig:
     analysis_width_pixels: float
     analysis_height_pixels: float
+    vertical_exchange_enabled: bool = False
+
+
+def is_end_on_table_view(points: Sequence[tuple[float, float]]) -> bool:
+    """Return whether the calibrated table is a conservative end-on view."""
+
+    if len(points) != 4:
+        raise ValueError("table view detection requires four ordered points")
+    top_left, top_right, bottom_right, bottom_left = points
+    top_edge = math.dist(top_left, top_right)
+    bottom_edge = math.dist(bottom_left, bottom_right)
+    left_edge = math.dist(top_left, bottom_left)
+    right_edge = math.dist(top_right, bottom_right)
+    lengths = (top_edge, bottom_edge, left_edge, right_edge)
+    if any(not math.isfinite(length) or length <= 0 for length in lengths):
+        return False
+    opposing_edge_balance = min(top_edge, bottom_edge) / max(top_edge, bottom_edge)
+    screen_aspect_ratio = (top_edge + bottom_edge) / (left_edge + right_edge)
+    return (
+        opposing_edge_balance >= CONTINUOUS_VISIBILITY_END_ON_MIN_EDGE_BALANCE
+        and screen_aspect_ratio >= CONTINUOUS_VISIBILITY_END_ON_MIN_SCREEN_ASPECT_RATIO
+    )
 
 
 def continuous_visibility_rallies(
@@ -195,6 +220,21 @@ def _is_ball_exchange(
         and horizontal_range
         >= vertical_range * CONTINUOUS_VISIBILITY_MIN_HORIZONTAL_TO_VERTICAL_RANGE_RATIO
     )
+    robust_vertical_exchange = (
+        config.vertical_exchange_enabled
+        and _significant_reversals(
+            _median_smooth(vertical),
+            config.analysis_height_pixels * CONTINUOUS_VISIBILITY_MIN_HORIZONTAL_EXCURSION_RATIO,
+        ) >= 1
+        and _run_reversals(
+            vertical,
+            frames,
+            config.analysis_height_pixels * CONTINUOUS_VISIBILITY_MIN_HORIZONTAL_EXCURSION_RATIO,
+            maximum_missing_frames,
+        ) >= 1
+        and vertical_range
+        >= horizontal_range * CONTINUOUS_VISIBILITY_MIN_VERTICAL_TO_HORIZONTAL_RANGE_RATIO
+    )
     monotonic_cross_table = (
         _significant_reversals(vertical, vertical_excursion)
         <= CONTINUOUS_VISIBILITY_MAX_MONOTONIC_VERTICAL_REVERSALS
@@ -210,7 +250,7 @@ def _is_ball_exchange(
             > config.analysis_height_pixels * CONTINUOUS_VISIBILITY_MAX_SHORT_VERTICAL_RANGE_RATIO
         )
     )
-    return robust_exchange or qualified_monotonic_cross_table
+    return robust_exchange or robust_vertical_exchange or qualified_monotonic_cross_table
 
 
 def _median_smooth(values: Sequence[float], radius: int = 2) -> list[float]:
