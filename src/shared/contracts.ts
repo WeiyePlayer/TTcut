@@ -323,6 +323,7 @@ export const continuousVisibilityAnalysisResultV2Schema = analysisResultBaseSche
   rallies: z.array(continuousVisibilityRallySchema),
   rally_recognition: z.object({
     method: z.literal('continuous_visibility'),
+    detection_confidence_threshold: finiteNumber.nonnegative().max(1).optional(),
     start_visible_seconds: finiteNumber.positive(),
     end_invisible_seconds: finiteNumber.positive(),
     motion_filter: z.object({

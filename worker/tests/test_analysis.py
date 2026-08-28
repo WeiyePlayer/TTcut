@@ -215,6 +215,7 @@ def test_worker_continuous_visibility_skips_bounce_detection_and_records_provena
     assert result["schema_version"] == 2
     assert result["rally_recognition"] == {
         "method": "continuous_visibility",
+        "detection_confidence_threshold": 0.3,
         "start_visible_seconds": 0.2,
         "end_invisible_seconds": 0.5,
         "motion_filter": {
@@ -239,6 +240,7 @@ def test_worker_continuous_visibility_skips_bounce_detection_and_records_provena
     assert "bounce_times_seconds" not in result
     assert "detection" not in result["model_provenance"]
     assert result["model_provenance"]["analysis"]["mode"] == "full"
+    assert result["model_provenance"]["analysis"]["stages"][0]["confidence_threshold"] == 0.3
 
 
 def test_worker_two_stage_uses_separate_thresholds_and_only_refinement_results(monkeypatch):

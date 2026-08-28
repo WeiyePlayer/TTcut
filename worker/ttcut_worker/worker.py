@@ -15,13 +15,13 @@ from .errors import InvalidRequestError, ModelResourceError, TableModelResourceE
 from .roi import AnalysisRoiConfig, build_analysis_roi
 from .rallies import group_rallies
 from .request import (
-    BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT,
     analysis_config,
     rally_recognition_config,
     validate_request,
 )
 from .table_analyze import analyze_table
 from .visibility_rallies import (
+    CONTINUOUS_VISIBILITY_CONFIDENCE_THRESHOLD,
     CONTINUOUS_VISIBILITY_END_SECONDS,
     CONTINUOUS_VISIBILITY_FRAGMENT_MERGE_DISPLACEMENT_RATIO,
     CONTINUOUS_VISIBILITY_FRAGMENT_MERGE_SECONDS,
@@ -86,7 +86,7 @@ def analyze(request: dict) -> dict:
     recognition_method = recognition["method"]
     effective_config = config if recognition_method == "bounce_events" else {
         "mode": "full",
-        "confidence_threshold": BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT,
+        "confidence_threshold": CONTINUOUS_VISIBILITY_CONFIDENCE_THRESHOLD,
     }
 
     def progress(stage: str):
@@ -227,6 +227,7 @@ def analyze(request: dict) -> dict:
             if recognition_method == "bounce_events"
             else {
                 "method": "continuous_visibility",
+                "detection_confidence_threshold": CONTINUOUS_VISIBILITY_CONFIDENCE_THRESHOLD,
                 "start_visible_seconds": CONTINUOUS_VISIBILITY_START_SECONDS,
                 "end_invisible_seconds": CONTINUOUS_VISIBILITY_END_SECONDS,
                 "motion_filter": {

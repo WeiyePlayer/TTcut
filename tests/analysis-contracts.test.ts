@@ -112,7 +112,8 @@ describe('BlurBall analysis request contracts', () => {
       },
       rallies: [{ id: 'rally_001', index: 1, start_time_seconds: 1, end_time_seconds: 5 }],
       rally_recognition: {
-        method: 'continuous_visibility', start_visible_seconds: 0.2, end_invisible_seconds: 0.5,
+        method: 'continuous_visibility', detection_confidence_threshold: 0.3,
+        start_visible_seconds: 0.2, end_invisible_seconds: 0.5,
         motion_filter: {
           minimum_horizontal_excursion_ratio: 20 / 618,
           maximum_reversal_gap_seconds: 0.35,
