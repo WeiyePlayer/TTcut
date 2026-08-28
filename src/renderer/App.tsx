@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT,
   BLURBALL_STAGE1_CONFIDENCE_THRESHOLD_DEFAULT,
+  DURATION_HIGHLIGHT_SECONDS,
+  DURATION_HIGHLIGHT_TIER_VALUES,
+  rallyRecognitionMethod,
   type AnalysisResultV1,
   type AppSettings,
   type Calibration,
@@ -10,6 +13,7 @@ import {
   type ExportResult,
   type ExportWarning,
   type HistorySummaryV1,
+  type DurationHighlightTier,
   type UpdateState,
   type VideoMetadata,
 } from '../shared/contracts';
@@ -81,6 +85,7 @@ export function App() {
     language: 'zh-CN', calibration_method: 'automatic',
     pre_roll_seconds: 2.5, post_roll_seconds: 1,
     analysis_mode: 'full',
+    rally_recognition_method: 'bounce_events',
   });
   const [view, setView] = useState<View>('auto');
   const [step, setStep] = useState<Step>('select');
@@ -94,7 +99,8 @@ export function App() {
   const [multiVideos, setMultiVideos] = useState<SelectedVideo[]>([]);
   const [updateState, setUpdateState] = useState<UpdateState>({ status: 'idle', version: null, message: null });
   const [mode, setMode] = useState<'all' | 'highlight' | 'custom'>('all');
-  const [threshold, setThreshold] = useState<3 | 5 | 7>(5);
+  const [bounceThreshold, setBounceThreshold] = useState<3 | 5 | 7>(5);
+  const [durationTier, setDurationTier] = useState<DurationHighlightTier>('rally');
   const blurballConfidenceThreshold = BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT;
   const blurballStage1ConfidenceThreshold = BLURBALL_STAGE1_CONFIDENCE_THRESHOLD_DEFAULT;
   const blurballStage2ConfidenceThreshold = BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT;
@@ -274,7 +280,7 @@ export function App() {
   const reset = useCallback(() => {
     setStep('select'); setVideo(null); setMetadata(null); setPoints({}); setAnalysis(null); setAnalysisId(null); setForceManual(false);
     setAnalysisWarning(null);
-    setMode('all'); setThreshold(5); setCustomDraft(null); setCustomOutputs({ combined_video: true, rally_videos: false, premiere_xml: false }); setProgress({ percent: 0, stage: 'probe' });
+    setMode('all'); setBounceThreshold(5); setDurationTier('rally'); setCustomDraft(null); setCustomOutputs({ combined_video: true, rally_videos: false, premiere_xml: false }); setProgress({ percent: 0, stage: 'probe' });
     setActiveTask(null); setExportResult(null); setError(null);
     if (videoTaskOwnerRef.current === 'single') updateVideoTaskOwner(null);
   }, [updateVideoTaskOwner]);
@@ -308,7 +314,12 @@ export function App() {
     points: points as Calibration['points'],
   } : null;
   const calibrationIssue = calibrationValue ? validateCalibration(calibrationValue) : null;
-  const highlights = analysis?.rallies.filter((rally) => rally.bounce_count > threshold) ?? [];
+  const analysisUsesContinuousVisibility = analysis ? rallyRecognitionMethod(analysis) === 'continuous_visibility' : false;
+  const highlights = analysis?.rallies.filter((rally) => (
+    analysisUsesContinuousVisibility
+      ? rally.end_time_seconds - rally.start_time_seconds > DURATION_HIGHLIGHT_SECONDS[durationTier]
+      : 'bounce_count' in rally && typeof rally.bounce_count === 'number' && rally.bounce_count > bounceThreshold
+  )) ?? [];
   const selectedCount = mode === 'all'
     ? analysis?.rallies.length ?? 0
     : mode === 'highlight'
@@ -339,7 +350,8 @@ export function App() {
         calibrationChoice: useManualCalibration ? { method: 'manual', calibration: calibrationValue! } : { method: 'automatic' },
         device: 'auto',
         historyVisibility: 'visible',
-        analysisMode: settings.analysis_mode,
+        analysisMode: settings.rally_recognition_method === 'continuous_visibility' ? 'full' : settings.analysis_mode,
+        rallyRecognitionMethod: settings.rally_recognition_method,
         blurballConfidenceThreshold,
         blurballStage1ConfidenceThreshold,
         blurballStage2ConfidenceThreshold,
@@ -358,7 +370,9 @@ export function App() {
     const common = { pre_roll_seconds: settings.pre_roll_seconds, post_roll_seconds: settings.post_roll_seconds } as const;
     if (preparedSelection) selection = preparedSelection;
     else if (mode === 'all') selection = { mode, ...common };
-    else if (mode === 'highlight') selection = { mode, highlight_threshold: threshold, ...common };
+    else if (mode === 'highlight') selection = analysisUsesContinuousVisibility
+      ? { mode, criterion: { kind: 'duration_tier', tier: durationTier }, ...common }
+      : { mode, criterion: { kind: 'bounce_count', threshold: bounceThreshold }, ...common };
     else return;
     if (selection.mode === 'custom' && selection.segments.length === 0) return;
     exportOriginRef.current = selection.mode === 'custom' ? 'custom' : 'mode';
@@ -428,7 +442,8 @@ export function App() {
       setAnalysisId(opened.analysisId);
       setPoints(opened.calibration.points);
       setMode('all');
-      setThreshold(5);
+      setBounceThreshold(5);
+      setDurationTier('rally');
       setCustomDraft(null);
       setCustomOutputs({ combined_video: true, rally_videos: false, premiere_xml: false });
       setExportResult(null);
@@ -623,7 +638,8 @@ export function App() {
               initialVideos={multiVideos}
               preRoll={settings.pre_roll_seconds}
               postRoll={settings.post_roll_seconds}
-              analysisMode={settings.analysis_mode}
+              analysisMode={settings.rally_recognition_method === 'continuous_visibility' ? 'full' : settings.analysis_mode}
+              rallyRecognitionMethod={settings.rally_recognition_method}
               blurballConfidenceThreshold={blurballConfidenceThreshold}
               blurballStage1ConfidenceThreshold={blurballStage1ConfidenceThreshold}
               blurballStage2ConfidenceThreshold={blurballStage2ConfidenceThreshold}
@@ -672,7 +688,22 @@ export function App() {
                   value={settings.language as Language}
                 />
               </article>
-              <article className="card detector-settings-card">
+              <article className="card setting-card">
+                <div><h2>{t.rallyRecognitionMethod}</h2></div>
+                <GlassRadioGroup
+                  ariaLabel={t.rallyRecognitionMethod}
+                  className="compact"
+                  idPrefix="settings-rally-recognition"
+                  name="settings-rally-recognition"
+                  onChange={(rally_recognition_method) => void saveRolls({ rally_recognition_method })}
+                  options={[
+                    { value: 'bounce_events', label: t.bounceEvents },
+                    { value: 'continuous_visibility', label: t.continuousVisibility },
+                  ] as const}
+                  value={settings.rally_recognition_method}
+                />
+              </article>
+              {settings.rally_recognition_method === 'bounce_events' && <article className="card detector-settings-card">
                 <section className="detector-setting">
                   <div>
                     <h2>{t.blurballAnalysisMode}</h2>
@@ -691,7 +722,7 @@ export function App() {
                     value={settings.analysis_mode}
                   />
                 </section>
-              </article>
+              </article>}
               <article className="card setting-card">
                 <div><h2>{settings.language === 'zh-CN' ? '球台标定' : 'Table calibration'}</h2><p>{settings.language === 'zh-CN' ? '选择单视频流程使用的球台标定方式。多任务会先自动标定，失败项目可手动补充。' : 'Choose the calibration method for single videos. Batch tasks calibrate automatically first, with manual recovery for failed items.'}</p></div>
                 <GlassRadioGroup
@@ -873,7 +904,7 @@ export function App() {
                 <div className="page-heading"><p className="eyebrow">3 / 4</p><h1>{t.modeTitle}</h1><p>{interpolate(t.detected, { count: analysis.rallies.length })}</p></div>
                 <div className="mode-grid">
                   {([
-                    ['all', t.all, t.allDetail], ['highlight', t.highlight, t.highlightDetail], ['custom', t.custom, t.customDetail],
+                    ['all', t.all, t.allDetail], ['highlight', t.highlight, analysisUsesContinuousVisibility ? t.highlightDurationDetail : t.highlightDetail], ['custom', t.custom, t.customDetail],
                   ] as const).map(([value, title, detail]) => (
                     <button key={value} className={`mode-card ${value !== 'custom' && mode === value ? 'selected' : ''} ${value === 'custom' ? 'mode-card-navigate' : ''}`} onClick={() => { if (value === 'custom') openCustomEditor(); else setMode(value); }}>
                       {value === 'custom' ? <span className="mode-card-chevron" aria-hidden="true" /> : <span className="radio-dot" />}
@@ -881,7 +912,7 @@ export function App() {
                     </button>
                   ))}
                 </div>
-                {mode === 'highlight' && <div className="card inline-setting"><div><h2>{t.threshold}</h2><p>{t.highlightDetail}</p></div><GlassRadioGroup ariaLabel={t.threshold} className="compact" idPrefix="single-threshold" name="single-threshold" onChange={setThreshold} options={[3, 5, 7].map((value) => ({ value: value as 3 | 5 | 7, label: `> ${value}` }))} value={threshold} />{highlights.length === 0 && <span className="inline-error">{t.noHighlights}</span>}</div>}
+                {mode === 'highlight' && <div className="card inline-setting"><div><h2>{analysisUsesContinuousVisibility ? t.durationTier : t.threshold}</h2><p>{analysisUsesContinuousVisibility ? t.highlightDurationDetail : t.highlightDetail}</p></div>{analysisUsesContinuousVisibility ? <GlassRadioGroup ariaLabel={t.durationTier} className="compact" idPrefix="single-duration-tier" name="single-duration-tier" onChange={setDurationTier} options={DURATION_HIGHLIGHT_TIER_VALUES.map((value) => ({ value, label: value === 'short_rally' ? t.shortRallyTier : value === 'rally' ? t.rallyTier : t.longRallyTier }))} value={durationTier} /> : <GlassRadioGroup ariaLabel={t.threshold} className="compact" idPrefix="single-threshold" name="single-threshold" onChange={setBounceThreshold} options={[3, 5, 7].map((value) => ({ value: value as 3 | 5 | 7, label: `> ${value}` }))} value={bounceThreshold} />}{highlights.length === 0 && <span className="inline-error">{analysisUsesContinuousVisibility ? t.noDurationHighlights : t.noHighlights}</span>}</div>}
                 <div className="footer-actions"><span>{selectedCount} / {analysis.rallies.length}</span><button className="primary" disabled={selectedCount === 0 || !platformSupported || !bootstrap?.components.media.available} onClick={() => void startCutting()}>{t.startCutting}</button></div>
               </div>
             )}

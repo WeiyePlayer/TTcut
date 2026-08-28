@@ -10,6 +10,7 @@ import {
   type Calibration,
   type CalibrationChoice,
   type BlurBallAnalysisMode,
+  type RallyRecognitionMethod,
   type TableAnalysis,
   type WorkerEventV1,
 } from '../shared/contracts';
@@ -169,6 +170,7 @@ export async function startAnalysis(
     device: 'auto' | 'cuda' | 'cpu';
     historyVisibility: 'visible' | 'deferred';
     analysisMode: BlurBallAnalysisMode;
+    rallyRecognitionMethod: RallyRecognitionMethod;
     blurballConfidenceThreshold: number;
     blurballStage1ConfidenceThreshold: number;
     blurballStage2ConfidenceThreshold: number;
@@ -334,7 +336,7 @@ export async function startAnalysis(
       }
       if (!processing) throw workerFailure('CFR_PROCESSING_MEDIA_MISSING', 'Processing media was not prepared.');
       const request = analysisRequestSchema.parse({
-        schema_version: 2,
+        schema_version: 3,
         task_id: taskId,
         video_path: processing.metadata.path,
         device: requestedDevice,
@@ -347,6 +349,7 @@ export async function startAnalysis(
             stage1_confidence_threshold: value.blurballStage1ConfidenceThreshold,
             stage2_confidence_threshold: value.blurballStage2ConfidenceThreshold,
           },
+        rally_recognition: { method: value.rallyRecognitionMethod },
       });
       const workerResult = await runWorker({
         taskId,

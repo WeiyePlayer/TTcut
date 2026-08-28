@@ -242,3 +242,29 @@ _Avoid_: Windows trusted root, publisher name alone
 The one-time manual installation needed to move a version that only has the
 default Windows trust verifier onto a version that understands Signed Update
 Manifests. Subsequent updates can return to the automatic NSIS flow.
+
+## 回合识别方式（Rally Recognition Method）
+
+将 Source-frame Trajectory 划分为可剪辑 Rally 的独立设置轴。 `落台判定`
+（`bounce_events`）以 Bounce Event Time 分组；`连续可见`
+（`continuous_visibility`）以可见帧与不可见帧的迟滞状态机分组。分析结果记录
+实际方式，历史展示和导出不得从当前全局设置推断。
+_Avoid_: Analysis Mode, highlight tier
+
+## 落台判定（Bounce Events）
+
+默认的 Rally Recognition Method。其 Rally 带有正整数 Board Count 与
+Bounce Event Times；精彩筛选使用板数阈值 `3 / 5 / 7`。
+
+## 连续可见（Continuous Visibility）
+
+以可见帧迟滞状态机识别 Rally 的方式。它固定使用完整单阶段分析并跳过落台检测；
+先按首个和最后一个可见帧形成候选，再以归一化的水平往返/横跨运动剔除回合间传球；
+只有间隔和边界位移都受限的合格候选才桥接短遮挡。结果不含 Board Count 或
+Bounce Event Times。
+
+## 精彩档位（Highlight Tier）
+
+“精彩回合”的选择准则，不是 Rally Recognition Method 或 Analysis Mode。连续可见
+结果按 `end_time_seconds - start_time_seconds` 严格大于阈值的累计时长档位选择：
+短回合、相持、长相持。

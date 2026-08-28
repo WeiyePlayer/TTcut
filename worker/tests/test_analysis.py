@@ -181,6 +181,63 @@ def test_worker_uses_requested_blurball_threshold_and_records_it(monkeypatch):
     }
 
 
+def test_worker_continuous_visibility_skips_bounce_detection_and_records_provenance(monkeypatch):
+    class FakeBlurBallPredictor:
+        def __init__(self, loaded, confidence_threshold=0.7):
+            self.confidence_threshold = confidence_threshold
+
+        def predict(self, video_path, progress_callback=None, analysis_roi=None):
+            xs = [100, 300, 500, 100, 500, 100]
+            points = [
+                TrajectoryPoint(frame, frame / 10.0, 1, x, 20, "blurball", 1.0)
+                for frame, x in enumerate(xs)
+            ]
+            return points, VideoInfo(Path(video_path), 1280, 720, 10.0, 6, 6, 0.5), SimpleNamespace(
+                model_width=512, model_height=288, confidence_threshold=self.confidence_threshold,
+                step=3, maximum_displacement_pixels=100.0,
+            )
+
+    fake_loaded = SimpleNamespace(component_version="1.0.0")
+    monkeypatch.setenv("TTCUT_BLURBALL_WEIGHTS", "blurball.pt")
+    monkeypatch.setattr("ttcut_worker.worker.load_blurball", lambda path, device: fake_loaded)
+    monkeypatch.setattr("ttcut_worker.worker.BlurBallPredictor", FakeBlurBallPredictor)
+    monkeypatch.setattr(
+        "ttcut_worker.worker.detect_blurball_bounce_frames",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("bounce detection must be skipped")),
+    )
+
+    request = valid_request()
+    request["schema_version"] = 3
+    request["analysis"] = {"mode": "two_stage", "stage1_confidence_threshold": 0.3, "stage2_confidence_threshold": 0.7}
+    request["rally_recognition"] = {"method": "continuous_visibility"}
+    result = analyze(request)
+
+    assert result["schema_version"] == 2
+    assert result["rally_recognition"] == {
+        "method": "continuous_visibility",
+        "start_visible_seconds": 0.2,
+        "end_invisible_seconds": 0.5,
+        "motion_filter": {
+            "minimum_horizontal_excursion_ratio": 20.0 / 618.0,
+            "maximum_reversal_gap_seconds": 0.35,
+            "minimum_horizontal_to_vertical_range_ratio": 0.7,
+            "maximum_monotonic_vertical_reversals": 1,
+            "minimum_monotonic_horizontal_range_ratio": 200.0 / 618.0,
+        },
+        "fragment_bridge": {
+            "maximum_gap_seconds": 1.5,
+            "maximum_boundary_displacement_ratio": 0.35,
+            "maximum_boundary_speed_ratio_per_second": 0.26,
+        },
+    }
+    assert result["rallies"] == [{
+        "id": "rally_001", "index": 1, "start_time_seconds": 0.0, "end_time_seconds": 0.5,
+    }]
+    assert "bounce_times_seconds" not in result
+    assert "detection" not in result["model_provenance"]
+    assert result["model_provenance"]["analysis"]["mode"] == "full"
+
+
 def test_worker_two_stage_uses_separate_thresholds_and_only_refinement_results(monkeypatch):
     captured = {"predict": [], "predict_intervals": []}
 

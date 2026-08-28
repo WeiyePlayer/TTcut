@@ -49,6 +49,21 @@ describe('BlurBall analysis request contracts', () => {
     })).toMatchObject({ analysis: { mode: 'two_stage' } });
   });
 
+  it('adds v3 rally recognition while preserving v1 and v2 as bounce-event requests', () => {
+    expect(analysisRequestSchema.parse({
+      schema_version: 3,
+      ...base,
+      analysis: { mode: 'full', confidence_threshold: 0.7 },
+      rally_recognition: { method: 'continuous_visibility' },
+    })).toMatchObject({ rally_recognition: { method: 'continuous_visibility' } });
+    expect(() => analysisRequestSchema.parse({
+      schema_version: 3,
+      ...base,
+      analysis: { mode: 'full', confidence_threshold: 0.7 },
+      rally_recognition: { method: 'unknown' },
+    })).toThrow();
+  });
+
   it('rejects out-of-range stage thresholds and unknown config fields', () => {
     expect(() => analysisRequestSchema.parse({
       schema_version: 2,
@@ -86,5 +101,36 @@ describe('BlurBall analysis request contracts', () => {
       },
     });
     expect(result.model_provenance?.analysis?.mode).toBe('two_stage');
+  });
+
+  it('models continuous-visibility results without bounce fields', () => {
+    const result = analysisResultSchema.parse({
+      schema_version: 2,
+      video: {
+        path: 'match.mp4', duration_seconds: 10, width: 1280, height: 720, fps: 30,
+        variable_frame_rate: false, video_codec: 'h264', audio_codec: null, container: 'mp4',
+      },
+      rallies: [{ id: 'rally_001', index: 1, start_time_seconds: 1, end_time_seconds: 5 }],
+      rally_recognition: {
+        method: 'continuous_visibility', start_visible_seconds: 0.2, end_invisible_seconds: 0.5,
+        motion_filter: {
+          minimum_horizontal_excursion_ratio: 20 / 618,
+          maximum_reversal_gap_seconds: 0.35,
+          minimum_horizontal_to_vertical_range_ratio: 0.7,
+          maximum_monotonic_vertical_reversals: 1,
+          minimum_monotonic_horizontal_range_ratio: 200 / 618,
+        },
+        fragment_bridge: {
+          maximum_gap_seconds: 1.5,
+          maximum_boundary_displacement_ratio: 0.35,
+          maximum_boundary_speed_ratio_per_second: 0.26,
+        },
+      },
+    });
+    expect(result.rallies[0]).not.toHaveProperty('bounce_count');
+    expect(() => analysisResultSchema.parse({
+      ...result,
+      rallies: [{ ...result.rallies[0], bounce_count: 3 }],
+    })).toThrow();
   });
 });

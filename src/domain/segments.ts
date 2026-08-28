@@ -1,10 +1,18 @@
-import type { AnalysisResultV1, CutGroup, CutSelectionV1, Rally } from '../shared/contracts';
+import {
+  DURATION_HIGHLIGHT_SECONDS,
+  hasBounceCounts,
+  rallyRecognitionMethod,
+  type AnalysisResultV1,
+  type CutGroup,
+  type CutSelectionV1,
+  type Rally,
+} from '../shared/contracts';
 
 const EPSILON = 1e-9;
 export const FINAL_RALLY_TAIL_SECONDS = 1;
 
 export class SelectionError extends Error {
-  constructor(public readonly code: 'NO_RALLIES' | 'NO_HIGHLIGHTS' | 'NO_CUSTOM_SELECTION') {
+  constructor(public readonly code: 'NO_RALLIES' | 'NO_HIGHLIGHTS' | 'NO_CUSTOM_SELECTION' | 'INVALID_HIGHLIGHT_CRITERION') {
     super(code);
   }
 }
@@ -21,7 +29,23 @@ export function selectRallies(result: AnalysisResultV1, selection: CutSelectionV
   }
 
   if (selection.mode === 'highlight') {
-    const filtered = rallies.filter((rally) => rally.bounce_count > selection.highlight_threshold);
+    const criterion = 'criterion' in selection
+      ? selection.criterion
+      : { kind: 'bounce_count' as const, threshold: selection.highlight_threshold };
+    const method = rallyRecognitionMethod(result);
+    if (criterion.kind === 'bounce_count' && method !== 'bounce_events') {
+      throw new SelectionError('INVALID_HIGHLIGHT_CRITERION');
+    }
+    if (criterion.kind === 'duration_tier' && method !== 'continuous_visibility') {
+      throw new SelectionError('INVALID_HIGHLIGHT_CRITERION');
+    }
+    const filtered = criterion.kind === 'bounce_count'
+      ? (hasBounceCounts(result)
+        ? rallies.filter((rally) => 'bounce_count' in rally && rally.bounce_count > criterion.threshold)
+        : [])
+      : rallies.filter((rally) => (
+        rally.end_time_seconds - rally.start_time_seconds > DURATION_HIGHLIGHT_SECONDS[criterion.tier]
+      ));
     if (filtered.length === 0) throw new SelectionError('NO_HIGHLIGHTS');
     return filtered;
   }

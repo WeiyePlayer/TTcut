@@ -114,7 +114,7 @@ export function createCustomClipDraft(
       source: 'detected' as const,
       sourceRallyId: rally.id,
       rallyIndex: rally.index,
-      bounceCount: rally.bounce_count,
+      bounceCount: 'bounce_count' in rally ? rally.bounce_count : null,
       defaultStart,
       defaultEnd: end,
       start: defaultStart,

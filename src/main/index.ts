@@ -12,6 +12,7 @@ import {
   BLURBALL_CONFIDENCE_THRESHOLD_MAX,
   BLURBALL_CONFIDENCE_THRESHOLD_MIN,
   BLURBALL_ANALYSIS_MODE_VALUES,
+  RALLY_RECOGNITION_METHOD_VALUES,
   appSettingsSchema,
   calibrationChoiceSchema,
   exportRequestSchema,
@@ -189,6 +190,8 @@ function registerIpc(): void {
     if (historyVisibility !== 'visible' && historyVisibility !== 'deferred') throw new Error('INVALID_REQUEST');
     const analysisMode = record.analysisMode;
     if (!BLURBALL_ANALYSIS_MODE_VALUES.includes(analysisMode as typeof BLURBALL_ANALYSIS_MODE_VALUES[number])) throw new Error('INVALID_REQUEST');
+    const rallyRecognitionMethod = record.rallyRecognitionMethod;
+    if (!RALLY_RECOGNITION_METHOD_VALUES.includes(rallyRecognitionMethod as typeof RALLY_RECOGNITION_METHOD_VALUES[number])) throw new Error('INVALID_REQUEST');
     const validateThreshold = (value: unknown): value is number => typeof value === 'number'
       && Number.isFinite(value)
       && value >= BLURBALL_CONFIDENCE_THRESHOLD_MIN
@@ -204,7 +207,8 @@ function registerIpc(): void {
       calibrationChoice: calibrationChoiceSchema.parse(record.calibrationChoice),
       device,
       historyVisibility,
-      analysisMode: analysisMode as 'full' | 'two_stage',
+      analysisMode: rallyRecognitionMethod === 'continuous_visibility' ? 'full' : analysisMode as 'full' | 'two_stage',
+      rallyRecognitionMethod: rallyRecognitionMethod as 'bounce_events' | 'continuous_visibility',
       blurballConfidenceThreshold,
       blurballStage1ConfidenceThreshold,
       blurballStage2ConfidenceThreshold,

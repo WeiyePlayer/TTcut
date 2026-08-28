@@ -141,6 +141,7 @@ describe('multi-task clipping', () => {
       device: 'auto',
       historyVisibility: 'deferred',
       analysisMode: 'full',
+      rallyRecognitionMethod: 'bounce_events',
       blurballConfidenceThreshold: 0.7,
       blurballStage1ConfidenceThreshold: 0.3,
       blurballStage2ConfidenceThreshold: 0.7,

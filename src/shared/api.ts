@@ -2,6 +2,7 @@ import type {
   AnalysisResultV1,
   AppSettings,
   BlurBallAnalysisMode,
+  RallyRecognitionMethod,
   Calibration,
   CalibrationChoice,
   TableAnalysis,
@@ -96,6 +97,7 @@ export interface TTcutApi {
     device: 'auto' | 'cuda' | 'cpu';
     historyVisibility: 'visible' | 'deferred';
     analysisMode: BlurBallAnalysisMode;
+    rallyRecognitionMethod: RallyRecognitionMethod;
     blurballConfidenceThreshold: number;
     blurballStage1ConfidenceThreshold: number;
     blurballStage2ConfidenceThreshold: number;

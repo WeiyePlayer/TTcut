@@ -13,6 +13,7 @@ const bootstrap: BootstrapData = {
     pre_roll_seconds: 2.5,
     post_roll_seconds: 1,
     analysis_mode: 'full',
+    rally_recognition_method: 'bounce_events',
   },
   components: {
     analysis: {
@@ -214,6 +215,36 @@ describe('App workflow notices and multi-task entry', () => {
 
     fireEvent.click(screen.getByRole('radio', { name: '默认' }));
     await waitFor(() => expect(screen.queryByRole('slider')).toBeNull());
+  });
+
+  it('uses continuous visibility as a separate setting, hides precision, and preserves it for bounce events', async () => {
+    bootstrap.settings.analysis_mode = 'two_stage';
+    const selected = {
+      path: 'C:\\video\\visible.mp4', name: 'visible.mp4', size: 100, mediaUrl: 'ttcut-media://visible',
+    };
+    selectVideos.mockResolvedValue([selected]);
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: '设置' }));
+    expect(screen.getByRole('radio', { name: '落台判定' })).toBeChecked();
+    fireEvent.click(screen.getByRole('radio', { name: '连续可见' }));
+
+    await waitFor(() => expect(window.ttcut.saveSettings).toHaveBeenCalledWith(expect.objectContaining({
+      rally_recognition_method: 'continuous_visibility', analysis_mode: 'two_stage',
+    })));
+    expect(screen.queryByRole('heading', { name: '分析精度' })).toBeNull();
+    fireEvent.click(screen.getByRole('radio', { name: '落台判定' }));
+    expect(await screen.findByRole('heading', { name: '分析精度' })).toBeVisible();
+    expect(screen.getByRole('radio', { name: '高精' })).toBeChecked();
+    fireEvent.click(screen.getByRole('radio', { name: '连续可见' }));
+
+    fireEvent.click(screen.getByRole('button', { name: '自动剪辑' }));
+    fireEvent.click(await screen.findByRole('button', { name: '选择或将文件拖到这里' }));
+    fireEvent.click(await screen.findByRole('button', { name: '开始分析' }));
+    await waitFor(() => expect(window.ttcut.startAnalysis).toHaveBeenCalledWith(expect.objectContaining({
+      analysisMode: 'full', rallyRecognitionMethod: 'continuous_visibility',
+    })));
+    bootstrap.settings.analysis_mode = 'full';
+    bootstrap.settings.rally_recognition_method = 'bounce_events';
   });
 
   it('replaces release notes with an author-contact QR tooltip', async () => {

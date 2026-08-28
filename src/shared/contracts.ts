@@ -12,6 +12,14 @@ export const BLURBALL_CONFIDENCE_THRESHOLD_STEP = 0.05;
 export const BLURBALL_ANALYSIS_MODE_VALUES = ['full', 'two_stage'] as const;
 export const BLURBALL_ANALYSIS_MODE_DEFAULT = 'full' as const;
 export const BLURBALL_REFINEMENT_EXPANSION_SECONDS = 0.75;
+export const RALLY_RECOGNITION_METHOD_VALUES = ['bounce_events', 'continuous_visibility'] as const;
+export const RALLY_RECOGNITION_METHOD_DEFAULT = 'bounce_events' as const;
+export const DURATION_HIGHLIGHT_TIER_VALUES = ['short_rally', 'rally', 'long_rally'] as const;
+export const DURATION_HIGHLIGHT_SECONDS = {
+  short_rally: 2.7,
+  rally: 4,
+  long_rally: 4.8,
+} as const;
 const LEGACY_RESULT_MODEL_PROFILES = ['tracknet_v1', 'blurball_v1'] as const;
 
 const finiteNumber = z.number().finite();
@@ -167,6 +175,10 @@ export const blurballAnalysisConfigSchema = z.discriminatedUnion('mode', [
   blurballTwoStageAnalysisConfigSchema,
 ]);
 
+export const rallyRecognitionConfigSchema = z.object({
+  method: z.enum(RALLY_RECOGNITION_METHOD_VALUES),
+}).strict();
+
 export const analysisRequestV2Schema = z.object({
   schema_version: z.literal(2),
   task_id: z.string().uuid(),
@@ -177,7 +189,16 @@ export const analysisRequestV2Schema = z.object({
   analysis: blurballAnalysisConfigSchema,
 }).strict();
 
-export const analysisRequestSchema = z.union([analysisRequestV1Schema, analysisRequestV2Schema]);
+export const analysisRequestV3Schema = analysisRequestV2Schema.extend({
+  schema_version: z.literal(3),
+  rally_recognition: rallyRecognitionConfigSchema,
+}).strict();
+
+export const analysisRequestSchema = z.union([
+  analysisRequestV1Schema,
+  analysisRequestV2Schema,
+  analysisRequestV3Schema,
+]);
 
 export const videoMetadataSchema = z.object({
   path: z.string().min(1),
@@ -213,7 +234,7 @@ export const videoMetadataSchema = z.object({
   color_primaries: z.string().nullable().optional(),
 }).strict();
 
-export const rallySchema = z.object({
+export const bounceRallySchema = z.object({
   id: z.string().regex(/^rally_\d{3,}$/),
   index: z.number().int().positive(),
   bounce_count: z.number().int().positive(),
@@ -224,8 +245,19 @@ export const rallySchema = z.object({
   { message: 'Rally end time must be after start time' },
 );
 
-export const analysisResultSchema = z.object({
-  schema_version: z.literal(1),
+export const continuousVisibilityRallySchema = z.object({
+  id: z.string().regex(/^rally_\d{3,}$/),
+  index: z.number().int().positive(),
+  start_time_seconds: finiteNumber.nonnegative(),
+  end_time_seconds: finiteNumber.positive(),
+}).strict().refine(
+  (rally) => rally.end_time_seconds > rally.start_time_seconds,
+  { message: 'Rally end time must be after start time' },
+);
+
+export const rallySchema = z.union([bounceRallySchema, continuousVisibilityRallySchema]);
+
+const analysisResultBaseSchema = z.object({
   video: videoMetadataSchema,
   source_video: videoMetadataSchema.optional(),
   processing: z.object({
@@ -234,8 +266,6 @@ export const analysisResultSchema = z.object({
     encoder: z.enum(['libopenh264', 'libx264']).nullable(),
     warning_code: z.string().min(1).nullable(),
   }).strict().optional(),
-  rallies: z.array(rallySchema),
-  bounce_times_seconds: z.array(finiteNumber.nonnegative()).optional(),
   calibration: calibrationSchema.optional(),
   table_analysis: tableAnalysisSchema.optional(),
   model_provenance: z.object({
@@ -270,6 +300,51 @@ export const analysisResultSchema = z.object({
     }).strict().optional(),
   }).strict().optional(),
 }).strict();
+
+export const legacyAnalysisResultV1Schema = analysisResultBaseSchema.extend({
+  schema_version: z.literal(1),
+  rallies: z.array(bounceRallySchema),
+  bounce_times_seconds: z.array(finiteNumber.nonnegative()).optional(),
+}).strict();
+
+export const bounceAnalysisResultV2Schema = analysisResultBaseSchema.extend({
+  schema_version: z.literal(2),
+  rallies: z.array(bounceRallySchema),
+  bounce_times_seconds: z.array(finiteNumber.nonnegative()),
+  rally_recognition: z.object({
+    method: z.literal('bounce_events'),
+    maximum_gap_seconds: finiteNumber.nonnegative(),
+    minimum_bounce_count: z.number().int().positive(),
+  }).strict(),
+}).strict();
+
+export const continuousVisibilityAnalysisResultV2Schema = analysisResultBaseSchema.extend({
+  schema_version: z.literal(2),
+  rallies: z.array(continuousVisibilityRallySchema),
+  rally_recognition: z.object({
+    method: z.literal('continuous_visibility'),
+    start_visible_seconds: finiteNumber.positive(),
+    end_invisible_seconds: finiteNumber.positive(),
+    motion_filter: z.object({
+      minimum_horizontal_excursion_ratio: finiteNumber.positive(),
+      maximum_reversal_gap_seconds: finiteNumber.positive(),
+      minimum_horizontal_to_vertical_range_ratio: finiteNumber.positive(),
+      maximum_monotonic_vertical_reversals: z.number().int().nonnegative(),
+      minimum_monotonic_horizontal_range_ratio: finiteNumber.positive(),
+    }).strict().optional(),
+    fragment_bridge: z.object({
+      maximum_gap_seconds: finiteNumber.positive(),
+      maximum_boundary_displacement_ratio: finiteNumber.positive(),
+      maximum_boundary_speed_ratio_per_second: finiteNumber.positive(),
+    }).strict().optional(),
+  }).strict(),
+}).strict();
+
+export const analysisResultSchema = z.union([
+  legacyAnalysisResultV1Schema,
+  bounceAnalysisResultV2Schema,
+  continuousVisibilityAnalysisResultV2Schema,
+]);
 
 export const calibrationResultSchema = z.object({
   calibration: calibrationSchema,
@@ -329,22 +404,45 @@ export const customExportSegmentInputSchema = z.union([
   legacyCustomExportSegmentSchema,
 ]);
 
-export const cutSelectionSchema = z.discriminatedUnion('mode', [
-  z.object({
+const allCutSelectionSchema = z.object({
     mode: z.literal('all'),
     pre_roll_seconds: z.union(PRE_ROLL_VALUES.map((value) => z.literal(value))),
     post_roll_seconds: z.union(POST_ROLL_VALUES.map((value) => z.literal(value))),
-  }).strict(),
-  z.object({
+  }).strict();
+
+const legacyHighlightCutSelectionSchema = z.object({
     mode: z.literal('highlight'),
     highlight_threshold: z.union(HIGHLIGHT_VALUES.map((value) => z.literal(value))),
     pre_roll_seconds: z.union(PRE_ROLL_VALUES.map((value) => z.literal(value))),
     post_roll_seconds: z.union(POST_ROLL_VALUES.map((value) => z.literal(value))),
-  }).strict(),
-  z.object({
+  }).strict();
+
+const highlightCutSelectionSchema = z.object({
+    mode: z.literal('highlight'),
+    criterion: z.discriminatedUnion('kind', [
+      z.object({
+        kind: z.literal('bounce_count'),
+        threshold: z.union(HIGHLIGHT_VALUES.map((value) => z.literal(value))),
+      }).strict(),
+      z.object({
+        kind: z.literal('duration_tier'),
+        tier: z.enum(DURATION_HIGHLIGHT_TIER_VALUES),
+      }).strict(),
+    ]),
+    pre_roll_seconds: z.union(PRE_ROLL_VALUES.map((value) => z.literal(value))),
+    post_roll_seconds: z.union(POST_ROLL_VALUES.map((value) => z.literal(value))),
+  }).strict();
+
+const customCutSelectionSchema = z.object({
     mode: z.literal('custom'),
     segments: z.array(customExportSegmentInputSchema).min(1),
-  }).strict(),
+  }).strict();
+
+export const cutSelectionSchema = z.union([
+  allCutSelectionSchema,
+  legacyHighlightCutSelectionSchema,
+  highlightCutSelectionSchema,
+  customCutSelectionSchema,
 ]);
 
 export const appSettingsSchema = z.object({
@@ -353,6 +451,7 @@ export const appSettingsSchema = z.object({
   pre_roll_seconds: z.union(PRE_ROLL_VALUES.map((value) => z.literal(value))),
   post_roll_seconds: z.union(POST_ROLL_VALUES.map((value) => z.literal(value))),
   analysis_mode: z.enum(BLURBALL_ANALYSIS_MODE_VALUES).default(BLURBALL_ANALYSIS_MODE_DEFAULT),
+  rally_recognition_method: z.enum(RALLY_RECOGNITION_METHOD_VALUES).default(RALLY_RECOGNITION_METHOD_DEFAULT),
 }).strict();
 
 export const historySourceSchema = z.object({
@@ -476,12 +575,31 @@ export type CalibrationChoice = z.infer<typeof calibrationChoiceSchema>;
 export type TableAnalysis = z.infer<typeof tableAnalysisSchema>;
 export type AnalysisRequestV1 = z.infer<typeof analysisRequestV1Schema>;
 export type AnalysisRequestV2 = z.infer<typeof analysisRequestV2Schema>;
+export type AnalysisRequestV3 = z.infer<typeof analysisRequestV3Schema>;
 export type AnalysisRequest = z.infer<typeof analysisRequestSchema>;
 export type BlurBallAnalysisConfig = z.infer<typeof blurballAnalysisConfigSchema>;
 export type BlurBallAnalysisMode = typeof BLURBALL_ANALYSIS_MODE_VALUES[number];
+export type RallyRecognitionConfig = z.infer<typeof rallyRecognitionConfigSchema>;
+export type RallyRecognitionMethod = typeof RALLY_RECOGNITION_METHOD_VALUES[number];
+export type DurationHighlightTier = typeof DURATION_HIGHLIGHT_TIER_VALUES[number];
 export type VideoMetadata = z.infer<typeof videoMetadataSchema>;
 export type Rally = z.infer<typeof rallySchema>;
+export type BounceRally = z.infer<typeof bounceRallySchema>;
+export type ContinuousVisibilityRally = z.infer<typeof continuousVisibilityRallySchema>;
 export type AnalysisResultV1 = z.infer<typeof analysisResultSchema>;
+export type AnalysisResult = AnalysisResultV1;
+export type LegacyAnalysisResultV1 = z.infer<typeof legacyAnalysisResultV1Schema>;
+export type BounceAnalysisResultV2 = z.infer<typeof bounceAnalysisResultV2Schema>;
+export type ContinuousVisibilityAnalysisResultV2 = z.infer<typeof continuousVisibilityAnalysisResultV2Schema>;
+export type BounceAnalysisResult = LegacyAnalysisResultV1 | BounceAnalysisResultV2;
+
+export function rallyRecognitionMethod(result: AnalysisResultV1): RallyRecognitionMethod {
+  return result.schema_version === 2 ? result.rally_recognition.method : RALLY_RECOGNITION_METHOD_DEFAULT;
+}
+
+export function hasBounceCounts(result: AnalysisResultV1): result is BounceAnalysisResult {
+  return rallyRecognitionMethod(result) === 'bounce_events';
+}
 export type CalibrationResultV1 = z.infer<typeof calibrationResultSchema>;
 export type WorkerEventV1 = z.infer<typeof workerEventSchema>;
 export type CutSelectionV1 = z.infer<typeof cutSelectionSchema>;

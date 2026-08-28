@@ -14,8 +14,27 @@ from .calibration import TableCalibration
 from .errors import InvalidRequestError, ModelResourceError, TableModelResourceError, WorkerError
 from .roi import AnalysisRoiConfig, build_analysis_roi
 from .rallies import group_rallies
-from .request import analysis_config, validate_request
+from .request import (
+    BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT,
+    analysis_config,
+    rally_recognition_config,
+    validate_request,
+)
 from .table_analyze import analyze_table
+from .visibility_rallies import (
+    CONTINUOUS_VISIBILITY_END_SECONDS,
+    CONTINUOUS_VISIBILITY_FRAGMENT_MERGE_DISPLACEMENT_RATIO,
+    CONTINUOUS_VISIBILITY_FRAGMENT_MERGE_SECONDS,
+    CONTINUOUS_VISIBILITY_FRAGMENT_MERGE_SPEED_RATIO_PER_SECOND,
+    CONTINUOUS_VISIBILITY_MAX_MONOTONIC_VERTICAL_REVERSALS,
+    CONTINUOUS_VISIBILITY_MAX_REVERSAL_GAP_SECONDS,
+    CONTINUOUS_VISIBILITY_MIN_HORIZONTAL_EXCURSION_RATIO,
+    CONTINUOUS_VISIBILITY_MIN_HORIZONTAL_TO_VERTICAL_RANGE_RATIO,
+    CONTINUOUS_VISIBILITY_MIN_MONOTONIC_HORIZONTAL_RANGE_RATIO,
+    CONTINUOUS_VISIBILITY_START_SECONDS,
+    VisibilityMotionConfig,
+    continuous_visibility_rallies,
+)
 
 
 def emit(payload: dict) -> None:
@@ -60,6 +79,12 @@ def analyze(request: dict) -> dict:
     emit({"type": "progress", "task_id": task_id, "stage": "load_model", "current": 1, "total": 1, "percent": 100.0})
 
     config = analysis_config(request)
+    recognition = rally_recognition_config(request)
+    recognition_method = recognition["method"]
+    effective_config = config if recognition_method == "bounce_events" else {
+        "mode": "full",
+        "confidence_threshold": BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT,
+    }
 
     def progress(stage: str):
         def callback(current: int, total: int) -> None:
@@ -70,10 +95,10 @@ def analyze(request: dict) -> dict:
             })
         return callback
 
-    if config["mode"] == "full":
+    if effective_config["mode"] == "full":
         predictor = BlurBallPredictor(
             loaded,
-            confidence_threshold=config["confidence_threshold"],
+            confidence_threshold=effective_config["confidence_threshold"],
         )
         points, info, stats = predictor.predict(
             request["video_path"],
@@ -92,7 +117,7 @@ def analyze(request: dict) -> dict:
     else:
         predictor = BlurBallPredictor(
             loaded,
-            confidence_threshold=config["stage1_confidence_threshold"],
+            confidence_threshold=effective_config["stage1_confidence_threshold"],
         )
         stage1_points, stage1_info, stage1_stats = predictor.predict(
             request["video_path"],
@@ -119,51 +144,64 @@ def analyze(request: dict) -> dict:
             },
             {
                 "name": "refinement",
-                "confidence_threshold": config["stage2_confidence_threshold"],
+                "confidence_threshold": effective_config["stage2_confidence_threshold"],
                 "window_size": 3,
                 "window_stride": 1,
                 "retained_output": "center_frame",
             },
         ]
         expansion_seconds = REFINEMENT_EXPANSION_SECONDS
-        final_threshold = config["stage2_confidence_threshold"]
+        final_threshold = effective_config["stage2_confidence_threshold"]
         if intervals:
             points, info, stats = predictor.predict_intervals(
                 request["video_path"],
                 intervals,
                 progress_callback=progress("refinement_analysis"),
                 analysis_roi=analysis_roi,
-                confidence_threshold=config["stage2_confidence_threshold"],
+                confidence_threshold=effective_config["stage2_confidence_threshold"],
             )
         else:
             points, info, stats = [], stage1_info, stage1_stats
 
     emit({"type": "progress", "task_id": task_id, "stage": "postprocess", "current": 0, "total": 1, "percent": 0.0})
-    bounce_frames = detect_blurball_bounce_frames(points, calibration)
-    rallies = group_rallies(bounce_frames, points)
+    bounce_frames: list[int] | None = None
+    if recognition_method == "bounce_events":
+        bounce_frames = detect_blurball_bounce_frames(points, calibration)
+        rallies = group_rallies(bounce_frames, points)
+    else:
+        rallies = continuous_visibility_rallies(
+            points,
+            float(info.fps or 0.0),
+            motion_config=VisibilityMotionConfig(
+                analysis_width_pixels=analysis_roi.width,
+                analysis_height_pixels=analysis_roi.height,
+            ),
+        )
     duration = float(info.duration or 0.0)
     points_by_frame = {point.frame: point for point in points}
     bounce_times = sorted({
         round(max(0.0, min(duration, float(point.time))) if duration else max(0.0, float(point.time)), 6)
         for frame in bounce_frames
         if (point := points_by_frame.get(frame)) is not None and math.isfinite(point.time)
-    })
+    }) if bounce_frames is not None else None
     normalized = []
     for index, rally in enumerate(rallies, start=1):
         start = max(0.0, float(rally.start_time))
         end = min(duration, float(rally.end_time)) if duration else float(rally.end_time)
         if not all(math.isfinite(value) for value in (start, end)) or end <= start:
             continue
-        normalized.append({
+        item = {
             "id": f"rally_{len(normalized) + 1:03d}",
             "index": len(normalized) + 1,
-            "bounce_count": rally.bounce_count,
             "start_time_seconds": round(start, 6),
             "end_time_seconds": round(end, 6),
-        })
+        }
+        if recognition_method == "bounce_events":
+            item["bounce_count"] = rally.bounce_count
+        normalized.append(item)
     emit({"type": "progress", "task_id": task_id, "stage": "postprocess", "current": 1, "total": 1, "percent": 100.0})
     result = {
-        "schema_version": 1,
+        "schema_version": 2,
         "video": {
             "path": str(info.path),
             "duration_seconds": duration,
@@ -177,7 +215,41 @@ def analyze(request: dict) -> dict:
             "frame_count": info.decoded_frame_count,
         },
         "rallies": normalized,
-        "bounce_times_seconds": bounce_times,
+        "rally_recognition": (
+            {
+                "method": "bounce_events",
+                "maximum_gap_seconds": 3.0,
+                "minimum_bounce_count": 2,
+            }
+            if recognition_method == "bounce_events"
+            else {
+                "method": "continuous_visibility",
+                "start_visible_seconds": CONTINUOUS_VISIBILITY_START_SECONDS,
+                "end_invisible_seconds": CONTINUOUS_VISIBILITY_END_SECONDS,
+                "motion_filter": {
+                    "minimum_horizontal_excursion_ratio": CONTINUOUS_VISIBILITY_MIN_HORIZONTAL_EXCURSION_RATIO,
+                    "maximum_reversal_gap_seconds": CONTINUOUS_VISIBILITY_MAX_REVERSAL_GAP_SECONDS,
+                    "minimum_horizontal_to_vertical_range_ratio": (
+                        CONTINUOUS_VISIBILITY_MIN_HORIZONTAL_TO_VERTICAL_RANGE_RATIO
+                    ),
+                    "maximum_monotonic_vertical_reversals": (
+                        CONTINUOUS_VISIBILITY_MAX_MONOTONIC_VERTICAL_REVERSALS
+                    ),
+                    "minimum_monotonic_horizontal_range_ratio": (
+                        CONTINUOUS_VISIBILITY_MIN_MONOTONIC_HORIZONTAL_RANGE_RATIO
+                    ),
+                },
+                "fragment_bridge": {
+                    "maximum_gap_seconds": CONTINUOUS_VISIBILITY_FRAGMENT_MERGE_SECONDS,
+                    "maximum_boundary_displacement_ratio": (
+                        CONTINUOUS_VISIBILITY_FRAGMENT_MERGE_DISPLACEMENT_RATIO
+                    ),
+                    "maximum_boundary_speed_ratio_per_second": (
+                        CONTINUOUS_VISIBILITY_FRAGMENT_MERGE_SPEED_RATIO_PER_SECOND
+                    ),
+                },
+            }
+        ),
         "calibration": {
             "video_width": calibration.video_width,
             "video_height": calibration.video_height,
@@ -199,20 +271,24 @@ def analyze(request: dict) -> dict:
                 "height": stats.model_height,
             },
             "aux_input": None,
-            "detection": {
-                "confidence_threshold": final_threshold,
-                "step": 1 if config["mode"] == "two_stage" else stats.step,
-                "maximum_displacement_pixels": stats.maximum_displacement_pixels,
-                "landing_region": "expanded_table",
-            },
+            **({
+                "detection": {
+                    "confidence_threshold": final_threshold,
+                    "step": 1 if effective_config["mode"] == "two_stage" else stats.step,
+                    "maximum_displacement_pixels": stats.maximum_displacement_pixels,
+                    "landing_region": "expanded_table",
+                },
+            } if recognition_method == "bounce_events" else {}),
             "analysis": {
                 "schema_version": 2,
-                "mode": config["mode"],
+                "mode": effective_config["mode"],
                 **({"interval_expansion_seconds": expansion_seconds} if expansion_seconds is not None else {}),
                 "stages": stages,
             },
         },
     }
+    if bounce_times is not None:
+        result["bounce_times_seconds"] = bounce_times
     if table_analysis is None and choice["method"] == "precalibrated":
         table_analysis = choice.get("table_analysis")
     if table_analysis is not None:
