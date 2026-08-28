@@ -17,6 +17,9 @@ CONTINUOUS_VISIBILITY_MAX_REVERSAL_GAP_SECONDS = 0.35
 CONTINUOUS_VISIBILITY_MIN_HORIZONTAL_TO_VERTICAL_RANGE_RATIO = 0.70
 CONTINUOUS_VISIBILITY_MAX_MONOTONIC_VERTICAL_REVERSALS = 1
 CONTINUOUS_VISIBILITY_MIN_MONOTONIC_HORIZONTAL_RANGE_RATIO = 200.0 / 618.0
+CONTINUOUS_VISIBILITY_MIN_MONOTONIC_DURATION_SECONDS = 0.60
+CONTINUOUS_VISIBILITY_SHORT_VERTICAL_FILTER_SECONDS = 1.20
+CONTINUOUS_VISIBILITY_MAX_SHORT_VERTICAL_RANGE_RATIO = 0.50
 CONTINUOUS_VISIBILITY_FRAGMENT_MERGE_SECONDS = 1.50
 CONTINUOUS_VISIBILITY_FRAGMENT_MERGE_DISPLACEMENT_RATIO = 0.35
 CONTINUOUS_VISIBILITY_FRAGMENT_MERGE_SPEED_RATIO_PER_SECOND = 0.26
@@ -183,6 +186,7 @@ def _is_ball_exchange(
     maximum_missing_frames = math.floor(fps * CONTINUOUS_VISIBILITY_MAX_REVERSAL_GAP_SECONDS)
     horizontal_range = _value_range(horizontal)
     vertical_range = _value_range(vertical)
+    duration = visible[-1].time - visible[0].time if len(visible) >= 2 else 0.0
 
     robust_exchange = (
         _significant_reversals(_median_smooth(horizontal), horizontal_excursion) >= 1
@@ -196,7 +200,16 @@ def _is_ball_exchange(
         and horizontal_range
         >= config.analysis_width_pixels * CONTINUOUS_VISIBILITY_MIN_MONOTONIC_HORIZONTAL_RANGE_RATIO
     )
-    return robust_exchange or monotonic_cross_table
+    qualified_monotonic_cross_table = (
+        monotonic_cross_table
+        and duration >= CONTINUOUS_VISIBILITY_MIN_MONOTONIC_DURATION_SECONDS
+        and not (
+            duration < CONTINUOUS_VISIBILITY_SHORT_VERTICAL_FILTER_SECONDS
+            and vertical_range
+            > config.analysis_height_pixels * CONTINUOUS_VISIBILITY_MAX_SHORT_VERTICAL_RANGE_RATIO
+        )
+    )
+    return robust_exchange or qualified_monotonic_cross_table
 
 
 def _median_smooth(values: Sequence[float], radius: int = 2) -> list[float]:

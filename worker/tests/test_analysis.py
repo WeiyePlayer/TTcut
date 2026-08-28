@@ -223,6 +223,9 @@ def test_worker_continuous_visibility_skips_bounce_detection_and_records_provena
             "minimum_horizontal_to_vertical_range_ratio": 0.7,
             "maximum_monotonic_vertical_reversals": 1,
             "minimum_monotonic_horizontal_range_ratio": 200.0 / 618.0,
+            "minimum_monotonic_duration_seconds": 0.6,
+            "short_vertical_filter_seconds": 1.2,
+            "maximum_short_vertical_range_ratio": 0.5,
         },
         "fragment_bridge": {
             "maximum_gap_seconds": 1.5,

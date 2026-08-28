@@ -88,6 +88,12 @@ def test_motion_filter_keeps_a_robust_horizontal_exchange() -> None:
     assert len(continuous_visibility_rallies(points, 10, motion_config=MOTION_CONFIG)) == 1
 
 
+def test_motion_filter_keeps_a_short_robust_horizontal_exchange() -> None:
+    xs = [0, 0, 30, 60, 90, 90, 60, 30, 0, 0, 30, 60, 90, 90, 60, 30, 0]
+    points = [point(frame, 1, fps=30, x=x, y=20) for frame, x in enumerate(xs)]
+    assert len(continuous_visibility_rallies(points, 30, motion_config=MOTION_CONFIG)) == 1
+
+
 def test_motion_filter_ignores_an_isolated_horizontal_jump() -> None:
     xs = [0, 10, 20, 30, 40, 150, 50, 60, 70, 80]
     points = [
@@ -110,32 +116,42 @@ def test_motion_filter_does_not_count_a_reversal_across_a_long_detection_gap() -
 
 
 def test_motion_filter_keeps_a_simple_monotonic_cross_table_flight() -> None:
-    points = [point(frame, 1, x=frame * 15, y=20) for frame in range(6)]
+    points = [point(frame, 1, x=frame * 15, y=20) for frame in range(7)]
     assert len(continuous_visibility_rallies(points, 10, motion_config=MOTION_CONFIG)) == 1
 
 
+def test_motion_filter_rejects_a_too_short_monotonic_cross_table_flight() -> None:
+    points = [point(frame, 1, x=frame * 15, y=20) for frame in range(6)]
+    assert continuous_visibility_rallies(points, 10, motion_config=MOTION_CONFIG) == ()
+
+
+def test_motion_filter_rejects_a_short_vertical_monotonic_cross_table_flight() -> None:
+    points = [point(frame, 1, x=frame * 7, y=frame * 6) for frame in range(12)]
+    assert continuous_visibility_rallies(points, 10, motion_config=MOTION_CONFIG) == ()
+
+
 def test_nearby_qualified_fragments_bridge_a_long_occlusion() -> None:
-    left_xs = [0, 30, 60, 90, 60, 30]
-    right_xs = [60, 90, 120, 150, 120, 90]
+    left_xs = [0, 30, 60, 90, 60, 30, 0]
+    right_xs = [60, 90, 120, 150, 120, 90, 60]
     points = [
         *[point(frame, 1, x=x) for frame, x in enumerate(left_xs)],
-        *[point(frame, 0) for frame in range(6, 20)],
-        *[point(frame, 1, x=x) for frame, x in zip(range(20, 26), right_xs, strict=True)],
+        *[point(frame, 0) for frame in range(7, 20)],
+        *[point(frame, 1, x=x) for frame, x in zip(range(20, 27), right_xs, strict=True)],
     ]
-    assert boundaries(points) == [(0, 5, 0.0, 0.5), (20, 25, 2.0, 2.5)]
+    assert boundaries(points) == [(0, 6, 0.0, 0.6), (20, 26, 2.0, 2.6)]
     assert [
         (rally.start_frame, rally.end_frame)
         for rally in continuous_visibility_rallies(points, 10, motion_config=MOTION_CONFIG)
-    ] == [(0, 25)]
+    ] == [(0, 26)]
 
 
 def test_distant_fragments_do_not_bridge_the_same_occlusion() -> None:
-    left_xs = [0, 30, 60, 90, 60, 30]
-    right_xs = [150, 180, 210, 240, 210, 180]
+    left_xs = [0, 30, 60, 90, 60, 30, 0]
+    right_xs = [150, 180, 210, 240, 210, 180, 150]
     points = [
         *[point(frame, 1, x=x) for frame, x in enumerate(left_xs)],
-        *[point(frame, 0) for frame in range(6, 20)],
-        *[point(frame, 1, x=x) for frame, x in zip(range(20, 26), right_xs, strict=True)],
+        *[point(frame, 0) for frame in range(7, 20)],
+        *[point(frame, 1, x=x) for frame, x in zip(range(20, 27), right_xs, strict=True)],
     ]
     assert len(continuous_visibility_rallies(points, 10, motion_config=MOTION_CONFIG)) == 2
 

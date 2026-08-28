@@ -28,9 +28,12 @@ from .visibility_rallies import (
     CONTINUOUS_VISIBILITY_FRAGMENT_MERGE_SPEED_RATIO_PER_SECOND,
     CONTINUOUS_VISIBILITY_MAX_MONOTONIC_VERTICAL_REVERSALS,
     CONTINUOUS_VISIBILITY_MAX_REVERSAL_GAP_SECONDS,
+    CONTINUOUS_VISIBILITY_MAX_SHORT_VERTICAL_RANGE_RATIO,
     CONTINUOUS_VISIBILITY_MIN_HORIZONTAL_EXCURSION_RATIO,
     CONTINUOUS_VISIBILITY_MIN_HORIZONTAL_TO_VERTICAL_RANGE_RATIO,
+    CONTINUOUS_VISIBILITY_MIN_MONOTONIC_DURATION_SECONDS,
     CONTINUOUS_VISIBILITY_MIN_MONOTONIC_HORIZONTAL_RANGE_RATIO,
+    CONTINUOUS_VISIBILITY_SHORT_VERTICAL_FILTER_SECONDS,
     CONTINUOUS_VISIBILITY_START_SECONDS,
     VisibilityMotionConfig,
     continuous_visibility_rallies,
@@ -237,6 +240,15 @@ def analyze(request: dict) -> dict:
                     ),
                     "minimum_monotonic_horizontal_range_ratio": (
                         CONTINUOUS_VISIBILITY_MIN_MONOTONIC_HORIZONTAL_RANGE_RATIO
+                    ),
+                    "minimum_monotonic_duration_seconds": (
+                        CONTINUOUS_VISIBILITY_MIN_MONOTONIC_DURATION_SECONDS
+                    ),
+                    "short_vertical_filter_seconds": (
+                        CONTINUOUS_VISIBILITY_SHORT_VERTICAL_FILTER_SECONDS
+                    ),
+                    "maximum_short_vertical_range_ratio": (
+                        CONTINUOUS_VISIBILITY_MAX_SHORT_VERTICAL_RANGE_RATIO
                     ),
                 },
                 "fragment_bridge": {

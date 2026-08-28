@@ -331,6 +331,9 @@ export const continuousVisibilityAnalysisResultV2Schema = analysisResultBaseSche
       minimum_horizontal_to_vertical_range_ratio: finiteNumber.positive(),
       maximum_monotonic_vertical_reversals: z.number().int().nonnegative(),
       minimum_monotonic_horizontal_range_ratio: finiteNumber.positive(),
+      minimum_monotonic_duration_seconds: finiteNumber.positive().optional(),
+      short_vertical_filter_seconds: finiteNumber.positive().optional(),
+      maximum_short_vertical_range_ratio: finiteNumber.positive().optional(),
     }).strict().optional(),
     fragment_bridge: z.object({
       maximum_gap_seconds: finiteNumber.positive(),
