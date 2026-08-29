@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { processingMediaCacheKey, targetFrameRateRatio } from '../src/main/processing-media';
+import { processingMediaCacheKey, retainOriginalVfrMedia, targetFrameRateRatio } from '../src/main/processing-media';
 import type { VideoMetadata } from '../src/shared/contracts';
 
 const base: VideoMetadata = {
@@ -37,5 +37,17 @@ describe('processing media frame-rate selection', () => {
     expect(processingMediaCacheKey({ ...source, size: 11 }, '60000/1001', 'libopenh264')).not.toBe(original);
     expect(processingMediaCacheKey(source, '30000/1001', 'libopenh264')).not.toBe(original);
     expect(processingMediaCacheKey(source, '60000/1001', 'libx264')).not.toBe(original);
+  });
+
+  it('keeps a VFR source untouched when normalization is disabled', () => {
+    expect(retainOriginalVfrMedia(base)).toMatchObject({
+      metadata: base,
+      mode: 'original_vfr',
+      targetFpsRatio: null,
+      encoder: null,
+      warningCode: null,
+      cachePath: null,
+      cacheCreated: false,
+    });
   });
 });

@@ -229,7 +229,7 @@ export const analysisResultSchema = z.object({
   video: videoMetadataSchema,
   source_video: videoMetadataSchema.optional(),
   processing: z.object({
-    mode: z.enum(['source_cfr', 'normalized_cfr', 'vfr_fallback']),
+    mode: z.enum(['source_cfr', 'normalized_cfr', 'original_vfr', 'vfr_fallback']),
     target_fps_ratio: z.string().regex(/^\d+\/\d+$/).nullable(),
     encoder: z.enum(['libopenh264', 'libx264']).nullable(),
     warning_code: z.string().min(1).nullable(),
@@ -353,6 +353,7 @@ export const appSettingsSchema = z.object({
   pre_roll_seconds: z.union(PRE_ROLL_VALUES.map((value) => z.literal(value))),
   post_roll_seconds: z.union(POST_ROLL_VALUES.map((value) => z.literal(value))),
   analysis_mode: z.enum(BLURBALL_ANALYSIS_MODE_VALUES).default(BLURBALL_ANALYSIS_MODE_DEFAULT),
+  normalize_variable_frame_rate: z.boolean().default(false),
 }).strict();
 
 export const historySourceSchema = z.object({

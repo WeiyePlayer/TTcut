@@ -127,7 +127,7 @@ describe('multi-task clipping', () => {
   });
 
   it('runs ready videos serially with precalibrated analysis and 70/30 progress mapping', async () => {
-    render(<MultiTaskPage initialVideos={videos} preRoll={2.5} postRoll={1} onOpenAnalysis={vi.fn()} />);
+    render(<MultiTaskPage initialVideos={videos} preRoll={2.5} postRoll={1} normalizeVariableFrameRate onOpenAnalysis={vi.fn()} />);
     await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledTimes(1));
     await finishCalibration('calibration-task-1');
     await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledTimes(2));
@@ -141,6 +141,7 @@ describe('multi-task clipping', () => {
       device: 'auto',
       historyVisibility: 'deferred',
       analysisMode: 'full',
+      normalizeVariableFrameRate: true,
       blurballConfidenceThreshold: 0.7,
       blurballStage1ConfidenceThreshold: 0.3,
       blurballStage2ConfidenceThreshold: 0.7,

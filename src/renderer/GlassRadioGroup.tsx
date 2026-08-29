@@ -1,6 +1,6 @@
 import type { CSSProperties, ReactNode } from 'react';
 
-type GlassRadioValue = string | number;
+type GlassRadioValue = string | number | boolean;
 
 export type GlassRadioOption<T extends GlassRadioValue> = {
   value: T;

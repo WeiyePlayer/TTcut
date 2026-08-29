@@ -50,7 +50,9 @@ await writeFile(
   `!define TTCUT_ONLINE_MODEL_INSTALLER ${onlineModelInstaller ? '1' : '0'}\n`,
   'utf8',
 );
-const assetResult = spawnSync('powershell.exe', [
+const powerShellExecutable = process.env.TTCUT_POWERSHELL_PATH
+  ?? path.join(process.env.ProgramW6432 ?? process.env.ProgramFiles ?? 'C:\\Program Files', 'PowerShell', '7', 'pwsh.exe');
+const assetResult = spawnSync(powerShellExecutable, [
   '-NoProfile',
   '-NonInteractive',
   '-ExecutionPolicy', 'Bypass',
