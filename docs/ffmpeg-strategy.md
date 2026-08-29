@@ -16,12 +16,13 @@
 
 ffprobe 读取：容器、时长、视频/音频编码、尺寸、平均和标称帧率（保留精确有理数字符串）、帧数、码率、像素格式、采样率、声道、流时长/起点/时间基、旋转、SAR/DAR 和色彩字段。
 
-帧数缺失时使用 `-count_frames`。VFR 由帧率字段差异和最多 60 秒的视频包 duration 采样共同判断；采样失败时保留字段判断。新分析在标定后将 VFR 优先转为 CFR，目标帧率优先使用精确 `r_frame_rate`，无效时使用精确 `avg_frame_rate`，不设置 FPS 上限。
+帧数缺失时使用 `-count_frames`。VFR 由帧率字段差异和最多 60 秒的视频包 duration 采样共同判断；采样失败时保留字段判断。设置“重编码为固定帧率”默认关闭；启用后，新分析在标定后将 VFR 转为 CFR，目标帧率优先使用精确 `r_frame_rate`，无效时使用精确 `avg_frame_rate`，不设置 FPS 上限。
 
 ## 分析前 CFR 归一化
 
+- 仅当源为 VFR 且用户启用“重编码为固定帧率”时执行；关闭时直接使用原始 VFR，不创建缓存也不显示回退警告。
 - 输出位于 `<Installation Root>\data\processing-media\v1\<cache-key>\media.mp4`，cache key 绑定源路径/大小/mtime、目标帧率、编码器和策略版本。
-- x264 使用 `libx264 -preset veryfast -crf 18`；未安装时使用现有 OpenH264 高码率策略。视频滤镜使用 `fps=<精确比率>,setsar=<源 SAR>` 和 `-fps_mode:v cfr`。
+- x264 使用 `libx264 -preset veryfast -crf 18`；未安装时使用现有 OpenH264 高码率策略。视频滤镜使用 `fps=<精确比率>,setsar=<源 SAR>,setparams=<源色彩属性>` 和 `-fps_mode:v cfr`。OpenH264 还通过 `h264_metadata` 写入相同的 H.264 VUI 色彩值。
 - 音频统一 AAC，保留采样率/声道，使用 `aresample=async=1:first_pts=0,apad=whole_dur=<源时长>` 重置起点并有限补齐；旋转烘焙到像素并清除旋转标记，同时复制已知色彩字段。
 - 使用任务 UUID partial 文件、空间预检、取消清理、原子改名和完整 H.264/AAC、CFR、分辨率、起点时间戳、时长及音画同步校验。空间不足、FFmpeg 失败或校验失败自动回退原 VFR 并记录稳定 `CFR_*` 错误码；取消或应用退出不回退。
 
@@ -38,7 +39,7 @@ ffprobe 读取：容器、时长、视频/音频编码、尺寸、平均和标�
 
 ## 准确重编码
 
-- 视频：`trim + setpts`，多组通过一次 `concat`；CFR 处理媒体保持目标 CFR，使用精确 `-r`/`-fps_mode cfr`；VFR 回退和无来源块的旧记录沿用 VFR 时间戳模式。
+- 视频：`trim + setpts + setsar + setparams`，多组通过一次 `concat`；CFR 处理媒体保持目标 CFR，使用精确 `-r`/`-fps_mode cfr`；原始 VFR、VFR 回退和无来源块的旧记录沿用 VFR 时间戳模式。OpenH264 额外使用 `h264_metadata` 修正已知 VUI 色彩字段。
 - 音频：`atrim + asetpts`，AAC，尽量保留源采样率、声道和近似码率。
 - `-noautorotate`，恢复旋转元数据、SAR 和已知色彩字段。
 - 不缩放、不加水印、不生成分析叠加视频。

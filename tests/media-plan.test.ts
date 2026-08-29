@@ -4,6 +4,8 @@ import {
   buildConcatArgs,
   buildConcatManifest,
   buildCfrNormalizationArgs,
+  buildColorSetParams,
+  buildOpenH264MetadataBitstreamFilter,
   buildReencodeArgs,
   buildSegmentReencodeArgs,
   buildStreamCopyArgs,
@@ -62,12 +64,19 @@ describe('media export planning', () => {
       encoder,
     );
     expect(args).toEqual(expect.arrayContaining([
-      '-autorotate', '-vf', 'fps=60000/1001,setsar=1/1', '-fps_mode:v', 'cfr',
+      '-autorotate', '-vf', 'fps=60000/1001,setsar=1/1,setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709', '-fps_mode:v', 'cfr',
       '-metadata:s:v:0', 'rotate=0', '-af', 'aresample=async=1:first_pts=0,apad=whole_dur=30.000000', '-shortest',
     ]));
     expect(args).toContain(encoder);
     expect(args).toContain(metadata.path);
     expect(args).toContain('processing.partial.mp4');
+    if (encoder === 'libopenh264') {
+      expect(args).toEqual(expect.arrayContaining([
+        '-bsf:v', 'h264_metadata=video_full_range_flag=0:colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1',
+      ]));
+    } else {
+      expect(args).not.toContain('-bsf:v');
+    }
   });
 
   it('keeps every path as its own argument and never forces CFR', () => {
@@ -84,7 +93,10 @@ describe('media export planning', () => {
     expect(args).not.toContain('-noautorotate');
     expect(args.slice(args.indexOf('-metadata:s:v:0'), args.indexOf('-metadata:s:v:0') + 2))
       .toEqual(['-metadata:s:v:0', 'rotate=0']);
-    expect(args.join(' ')).toContain('setsar=sar=1/1');
+    expect(args.join(' ')).toContain('setsar=sar=1/1,setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709');
+    expect(args).toEqual(expect.arrayContaining([
+      '-bsf:v', 'h264_metadata=video_full_range_flag=0:colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1',
+    ]));
   });
 
   it('builds a single concat graph for multiple groups', () => {
@@ -106,6 +118,7 @@ describe('media export planning', () => {
     expect(args).not.toContain('libopenh264');
     expect(args).not.toContain('-b:v');
     expect(args).not.toContain('-profile:v');
+    expect(args).not.toContain('-bsf:v');
     expect(args[args.indexOf('-pix_fmt') + 1]).toBe('yuv420p');
   });
 
@@ -153,8 +166,31 @@ describe('media export planning', () => {
       expect(args.slice(args.indexOf('-fps_mode'), args.indexOf('-fps_mode') + 2))
         .toEqual(['-fps_mode', 'vfr']);
       expect(args).not.toContain('-r');
+      expect(filter).toContain('setsar=sar=1/1,setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709');
+      if (encoder === 'libopenh264') {
+        expect(args).toEqual(expect.arrayContaining([
+          '-bsf:v', 'h264_metadata=video_full_range_flag=0:colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1',
+        ]));
+      } else {
+        expect(args).not.toContain('-bsf:v');
+      }
     },
   );
+
+  it('maps the source color metadata to both frame and OpenH264 VUI parameters without forcing unknown fields', () => {
+    expect(buildColorSetParams({
+      color_range: 'tv', color_primaries: 'bt470bg', color_transfer: 'smpte170m', color_space: 'smpte170m',
+    })).toBe('setparams=range=limited:color_primaries=bt470bg:color_trc=smpte170m:colorspace=smpte170m');
+    expect(buildOpenH264MetadataBitstreamFilter({
+      color_range: 'tv', color_primaries: 'bt470bg', color_transfer: 'smpte170m', color_space: 'smpte170m',
+    })).toBe('h264_metadata=video_full_range_flag=0:colour_primaries=5:transfer_characteristics=6:matrix_coefficients=6');
+    expect(buildColorSetParams({
+      color_range: 'unknown', color_primaries: 'unknown', color_transfer: null, color_space: undefined,
+    })).toBeNull();
+    expect(buildOpenH264MetadataBitstreamFilter({
+      color_range: 'unknown', color_primaries: 'unknown', color_transfer: null, color_space: undefined,
+    })).toBeNull();
+  });
 
   it('disables x264 B-frames only for independently concatenated segments', () => {
     const segmentArgs = buildSegmentReencodeArgs(

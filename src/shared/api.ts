@@ -96,6 +96,7 @@ export interface TTcutApi {
     device: 'auto' | 'cuda' | 'cpu';
     historyVisibility: 'visible' | 'deferred';
     analysisMode: BlurBallAnalysisMode;
+    normalizeVariableFrameRate: boolean;
     blurballConfidenceThreshold: number;
     blurballStage1ConfidenceThreshold: number;
     blurballStage2ConfidenceThreshold: number;

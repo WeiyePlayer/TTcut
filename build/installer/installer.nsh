@@ -2,6 +2,7 @@
 !include "FileFunc.nsh"
 !include "StrFunc.nsh"
 !include "nsDialogs.nsh"
+!include "${PROJECT_DIR}\.runtime\installer-assets\online-model-installer.nsh"
 
 !ifndef BUILD_UNINSTALLER
 ${StrRep}
@@ -41,10 +42,8 @@ LangString TTCUT_PATH_SYSTEM 2052 "请选择 Windows 和 Program Files 之外的
 LangString TTCUT_PATH_WRITE 1033 "The selected installation location is not writable."
 LangString TTCUT_PATH_NOT_EMPTY 1033 "Choose an empty folder, or the existing TTcut installation location."
 LangString TTCUT_PATH_NOT_EMPTY 2052 "请选择空文件夹，或已经安装的 TTcut 位置。"
-LangString TTCUT_SPACE_REQUIRED 1033 "The selected drive does not have enough free space for TTcut and its components."
-LangString TTCUT_SPACE_REQUIRED 2052 "所选磁盘的可用空间不足以安装 TTcut 及其组件。"
-LangString TTCUT_SPACE_CHECK_FAILED 1033 "The installer's free-space check could not be completed. Choose another location and try again."
-LangString TTCUT_SPACE_CHECK_FAILED 2052 "无法完成安装器的磁盘空间检查，请选择其他位置后重试。"
+LangString TTCUT_MODEL_DOWNLOAD_FAILED 1033 "TTcut could not download or verify its required analysis models. Check your network connection and run the installer again."
+LangString TTCUT_MODEL_DOWNLOAD_FAILED 2052 "TTcut 无法下载或验证所需的分析模型。请检查网络连接后重新运行安装程序。"
 LangString TTCUT_PATH_WRITE 2052 "所选安装位置不可写。"
 LangString TTCUT_MIGRATION_FAILED 1033 "Component migration failed. The old installation and components were left unchanged."
 LangString TTCUT_MIGRATION_FAILED 2052 "组件迁移失败，旧程序和旧组件保持不变。"
@@ -390,19 +389,6 @@ Function TTcutOptionsLeave
     System::Call 'kernel32::SetEnvironmentVariableW(w "TTCUT_INSTALLER_LEGACY", w "$TTcutLegacyComponents")i.r1'
   ${EndIf}
   System::Call 'kernel32::SetEnvironmentVariableW(w "TTCUT_INSTALLER_LEGACY_APP", w "$TTcutLegacyUninstall")i.r1'
-  InitPluginsDir
-  SetOutPath "$PLUGINSDIR"
-  File /oname=check-install-space.ps1 "${PROJECT_DIR}\build\installer\check-install-space.ps1"
-  nsExec::ExecToStack 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\check-install-space.ps1" -EstimatedSizeKb "${ESTIMATED_SIZE}"'
-  Pop $6
-  Pop $7
-  ${If} $6 == 1
-    MessageBox MB_ICONEXCLAMATION "$(TTCUT_SPACE_REQUIRED)"
-    Abort
-  ${ElseIf} $6 != 0
-    MessageBox MB_ICONEXCLAMATION "$(TTCUT_SPACE_CHECK_FAILED)"
-    Abort
-  ${EndIf}
 
   ${If} $TTcutLegacyUninstall != ""
     StrCpy $4 0
@@ -454,10 +440,34 @@ Function TTcutRollbackNewInstall
   ${EndIf}
 FunctionEnd
 
+!if ${TTCUT_ONLINE_MODEL_INSTALLER} == 1
+Function TTcutInstallOnlineModels
+  IfFileExists "$INSTDIR\resources\resources\.ttcut-online-model-delivery" 0 ttcut_online_models_done
+  InitPluginsDir
+  SetOutPath "$PLUGINSDIR"
+  File /oname=download-models.ps1 "${PROJECT_DIR}\build\installer\download-models.ps1"
+  File /oname=online-model-delivery.json "${PROJECT_DIR}\resources\online-model-delivery.json"
+  nsExec::ExecToStack 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\download-models.ps1" -InstallDirectory "$INSTDIR" -DeliveryManifestPath "$PLUGINSDIR\online-model-delivery.json" -ModelManifestPath "$INSTDIR\resources\resources\model-manifest.json"'
+  Pop $6
+  Pop $7
+  ${If} $6 != 0
+    Call TTcutRollbackNewInstall
+    MessageBox MB_ICONSTOP "$(TTCUT_MODEL_DOWNLOAD_FAILED)"
+    SetErrorLevel 1
+    Quit
+  ${EndIf}
+  ttcut_online_models_done:
+FunctionEnd
+!endif
+
 !macro customInstall
   SetShellVarContext current
   ${GetParent} "$INSTDIR" $TTcutRoot
   StrCpy $TTcutMigrationState "0"
+
+  !if ${TTCUT_ONLINE_MODEL_INSTALLER} == 1
+  Call TTcutInstallOnlineModels
+  !endif
 
   ; --updated skips the assisted options page. Restore the existing shortcut
   ; preference before the registration helper runs so a silent update cannot

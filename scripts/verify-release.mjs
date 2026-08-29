@@ -9,6 +9,7 @@ const require = createRequire(import.meta.url);
 const { listPackage } = require('@electron/asar');
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const failures = [];
+const onlineModelInstaller = process.env.TTCUT_ONLINE_MODEL_INSTALLER === '1';
 
 function check(condition, message) {
   if (!condition) failures.push(message);
@@ -129,6 +130,7 @@ check(componentManagerSource.includes("spawn('taskkill.exe'"), 'Stalled Windows 
 
 const componentCatalog = JSON.parse(await readFile(path.join(root, 'resources', 'components.json'), 'utf8'));
 const modelManifest = JSON.parse(await readFile(path.join(root, 'resources', 'model-manifest.json'), 'utf8'));
+const onlineModelDelivery = JSON.parse(await readFile(path.join(root, 'resources', 'online-model-delivery.json'), 'utf8'));
 check(modelManifest.schema_version === 1, 'The bundled model manifest schema is invalid.');
 check(modelManifest.models?.length === 2, 'The bundled model manifest must contain exactly two models.');
 check(new Set(modelManifest.models?.map((model) => model.filename)).size === 2, 'The bundled model manifest contains duplicate filenames.');
@@ -138,6 +140,20 @@ for (const [filename, size, hash] of [
 ]) {
   const model = modelManifest.models?.find((candidate) => candidate.filename === filename);
   check(model?.size_bytes === size && model?.sha256 === hash, `Bundled model manifest entry is invalid: ${filename}`);
+}
+check(onlineModelDelivery.schema_version === 1, 'The online model delivery manifest schema is invalid.');
+check(onlineModelDelivery.repository === 'weiye76/TTcut-runtime-assets', 'The online model delivery repository is invalid.');
+check(onlineModelDelivery.release_tag === 'models-1.0.0', 'The online model delivery tag is invalid.');
+check(onlineModelDelivery.models?.length === modelManifest.models?.length, 'The online model delivery manifest has the wrong model count.');
+for (const model of modelManifest.models ?? []) {
+  const delivery = onlineModelDelivery.models?.find((candidate) => candidate.filename === model.filename);
+  check(
+    delivery?.model_id === model.model_id
+      && delivery?.size_bytes === model.size_bytes
+      && delivery?.sha256 === model.sha256
+      && delivery?.url === `https://gitee.com/weiye76/TTcut-runtime-assets/releases/download/models-1.0.0/${model.filename}`,
+    `The online model delivery entry is invalid: ${model.filename}`,
+  );
 }
 check(!('tracknet_weight' in componentCatalog), 'Model weights remain in the managed component catalog.');
 check(!('table_weight' in componentCatalog), 'Table model weights remain in the managed component catalog.');
@@ -180,7 +196,9 @@ for (const fuse of [
 ]) {
   check(forgeSource.includes(fuse), `Forge security fuse is missing: ${fuse}`);
 }
-check(forgeSource.includes("extraResource: ['.runtime/worker'"), 'Forge does not package the staged minimal Worker.');
+check(forgeSource.includes("onlineModelInstaller ? '.runtime/online-installer/resources' : 'resources'"), 'Forge does not select model-free resources for the online installer.');
+check(forgeSource.includes("new Set(['en-US.pak', 'zh-CN.pak'])"), 'Forge does not restrict Windows locales to supported UI languages.');
+check(forgeSource.includes('afterExtract: [retainSupportedWindowsLocales]'), 'Forge does not prune unused Windows locales before packaging.');
 check(forgeSource.includes("'.runtime/release-metadata'"), 'Forge does not package generated license metadata.');
 check(forgeSource.includes("process.env.TTCUT_PUBLIC_RC === '1'"), 'Forge does not retain the public RC signing mode.');
 check(forgeSource.includes("process.env.TTCUT_OFFICIAL_RELEASE === '1'"), 'Forge does not enforce the official release signing mode.');
@@ -198,6 +216,13 @@ check(builderSource.includes("target: 'nsis'"), 'The active installer target is 
 check(builderSource.includes('oneClick: false'), 'The NSIS installer is not assisted mode.');
 check(builderSource.includes('perMachine: false'), 'The NSIS installer is not current-user mode.');
 check(builderSource.includes("include: 'build/installer/installer.nsh'"), 'The branded NSIS include is missing.');
+check(builderSource.includes("'TTcut-${version}-x64-Online-Setup.${ext}'"), 'The online installer artifact name is missing.');
+const updateManifestSource = await readFile(path.join(root, 'scripts', 'generate-update-manifest.mjs'), 'utf8');
+check(updateManifestSource.includes("process.env.TTCUT_ONLINE_MODEL_INSTALLER === '1'"), 'The update manifest generator does not distinguish Online-Setup.');
+const installerSource = await readFile(path.join(root, 'build', 'installer', 'installer.nsh'), 'utf8');
+check(installerSource.includes('TTCUT_ONLINE_MODEL_INSTALLER'), 'The installer does not gate online model delivery.');
+check(installerSource.includes('download-models.ps1'), 'The installer does not invoke verified online model delivery.');
+check(!installerSource.includes('check-install-space.ps1'), 'The installer still performs a pre-install disk-space check.');
 
 const releaseMetadata = path.join(root, '.runtime', 'release-metadata');
 for (const relative of ['THIRD_PARTY_NOTICES.html', 'THIRD_PARTY_NOTICES.md', 'sbom.cdx.json', 'licenses/index.json', 'licenses/tracknet/LICENSE.txt']) {
@@ -245,7 +270,13 @@ if (existsSync(packagedRoot)) {
     check(licenseCenter.includes('TTcut 第三方许可证'), 'Packaged license center contains corrupted user-facing text.');
   }
   check(existsSync(path.join(packagedRoot, 'resources', 'resources', 'model-manifest.json')), 'Packaged model manifest is missing.');
-  if (existsSync(packagedModels)) {
+  if (onlineModelInstaller) {
+    check(existsSync(path.join(packagedRoot, 'resources', 'resources', '.ttcut-online-model-delivery')), 'Packaged online installer marker is missing.');
+    const modelFiles = existsSync(packagedModels)
+      ? (await readdir(packagedModels)).filter((name) => /\.pt$/i.test(name)).sort()
+      : [];
+    check(modelFiles.length === 0, `Online installer still packages model weights: ${modelFiles.join(', ')}`);
+  } else if (existsSync(packagedModels)) {
     const modelFiles = (await readdir(packagedModels)).filter((name) => /\.pt$/i.test(name)).sort();
     check(JSON.stringify(modelFiles) === JSON.stringify(['blurball_best.pt', 'table_analyze.pt']), `Packaged model names are incorrect: ${modelFiles.join(', ')}`);
     for (const model of modelManifest.models) {
@@ -272,10 +303,10 @@ if (existsSync(packagedRoot)) {
   }
 }
 
-const nsisRoot = path.join(root, 'out', 'make', 'nsis', 'x64');
+const nsisRoot = path.join(root, 'out', 'make', onlineModelInstaller ? 'nsis-online' : 'nsis', 'x64');
 if (existsSync(nsisRoot)) {
   const artifacts = await readdir(nsisRoot);
-  const setup = artifacts.find((name) => /-Setup\.exe$/i.test(name));
+  const setup = artifacts.find((name) => onlineModelInstaller ? /-Online-Setup\.exe$/i.test(name) : /-Setup\.exe$/i.test(name));
   check(Boolean(setup), 'The NSIS Setup artifact is missing.');
   check(Boolean(setup && artifacts.includes(`${setup}.blockmap`)), 'The NSIS blockmap is missing.');
   check(artifacts.some((name) => /^(latest|beta)\.yml$/i.test(name)), 'NSIS update metadata is missing.');

@@ -145,6 +145,21 @@ describe('export timestamp validation', () => {
     );
   });
 
+  it('keeps mismatched color metadata fatal after the encoder repair path', async () => {
+    state.probeVideo.mockResolvedValue({
+      ...source,
+      path: output,
+      color_transfer: 'smpte170m',
+      color_primaries: 'bt470bg',
+    });
+
+    await expect(validateExportOutput(
+      output,
+      { targetSeconds: 2, segmentCount: 1 },
+      source,
+    )).rejects.toThrow('EXPORT_METADATA_MISMATCH:color_transfer');
+  });
+
   it('accepts a physically normalized portrait output without copied rotation metadata', async () => {
     const rotatedSource: VideoMetadata = {
       ...source,

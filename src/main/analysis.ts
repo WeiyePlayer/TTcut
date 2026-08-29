@@ -32,6 +32,7 @@ import { analysisProcessEnvironment } from './analysis-environment';
 import {
   CfrNormalizationError,
   prepareProcessingMedia,
+  retainOriginalVfrMedia,
   removeProcessingCache,
   targetFrameRateRatio,
   type ProcessingMediaOutcome,
@@ -169,6 +170,7 @@ export async function startAnalysis(
     device: 'auto' | 'cuda' | 'cpu';
     historyVisibility: 'visible' | 'deferred';
     analysisMode: BlurBallAnalysisMode;
+    normalizeVariableFrameRate: boolean;
     blurballConfidenceThreshold: number;
     blurballStage1ConfidenceThreshold: number;
     blurballStage2ConfidenceThreshold: number;
@@ -212,7 +214,14 @@ export async function startAnalysis(
           env: workerEnvironment(analysisComponents, false),
           request: calibrationRequest,
           parseResult: (data): { calibration: Calibration; table_analysis: TableAnalysis } => calibrationResultSchema.parse(data),
-          onProgress: (event) => emitProgress(window, taskId, event, 'automatic', value.analysisMode, 'normalized'),
+          onProgress: (event) => emitProgress(
+            window,
+            taskId,
+            event,
+            'automatic',
+            value.analysisMode,
+            value.normalizeVariableFrameRate && sourceMetadata.variable_frame_rate ? 'normalized' : 'source',
+          ),
         });
         calibrationChoice = {
           method: 'precalibrated',
@@ -244,6 +253,8 @@ export async function startAnalysis(
           controller.signal,
           () => undefined,
         );
+      } else if (!value.normalizeVariableFrameRate) {
+        processing = retainOriginalVfrMedia(sourceMetadata);
       } else if (!canNormalize) {
         if (controller.cancelRequested || controller.signal.aborted) {
           throw new CfrNormalizationError('CFR_NORMALIZATION_CANCELLED', 'CFR normalization was cancelled.', true);
@@ -333,12 +344,13 @@ export async function startAnalysis(
         }
       }
       if (!processing) throw workerFailure('CFR_PROCESSING_MEDIA_MISSING', 'Processing media was not prepared.');
+      const processingMedia = processing;
       const request = analysisRequestSchema.parse({
         schema_version: 2,
         task_id: taskId,
-        video_path: processing.metadata.path,
+        video_path: processingMedia.metadata.path,
         device: requestedDevice,
-        video_metadata: workerVideoMetadata(processing.metadata),
+        video_metadata: workerVideoMetadata(processingMedia.metadata),
         calibration_choice: calibrationChoice,
         analysis: value.analysisMode === 'full'
           ? { mode: 'full', confidence_threshold: value.blurballConfidenceThreshold }
@@ -362,18 +374,18 @@ export async function startAnalysis(
           event,
           value.calibrationChoice.method,
           value.analysisMode,
-          sourceMetadata.variable_frame_rate ? 'normalized' : 'source',
+          processingMedia.mode === 'normalized_cfr' ? 'normalized' : 'source',
         ),
       });
       const data = analysisResultSchema.parse({
         ...workerResult,
-        video: processing.metadata,
+        video: processingMedia.metadata,
         source_video: sourceMetadata,
         processing: {
-          mode: processing.mode,
-          target_fps_ratio: processing.targetFpsRatio,
-          encoder: processing.encoder,
-          warning_code: processing.warningCode,
+          mode: processingMedia.mode,
+          target_fps_ratio: processingMedia.targetFpsRatio,
+          encoder: processingMedia.encoder,
+          warning_code: processingMedia.warningCode,
         },
       });
       const calibration: Calibration | undefined = data.calibration ?? calibrationChoice.calibration;

@@ -2,6 +2,7 @@ const officialRelease = process.env.TTCUT_OFFICIAL_RELEASE === '1';
 const certificateSha1 = process.env.WINDOWS_CERTIFICATE_THUMBPRINT?.replace(/\s+/g, '').toUpperCase();
 const version = require('./package.json').version;
 const updateChannel = version.includes('-') ? 'beta' : 'latest';
+const onlineModelInstaller = process.env.TTCUT_ONLINE_MODEL_INSTALLER === '1';
 
 if (officialRelease && !certificateSha1) {
   throw new Error('TTCUT_OFFICIAL_RELEASE requires WINDOWS_CERTIFICATE_THUMBPRINT.');
@@ -12,10 +13,12 @@ module.exports = {
   productName: 'TTcut',
   asar: true,
   directories: {
-    output: 'out/make/nsis/x64',
+    output: onlineModelInstaller ? 'out/make/nsis-online/x64' : 'out/make/nsis/x64',
     buildResources: '.runtime/installer-assets',
   },
-  artifactName: 'TTcut-${version}-x64-Setup.${ext}',
+  artifactName: onlineModelInstaller
+    ? 'TTcut-${version}-x64-Online-Setup.${ext}'
+    : 'TTcut-${version}-x64-Setup.${ext}',
   generateUpdatesFilesForAllChannels: true,
   publish: [{
     provider: 'github',

@@ -8,11 +8,11 @@ TTcut is a local automatic table-tennis video cutter for players and enthusiasts
 
 Videos, analysis results, and history stay on the local computer. TTcut requires no account, uploads no video, and collects no telemetry. An internet connection is required when installing the resources needed for the first run; analysis, preview, and cutting can run offline after setup.
 
-> The current stable release is `v1.2.9` for Windows x64.
+> The current stable release is `v1.2.10` for Windows x64.
 
 ## Download and installation
 
-1. Download the Windows version from [TTcut Releases](https://github.com/WeiyePlayer/TTcut/releases).
+1. Download the Windows version from [TTcut Releases](https://github.com/WeiyePlayer/TTcut/releases). The full installer is for a one-step setup; the online installer downloads and verifies the required runtime resources during installation and needs an active connection.
 2. Download the Android version from [TTcut-Mobile-Releases](https://github.com/WeiyePlayer/TTcut-Mobile-Releases/releases).
 3. If GitHub downloads are slow, use the Baidu Netdisk mirror: [link](https://pan.baidu.com/s/1LXDzs74xOM1t50-IRM_Vvw?pwd=ttct), extraction code: `ttct`.
 4. Run the installer, choose the installation root, and decide whether to create a desktop shortcut. Application files are written under `<root>\app`; large runtime resources, downloads, and import staging are stored under `<root>\data\components`. A Start menu shortcut is always created.
@@ -20,14 +20,12 @@ Videos, analysis results, and history stay on the local computer. TTcut requires
 
 TTcut detects an NVIDIA GPU automatically and falls back to CPU if accelerated setup or its self-test fails. Its video-processing capability reads media information, cuts and joins segments, and validates exported files.
 
-## What's new in v1.2.9
+## What's new in v1.2.10
 
-- Settings now offers Analysis precision: Default retains the established full-video analysis, while High precision first finds candidate rallies and then runs a finer second analysis over those intervals. It takes longer.
-- After calibration, variable-frame-rate video is preferentially converted to constant-frame-rate processing media for analysis, preview, cutting, and newly created XML. The original video remains the identity, calibration, and default-output source.
-- If constant-frame-rate preparation runs out of space, transcoding fails, or output validation fails, TTcut shows a clear warning and continues analysis with the original variable-frame-rate video.
-- Improved the rally-analysis flow and settings defaults, and fixed related progress, history, and export hand-offs.
+- Settings now provides Re-encode as constant frame rate, which is off by default. When off, variable-frame-rate video is processed directly from the original media. When on, TTcut first creates constant-frame-rate processing media for more stable cut timing, with additional processing time and disk use.
+- Fixed an installer issue where pre-install disk-space probing could incorrectly block installation in some environments.
 
-See the [v1.2.9 release notes](docs/release-notes-v1.2.9.en.md) for the complete details.
+See the [v1.2.10 release notes](docs/release-notes-v1.2.10.en.md) for the complete details.
 
 ## Contact the author on WeChat: m2924931661
 
@@ -83,7 +81,7 @@ Select multiple MP4 files in Batch tasks. On entry, TTcut automatically calibrat
 
 ## Local analysis
 
-The installer includes the ball- and table-recognition resources required at runtime, so model weights do not need to be downloaded separately. Local analysis is responsible for:
+The full installer includes the ball- and table-recognition resources required at runtime; the online installer downloads and verifies them during installation. Local analysis is responsible for:
 
 - automatic or manual table calibration and coordinate mapping;
 - locating the ball and detecting bounce events;

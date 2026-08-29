@@ -28,6 +28,7 @@ describe('settings migration', () => {
       language: 'en', calibration_method: 'automatic',
       pre_roll_seconds: 5, post_roll_seconds: 0.5,
       analysis_mode: 'full',
+      normalize_variable_frame_rate: false,
     });
   });
 
@@ -38,6 +39,7 @@ describe('settings migration', () => {
     await expect(loadSettings()).resolves.toMatchObject({
       pre_roll_seconds: 2.5,
       post_roll_seconds: 1,
+      normalize_variable_frame_rate: false,
     });
   });
 
@@ -46,6 +48,7 @@ describe('settings migration', () => {
       language: 'zh-CN' as const, calibration_method: 'automatic' as const,
       pre_roll_seconds: 2.5 as const, post_roll_seconds: 2 as const,
       analysis_mode: 'full' as const,
+      normalize_variable_frame_rate: true,
     };
     await expect(saveSettings(settings)).resolves.toEqual(settings);
     expect(JSON.parse(await readFile(path.join(state.userData, 'settings.json'), 'utf8'))).toEqual(settings);
@@ -59,6 +62,7 @@ describe('settings migration', () => {
     await expect(loadSettings()).resolves.toEqual({
       language: 'zh-CN', calibration_method: 'automatic', pre_roll_seconds: 2.5, post_roll_seconds: 2,
       analysis_mode: 'full',
+      normalize_variable_frame_rate: false,
     });
     expect(JSON.parse(await readFile(path.join(state.userData, 'settings.json'), 'utf8'))).not.toHaveProperty('ball_model_profile');
   });
@@ -73,6 +77,7 @@ describe('settings migration', () => {
     await saveSettings(settings);
     const persisted = JSON.parse(await readFile(path.join(state.userData, 'settings.json'), 'utf8')) as Record<string, unknown>;
     expect(persisted.analysis_mode).toBe('two_stage');
+    expect(persisted.normalize_variable_frame_rate).toBe(false);
     expect(persisted).not.toHaveProperty('blurball_confidence_threshold');
   });
 });

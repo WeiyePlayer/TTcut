@@ -12,7 +12,7 @@ const CFR_CACHE_SCHEMA_VERSION = 1;
 const CFR_STRATEGY_VERSION = 1;
 const AV_SYNC_TOLERANCE_SECONDS = 0.1;
 
-export type ProcessingMediaMode = 'source_cfr' | 'normalized_cfr' | 'vfr_fallback';
+export type ProcessingMediaMode = 'source_cfr' | 'normalized_cfr' | 'original_vfr' | 'vfr_fallback';
 
 export type ProcessingMediaOutcome = {
   metadata: VideoMetadata;
@@ -330,6 +330,19 @@ export async function clearProcessingMediaCache(): Promise<void> {
     return;
   }
   await rm(root, { recursive: true, force: true });
+}
+
+export function retainOriginalVfrMedia(source: VideoMetadata): ProcessingMediaOutcome {
+  return {
+    metadata: source,
+    mode: 'original_vfr',
+    targetFpsRatio: null,
+    encoder: null,
+    warningCode: null,
+    cachePath: null,
+    cacheKey: null,
+    cacheCreated: false,
+  };
 }
 
 export async function prepareProcessingMedia(

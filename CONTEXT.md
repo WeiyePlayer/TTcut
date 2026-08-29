@@ -68,6 +68,20 @@ end, one fixed closing second, and After-rally time. Selected Custom Rally
 Clips never overlap on the single track.
 _Avoid_: Rally, CutGroup
 
+## Playback Target Clip
+
+The selected Custom Rally Clip whose half-open time interval contains the
+current playback time. At most one Playback Target Clip exists at a time; a
+gap or an unselected clip has no target.
+_Avoid_: current selection, active Rally
+
+## Rally Location Cue
+
+A transient list-row indicator that connects playback or an explicit jump to
+its Playback Target Clip. It does not change clip selection, focus, or the
+Custom Rally Clip itself.
+_Avoid_: persistent active row, selected Rally
+
 ## Manual Rally Clip
 
 A Custom Rally Clip created directly on the timeline rather than from a
@@ -158,11 +172,15 @@ _Avoid_: Crop-relative trajectory
 
 ## 处理媒体（Processing Media）
 
-球路分析、分析后预览和剪辑实际读取的媒体。源本来就是固定帧率时处理媒体就是原始媒体；可变帧率源优先使用 CFR 派生媒体。
+球路分析、分析后预览和剪辑实际读取的媒体。源本来就是固定帧率时处理媒体就是原始媒体；可变帧率源仅在设置中启用“重编码为固定帧率”后使用 CFR 派生媒体，默认直接使用原始媒体。
 
 ## CFR 派生媒体（CFR Derived Media）
 
-由 FFmpeg 从原始 VFR 媒体生成的 H.264/AAC 固定帧率 MP4，按精确目标帧率、编码器和源指纹缓存在 `<Installation Root>\data\processing-media\v1`。只有成功历史记录仍引用它时才保留。
+由 FFmpeg 从原始 VFR 媒体生成的 H.264/AAC 固定帧率 MP4，仅在用户启用“重编码为固定帧率”后按精确目标帧率、编码器和源指纹缓存在 `<Installation Root>\data\processing-media\v1`。只有成功历史记录仍引用它时才保留。
+
+## 原始 VFR（Original VFR）
+
+设置默认关闭时保留原始可变帧率媒体，不创建 CFR 缓存，也不显示回退警告。这与因 CFR 转码失败而产生的 VFR 回退不同。
 
 ## VFR 回退（VFR Fallback）
 
