@@ -91,6 +91,129 @@ export function outputPixelFormat(metadata: VideoMetadata, encoder: MediaEncoder
     : 'yuv420p';
 }
 
+const FILTER_COLOR_RANGES: Readonly<Record<string, string>> = {
+  tv: 'limited',
+  limited: 'limited',
+  mpeg: 'limited',
+  pc: 'full',
+  full: 'full',
+  jpeg: 'full',
+};
+
+const FILTER_COLOR_PRIMARIES = new Set([
+  'bt709', 'bt470m', 'bt470bg', 'smpte170m', 'smpte240m', 'film', 'bt2020',
+  'smpte428', 'smpte431', 'smpte432', 'jedec-p22', 'ebu3213',
+]);
+
+const FILTER_COLOR_TRANSFERS = new Set([
+  'bt709', 'bt470m', 'bt470bg', 'smpte170m', 'smpte240m', 'linear', 'log100',
+  'log316', 'iec61966-2-4', 'bt1361e', 'iec61966-2-1', 'bt2020-10', 'bt2020-12',
+  'smpte2084', 'smpte428', 'arib-std-b67',
+]);
+
+const FILTER_COLORSPACES = new Set([
+  'gbr', 'bt709', 'fcc', 'bt470bg', 'smpte170m', 'smpte240m', 'ycgco',
+  'bt2020nc', 'bt2020c', 'smpte2085', 'chroma-derived-nc', 'chroma-derived-c', 'ictcp',
+]);
+
+const H264_COLOR_PRIMARIES: Readonly<Record<string, number>> = {
+  bt709: 1,
+  bt470m: 4,
+  bt470bg: 5,
+  smpte170m: 6,
+  smpte240m: 7,
+  film: 8,
+  bt2020: 9,
+  smpte428: 10,
+  smpte431: 11,
+  smpte432: 12,
+  'jedec-p22': 22,
+  ebu3213: 22,
+};
+
+const H264_TRANSFER_CHARACTERISTICS: Readonly<Record<string, number>> = {
+  bt709: 1,
+  bt470m: 4,
+  bt470bg: 5,
+  smpte170m: 6,
+  smpte240m: 7,
+  linear: 8,
+  log100: 9,
+  log316: 10,
+  'iec61966-2-4': 11,
+  bt1361e: 12,
+  'iec61966-2-1': 13,
+  'bt2020-10': 14,
+  'bt2020-12': 15,
+  smpte2084: 16,
+  smpte428: 17,
+  'arib-std-b67': 18,
+};
+
+const H264_MATRIX_COEFFICIENTS: Readonly<Record<string, number>> = {
+  gbr: 0,
+  bt709: 1,
+  fcc: 4,
+  bt470bg: 5,
+  smpte170m: 6,
+  smpte240m: 7,
+  ycgco: 8,
+  bt2020nc: 9,
+  bt2020c: 10,
+  smpte2085: 11,
+  'chroma-derived-nc': 12,
+  'chroma-derived-c': 13,
+  ictcp: 14,
+};
+
+type ColorMetadata = Pick<VideoMetadata,
+  'color_range' | 'color_primaries' | 'color_transfer' | 'color_space'>;
+
+function knownColorValue(value: string | null | undefined, supported: ReadonlySet<string>): string | null {
+  return value && value !== 'unknown' && supported.has(value) ? value : null;
+}
+
+export function buildColorSetParams(metadata: ColorMetadata): string | null {
+  const options = [
+    metadata.color_range && metadata.color_range !== 'unknown'
+      ? (FILTER_COLOR_RANGES[metadata.color_range] ? `range=${FILTER_COLOR_RANGES[metadata.color_range]}` : null)
+      : null,
+    (() => {
+      const value = knownColorValue(metadata.color_primaries, FILTER_COLOR_PRIMARIES);
+      return value ? `color_primaries=${value}` : null;
+    })(),
+    (() => {
+      const value = knownColorValue(metadata.color_transfer, FILTER_COLOR_TRANSFERS);
+      return value ? `color_trc=${value}` : null;
+    })(),
+    (() => {
+      const value = knownColorValue(metadata.color_space, FILTER_COLORSPACES);
+      return value ? `colorspace=${value}` : null;
+    })(),
+  ].filter((value): value is string => value !== null);
+  return options.length > 0 ? `setparams=${options.join(':')}` : null;
+}
+
+export function buildOpenH264MetadataBitstreamFilter(metadata: ColorMetadata): string | null {
+  const options = [
+    metadata.color_range && metadata.color_range !== 'unknown'
+      ? (FILTER_COLOR_RANGES[metadata.color_range] === 'limited'
+        ? 'video_full_range_flag=0'
+        : FILTER_COLOR_RANGES[metadata.color_range] === 'full' ? 'video_full_range_flag=1' : null)
+      : null,
+    metadata.color_primaries && H264_COLOR_PRIMARIES[metadata.color_primaries] !== undefined
+      ? `colour_primaries=${H264_COLOR_PRIMARIES[metadata.color_primaries]}`
+      : null,
+    metadata.color_transfer && H264_TRANSFER_CHARACTERISTICS[metadata.color_transfer] !== undefined
+      ? `transfer_characteristics=${H264_TRANSFER_CHARACTERISTICS[metadata.color_transfer]}`
+      : null,
+    metadata.color_space && H264_MATRIX_COEFFICIENTS[metadata.color_space] !== undefined
+      ? `matrix_coefficients=${H264_MATRIX_COEFFICIENTS[metadata.color_space]}`
+      : null,
+  ].filter((value): value is string => value !== null);
+  return options.length > 0 ? `h264_metadata=${options.join(':')}` : null;
+}
+
 export function appendAudioEncodingOptions(args: string[], metadata: VideoMetadata): void {
   args.push('-c:a', 'aac', '-b:a', String(Math.round(metadata.audio_bitrate ?? 192_000)));
   if (metadata.audio_sample_rate) args.push('-ar', String(metadata.audio_sample_rate));
@@ -127,21 +250,28 @@ function appendMediaOutputOptions(
   for (const [flag, value] of colorOptions) {
     if (value && value !== 'unknown') args.push(flag, value);
   }
+  if (encoder === 'libopenh264') {
+    const bitstreamFilter = buildOpenH264MetadataBitstreamFilter(metadata);
+    if (bitstreamFilter) args.push('-bsf:v', bitstreamFilter);
+  }
   args.push('-movflags', '+faststart', '-progress', 'pipe:1', '-nostats');
 }
 
 export function buildTrimFilter(
   groups: readonly CutGroup[],
   hasAudio: boolean,
-  sampleAspectRatio: string | null | undefined,
+  metadata: Pick<VideoMetadata,
+    'sample_aspect_ratio' | 'color_range' | 'color_primaries' | 'color_transfer' | 'color_space'>,
 ): { filter: string; maps: string[] } {
   const parts: string[] = [];
-  const sar = normalizedSar(sampleAspectRatio);
+  const sar = normalizedSar(metadata.sample_aspect_ratio);
+  const colorSetParams = buildColorSetParams(metadata);
+  const outputFrameFilters = `setsar=sar=${sar}${colorSetParams ? `,${colorSetParams}` : ''}`;
   if (groups.length === 1) {
     const group = groups[0]!;
     parts.push(
       `[0:v:0]trim=start=${group.start.toFixed(6)}:end=${group.end.toFixed(6)},`
-      + `setpts=PTS-STARTPTS:strip_fps=1,setsar=sar=${sar}[vout]`,
+      + `setpts=PTS-STARTPTS:strip_fps=1,${outputFrameFilters}[vout]`,
     );
     if (hasAudio) {
       parts.push(
@@ -176,7 +306,7 @@ export function buildTrimFilter(
     } else {
       parts.push(`${inputs}concat=n=${groups.length}:v=1:a=0[vcat]`);
     }
-    parts.push(`[vcat]setsar=sar=${sar}[vout]`);
+    parts.push(`[vcat]${outputFrameFilters}[vout]`);
   }
   return {
     filter: parts.join(';'),
@@ -192,7 +322,7 @@ export function buildReencodeArgs(
   encoder: MediaEncoder = 'libopenh264',
 ): string[] {
   const hasAudio = metadata.audio_codec !== null;
-  const filter = buildTrimFilter(groups, hasAudio, metadata.sample_aspect_ratio);
+  const filter = buildTrimFilter(groups, hasAudio, metadata);
   const args = [
     '-hide_banner', '-y', '-autorotate', '-i', input,
     '-filter_complex', filter.filter, ...filter.maps,
@@ -210,7 +340,12 @@ export function buildCfrNormalizationArgs(
   encoder: MediaEncoder,
 ): string[] {
   const hasAudio = metadata.audio_codec !== null;
-  const filters = [`fps=${targetFpsRatio}`, `setsar=${normalizedSar(metadata.sample_aspect_ratio)}`];
+  const colorSetParams = buildColorSetParams(metadata);
+  const filters = [
+    `fps=${targetFpsRatio}`,
+    `setsar=${normalizedSar(metadata.sample_aspect_ratio)}`,
+    ...(colorSetParams ? [colorSetParams] : []),
+  ];
   const args = [
     '-hide_banner', '-y', '-autorotate', '-i', input,
     '-map', '0:v:0', '-map', '0:a?',
@@ -236,6 +371,10 @@ export function buildCfrNormalizationArgs(
   ];
   for (const [flag, value] of colorOptions) {
     if (value && value !== 'unknown') args.push(flag, value);
+  }
+  if (encoder === 'libopenh264') {
+    const bitstreamFilter = buildOpenH264MetadataBitstreamFilter(metadata);
+    if (bitstreamFilter) args.push('-bsf:v', bitstreamFilter);
   }
   args.push(
     '-metadata:s:v:0', 'rotate=0',
@@ -263,7 +402,7 @@ export function buildSegmentReencodeArgs(
     end: relativeEnd,
   };
   const hasAudio = metadata.audio_codec !== null;
-  const filter = buildTrimFilter([relativeGroup], hasAudio, metadata.sample_aspect_ratio);
+  const filter = buildTrimFilter([relativeGroup], hasAudio, metadata);
   const args = [
     '-hide_banner', '-y', '-autorotate',
     '-ss', safeSeekStart.toFixed(6),

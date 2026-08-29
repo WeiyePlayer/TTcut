@@ -9,6 +9,7 @@ const defaults: AppSettings = {
   pre_roll_seconds: 2.5,
   post_roll_seconds: 1,
   analysis_mode: 'full',
+  normalize_variable_frame_rate: false,
 };
 
 function settingsPath(): string {
@@ -40,6 +41,9 @@ export async function loadSettings(): Promise<AppSettings> {
       analysis_mode: raw.analysis_mode === 'two_stage' || raw.analysis_mode === 'full'
         ? raw.analysis_mode
         : defaults.analysis_mode,
+      normalize_variable_frame_rate: typeof raw.normalize_variable_frame_rate === 'boolean'
+        ? raw.normalize_variable_frame_rate
+        : defaults.normalize_variable_frame_rate,
     });
     if (Object.hasOwn(raw, 'ball_model_profile')) await writeSettings(settings).catch(() => undefined);
     return settings;

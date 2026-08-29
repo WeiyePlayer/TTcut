@@ -189,6 +189,8 @@ function registerIpc(): void {
     if (historyVisibility !== 'visible' && historyVisibility !== 'deferred') throw new Error('INVALID_REQUEST');
     const analysisMode = record.analysisMode;
     if (!BLURBALL_ANALYSIS_MODE_VALUES.includes(analysisMode as typeof BLURBALL_ANALYSIS_MODE_VALUES[number])) throw new Error('INVALID_REQUEST');
+    const normalizeVariableFrameRate = record.normalizeVariableFrameRate;
+    if (typeof normalizeVariableFrameRate !== 'boolean') throw new Error('INVALID_REQUEST');
     const validateThreshold = (value: unknown): value is number => typeof value === 'number'
       && Number.isFinite(value)
       && value >= BLURBALL_CONFIDENCE_THRESHOLD_MIN
@@ -205,6 +207,7 @@ function registerIpc(): void {
       device,
       historyVisibility,
       analysisMode: analysisMode as 'full' | 'two_stage',
+      normalizeVariableFrameRate,
       blurballConfidenceThreshold,
       blurballStage1ConfidenceThreshold,
       blurballStage2ConfidenceThreshold,

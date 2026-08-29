@@ -222,7 +222,7 @@ check(updateManifestSource.includes("process.env.TTCUT_ONLINE_MODEL_INSTALLER ==
 const installerSource = await readFile(path.join(root, 'build', 'installer', 'installer.nsh'), 'utf8');
 check(installerSource.includes('TTCUT_ONLINE_MODEL_INSTALLER'), 'The installer does not gate online model delivery.');
 check(installerSource.includes('download-models.ps1'), 'The installer does not invoke verified online model delivery.');
-check(installerSource.includes('AdditionalRequiredBytes "204214006"'), 'The online installer does not reserve disk space for downloaded models.');
+check(!installerSource.includes('check-install-space.ps1'), 'The installer still performs a pre-install disk-space check.');
 
 const releaseMetadata = path.join(root, '.runtime', 'release-metadata');
 for (const relative of ['THIRD_PARTY_NOTICES.html', 'THIRD_PARTY_NOTICES.md', 'sbom.cdx.json', 'licenses/index.json', 'licenses/tracknet/LICENSE.txt']) {
