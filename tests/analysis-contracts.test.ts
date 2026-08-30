@@ -64,6 +64,23 @@ describe('BlurBall analysis request contracts', () => {
     })).toThrow();
   });
 
+  it('limits TrackNet selection to the explicit local-test v4 request schema', () => {
+    expect(analysisRequestSchema.parse({
+      schema_version: 4,
+      ...base,
+      ball_model_profile: 'tracknet_v1',
+      analysis: { mode: 'full', confidence_threshold: 0.7 },
+      rally_recognition: { method: 'bounce_events' },
+    })).toMatchObject({ schema_version: 4, ball_model_profile: 'tracknet_v1' });
+    expect(() => analysisRequestSchema.parse({
+      schema_version: 3,
+      ...base,
+      ball_model_profile: 'tracknet_v1',
+      analysis: { mode: 'full', confidence_threshold: 0.7 },
+      rally_recognition: { method: 'bounce_events' },
+    })).toThrow();
+  });
+
   it('rejects out-of-range stage thresholds and unknown config fields', () => {
     expect(() => analysisRequestSchema.parse({
       schema_version: 2,
@@ -133,9 +150,33 @@ describe('BlurBall analysis request contracts', () => {
           maximum_boundary_displacement_ratio: 0.35,
           maximum_boundary_speed_ratio_per_second: 0.26,
         },
+        tracknet_filter: {
+          minimum_rally_seconds: 0.9,
+          minimum_horizontal_run_reversals: 1,
+          short_rally_seconds: 2,
+          minimum_short_rally_expanded_table_ratio: 0.25,
+          expanded_table_length_margin_cm: 35,
+          expanded_table_width_margin_cm: 25,
+          reliable_fragment_bridge_seconds: 0.75,
+        },
+      },
+      model_provenance: {
+        profile: 'tracknet_v1', component_version: null,
+        roi: { x: 364, y: 113, width: 611, height: 340 },
+        main_input: { width: 248, height: 136 }, aux_input: null,
+        tracknet: {
+          confidence_threshold: 0.35, roi_model_scale: 1,
+          inference_seconds: 26.7, predictor_seconds: 64.8,
+          detected_frames: 5588, missing_frames: 9619,
+        },
       },
     });
     expect(result.rallies[0]).not.toHaveProperty('bounce_count');
+    if (result.schema_version !== 2 || result.rally_recognition.method !== 'continuous_visibility') {
+      throw new Error('Expected a continuous-visibility v2 result');
+    }
+    expect(result.rally_recognition.tracknet_filter?.minimum_rally_seconds).toBe(0.9);
+    expect(result.model_provenance?.tracknet?.confidence_threshold).toBe(0.35);
     expect(() => analysisResultSchema.parse({
       ...result,
       rallies: [{ ...result.rallies[0], bounce_count: 3 }],

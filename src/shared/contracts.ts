@@ -20,7 +20,8 @@ export const DURATION_HIGHLIGHT_SECONDS = {
   rally: 4,
   long_rally: 4.8,
 } as const;
-const LEGACY_RESULT_MODEL_PROFILES = ['tracknet_v1', 'blurball_v1'] as const;
+export const BALL_MODEL_PROFILE_VALUES = ['tracknet_v1', 'blurball_v1'] as const;
+const LEGACY_RESULT_MODEL_PROFILES = BALL_MODEL_PROFILE_VALUES;
 
 const finiteNumber = z.number().finite();
 const point = z.tuple([finiteNumber, finiteNumber]);
@@ -194,10 +195,18 @@ export const analysisRequestV3Schema = analysisRequestV2Schema.extend({
   rally_recognition: rallyRecognitionConfigSchema,
 }).strict();
 
+// Schema v4 is intentionally only emitted by a local development run when a
+// TrackNet test weight has been configured outside the application package.
+export const analysisRequestV4Schema = analysisRequestV3Schema.extend({
+  schema_version: z.literal(4),
+  ball_model_profile: z.enum(BALL_MODEL_PROFILE_VALUES),
+}).strict();
+
 export const analysisRequestSchema = z.union([
   analysisRequestV1Schema,
   analysisRequestV2Schema,
   analysisRequestV3Schema,
+  analysisRequestV4Schema,
 ]);
 
 export const videoMetadataSchema = z.object({
@@ -269,7 +278,7 @@ const analysisResultBaseSchema = z.object({
   calibration: calibrationSchema.optional(),
   table_analysis: tableAnalysisSchema.optional(),
   model_provenance: z.object({
-    // TrackNet is accepted only when reading analyses created before it was retired.
+    // TrackNet remains readable for legacy history and explicit local development analyses.
     profile: z.enum(LEGACY_RESULT_MODEL_PROFILES),
     component_version: z.string().min(1).nullable(),
     roi: z.object({
@@ -297,6 +306,14 @@ const analysisResultBaseSchema = z.object({
         window_stride: z.union([z.literal(1), z.literal(3)]),
         retained_output: z.enum(['all_window_frames', 'center_frame']),
       }).strict()).min(1),
+    }).strict().optional(),
+    tracknet: z.object({
+      confidence_threshold: finiteNumber.min(0).max(1),
+      roi_model_scale: finiteNumber.positive(),
+      inference_seconds: finiteNumber.nonnegative(),
+      predictor_seconds: finiteNumber.nonnegative(),
+      detected_frames: z.number().int().nonnegative(),
+      missing_frames: z.number().int().nonnegative(),
     }).strict().optional(),
   }).strict().optional(),
 }).strict();
@@ -344,6 +361,15 @@ export const continuousVisibilityAnalysisResultV2Schema = analysisResultBaseSche
       maximum_gap_seconds: finiteNumber.positive(),
       maximum_boundary_displacement_ratio: finiteNumber.positive(),
       maximum_boundary_speed_ratio_per_second: finiteNumber.positive(),
+    }).strict().optional(),
+    tracknet_filter: z.object({
+      minimum_rally_seconds: finiteNumber.positive(),
+      minimum_horizontal_run_reversals: z.number().int().positive(),
+      short_rally_seconds: finiteNumber.positive(),
+      minimum_short_rally_expanded_table_ratio: finiteNumber.min(0).max(1),
+      expanded_table_length_margin_cm: finiteNumber.nonnegative(),
+      expanded_table_width_margin_cm: finiteNumber.nonnegative(),
+      reliable_fragment_bridge_seconds: finiteNumber.positive(),
     }).strict().optional(),
   }).strict(),
 }).strict();
@@ -581,6 +607,7 @@ export const platformCompatibilitySchema = z.object({
 export type Calibration = z.infer<typeof calibrationSchema>;
 export type CalibrationChoice = z.infer<typeof calibrationChoiceSchema>;
 export type TableAnalysis = z.infer<typeof tableAnalysisSchema>;
+export type BallModelProfile = typeof BALL_MODEL_PROFILE_VALUES[number];
 export type AnalysisRequestV1 = z.infer<typeof analysisRequestV1Schema>;
 export type AnalysisRequestV2 = z.infer<typeof analysisRequestV2Schema>;
 export type AnalysisRequestV3 = z.infer<typeof analysisRequestV3Schema>;

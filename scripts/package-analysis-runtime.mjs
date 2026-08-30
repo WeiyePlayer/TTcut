@@ -60,7 +60,7 @@ async function walk(directory) {
 }
 
 const relativeFiles = (await walk(source)).map((file) => path.relative(source, file).replaceAll('\\', '/').toLowerCase());
-if (relativeFiles.some((file) => /(^|\/)tracknet_best\.pt$/.test(file))) throw new Error('Runtime archive must not contain the TrackNet weight.');
+if (relativeFiles.some((file) => /(^|\/)(tracknet_best|analyze)\.pt$/.test(file))) throw new Error('Runtime archive must not contain a local TrackNet test weight.');
 for (const pattern of [
   /^license\.txt$/,
   /torch-[^/]+\.dist-info\/(?:licenses\/)?license/,

@@ -11,6 +11,7 @@ from ttcut_worker.rallies import group_rallies
 from ttcut_worker.table_analyze import _order_corners, _select_coherent_corner_pair
 from ttcut_worker.types import TrajectoryPoint
 from ttcut_worker.video import VideoInfo
+from ttcut_worker.visibility_rallies import VisibilityRallySummary
 from ttcut_worker.worker import analyze, validate_request
 
 
@@ -89,7 +90,18 @@ def test_automatic_calibration_selects_two_coherent_samples():
     ) == (0, 1)
 
 
-def test_worker_request_rejects_unknown_fields_and_retired_profile():
+def local_tracknet_request() -> dict:
+    request = valid_request()
+    request.update({
+        "schema_version": 4,
+        "ball_model_profile": "tracknet_v1",
+        "analysis": {"mode": "full", "confidence_threshold": 0.7},
+        "rally_recognition": {"method": "bounce_events"},
+    })
+    return request
+
+
+def test_worker_request_rejects_a_profile_field_in_legacy_schema():
     request = valid_request()
     request["ball_model_profile"] = "tracknet_v1"
     try:
@@ -97,7 +109,12 @@ def test_worker_request_rejects_unknown_fields_and_retired_profile():
     except Exception as exc:
         assert "schema" in str(exc).lower()
     else:
-        raise AssertionError("a retired model profile must be rejected")
+        raise AssertionError("legacy request schemas must reject added fields")
+
+
+def test_worker_request_accepts_the_explicit_local_tracknet_schema():
+    request = local_tracknet_request()
+    assert validate_request(request) is request
 
 
 def test_worker_request_accepts_mov_and_precalibrated_diagnostics():
@@ -179,6 +196,113 @@ def test_worker_uses_requested_blurball_threshold_and_records_it(monkeypatch):
         "confidence_threshold": 0.55, "step": 3,
         "maximum_displacement_pixels": 100.0, "landing_region": "expanded_table",
     }
+
+
+def test_worker_uses_the_local_tracknet_weight_without_blurball_provenance(monkeypatch):
+    captured = {}
+
+    class FakeTrackNetPredictor:
+        def __init__(self, loaded, confidence_threshold, roi_model_scale):
+            captured["loaded"] = loaded
+            captured["confidence_threshold"] = confidence_threshold
+            captured["roi_model_scale"] = roi_model_scale
+            self.confidence_threshold = confidence_threshold
+            self.roi_model_scale = roi_model_scale
+
+        def predict(self, video_path, progress_callback=None, analysis_roi=None):
+            captured["roi"] = analysis_roi
+            points = [TrajectoryPoint(i, i * 0.1, 1, 640, 360, "tracknet", 0.9) for i in range(6)]
+            return points, VideoInfo(Path(video_path), 1280, 720, 10.0, 6, 6, 0.6), SimpleNamespace(
+                model_width=512, model_height=288, confidence_threshold=self.confidence_threshold,
+                roi_model_scale=self.roi_model_scale, inference_seconds=0.4, predictor_seconds=0.6,
+                detected_frames=6, missing_frames=0,
+            )
+
+    fake_loaded = SimpleNamespace()
+    monkeypatch.setenv("TTCUT_TRACKNET_WEIGHTS", "D:/local/TrackNet_best.pt")
+    monkeypatch.setattr("ttcut_worker.worker.load_tracknet", lambda path, device: captured.update(weight_path=path, device=device) or fake_loaded)
+    monkeypatch.setattr("ttcut_worker.worker.TrackNetPredictor", FakeTrackNetPredictor)
+    monkeypatch.setattr("ttcut_worker.worker.detect_tracknet_bounce_frames", lambda points, calibration: [0, 5])
+
+    result = analyze(local_tracknet_request())
+
+    assert captured["loaded"] is fake_loaded
+    assert captured["weight_path"] == "D:/local/TrackNet_best.pt"
+    assert captured["device"] == "cpu"
+    assert captured["confidence_threshold"] == 0.35
+    assert captured["roi_model_scale"] == 1.0
+    assert captured["roi"].source_width == 1280
+    provenance = result["model_provenance"]
+    assert provenance["profile"] == "tracknet_v1"
+    assert provenance["component_version"] is None
+    assert provenance["main_input"] == {"width": 512, "height": 288}
+    assert "detection" not in provenance
+    assert "analysis" not in provenance
+    assert provenance["tracknet"] == {
+        "confidence_threshold": 0.35,
+        "roi_model_scale": 1.0,
+        "inference_seconds": 0.4,
+        "predictor_seconds": 0.6,
+        "detected_frames": 6,
+        "missing_frames": 0,
+    }
+
+
+def test_worker_applies_the_tracknet_visibility_filter_and_records_its_thresholds(monkeypatch):
+    captured = {}
+
+    class FakeTrackNetPredictor:
+        def __init__(self, loaded, confidence_threshold, roi_model_scale):
+            captured["confidence_threshold"] = confidence_threshold
+            captured["roi_model_scale"] = roi_model_scale
+
+        def predict(self, video_path, progress_callback=None, analysis_roi=None):
+            points = [
+                TrajectoryPoint(frame, frame / 10.0, 1, frame * 100, 300, "tracknet", 0.9)
+                for frame in range(20)
+            ]
+            return points, VideoInfo(Path(video_path), 1280, 720, 10.0, 20, 20, 2.0), SimpleNamespace(
+                model_width=248, model_height=136, confidence_threshold=0.35,
+                roi_model_scale=1.0, inference_seconds=0.4, predictor_seconds=0.6,
+                detected_frames=20, missing_frames=0,
+            )
+
+    def fake_tracknet_rallies(points, fps, table, *, motion_config):
+        captured["tracknet_filter_called"] = True
+        return (VisibilityRallySummary(0, 19, 0.0, 1.9),)
+
+    monkeypatch.setenv("TTCUT_TRACKNET_WEIGHTS", "D:/local/TrackNet_best.pt")
+    monkeypatch.setattr("ttcut_worker.worker.load_tracknet", lambda path, device: SimpleNamespace())
+    monkeypatch.setattr("ttcut_worker.worker.TrackNetPredictor", FakeTrackNetPredictor)
+    monkeypatch.setattr("ttcut_worker.worker.tracknet_visibility_rallies", fake_tracknet_rallies)
+    monkeypatch.setattr(
+        "ttcut_worker.worker.detect_tracknet_bounce_frames",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("bounce detection must be skipped")),
+    )
+    request = local_tracknet_request()
+    request["rally_recognition"] = {"method": "continuous_visibility"}
+
+    result = analyze(request)
+
+    assert captured == {
+        "confidence_threshold": 0.35,
+        "roi_model_scale": 1.0,
+        "tracknet_filter_called": True,
+    }
+    assert result["rallies"] == [{
+        "id": "rally_001", "index": 1, "start_time_seconds": 0.0, "end_time_seconds": 1.9,
+    }]
+    assert result["rally_recognition"]["tracknet_filter"] == {
+        "minimum_rally_seconds": 0.9,
+        "minimum_horizontal_run_reversals": 1,
+        "short_rally_seconds": 2.0,
+        "minimum_short_rally_expanded_table_ratio": 0.25,
+        "expanded_table_length_margin_cm": 35.0,
+        "expanded_table_width_margin_cm": 25.0,
+        "reliable_fragment_bridge_seconds": 0.75,
+    }
+    assert result["rally_recognition"]["detection_confidence_threshold"] == 0.35
+    assert "bounce_times_seconds" not in result
 
 
 def test_worker_continuous_visibility_skips_bounce_detection_and_records_provenance(monkeypatch):

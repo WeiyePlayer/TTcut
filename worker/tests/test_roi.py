@@ -48,6 +48,21 @@ def test_default_roi_model_dimensions_use_the_adopted_125_percent_scale():
     assert model_dimensions(roi, 1920, 1080) == (280, 160)
 
 
+def test_roi_model_dimensions_can_use_unscaled_tracknet_input():
+    roi = AnalysisRoi(
+        x0=0,
+        y0=0,
+        x1=840,
+        y1=480,
+        projected_polygon=((0.0, 0.0),) * 4,
+        top_padding_pixels=0.0,
+        source_width=1920,
+        source_height=1080,
+    )
+
+    assert model_dimensions(roi, 1920, 1080, scale=1.0) == (224, 128)
+
+
 def test_analysis_roi_is_the_outer_bbox_and_extends_above_the_table():
     roi = build_analysis_roi(
         calibration(),

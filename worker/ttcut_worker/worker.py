@@ -20,6 +20,23 @@ from .request import (
     validate_request,
 )
 from .table_analyze import analyze_table
+from .tracknet_bounce import detect_tracknet_bounce_frames
+from .tracknet_model import load_tracknet
+from .tracknet_predictor import (
+    TRACKNET_CONFIDENCE_THRESHOLD,
+    TRACKNET_ROI_MODEL_SCALE,
+    TrackNetPredictor,
+)
+from .tracknet_rallies import (
+    TRACKNET_EXPANDED_TABLE_LENGTH_MARGIN_CM,
+    TRACKNET_EXPANDED_TABLE_WIDTH_MARGIN_CM,
+    TRACKNET_MINIMUM_HORIZONTAL_RUN_REVERSALS,
+    TRACKNET_MINIMUM_RALLY_SECONDS,
+    TRACKNET_MINIMUM_SHORT_RALLY_EXPANDED_TABLE_RATIO,
+    TRACKNET_RELIABLE_FRAGMENT_BRIDGE_SECONDS,
+    TRACKNET_SHORT_RALLY_SECONDS,
+    tracknet_visibility_rallies,
+)
 from .visibility_rallies import (
     CONTINUOUS_VISIBILITY_CONFIDENCE_THRESHOLD,
     CONTINUOUS_VISIBILITY_END_SECONDS,
@@ -78,20 +95,31 @@ def analyze(request: dict) -> dict:
             calibration_value["video_width"], calibration_value["video_height"], calibration_value["points"],
         )
     analysis_roi = build_analysis_roi(calibration, AnalysisRoiConfig())
+    profile = request.get("ball_model_profile", "blurball_v1")
     emit({"type": "progress", "task_id": task_id, "stage": "load_model", "current": 0, "total": 1, "percent": 0.0})
-    blurball_path = os.environ.get("TTCUT_BLURBALL_WEIGHTS", "").strip()
-    if not blurball_path:
-        raise ModelResourceError("Bundled BlurBall model path is not configured.")
-    loaded = load_blurball(blurball_path, request["device"])
+    if profile == "tracknet_v1":
+        tracknet_path = os.environ.get("TTCUT_TRACKNET_WEIGHTS", "").strip()
+        if not tracknet_path:
+            raise ModelResourceError("Local TrackNet testing is not configured.")
+        loaded = load_tracknet(tracknet_path, request["device"])
+    else:
+        blurball_path = os.environ.get("TTCUT_BLURBALL_WEIGHTS", "").strip()
+        if not blurball_path:
+            raise ModelResourceError("Bundled BlurBall model path is not configured.")
+        loaded = load_blurball(blurball_path, request["device"])
     emit({"type": "progress", "task_id": task_id, "stage": "load_model", "current": 1, "total": 1, "percent": 100.0})
 
     config = analysis_config(request)
     recognition = rally_recognition_config(request)
     recognition_method = recognition["method"]
-    effective_config = config if recognition_method == "bounce_events" else {
-        "mode": "full",
-        "confidence_threshold": CONTINUOUS_VISIBILITY_CONFIDENCE_THRESHOLD,
-    }
+    effective_config = (
+        {"mode": "full", "confidence_threshold": TRACKNET_CONFIDENCE_THRESHOLD}
+        if profile == "tracknet_v1"
+        else config if recognition_method == "bounce_events" else {
+            "mode": "full",
+            "confidence_threshold": CONTINUOUS_VISIBILITY_CONFIDENCE_THRESHOLD,
+        }
+    )
 
     def progress(stage: str):
         def callback(current: int, total: int) -> None:
@@ -103,24 +131,33 @@ def analyze(request: dict) -> dict:
         return callback
 
     if effective_config["mode"] == "full":
-        predictor = BlurBallPredictor(
-            loaded,
-            confidence_threshold=effective_config["confidence_threshold"],
+        predictor = (
+            TrackNetPredictor(
+                loaded,
+                confidence_threshold=effective_config["confidence_threshold"],
+                roi_model_scale=TRACKNET_ROI_MODEL_SCALE,
+            )
+            if profile == "tracknet_v1"
+            else BlurBallPredictor(
+                loaded,
+                confidence_threshold=effective_config["confidence_threshold"],
+            )
         )
         points, info, stats = predictor.predict(
             request["video_path"],
             progress_callback=progress("analysis"),
             analysis_roi=analysis_roi,
         )
-        final_threshold = stats.confidence_threshold
-        stages = [{
-            "name": "full",
-            "confidence_threshold": stats.confidence_threshold,
-            "window_size": 3,
-            "window_stride": 3,
-            "retained_output": "all_window_frames",
-        }]
-        expansion_seconds = None
+        if profile == "blurball_v1":
+            final_threshold = stats.confidence_threshold
+            stages = [{
+                "name": "full",
+                "confidence_threshold": stats.confidence_threshold,
+                "window_size": 3,
+                "window_stride": 3,
+                "retained_output": "all_window_frames",
+            }]
+            expansion_seconds = None
     else:
         predictor = BlurBallPredictor(
             loaded,
@@ -173,18 +210,32 @@ def analyze(request: dict) -> dict:
     emit({"type": "progress", "task_id": task_id, "stage": "postprocess", "current": 0, "total": 1, "percent": 0.0})
     bounce_frames: list[int] | None = None
     if recognition_method == "bounce_events":
-        bounce_frames = detect_blurball_bounce_frames(points, calibration)
+        bounce_frames = (
+            detect_tracknet_bounce_frames(points, calibration)
+            if profile == "tracknet_v1"
+            else detect_blurball_bounce_frames(points, calibration)
+        )
         rallies = group_rallies(bounce_frames, points)
     else:
         vertical_exchange_enabled = is_end_on_table_view(calibration.points)
-        rallies = continuous_visibility_rallies(
-            points,
-            float(info.fps or 0.0),
-            motion_config=VisibilityMotionConfig(
-                analysis_width_pixels=analysis_roi.width,
-                analysis_height_pixels=analysis_roi.height,
-                vertical_exchange_enabled=vertical_exchange_enabled,
-            ),
+        motion_config = VisibilityMotionConfig(
+            analysis_width_pixels=analysis_roi.width,
+            analysis_height_pixels=analysis_roi.height,
+            vertical_exchange_enabled=vertical_exchange_enabled,
+        )
+        rallies = (
+            tracknet_visibility_rallies(
+                points,
+                float(info.fps or 0.0),
+                calibration,
+                motion_config=motion_config,
+            )
+            if profile == "tracknet_v1"
+            else continuous_visibility_rallies(
+                points,
+                float(info.fps or 0.0),
+                motion_config=motion_config,
+            )
         )
     duration = float(info.duration or 0.0)
     points_by_frame = {point.frame: point for point in points}
@@ -233,7 +284,11 @@ def analyze(request: dict) -> dict:
             if recognition_method == "bounce_events"
             else {
                 "method": "continuous_visibility",
-                "detection_confidence_threshold": CONTINUOUS_VISIBILITY_CONFIDENCE_THRESHOLD,
+                "detection_confidence_threshold": (
+                    stats.confidence_threshold
+                    if profile == "tracknet_v1"
+                    else CONTINUOUS_VISIBILITY_CONFIDENCE_THRESHOLD
+                ),
                 "start_visible_seconds": CONTINUOUS_VISIBILITY_START_SECONDS,
                 "end_invisible_seconds": CONTINUOUS_VISIBILITY_END_SECONDS,
                 "motion_filter": {
@@ -277,6 +332,17 @@ def analyze(request: dict) -> dict:
                         CONTINUOUS_VISIBILITY_FRAGMENT_MERGE_SPEED_RATIO_PER_SECOND
                     ),
                 },
+                **({"tracknet_filter": {
+                    "minimum_rally_seconds": TRACKNET_MINIMUM_RALLY_SECONDS,
+                    "minimum_horizontal_run_reversals": TRACKNET_MINIMUM_HORIZONTAL_RUN_REVERSALS,
+                    "short_rally_seconds": TRACKNET_SHORT_RALLY_SECONDS,
+                    "minimum_short_rally_expanded_table_ratio": (
+                        TRACKNET_MINIMUM_SHORT_RALLY_EXPANDED_TABLE_RATIO
+                    ),
+                    "expanded_table_length_margin_cm": TRACKNET_EXPANDED_TABLE_LENGTH_MARGIN_CM,
+                    "expanded_table_width_margin_cm": TRACKNET_EXPANDED_TABLE_WIDTH_MARGIN_CM,
+                    "reliable_fragment_bridge_seconds": TRACKNET_RELIABLE_FRAGMENT_BRIDGE_SECONDS,
+                }} if profile == "tracknet_v1" else {}),
             }
         ),
         "calibration": {
@@ -287,8 +353,8 @@ def analyze(request: dict) -> dict:
             )},
         },
         "model_provenance": {
-            "profile": "blurball_v1",
-            "component_version": loaded.component_version,
+            "profile": profile,
+            "component_version": loaded.component_version if profile == "blurball_v1" else None,
             "roi": {
                 "x": analysis_roi.x0,
                 "y": analysis_roi.y0,
@@ -307,13 +373,21 @@ def analyze(request: dict) -> dict:
                     "maximum_displacement_pixels": stats.maximum_displacement_pixels,
                     "landing_region": "expanded_table",
                 },
-            } if recognition_method == "bounce_events" else {}),
-            "analysis": {
+            } if profile == "blurball_v1" and recognition_method == "bounce_events" else {}),
+            **({"analysis": {
                 "schema_version": 2,
                 "mode": effective_config["mode"],
                 **({"interval_expansion_seconds": expansion_seconds} if expansion_seconds is not None else {}),
                 "stages": stages,
-            },
+            }} if profile == "blurball_v1" else {}),
+            **({"tracknet": {
+                "confidence_threshold": stats.confidence_threshold,
+                "roi_model_scale": stats.roi_model_scale,
+                "inference_seconds": stats.inference_seconds,
+                "predictor_seconds": stats.predictor_seconds,
+                "detected_frames": stats.detected_frames,
+                "missing_frames": stats.missing_frames,
+            }} if profile == "tracknet_v1" else {}),
         },
     }
     if bounce_times is not None:

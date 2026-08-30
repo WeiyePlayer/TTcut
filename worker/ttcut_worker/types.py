@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Literal
 
-PointSource = Literal["blurball", "missing"]
+PointSource = Literal["blurball", "tracknet", "missing"]
 TimeSource = Literal["decoder", "fps_estimation"]
 
 
