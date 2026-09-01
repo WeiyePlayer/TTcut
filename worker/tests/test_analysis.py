@@ -294,6 +294,8 @@ def test_worker_applies_the_tracknet_visibility_filter_and_records_its_threshold
     }]
     assert result["rally_recognition"]["tracknet_filter"] == {
         "minimum_rally_seconds": 0.9,
+        "strong_evidence_minimum_rally_seconds": 0.75,
+        "strong_evidence_minimum_expanded_table_ratio": 0.8,
         "minimum_horizontal_run_reversals": 1,
         "short_rally_seconds": 2.0,
         "minimum_short_rally_expanded_table_ratio": 0.2,

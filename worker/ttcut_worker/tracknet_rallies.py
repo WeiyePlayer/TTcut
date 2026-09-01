@@ -17,6 +17,8 @@ from .visibility_rallies import (
 
 
 TRACKNET_MINIMUM_RALLY_SECONDS = 0.90
+TRACKNET_STRONG_EVIDENCE_MINIMUM_RALLY_SECONDS = 0.75
+TRACKNET_STRONG_EVIDENCE_MINIMUM_EXPANDED_TABLE_RATIO = 0.80
 TRACKNET_SHORT_RALLY_SECONDS = 2.0
 TRACKNET_MINIMUM_SHORT_RALLY_EXPANDED_TABLE_RATIO = 0.20
 TRACKNET_EXPANDED_TABLE_LENGTH_MARGIN_CM = 35.0
@@ -47,7 +49,7 @@ def tracknet_visibility_rallies(
 
     for rally in base:
         duration = rally.end_time - rally.start_time
-        if duration + 1e-9 < TRACKNET_MINIMUM_RALLY_SECONDS:
+        if duration + 1e-9 < TRACKNET_STRONG_EVIDENCE_MINIMUM_RALLY_SECONDS:
             continue
         segment = ordered[
             bisect_left(frames, rally.start_frame):bisect_right(frames, rally.end_frame)
@@ -73,10 +75,14 @@ def tracknet_visibility_rallies(
                     calibration.image_to_table(point.x, point.y) for point in visible
                 )
             )
+            expanded_table_ratio = expanded_table_points / len(visible)
             if (
-                expanded_table_points / len(visible)
-                < TRACKNET_MINIMUM_SHORT_RALLY_EXPANDED_TABLE_RATIO
+                duration + 1e-9 < TRACKNET_MINIMUM_RALLY_SECONDS
+                and expanded_table_ratio
+                < TRACKNET_STRONG_EVIDENCE_MINIMUM_EXPANDED_TABLE_RATIO
             ):
+                continue
+            if expanded_table_ratio < TRACKNET_MINIMUM_SHORT_RALLY_EXPANDED_TABLE_RATIO:
                 continue
         reliable.append(rally)
 

@@ -35,6 +35,8 @@ from .tracknet_rallies import (
     TRACKNET_MINIMUM_SHORT_RALLY_EXPANDED_TABLE_RATIO,
     TRACKNET_RELIABLE_FRAGMENT_BRIDGE_SECONDS,
     TRACKNET_SHORT_RALLY_SECONDS,
+    TRACKNET_STRONG_EVIDENCE_MINIMUM_EXPANDED_TABLE_RATIO,
+    TRACKNET_STRONG_EVIDENCE_MINIMUM_RALLY_SECONDS,
     tracknet_visibility_rallies,
 )
 from .visibility_rallies import (
@@ -334,6 +336,12 @@ def analyze(request: dict) -> dict:
                 },
                 **({"tracknet_filter": {
                     "minimum_rally_seconds": TRACKNET_MINIMUM_RALLY_SECONDS,
+                    "strong_evidence_minimum_rally_seconds": (
+                        TRACKNET_STRONG_EVIDENCE_MINIMUM_RALLY_SECONDS
+                    ),
+                    "strong_evidence_minimum_expanded_table_ratio": (
+                        TRACKNET_STRONG_EVIDENCE_MINIMUM_EXPANDED_TABLE_RATIO
+                    ),
                     "minimum_horizontal_run_reversals": TRACKNET_MINIMUM_HORIZONTAL_RUN_REVERSALS,
                     "short_rally_seconds": TRACKNET_SHORT_RALLY_SECONDS,
                     "minimum_short_rally_expanded_table_ratio": (

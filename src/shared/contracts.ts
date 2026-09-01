@@ -364,6 +364,8 @@ export const continuousVisibilityAnalysisResultV2Schema = analysisResultBaseSche
     }).strict().optional(),
     tracknet_filter: z.object({
       minimum_rally_seconds: finiteNumber.positive(),
+      strong_evidence_minimum_rally_seconds: finiteNumber.positive().optional(),
+      strong_evidence_minimum_expanded_table_ratio: finiteNumber.min(0).max(1).optional(),
       minimum_horizontal_run_reversals: z.number().int().positive(),
       short_rally_seconds: finiteNumber.positive(),
       minimum_short_rally_expanded_table_ratio: finiteNumber.min(0).max(1),

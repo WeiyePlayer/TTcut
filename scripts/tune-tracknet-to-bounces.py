@@ -16,7 +16,16 @@ if str(WORKER_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKER_ROOT))
 
 from ttcut_worker.calibration import TABLE_LENGTH_CM, TABLE_WIDTH_CM, TableCalibration  # noqa: E402
-from ttcut_worker.tracknet_rallies import tracknet_visibility_rallies  # noqa: E402
+from ttcut_worker.tracknet_rallies import (  # noqa: E402
+    TRACKNET_MINIMUM_HORIZONTAL_RUN_REVERSALS,
+    TRACKNET_MINIMUM_RALLY_SECONDS,
+    TRACKNET_MINIMUM_SHORT_RALLY_EXPANDED_TABLE_RATIO,
+    TRACKNET_RELIABLE_FRAGMENT_BRIDGE_SECONDS,
+    TRACKNET_SHORT_RALLY_SECONDS,
+    TRACKNET_STRONG_EVIDENCE_MINIMUM_EXPANDED_TABLE_RATIO,
+    TRACKNET_STRONG_EVIDENCE_MINIMUM_RALLY_SECONDS,
+    tracknet_visibility_rallies,
+)
 from ttcut_worker.types import TrajectoryPoint  # noqa: E402
 from ttcut_worker.visibility_rallies import (  # noqa: E402
     CONTINUOUS_VISIBILITY_MAX_REVERSAL_GAP_SECONDS,
@@ -43,6 +52,8 @@ class FilterConfig:
     short_duration: float
     minimum_short_table_ratio: float
     bridge_seconds: float
+    strong_evidence_minimum_duration: float | None = None
+    strong_evidence_minimum_table_ratio: float | None = None
 
 
 def restore_point(value: dict) -> TrajectoryPoint:
@@ -142,7 +153,14 @@ def apply_filter(candidates: list[Candidate], config: FilterConfig) -> list[Visi
         rally = candidate.rally
         duration = rally.end_time - rally.start_time
         if duration + 1e-9 < config.minimum_duration:
-            continue
+            if (
+                config.strong_evidence_minimum_duration is None
+                or config.strong_evidence_minimum_table_ratio is None
+                or duration + 1e-9 < config.strong_evidence_minimum_duration
+                or candidate.expanded_table_ratio
+                < config.strong_evidence_minimum_table_ratio
+            ):
+                continue
         if candidate.horizontal_run_reversals < config.minimum_reversals:
             continue
         if (
@@ -271,11 +289,16 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--current", type=Path, required=True)
     parser.add_argument("--regression", type=Path, required=True)
+    parser.add_argument("--guard", action="append", type=Path, default=[])
     parser.add_argument("--top", type=int, default=20)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     current = json.loads(args.current.read_text(encoding="utf-8"))
     regression = json.loads(args.regression.read_text(encoding="utf-8"))
+    guard_payloads = [
+        (path, json.loads(path.read_text(encoding="utf-8")))
+        for path in args.guard
+    ]
     current_features = features(current)
     regression_features = features(regression)
     current_target = intervals(current["bounce_rallies"], bounce=True)
@@ -283,6 +306,17 @@ def main() -> int:
     recorded_regression_rallies = [
         VisibilityRallySummary(**value) for value in regression["visibility_rallies"]
     ]
+    guards = []
+    for path, payload in guard_payloads:
+        production = production_rallies(payload)
+        target = intervals(payload["bounce_rallies"], bounce=True)
+        guards.append({
+            "path": str(path),
+            "features": features(payload),
+            "production": production,
+            "target": target,
+            "production_score": match(production, target),
+        })
     configs = (
         FilterConfig(*values)
         for values in itertools.product(
@@ -313,6 +347,27 @@ def main() -> int:
                 if len(recorded_regression_rallies) == len(regression_rallies)
                 else math.inf
             ),
+            "guards": [
+                {
+                    "path": guard["path"],
+                    "score": match(
+                        guard_rallies := apply_filter(guard["features"], config),
+                        guard["target"],
+                    ),
+                    "production_score": guard["production_score"],
+                    "production_interval_changes": (
+                        sum(
+                            production != candidate
+                            for production, candidate in zip(
+                                guard["production"], guard_rallies, strict=True,
+                            )
+                        )
+                        if len(guard["production"]) == len(guard_rallies)
+                        else math.inf
+                    ),
+                }
+                for guard in guards
+            ],
         })
     preserving = [
         item for item in results
@@ -326,6 +381,26 @@ def main() -> int:
             item["current"]["matched"],
             -abs(item["current"]["predicted"] - item["current"]["target"]),
             -item["regression_interval_changes"],
+        ),
+        reverse=True,
+    )
+    guarded_ranked = sorted(
+        (
+            item for item in preserving
+            if all(
+                guard["score"]["predicted"] == guard["production_score"]["predicted"]
+                and guard["score"]["matched"] >= guard["production_score"]["matched"]
+                for guard in item["guards"]
+            )
+        ),
+        key=lambda item: (
+            item["current"]["f1"],
+            item["current"]["matched"],
+            -abs(item["current"]["predicted"] - item["current"]["target"]),
+            -sum(
+                guard["production_interval_changes"]
+                for guard in item["guards"]
+            ),
         ),
         reverse=True,
     )
@@ -344,10 +419,23 @@ def main() -> int:
             item for item in ranked
             if item["regression_interval_changes"] == change_count
         ))
-    current_config = FilterConfig(0.9, 1, 2.0, 0.25, 0.75)
+    current_config = FilterConfig(0.9, 1, 2.0, 0.20, 1.50)
     baseline = next(item for item in results if item["config"] == current_config)
-    selected_config = FilterConfig(0.9, 1, 2.0, 0.20, 1.50)
-    selected = next(item for item in results if item["config"] == selected_config)
+    selected_config = FilterConfig(
+        TRACKNET_MINIMUM_RALLY_SECONDS,
+        TRACKNET_MINIMUM_HORIZONTAL_RUN_REVERSALS,
+        TRACKNET_SHORT_RALLY_SECONDS,
+        TRACKNET_MINIMUM_SHORT_RALLY_EXPANDED_TABLE_RATIO,
+        TRACKNET_RELIABLE_FRAGMENT_BRIDGE_SECONDS,
+        TRACKNET_STRONG_EVIDENCE_MINIMUM_RALLY_SECONDS,
+        TRACKNET_STRONG_EVIDENCE_MINIMUM_EXPANDED_TABLE_RATIO,
+    )
+    selected = {
+        "current": match(apply_filter(current_features, selected_config), current_target),
+        "regression": match_overlap(
+            apply_filter(regression_features, selected_config), regression_target,
+        ),
+    }
     shared_current = match([candidate.rally for candidate in current_features], current_target)
     shared_regression = match_overlap([candidate.rally for candidate in regression_features], regression_target)
     raw_current = match(raw_rallies(current), current_target)
@@ -419,6 +507,15 @@ def main() -> int:
     selected_regression_rallies = apply_filter(regression_features, selected_config)
     production_current_rallies = production_rallies(current)
     production_regression_rallies = production_rallies(regression)
+    selected_guards = []
+    for guard in guards:
+        guard_rallies = apply_filter(guard["features"], selected_config)
+        selected_guards.append({
+            "path": guard["path"],
+            "score": match(guard_rallies, guard["target"]),
+            "production_score": guard["production_score"],
+            "matches_production_intervals": guard_rallies == guard["production"],
+        })
     selected_regression_interval_changes = [
         {
             "index": index,
@@ -455,6 +552,7 @@ def main() -> int:
                 selected["current"]["unmatched_target"],
             ),
             "regression_interval_changes": selected_regression_interval_changes,
+            "guards": selected_guards,
             "production_replay": {
                 "current_count": len(production_current_rallies),
                 "regression_count": len(production_regression_rallies),
@@ -465,6 +563,23 @@ def main() -> int:
             },
         },
         "preserving_config_count": len(preserving),
+        "guard_baselines": [
+            {
+                "path": guard["path"],
+                "production_score": guard["production_score"],
+                "production_count": len(guard["production"]),
+            }
+            for guard in guards
+        ],
+        "guarded_top": [
+            {
+                "config": item["config"].__dict__,
+                "current": item["current"],
+                "regression": item["regression"],
+                "guards": item["guards"],
+            }
+            for item in guarded_ranked[:args.top]
+        ],
         "best_unmatched_target_details": best_details,
         "best_regression_interval_changes": best_regression_interval_changes,
         "state_search_top": [

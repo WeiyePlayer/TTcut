@@ -34,11 +34,49 @@ def points(xs: list[int], *, start_frame: int = 0) -> list[TrajectoryPoint]:
     ]
 
 
-def test_tracknet_filter_rejects_a_subsecond_exchange() -> None:
+def test_tracknet_filter_accepts_a_strong_subsecond_exchange() -> None:
+    trajectory = points([0, 30, 60, 90, 60, 30, 0, 30, 60])
+
+    assert len(tracknet_visibility_rallies(
+        trajectory, FPS, FakeCalibration(), motion_config=MOTION_CONFIG,
+    )) == 1
+
+
+def test_tracknet_filter_rejects_a_subsecond_exchange_without_strong_table_evidence() -> None:
     trajectory = points([0, 30, 60, 90, 60, 30, 0, 30, 60])
 
     assert tracknet_visibility_rallies(
+        trajectory, FPS, FakeCalibration(inside=False), motion_config=MOTION_CONFIG,
+    ) == ()
+
+
+def test_tracknet_filter_rejects_an_exchange_below_the_strong_evidence_minimum() -> None:
+    trajectory = points([0, 30, 60, 90, 60, 30, 0, 30])
+
+    assert tracknet_visibility_rallies(
         trajectory, FPS, FakeCalibration(), motion_config=MOTION_CONFIG,
+    ) == ()
+
+
+def test_tracknet_filter_accepts_exactly_eighty_percent_table_evidence_below_standard_minimum() -> None:
+    fps = 12.0
+    xs = [0, 0, 50, 100, 100, 80, 60, 40, 25, 25]
+    trajectory = [
+        TrajectoryPoint(frame, frame / fps, 1, x, 20, "tracknet", 0.9)
+        for frame, x in enumerate(xs)
+    ]
+
+    assert len(tracknet_visibility_rallies(
+        trajectory,
+        fps,
+        ThresholdCalibration(minimum_inside_x=25),
+        motion_config=MOTION_CONFIG,
+    )) == 1
+    assert tracknet_visibility_rallies(
+        trajectory,
+        fps,
+        ThresholdCalibration(minimum_inside_x=26),
+        motion_config=MOTION_CONFIG,
     ) == ()
 
 

@@ -152,12 +152,14 @@ describe('BlurBall analysis request contracts', () => {
         },
         tracknet_filter: {
           minimum_rally_seconds: 0.9,
+          strong_evidence_minimum_rally_seconds: 0.75,
+          strong_evidence_minimum_expanded_table_ratio: 0.8,
           minimum_horizontal_run_reversals: 1,
           short_rally_seconds: 2,
-          minimum_short_rally_expanded_table_ratio: 0.25,
+          minimum_short_rally_expanded_table_ratio: 0.2,
           expanded_table_length_margin_cm: 35,
           expanded_table_width_margin_cm: 25,
-          reliable_fragment_bridge_seconds: 0.75,
+          reliable_fragment_bridge_seconds: 1.5,
         },
       },
       model_provenance: {
@@ -176,6 +178,9 @@ describe('BlurBall analysis request contracts', () => {
       throw new Error('Expected a continuous-visibility v2 result');
     }
     expect(result.rally_recognition.tracknet_filter?.minimum_rally_seconds).toBe(0.9);
+    expect(
+      result.rally_recognition.tracknet_filter?.strong_evidence_minimum_rally_seconds,
+    ).toBe(0.75);
     expect(result.model_provenance?.tracknet?.confidence_threshold).toBe(0.35);
     expect(() => analysisResultSchema.parse({
       ...result,
