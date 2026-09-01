@@ -295,12 +295,14 @@ test('neutral controls use the shared hover surface without overriding semantic 
       const index = siblings.indexOf(card);
       const language = siblings.findIndex((item) => item.classList.contains('setting-card') && item.textContent?.includes('语言'));
       const rallyRecognition = siblings.findIndex((item) => item.classList.contains('setting-card') && item.textContent?.includes('回合识别方式'));
+      const normalizeVariableFrameRate = siblings.findIndex((item) => item.classList.contains('setting-card') && item.textContent?.includes('重编码为固定帧率'));
       const calibration = siblings.findIndex((item) => item.classList.contains('setting-card') && item.textContent?.includes('球台标定'));
-      return { index, language, rallyRecognition, calibration };
+      return { index, language, rallyRecognition, normalizeVariableFrameRate, calibration };
     });
     expect(analysisPrecisionOrder.rallyRecognition).toBe(analysisPrecisionOrder.language + 1);
     expect(analysisPrecisionOrder.index).toBe(analysisPrecisionOrder.rallyRecognition + 1);
-    expect(analysisPrecisionOrder.calibration).toBe(analysisPrecisionOrder.index + 1);
+    expect(analysisPrecisionOrder.normalizeVariableFrameRate).toBe(analysisPrecisionOrder.index + 1);
+    expect(analysisPrecisionOrder.calibration).toBe(analysisPrecisionOrder.normalizeVariableFrameRate + 1);
     const rallyRecognition = page.getByRole('radiogroup', { name: '回合识别方式' });
     await expect(rallyRecognition.getByRole('radio', { name: '落台判定' })).toBeChecked();
     await expect(rallyRecognition.getByRole('radio', { name: '连续可见' })).toBeVisible();
