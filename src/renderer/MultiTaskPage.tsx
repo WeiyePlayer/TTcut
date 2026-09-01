@@ -55,6 +55,7 @@ interface MultiTaskPageProps {
   postRoll: 0.5 | 1 | 2 | 4;
   analysisMode?: BlurBallAnalysisMode;
   rallyRecognitionMethod?: RallyRecognitionMethod;
+  normalizeVariableFrameRate?: boolean;
   blurballConfidenceThreshold?: number;
   blurballStage1ConfidenceThreshold?: number;
   blurballStage2ConfidenceThreshold?: number;
@@ -121,6 +122,7 @@ export function MultiTaskPage({
   postRoll,
   analysisMode = 'full',
   rallyRecognitionMethod = 'bounce_events',
+  normalizeVariableFrameRate = false,
   blurballConfidenceThreshold = BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT,
   blurballStage1ConfidenceThreshold = BLURBALL_STAGE1_CONFIDENCE_THRESHOLD_DEFAULT,
   blurballStage2ConfidenceThreshold = BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT,
@@ -154,6 +156,7 @@ export function MultiTaskPage({
     postRoll,
     analysisMode,
     rallyRecognitionMethod,
+    normalizeVariableFrameRate,
     blurballConfidenceThreshold,
     blurballStage1ConfidenceThreshold,
     blurballStage2ConfidenceThreshold,
@@ -334,6 +337,7 @@ export function MultiTaskPage({
       historyVisibility: candidate.mode === 'analyze-only' ? 'visible' : 'deferred',
       analysisMode: optionsRef.current.rallyRecognitionMethod === 'continuous_visibility' ? 'full' : optionsRef.current.analysisMode,
       rallyRecognitionMethod: optionsRef.current.rallyRecognitionMethod,
+      normalizeVariableFrameRate: optionsRef.current.normalizeVariableFrameRate,
       blurballConfidenceThreshold: optionsRef.current.blurballConfidenceThreshold,
       blurballStage1ConfidenceThreshold: optionsRef.current.blurballStage1ConfidenceThreshold,
       blurballStage2ConfidenceThreshold: optionsRef.current.blurballStage2ConfidenceThreshold,

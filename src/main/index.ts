@@ -192,6 +192,8 @@ function registerIpc(): void {
     if (!BLURBALL_ANALYSIS_MODE_VALUES.includes(analysisMode as typeof BLURBALL_ANALYSIS_MODE_VALUES[number])) throw new Error('INVALID_REQUEST');
     const rallyRecognitionMethod = record.rallyRecognitionMethod;
     if (!RALLY_RECOGNITION_METHOD_VALUES.includes(rallyRecognitionMethod as typeof RALLY_RECOGNITION_METHOD_VALUES[number])) throw new Error('INVALID_REQUEST');
+    const normalizeVariableFrameRate = record.normalizeVariableFrameRate;
+    if (typeof normalizeVariableFrameRate !== 'boolean') throw new Error('INVALID_REQUEST');
     const validateThreshold = (value: unknown): value is number => typeof value === 'number'
       && Number.isFinite(value)
       && value >= BLURBALL_CONFIDENCE_THRESHOLD_MIN
@@ -207,8 +209,9 @@ function registerIpc(): void {
       calibrationChoice: calibrationChoiceSchema.parse(record.calibrationChoice),
       device,
       historyVisibility,
-      analysisMode: rallyRecognitionMethod === 'continuous_visibility' ? 'full' : analysisMode as 'full' | 'two_stage',
-      rallyRecognitionMethod: rallyRecognitionMethod as 'bounce_events' | 'continuous_visibility',
+    analysisMode: rallyRecognitionMethod === 'continuous_visibility' ? 'full' : analysisMode as 'full' | 'two_stage',
+    rallyRecognitionMethod: rallyRecognitionMethod as 'bounce_events' | 'continuous_visibility',
+    normalizeVariableFrameRate,
       blurballConfidenceThreshold,
       blurballStage1ConfidenceThreshold,
       blurballStage2ConfidenceThreshold,

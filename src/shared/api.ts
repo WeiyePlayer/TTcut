@@ -98,6 +98,7 @@ export interface TTcutApi {
     historyVisibility: 'visible' | 'deferred';
     analysisMode: BlurBallAnalysisMode;
     rallyRecognitionMethod: RallyRecognitionMethod;
+    normalizeVariableFrameRate: boolean;
     blurballConfidenceThreshold: number;
     blurballStage1ConfidenceThreshold: number;
     blurballStage2ConfidenceThreshold: number;

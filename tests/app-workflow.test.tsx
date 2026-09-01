@@ -6,7 +6,7 @@ import type { AppEvent, BootstrapData, SelectedVideo, TTcutApi } from '../src/sh
 import type { VideoMetadata } from '../src/shared/contracts';
 
 const bootstrap: BootstrapData = {
-  version: '1.2.9',
+  version: '1.2.10',
   settings: {
     language: 'zh-CN',
     calibration_method: 'automatic',
@@ -14,6 +14,7 @@ const bootstrap: BootstrapData = {
     post_roll_seconds: 1,
     analysis_mode: 'full',
     rally_recognition_method: 'bounce_events',
+    normalize_variable_frame_rate: false,
   },
   components: {
     analysis: {
@@ -199,9 +200,34 @@ describe('App workflow notices and multi-task entry', () => {
     await waitFor(() => expect(window.ttcut.startAnalysis).toHaveBeenCalledWith(expect.objectContaining({
       videoPath: selected.path,
       analysisMode: 'full',
+      normalizeVariableFrameRate: false,
       blurballConfidenceThreshold: 0.7,
       blurballStage1ConfidenceThreshold: 0.3,
       blurballStage2ConfidenceThreshold: 0.7,
+    })));
+  });
+
+  it('defaults VFR normalization to off, persists the choice, and passes it to analysis', async () => {
+    const selected = {
+      path: 'C:\\video\\vfr.mp4', name: 'vfr.mp4', size: 100, mediaUrl: 'ttcut-media://vfr',
+    };
+    selectVideos.mockResolvedValue([selected]);
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '设置' }));
+    const group = screen.getByRole('radiogroup', { name: '重编码为固定帧率' });
+    expect(within(group).getByRole('radio', { name: '关闭' })).toBeChecked();
+    fireEvent.click(within(group).getByRole('radio', { name: '开启' }));
+    await waitFor(() => expect(window.ttcut.saveSettings).toHaveBeenCalledWith(expect.objectContaining({
+      normalize_variable_frame_rate: true,
+    })));
+
+    fireEvent.click(screen.getByRole('button', { name: '自动剪辑' }));
+    fireEvent.click(await screen.findByRole('button', { name: '选择或将文件拖到这里' }));
+    fireEvent.click(await screen.findByRole('button', { name: '开始分析' }));
+    await waitFor(() => expect(window.ttcut.startAnalysis).toHaveBeenCalledWith(expect.objectContaining({
+      videoPath: selected.path,
+      normalizeVariableFrameRate: true,
     })));
   });
 

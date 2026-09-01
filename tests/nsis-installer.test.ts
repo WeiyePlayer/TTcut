@@ -1,4 +1,4 @@
-import { copyFile, mkdir, mkdtemp, readFile, rm, statfs, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -8,7 +8,6 @@ const installerPath = path.join(process.cwd(), 'build', 'installer', 'installer.
 const makeNsisPath = path.join(process.cwd(), 'scripts', 'make-nsis.mjs');
 const compareVersionsPath = path.join(process.cwd(), 'build', 'installer', 'compare-versions.ps1');
 const chooseDefaultRootPath = path.join(process.cwd(), 'build', 'installer', 'choose-default-root.ps1');
-const checkInstallSpacePath = path.join(process.cwd(), 'build', 'installer', 'check-install-space.ps1');
 const downloadModelsPath = path.join(process.cwd(), 'build', 'installer', 'download-models.ps1');
 const updateManifestPath = path.join(process.cwd(), 'scripts', 'generate-update-manifest.mjs');
 const commitRegistrationPath = path.join(process.cwd(), 'build', 'installer', 'commit-install-registration.ps1');
@@ -87,9 +86,8 @@ describe('assisted NSIS installer contract', () => {
     expect(source).not.toContain(
       '$$p=[IO.Path]::GetFullPath($$env:TTCUT_INSTALLER_ROOT)',
     );
-    expect(source).toContain(
-      'File /oname=check-install-space.ps1 "${PROJECT_DIR}\\build\\installer\\check-install-space.ps1"',
-    );
+    expect(source).not.toContain('check-install-space.ps1');
+    expect(source).not.toContain('AdditionalRequiredBytes');
     expect(source).toContain('EnableWindow $TTcutRootField 0');
     expect(source).toContain('EnableWindow $TTcutBrowseButton 0');
     expect(source).toContain('CreateShortcut "$SMPROGRAMS\\TTcut.lnk"');
@@ -97,29 +95,20 @@ describe('assisted NSIS installer contract', () => {
     expect(source).toContain('WriteRegStr HKCU "Software\\TTcut\\Install" "PreservedDataRoot"');
   });
 
-  it('keeps the first-run probes compatible with Windows 7 PowerShell', async () => {
+  it('keeps the remaining first-run helpers compatible with Windows 7 PowerShell', async () => {
     const source = await readFile(installerPath, 'utf8');
     const chooseDefaultRoot = await readFile(chooseDefaultRootPath, 'utf8');
-    const checkInstallSpace = await readFile(checkInstallSpacePath, 'utf8');
     const commitRegistration = await readFile(commitRegistrationPath, 'utf8');
     const compareVersions = await readFile(compareVersionsPath, 'utf8');
 
     expect(source).toContain(
       'File /oname=choose-default-root.ps1 "${PROJECT_DIR}\\build\\installer\\choose-default-root.ps1"',
     );
-    expect(source).toContain(
-      'File /oname=check-install-space.ps1 "${PROJECT_DIR}\\build\\installer\\check-install-space.ps1"',
-    );
+    expect(source).not.toContain('check-install-space.ps1');
     expect(source).not.toContain('Get-CimInstance');
     expect(source).not.toContain('[IO.DriveInfo]::new');
     expect(chooseDefaultRoot).toContain('Get-WmiObject');
     expect(chooseDefaultRoot).not.toContain('Get-CimInstance');
-    expect(checkInstallSpace).toContain(
-      'New-Object -TypeName System.IO.DriveInfo -ArgumentList',
-    );
-    expect(checkInstallSpace).not.toContain('[Parameter(');
-    expect(checkInstallSpace).not.toContain('::new(');
-    expect(checkInstallSpace).not.toMatch(/Get-ChildItem[^\r\n]*-File/);
     expect(commitRegistration).not.toContain('[ordered]');
     expect(commitRegistration).not.toContain('[Parameter(');
     expect(commitRegistration).not.toContain('ConvertTo-Json');
@@ -127,8 +116,6 @@ describe('assisted NSIS installer contract', () => {
     expect(compareVersions).not.toContain('[Parameter(');
     expect(compareVersions).not.toContain('[pscustomobject]');
     expect(compareVersions).toContain('New-Object -TypeName PSObject -Property');
-    expect(checkInstallSpace).toContain('[int64]$AdditionalRequiredBytes = 0');
-    expect(checkInstallSpace).toContain('$required += $AdditionalRequiredBytes');
   });
 
   it('gates verified model delivery to the distinct online installer build', async () => {
@@ -141,7 +128,7 @@ describe('assisted NSIS installer contract', () => {
     expect(installer).toContain('online-model-installer.nsh');
     expect(installer).toContain('Function TTcutInstallOnlineModels');
     expect(installer).toContain('download-models.ps1');
-    expect(installer).toContain('AdditionalRequiredBytes "204214006"');
+    expect(installer).not.toContain('AdditionalRequiredBytes');
     expect(modelDownload).toContain("'weiye76/TTcut-runtime-assets'");
     expect(modelDownload).toContain('"/weiye76/TTcut-runtime-assets/releases/download/models-1.0.0/$filename"');
     expect(modelDownload).toContain('MODEL_HASH_MISMATCH');
@@ -177,40 +164,6 @@ describe('assisted NSIS installer contract', () => {
         desktop_shortcut: 1,
         error_code: 'INVALID_APP_GUID',
       });
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-
-  it.skipIf(powerShell2Unavailable)('distinguishes enough space, low space, and probe failures in PowerShell 2', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'ttcut-space-probe-'));
-    try {
-      const filesystem = await statfs(root, { bigint: true });
-      const available = filesystem.bavail * filesystem.bsize;
-      const reserve = 512n * 1024n * 1024n;
-      const invoke = (installRoot: string, estimatedSizeKb: bigint) => spawnSync(
-        'powershell.exe',
-        [
-          '-Version', '2', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-          '-File', checkInstallSpacePath,
-          '-EstimatedSizeKb', estimatedSizeKb.toString(),
-        ],
-        {
-          encoding: 'utf8',
-          env: {
-            ...process.env,
-            TTCUT_INSTALLER_ROOT: installRoot,
-            TTCUT_INSTALLER_LEGACY: '',
-            TTCUT_INSTALLER_LEGACY_APP: '',
-          },
-        },
-      ).status;
-
-      if (available > reserve + 1024n) {
-        expect(invoke(root, 1n)).toBe(0);
-      }
-      expect(invoke(root, (available / 1024n) + 1n)).toBe(1);
-      expect(invoke('', 1n)).toBe(2);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

@@ -86,6 +86,7 @@ export function App() {
     pre_roll_seconds: 2.5, post_roll_seconds: 1,
     analysis_mode: 'full',
     rally_recognition_method: 'bounce_events',
+    normalize_variable_frame_rate: false,
   });
   const [view, setView] = useState<View>('auto');
   const [step, setStep] = useState<Step>('select');
@@ -352,6 +353,7 @@ export function App() {
         historyVisibility: 'visible',
         analysisMode: settings.rally_recognition_method === 'continuous_visibility' ? 'full' : settings.analysis_mode,
         rallyRecognitionMethod: settings.rally_recognition_method,
+        normalizeVariableFrameRate: settings.normalize_variable_frame_rate,
         blurballConfidenceThreshold,
         blurballStage1ConfidenceThreshold,
         blurballStage2ConfidenceThreshold,
@@ -640,6 +642,7 @@ export function App() {
               postRoll={settings.post_roll_seconds}
               analysisMode={settings.rally_recognition_method === 'continuous_visibility' ? 'full' : settings.analysis_mode}
               rallyRecognitionMethod={settings.rally_recognition_method}
+              normalizeVariableFrameRate={settings.normalize_variable_frame_rate}
               blurballConfidenceThreshold={blurballConfidenceThreshold}
               blurballStage1ConfidenceThreshold={blurballStage1ConfidenceThreshold}
               blurballStage2ConfidenceThreshold={blurballStage2ConfidenceThreshold}
@@ -723,6 +726,24 @@ export function App() {
                   />
                 </section>
               </article>}
+              <article className="card setting-card">
+                <div>
+                  <h2>{t.normalizeVariableFrameRate}</h2>
+                  <p>{t.normalizeVariableFrameRateDetail}</p>
+                </div>
+                <GlassRadioGroup
+                  ariaLabel={t.normalizeVariableFrameRate}
+                  className="compact"
+                  idPrefix="settings-normalize-variable-frame-rate"
+                  name="settings-normalize-variable-frame-rate"
+                  onChange={(normalize_variable_frame_rate) => void saveRolls({ normalize_variable_frame_rate })}
+                  options={[
+                    { value: false, label: t.off },
+                    { value: true, label: t.on },
+                  ] as const}
+                  value={settings.normalize_variable_frame_rate}
+                />
+              </article>
               <article className="card setting-card">
                 <div><h2>{settings.language === 'zh-CN' ? '球台标定' : 'Table calibration'}</h2><p>{settings.language === 'zh-CN' ? '选择单视频流程使用的球台标定方式。多任务会先自动标定，失败项目可手动补充。' : 'Choose the calibration method for single videos. Batch tasks calibrate automatically first, with manual recovery for failed items.'}</p></div>
                 <GlassRadioGroup

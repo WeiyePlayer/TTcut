@@ -20,7 +20,7 @@ const api: TTcutApi = {
   startAutoCalibration: (input: { videoPath: string; device: 'auto' | 'cuda' | 'cpu' }) => (
     ipcRenderer.invoke(IPC.calibrationStart, input)
   ),
-  startAnalysis: (input: { videoPath: string; calibrationChoice: CalibrationChoice; device: 'auto' | 'cuda' | 'cpu'; historyVisibility: 'visible' | 'deferred'; analysisMode: BlurBallAnalysisMode; rallyRecognitionMethod: RallyRecognitionMethod; blurballConfidenceThreshold: number; blurballStage1ConfidenceThreshold: number; blurballStage2ConfidenceThreshold: number }) => (
+  startAnalysis: (input: { videoPath: string; calibrationChoice: CalibrationChoice; device: 'auto' | 'cuda' | 'cpu'; historyVisibility: 'visible' | 'deferred'; analysisMode: BlurBallAnalysisMode; rallyRecognitionMethod: RallyRecognitionMethod; normalizeVariableFrameRate: boolean; blurballConfidenceThreshold: number; blurballStage1ConfidenceThreshold: number; blurballStage2ConfidenceThreshold: number }) => (
     ipcRenderer.invoke(IPC.analysisStart, input)
   ),
   startExport: (input: ExportRequest) => ipcRenderer.invoke(IPC.exportStart, input),

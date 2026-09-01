@@ -10,6 +10,7 @@ const defaults: AppSettings = {
   post_roll_seconds: 1,
   analysis_mode: 'full',
   rally_recognition_method: 'bounce_events',
+  normalize_variable_frame_rate: false,
 };
 
 function settingsPath(): string {
@@ -45,6 +46,9 @@ export async function loadSettings(): Promise<AppSettings> {
         || raw.rally_recognition_method === 'bounce_events'
         ? raw.rally_recognition_method
         : defaults.rally_recognition_method,
+      normalize_variable_frame_rate: typeof raw.normalize_variable_frame_rate === 'boolean'
+        ? raw.normalize_variable_frame_rate
+        : defaults.normalize_variable_frame_rate,
     });
     if (Object.hasOwn(raw, 'ball_model_profile')) await writeSettings(settings).catch(() => undefined);
     return settings;
