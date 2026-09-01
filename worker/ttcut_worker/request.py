@@ -10,6 +10,8 @@ from .errors import InvalidRequestError
 BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT = 0.7
 BLURBALL_CONFIDENCE_THRESHOLD_MIN = 0.1
 BLURBALL_CONFIDENCE_THRESHOLD_MAX = 0.95
+RALLY_RECOGNITION_METHOD_DEFAULT = "bounce_events"
+RALLY_RECOGNITION_METHODS = {"bounce_events", "continuous_visibility"}
 
 
 def validate_request(value: object) -> dict:
@@ -21,15 +23,21 @@ def validate_request(value: object) -> dict:
         "video_metadata",
         "calibration_choice",
     }
-    if not isinstance(value, dict) or value.get("schema_version") not in {1, 2}:
+    if not isinstance(value, dict) or value.get("schema_version") not in {1, 2, 3, 4}:
         raise InvalidRequestError("Unsupported analysis request schema.")
     version = value["schema_version"]
     threshold_field = "blurball_confidence_threshold"
     if version == 1:
         if set(value) not in (base_fields, base_fields | {threshold_field}):
             raise InvalidRequestError("Unsupported analysis request schema fields.")
-    else:
+    elif version == 2:
         if set(value) != base_fields | {"analysis"}:
+            raise InvalidRequestError("Unsupported analysis request schema fields.")
+    elif version == 3:
+        if set(value) != base_fields | {"analysis", "rally_recognition"}:
+            raise InvalidRequestError("Unsupported analysis request schema fields.")
+    else:
+        if set(value) != base_fields | {"analysis", "rally_recognition", "ball_model_profile"}:
             raise InvalidRequestError("Unsupported analysis request schema fields.")
     try:
         uuid.UUID(str(value["task_id"]))
@@ -87,6 +95,16 @@ def validate_request(value: object) -> dict:
                     raise ValueError("analysis")
                 _validate_threshold(analysis["stage1_confidence_threshold"], "stage1_confidence_threshold")
                 _validate_threshold(analysis["stage2_confidence_threshold"], "stage2_confidence_threshold")
+            if version in {3, 4}:
+                recognition = value["rally_recognition"]
+                if (
+                    not isinstance(recognition, dict)
+                    or set(recognition) != {"method"}
+                    or recognition["method"] not in RALLY_RECOGNITION_METHODS
+                ):
+                    raise ValueError("rally_recognition")
+            if version == 4 and value["ball_model_profile"] not in {"blurball_v1", "tracknet_v1"}:
+                raise ValueError("ball_model_profile")
         choice = value["calibration_choice"]
         if not isinstance(choice, dict) or choice.get("method") not in {"manual", "automatic", "precalibrated"}:
             raise ValueError("calibration_choice")
@@ -148,3 +166,10 @@ def analysis_config(request: dict) -> dict:
             ),
         }
     return request["analysis"]
+
+
+def rally_recognition_config(request: dict) -> dict:
+    """Return the recognition method while preserving v1/v2 request behavior."""
+    if request.get("schema_version") not in {3, 4}:
+        return {"method": RALLY_RECOGNITION_METHOD_DEFAULT}
+    return request["rally_recognition"]

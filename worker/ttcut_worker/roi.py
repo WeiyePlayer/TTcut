@@ -60,9 +60,13 @@ def model_dimensions(
     roi: AnalysisRoi | None,
     source_width: int,
     source_height: int,
+    *,
+    scale: float = DEFAULT_ROI_MODEL_SCALE,
 ) -> tuple[int, int]:
     if source_width <= 0 or source_height <= 0:
         raise AnalysisRoiError("Source video dimensions are invalid for ROI analysis.")
+    if not math.isfinite(scale) or scale <= 0:
+        raise AnalysisRoiError("ROI model scale must be finite and positive.")
     if roi is None:
         return MODEL_REFERENCE_WIDTH, MODEL_REFERENCE_HEIGHT
     if roi.source_width != source_width or roi.source_height != source_height:
@@ -74,7 +78,7 @@ def model_dimensions(
 
     def scaled_stride_size(raw_size: float) -> int:
         base_size = math.ceil(raw_size / MODEL_STRIDE) * MODEL_STRIDE
-        scaled_size = base_size * DEFAULT_ROI_MODEL_SCALE
+        scaled_size = base_size * scale
         nearest_integer = round(scaled_size)
         if math.isclose(scaled_size, nearest_integer, abs_tol=1e-9):
             scaled_size = nearest_integer

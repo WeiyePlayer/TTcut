@@ -9,6 +9,7 @@ const defaults: AppSettings = {
   pre_roll_seconds: 2.5,
   post_roll_seconds: 1,
   analysis_mode: 'full',
+  rally_recognition_method: 'bounce_events',
   normalize_variable_frame_rate: false,
 };
 
@@ -41,6 +42,10 @@ export async function loadSettings(): Promise<AppSettings> {
       analysis_mode: raw.analysis_mode === 'two_stage' || raw.analysis_mode === 'full'
         ? raw.analysis_mode
         : defaults.analysis_mode,
+      rally_recognition_method: raw.rally_recognition_method === 'continuous_visibility'
+        || raw.rally_recognition_method === 'bounce_events'
+        ? raw.rally_recognition_method
+        : defaults.rally_recognition_method,
       normalize_variable_frame_rate: typeof raw.normalize_variable_frame_rate === 'boolean'
         ? raw.normalize_variable_frame_rate
         : defaults.normalize_variable_frame_rate,

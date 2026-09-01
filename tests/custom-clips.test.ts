@@ -11,14 +11,14 @@ import {
   validateAndBuildCustomCutGroups,
   validateCustomExportSegments,
 } from '../src/domain/custom-clips';
-import type { AnalysisResultV1, CustomExportSegmentInput, Rally } from '../src/shared/contracts';
+import type { AnalysisResultV1, BounceRally, CustomExportSegmentInput } from '../src/shared/contracts';
 import { cutSelectionSchema, exportRequestSchema } from '../src/shared/contracts';
 
-function rally(id: string, index: number, start: number, end: number): Rally {
+function rally(id: string, index: number, start: number, end: number): BounceRally {
   return { id, index, bounce_count: index + 2, start_time_seconds: start, end_time_seconds: end };
 }
 
-function analysis(rallies: Rally[] = [rally('rally_001', 1, 10, 12), rally('rally_002', 2, 15, 17)]): AnalysisResultV1 {
+function analysis(rallies: BounceRally[] = [rally('rally_001', 1, 10, 12), rally('rally_002', 2, 15, 17)]): AnalysisResultV1 {
   return {
     schema_version: 1,
     video: {

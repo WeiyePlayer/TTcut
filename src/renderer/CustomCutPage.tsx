@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { SelectedVideo } from '../shared/api';
-import type { AnalysisResultV1, ExportRequest } from '../shared/contracts';
+import { hasBounceCounts, type AnalysisResultV1, type ExportRequest } from '../shared/contracts';
 import {
   createManualCustomClip,
   deleteCustomClip,
@@ -179,6 +179,7 @@ export function CustomCutPage({
   const [toolMode, setToolMode] = useState<TimelineToolMode>(null);
   const [exportOptionsOpen, setExportOptionsOpen] = useState(false);
   const selectedCount = clips.filter((clip) => clip.selected).length;
+  const showBounceCounts = hasBounceCounts(analysis);
 
   const clearPlaybackScrollWait = useCallback(() => {
     if (playbackScrollFrameRef.current !== null) {
@@ -405,7 +406,7 @@ export function CustomCutPage({
       clipId,
       start,
       analysis.video.duration_seconds,
-      analysis.bounce_times_seconds,
+      showBounceCounts ? analysis.bounce_times_seconds : undefined,
     );
     if (!nextClips) return false;
     onClipsChange(nextClips);
@@ -451,7 +452,7 @@ export function CustomCutPage({
                         </label>
                       </div>
                       <div>
-                        <div className="custom-rally-meta"><strong>{translations.rally} {clip.rallyIndex}</strong><span title={clip.bounceCount === null ? translations.manualBounceUnavailable : undefined}>{translations.strokes} {clip.bounceCount ?? '—'}</span></div>
+                        <div className="custom-rally-meta"><strong>{translations.rally} {clip.rallyIndex}</strong>{showBounceCounts && <span title={clip.bounceCount === null ? translations.manualBounceUnavailable : undefined}>{translations.strokes} {clip.bounceCount ?? '—'}</span>}</div>
                         <div className="custom-rally-times"><span>{formatCustomClipTime(clip.start)}</span><div className="custom-rally-duration"><strong>{formatCustomClipDuration(clip.start, clip.end)}</strong><i /></div><span>{formatCustomClipTime(clip.end)}</span></div>
                       </div>
                     </div>
@@ -469,7 +470,7 @@ export function CustomCutPage({
           </div></div>
 
           <CustomTimeline clips={clips} duration={analysis.video.duration_seconds} fps={analysis.video.fps} currentTime={currentTime} timelineLabel={translations.timeline} resizeStartLabel={translations.resizeStart} resizeEndLabel={translations.resizeEnd} toolMode={toolMode} onSeek={seek} onScrubCancel={() => { isPreviewSeekingRef.current = false; }} onPlayClip={playClip} onAddAt={addManualAt} onDeleteClip={(clipId) => onClipsChange(deleteCustomClip(clips, clipId))} onResize={(clipId, edge, time) => {
-            const nextClips = resizeCustomClip(clips, clipId, edge, time, analysis.video.duration_seconds, analysis.video.fps, analysis.bounce_times_seconds);
+            const nextClips = resizeCustomClip(clips, clipId, edge, time, analysis.video.duration_seconds, analysis.video.fps, showBounceCounts ? analysis.bounce_times_seconds : undefined);
             onClipsChange(nextClips);
             const resized = nextClips.find((clip) => clip.clipId === clipId);
             return resized ? resized[edge] : time;

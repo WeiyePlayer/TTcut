@@ -28,6 +28,7 @@ describe('settings migration', () => {
       language: 'en', calibration_method: 'automatic',
       pre_roll_seconds: 5, post_roll_seconds: 0.5,
       analysis_mode: 'full',
+      rally_recognition_method: 'bounce_events',
       normalize_variable_frame_rate: false,
     });
   });
@@ -48,6 +49,7 @@ describe('settings migration', () => {
       language: 'zh-CN' as const, calibration_method: 'automatic' as const,
       pre_roll_seconds: 2.5 as const, post_roll_seconds: 2 as const,
       analysis_mode: 'full' as const,
+      rally_recognition_method: 'bounce_events' as const,
       normalize_variable_frame_rate: true,
     };
     await expect(saveSettings(settings)).resolves.toEqual(settings);
@@ -62,6 +64,7 @@ describe('settings migration', () => {
     await expect(loadSettings()).resolves.toEqual({
       language: 'zh-CN', calibration_method: 'automatic', pre_roll_seconds: 2.5, post_roll_seconds: 2,
       analysis_mode: 'full',
+      rally_recognition_method: 'bounce_events',
       normalize_variable_frame_rate: false,
     });
     expect(JSON.parse(await readFile(path.join(state.userData, 'settings.json'), 'utf8'))).not.toHaveProperty('ball_model_profile');
@@ -79,5 +82,15 @@ describe('settings migration', () => {
     expect(persisted.analysis_mode).toBe('two_stage');
     expect(persisted.normalize_variable_frame_rate).toBe(false);
     expect(persisted).not.toHaveProperty('blurball_confidence_threshold');
+  });
+
+  it('defaults missing or invalid rally recognition methods to bounce events', async () => {
+    await writeFile(path.join(state.userData, 'settings.json'), JSON.stringify({
+      language: 'zh-CN', calibration_method: 'automatic', pre_roll_seconds: 2.5, post_roll_seconds: 1,
+      analysis_mode: 'two_stage', rally_recognition_method: 'unknown',
+    }), 'utf8');
+    await expect(loadSettings()).resolves.toMatchObject({
+      rally_recognition_method: 'bounce_events', analysis_mode: 'two_stage',
+    });
   });
 });
