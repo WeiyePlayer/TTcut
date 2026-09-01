@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFile, stat } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -11,12 +11,19 @@ if (manifest.schema_version !== 1 || !Array.isArray(manifest.models) || manifest
 }
 
 const expectedNames = new Set(['table_analyze.pt', 'blurball_best.pt']);
+const modelsDirectory = path.join(root, 'resources', 'models');
+const forbiddenLocalTestWeights = new Set(['analyze.pt', 'tracknet_best.pt']);
+for (const entry of await readdir(modelsDirectory)) {
+  if (forbiddenLocalTestWeights.has(entry.toLowerCase())) {
+    throw new Error(`Local-only TrackNet test weight must not be bundled: ${entry}`);
+  }
+}
 for (const model of manifest.models) {
   if (!expectedNames.delete(model.filename)) throw new Error(`Unexpected or duplicate model asset: ${model.filename}`);
   if (!Number.isSafeInteger(model.size_bytes) || model.size_bytes <= 0 || !/^[a-f0-9]{64}$/.test(model.sha256)) {
     throw new Error(`Invalid model manifest entry: ${model.filename}`);
   }
-  const modelPath = path.join(root, 'resources', 'models', model.filename);
+  const modelPath = path.join(modelsDirectory, model.filename);
   const metadata = await stat(modelPath).catch(() => null);
   if (!metadata?.isFile()) throw new Error(`Required bundled model is missing: ${modelPath}`);
   if (metadata.size !== model.size_bytes) {
