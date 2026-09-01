@@ -296,10 +296,10 @@ def test_worker_applies_the_tracknet_visibility_filter_and_records_its_threshold
         "minimum_rally_seconds": 0.9,
         "minimum_horizontal_run_reversals": 1,
         "short_rally_seconds": 2.0,
-        "minimum_short_rally_expanded_table_ratio": 0.25,
+        "minimum_short_rally_expanded_table_ratio": 0.2,
         "expanded_table_length_margin_cm": 35.0,
         "expanded_table_width_margin_cm": 25.0,
-        "reliable_fragment_bridge_seconds": 0.75,
+        "reliable_fragment_bridge_seconds": 1.5,
     }
     assert result["rally_recognition"]["detection_confidence_threshold"] == 0.35
     assert "bounce_times_seconds" not in result

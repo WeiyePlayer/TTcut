@@ -43,8 +43,10 @@ def sha256(path: Path) -> str:
 
 def load_target(path: Path) -> tuple[TableCalibration, list[tuple[float, float]]]:
     payload = json.loads(path.read_text(encoding="utf-8"))
-    result = payload.get("result", payload)
-    calibration = result["calibration"]
+    result = payload.get("result", payload.get("analysis", payload))
+    calibration = result.get("calibration", payload.get("calibration"))
+    if calibration is None:
+        raise ValueError("The target artifact does not contain table calibration.")
     points = calibration["points"]
     ordered = [points[name] for name in ("top_left", "top_right", "bottom_right", "bottom_left")]
     table = TableCalibration.from_points(

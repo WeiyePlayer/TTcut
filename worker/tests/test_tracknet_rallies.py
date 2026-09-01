@@ -19,6 +19,14 @@ class FakeCalibration:
         return (100.0, 50.0) if self.inside else (-100.0, -100.0)
 
 
+@dataclass
+class ThresholdCalibration:
+    minimum_inside_x: float
+
+    def image_to_table(self, x: float, y: float) -> tuple[float, float]:
+        return (100.0, 50.0) if x >= self.minimum_inside_x else (-100.0, -100.0)
+
+
 def points(xs: list[int], *, start_frame: int = 0) -> list[TrajectoryPoint]:
     return [
         TrajectoryPoint(frame, frame / FPS, 1, x, 20, "tracknet", 0.9)
@@ -53,6 +61,23 @@ def test_tracknet_filter_requires_short_exchanges_to_visit_the_expanded_table() 
     ) == ()
 
 
+def test_tracknet_filter_accepts_exactly_twenty_percent_short_table_visits() -> None:
+    trajectory = points([0, 30, 60, 90, 60, 30, 0, 30, 60, 90])
+
+    assert len(tracknet_visibility_rallies(
+        trajectory,
+        FPS,
+        ThresholdCalibration(minimum_inside_x=90),
+        motion_config=MOTION_CONFIG,
+    )) == 1
+    assert tracknet_visibility_rallies(
+        trajectory,
+        FPS,
+        ThresholdCalibration(minimum_inside_x=91),
+        motion_config=MOTION_CONFIG,
+    ) == ()
+
+
 def test_tracknet_filter_bridges_two_reliable_fragments_across_a_short_occlusion() -> None:
     first = points([0, 30, 60, 90, 60, 30, 0, 30, 60, 0])
     missing = [
@@ -69,3 +94,39 @@ def test_tracknet_filter_bridges_two_reliable_fragments_across_a_short_occlusion
     )
 
     assert [(rally.start_frame, rally.end_frame) for rally in rallies] == [(0, 24)]
+
+
+def test_tracknet_filter_bridges_reliable_fragments_up_to_one_and_a_half_seconds() -> None:
+    first = points([0, 30, 60, 90, 60, 30, 0, 30, 60, 0])
+    missing = [
+        TrajectoryPoint(frame, frame / FPS, 0, 0, 0)
+        for frame in range(10, 24)
+    ]
+    second = points([100, 130, 160, 190, 160, 130, 100, 130, 160, 100], start_frame=24)
+
+    rallies = tracknet_visibility_rallies(
+        [*first, *missing, *second],
+        FPS,
+        FakeCalibration(),
+        motion_config=MOTION_CONFIG,
+    )
+
+    assert [(rally.start_frame, rally.end_frame) for rally in rallies] == [(0, 33)]
+
+
+def test_tracknet_filter_keeps_fragments_separate_beyond_one_and_a_half_seconds() -> None:
+    first = points([0, 30, 60, 90, 60, 30, 0, 30, 60, 0])
+    missing = [
+        TrajectoryPoint(frame, frame / FPS, 0, 0, 0)
+        for frame in range(10, 25)
+    ]
+    second = points([100, 130, 160, 190, 160, 130, 100, 130, 160, 100], start_frame=25)
+
+    rallies = tracknet_visibility_rallies(
+        [*first, *missing, *second],
+        FPS,
+        FakeCalibration(),
+        motion_config=MOTION_CONFIG,
+    )
+
+    assert [(rally.start_frame, rally.end_frame) for rally in rallies] == [(0, 9), (25, 34)]
