@@ -61,3 +61,11 @@ export function installMediaProtocol(): void {
     }
   });
 }
+
+export function resolveMediaPath(mediaUrl: string): string {
+  const url = new URL(mediaUrl);
+  if (url.protocol !== 'ttcut-media:') throw new Error('INVALID_MEDIA_URL');
+  const media = registered.get(url.pathname.replace(/^\//, ''));
+  if (!media) throw new Error('MEDIA_NOT_REGISTERED');
+  return media.filePath;
+}

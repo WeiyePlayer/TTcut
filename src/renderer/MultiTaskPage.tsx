@@ -1,3 +1,4 @@
+import { CompatibleVideo } from './CompatibleVideo';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT,
@@ -46,6 +47,7 @@ type BatchItem = {
 };
 
 interface MultiTaskPageProps {
+  allowShutdown?: boolean;
   initialVideos: SelectedVideo[];
   preRoll: 1.5 | 2.5 | 5;
   postRoll: 0.5 | 1 | 2 | 4;
@@ -109,6 +111,7 @@ function hasOpenBatchWork(items: BatchItem[]): boolean {
 }
 
 export function MultiTaskPage({
+  allowShutdown = true,
   initialVideos,
   preRoll,
   postRoll,
@@ -127,7 +130,7 @@ export function MultiTaskPage({
   const [activeItem, setActiveItem] = useState<string | null>(null);
   const [activePhase, setActivePhase] = useState<ActivePhase | null>(null);
   const [running, setRunning] = useState(false);
-  const [preview, setPreview] = useState<{ source: string; name: string; width: number; height: number } | null>(null);
+  const [preview, setPreview] = useState<{ source: string; name: string; width: number; height: number; hdr: boolean } | null>(null);
   const [manualItemId, setManualItemId] = useState<string | null>(null);
   const [manualPoints, setManualPoints] = useState<Partial<Record<PointName, [number, number]>>>({});
   const [systemNotice, setSystemNotice] = useState<string | null>(null);
@@ -649,6 +652,7 @@ export function MultiTaskPage({
                       : setPreview({
                         source: (item.previewVideo ?? item.video).mediaUrl,
                         name: item.video.name,
+                        hdr: Boolean(item.metadata.native_video && item.metadata.native_video.hdr !== 'sdr'),
                         width: item.metadata.width,
                         height: item.metadata.height,
                       })}
@@ -674,6 +678,7 @@ export function MultiTaskPage({
                   <button className="secondary" type="button" disabled={!item.outputMediaUrl && batchTaskActive} onClick={() => item.outputMediaUrl ? setPreview({
                     source: item.outputMediaUrl,
                     name: item.video.name,
+                    hdr: Boolean(item.metadata.native_video && item.metadata.native_video.hdr !== 'sdr'),
                     width: item.metadata.width,
                     height: item.metadata.height,
                   }) : item.analysisId && onOpenAnalysis(item.analysisId)}>{item.outputPath ? '预览输出' : '查看分析'}</button>
@@ -724,7 +729,7 @@ export function MultiTaskPage({
         })}
       </div>
       <div className={`batch-launcher floating-launcher ${shutdownAfterCompletion ? 'shutdown-armed' : ''}`}>
-        <label className="batch-shutdown-option floating-launch-options">
+        {allowShutdown && <label className="batch-shutdown-option floating-launch-options">
           <input
             type="checkbox"
             checked={shutdownAfterCompletion}
@@ -732,7 +737,7 @@ export function MultiTaskPage({
             onChange={(event) => toggleShutdownAfterCompletion(event.target.checked)}
           />
           <span>{text.shutdownAfterTask}</span>
-        </label>
+        </label>}
         <button
           className="batch-start primary floating-launch-start"
           type="button"
@@ -751,7 +756,7 @@ export function MultiTaskPage({
               <button className="preview-close" type="button" onClick={() => setPreview(null)}>×</button>
             </div>
             <div className="batch-preview-media" style={{ aspectRatio: `${preview.width} / ${preview.height}` }}>
-              <video src={preview.source} controls autoPlay />
+              <CompatibleVideo hdr={preview.hdr} src={preview.source} controls autoPlay />
             </div>
           </div>
         </div>

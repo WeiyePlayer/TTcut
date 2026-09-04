@@ -40,6 +40,16 @@ export type TaskController = {
 };
 
 const controllers = new Map<string, TaskController>();
+const backgroundProcesses = new Map<ChildProcess, Promise<void>>();
+const terminationRequests = new WeakMap<ChildProcess, Promise<void>>();
+
+/** Read-only native probes may run without occupying the analysis/export task slot. */
+export function trackBackgroundProcess(child: ChildProcess): void {
+  const completion = new Promise<void>((resolve) => child.once('close', () => { backgroundProcesses.delete(child); resolve(); }));
+  backgroundProcesses.set(child, completion);
+}
+export function hasBackgroundProcesses(): boolean { return backgroundProcesses.size > 0; }
+
 const externalTasks = new Map<string, () => void | Promise<void>>();
 const taskCompletions = new Map<string, { promise: Promise<void>; resolve: () => void }>();
 
@@ -129,6 +139,7 @@ export function spawnTracked(taskId: string, executable: string, args: readonly 
     cwd: options.cwd,
     env: options.env,
     windowsHide: true,
+    detached: process.platform === 'darwin',
     stdio: ['pipe', 'pipe', 'pipe'],
     shell: false,
   });
@@ -192,17 +203,33 @@ export function activeTaskIds(): string[] {
   return [...new Set([...controllers.keys(), ...externalTasks.keys()])];
 }
 
-async function terminateChild(child: ChildProcess): Promise<void> {
-  child.kill('SIGTERM');
-  if (process.platform === 'win32' && child.pid) {
-    await new Promise<void>((resolve) => {
-      const killer = spawn('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], {
-        windowsHide: true, stdio: 'ignore', shell: false,
-      });
-      killer.once('close', () => resolve());
-      killer.once('error', () => resolve());
-    });
-  }
+export function terminateChild(child: ChildProcess): Promise<void> {
+  const existing = terminationRequests.get(child);
+  if (existing) return existing;
+  const pending = (async () => {
+    if (process.platform === 'darwin' && child.pid) {
+      const pid = child.pid;
+      try { process.kill(-pid, 'SIGTERM'); } catch { child.kill('SIGTERM'); return; }
+      const deadline = Date.now() + 2000;
+      while (Date.now() < deadline) {
+        try { process.kill(-pid, 0); } catch { return; }
+        await new Promise<void>((resolve) => setTimeout(resolve, 50));
+      }
+      try { process.kill(-pid, 'SIGKILL'); } catch { /* Group already exited. */ }
+    } else {
+      child.kill('SIGTERM');
+      if (process.platform === 'win32' && child.pid) {
+        await new Promise<void>((resolve) => {
+          const killer = spawn('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], {
+            windowsHide: true, stdio: 'ignore', shell: false,
+          });
+          killer.once('close', () => resolve()); killer.once('error', () => resolve());
+        });
+      }
+    }
+  })();
+  terminationRequests.set(child, pending);
+  return pending;
 }
 
 export async function cancelTask(taskId: string, reason: TaskCancellationReason = 'user'): Promise<void> {
@@ -225,15 +252,16 @@ export async function cancelTask(taskId: string, reason: TaskCancellationReason 
 }
 
 export async function cancelAllTasks(reason: TaskCancellationReason = 'app-exit'): Promise<void> {
-  await Promise.all(activeTaskIds().map((taskId) => cancelTask(taskId, reason)));
+  await Promise.all([...activeTaskIds().map((taskId) => cancelTask(taskId, reason)), ...[...backgroundProcesses.keys()].map(terminateChild)]);
 }
 
 export async function cancelAllTasksAndWait(reason: TaskCancellationReason = 'app-exit'): Promise<void> {
+  const backgroundCompletions = [...backgroundProcesses.values()];
   const completions = activeTaskIds()
     .map((taskId) => taskCompletions.get(taskId)?.promise)
     .filter((value): value is Promise<void> => Boolean(value));
   await cancelAllTasks(reason);
-  await Promise.all(completions);
+  await Promise.all([...completions, ...backgroundCompletions]);
 }
 
 export function runProcess(executable: string, args: readonly string[], options: {
@@ -252,6 +280,7 @@ export function runProcess(executable: string, args: readonly string[], options:
       cwd: options.cwd,
       env: options.env,
       windowsHide: true,
+      detached: process.platform === 'darwin',
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: false,
     });
@@ -261,7 +290,7 @@ export function runProcess(executable: string, args: readonly string[], options:
     child.stderr.setEncoding('utf8');
     child.stdout.on('data', (chunk: string) => { stdout += chunk; });
     child.stderr.on('data', (chunk: string) => { stderr += chunk; });
-    const timer = options.timeoutMs ? setTimeout(() => child.kill(), options.timeoutMs) : null;
+    const timer = options.timeoutMs ? setTimeout(() => { void terminateChild(child); }, options.timeoutMs) : null;
     const abort = () => { void terminateChild(child); };
     const cleanup = () => {
       if (timer) clearTimeout(timer);

@@ -1,5 +1,6 @@
 import { access, mkdir, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { inspectMacComponents, macMediaComponents } from './macos/runtime';
 import { app } from 'electron';
 import type { ComponentStatus } from '../shared/contracts';
 import { loadComponentCatalog } from './component-catalog';
@@ -182,6 +183,7 @@ async function modelResource(filename: string): Promise<string> {
 }
 
 export function managedComponentsRoot(): string {
+  if (process.platform === 'darwin') return path.join(app.getPath('userData'), 'data', 'components');
   if (!app.isPackaged && process.env.TTCUT_E2E === '1' && process.env.TTCUT_E2E_COMPONENTS_ROOT) {
     return path.resolve(process.env.TTCUT_E2E_COMPONENTS_ROOT);
   }
@@ -417,6 +419,7 @@ export async function validateX264EightKCapability(ffmpeg: string): Promise<void
 }
 
 export async function resolveUsableMediaComponents(): Promise<Pick<ComponentPaths, 'ffmpeg' | 'ffprobe' | 'mediaEncoder'>> {
+  if (process.platform === 'darwin') return macMediaComponents();
   let lastError: unknown = null;
   for (const candidate of await mediaCandidates()) {
     try {
@@ -484,6 +487,7 @@ export async function inspectComponentPaths(paths: ComponentPaths, x264Available
 }
 
 export async function inspectComponents(): Promise<ComponentStatus> {
+  if (process.platform === 'darwin') return inspectMacComponents();
   const raw = await resolveComponents('auto');
   const usableMedia = await resolveUsableMediaComponents().catch(() => null);
   const paths = usableMedia ? { ...raw, ...usableMedia } : raw;

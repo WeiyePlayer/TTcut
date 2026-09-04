@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { nativeVideoSchema, nativeTableSampleSchema } from './native-contracts';
 
 export const DEVICE_VALUES = ['auto', 'cuda', 'cpu'] as const;
 export const PRE_ROLL_VALUES = [1.5, 2.5, 5] as const;
@@ -74,7 +75,7 @@ const fixedTableKeypointSchema = z.discriminatedUnion('valid', [
   }).strict(),
 ]);
 
-export const tableAnalysisSchema = z.object({
+const pythonTableAnalysisSchema = z.object({
   schema_version: z.literal(1),
   model: z.object({
     id: z.literal('table_analyze'),
@@ -107,6 +108,13 @@ export const tableAnalysisSchema = z.object({
   aggregation_rule: z.literal('closest_valid_pair_mean'),
   fixed_keypoints: z.array(fixedTableKeypointSchema).length(13),
 }).strict();
+
+export const tableAnalysisSchema = z.union([pythonTableAnalysisSchema, z.object({
+  schema_version: z.literal(2), engine: z.literal('coreml'), compute_units: z.literal('cpuOnly'),
+  checkpoint_sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  aggregation_rule: z.literal('closest_valid_table_pair_mean'),
+  sampling: z.array(nativeTableSampleSchema).length(5),
+}).strict()]);
 
 export const calibrationSchema = z.object({
   video_width: z.number().int().positive(),
@@ -196,6 +204,7 @@ export const videoMetadataSchema = z.object({
   average_bitrate: z.number().int().positive().nullable().optional(),
   audio_bitrate: z.number().int().positive().nullable().optional(),
   pixel_format: z.string().nullable().optional(),
+  native_video: nativeVideoSchema.optional(),
   audio_sample_rate: z.number().int().positive().nullable().optional(),
   audio_channels: z.number().int().positive().nullable().optional(),
   video_duration_seconds: finiteNumber.positive().nullable().optional(),
@@ -231,13 +240,14 @@ export const analysisResultSchema = z.object({
   processing: z.object({
     mode: z.enum(['source_cfr', 'normalized_cfr', 'original_vfr', 'vfr_fallback']),
     target_fps_ratio: z.string().regex(/^\d+\/\d+$/).nullable(),
-    encoder: z.enum(['libopenh264', 'libx264']).nullable(),
+    encoder: z.enum(['libopenh264', 'libx264', 'libx265']).nullable(),
     warning_code: z.string().min(1).nullable(),
   }).strict().optional(),
   rallies: z.array(rallySchema),
   bounce_times_seconds: z.array(finiteNumber.nonnegative()).optional(),
   calibration: calibrationSchema.optional(),
   table_analysis: tableAnalysisSchema.optional(),
+  inference_runtime: z.object({ engine: z.literal('coreml'), compute_units: z.enum(['cpuOnly', 'cpuAndGPU']), checkpoint_sha256: z.string().regex(/^[a-f0-9]{64}$/) }).strict().optional(),
   model_provenance: z.object({
     // TrackNet is accepted only when reading analyses created before it was retired.
     profile: z.enum(LEGACY_RESULT_MODEL_PROFILES),
@@ -423,7 +433,7 @@ export const componentStatusSchema = z.object({
     available: z.boolean(),
     version: z.string().nullable(),
     path: z.string().nullable(),
-    acceleration: z.enum(['cuda', 'cpu', 'unavailable']),
+    acceleration: z.enum(['cuda', 'cpu', 'coreml', 'unavailable']),
     detail: z.string().nullable(),
   }).strict(),
   media: z.object({
@@ -453,7 +463,7 @@ export const componentSetupInfoSchema = z.object({
     filename: z.string().endsWith('.zip'),
     download_size_bytes: z.number().int().positive(),
     license_url: z.string().url(),
-  }).strict(),
+  }).strict().nullable(),
 }).strict();
 
 export const platformCompatibilitySchema = z.object({
@@ -463,6 +473,7 @@ export const platformCompatibilitySchema = z.object({
     'unsupported_platform',
     'unsupported_architecture',
     'unsupported_windows_build',
+    'unsupported_macos_version',
     'windows_server',
     'probe_failed',
   ]),

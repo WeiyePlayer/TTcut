@@ -1,3 +1,4 @@
+import { CompatibleVideo } from './CompatibleVideo';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { SelectedVideo } from '../shared/api';
 import type { AnalysisResultV1, ExportRequest } from '../shared/contracts';
@@ -465,7 +466,7 @@ export function CustomCutPage({
 
         <div className="custom-workspace-right">
           <div className="custom-monitor-slot"><div className="custom-monitor">
-            <video ref={videoRef} src={video.mediaUrl} controls={false} preload="metadata" playsInline tabIndex={0} aria-label={translations.togglePlayback} onClick={togglePlayback} onKeyDown={handleVideoKeyDown} onLoadedMetadata={(event) => { lastPlaybackClipIdRef.current = null; isPreviewSeekingRef.current = false; event.currentTarget.currentTime = 0; updatePlaybackTime(0); }} onPlay={startVideoFrameTracking} onPause={stopVideoFrameTracking} onEnded={stopVideoFrameTracking} onTimeUpdate={(event) => { const time = event.currentTarget.currentTime; updatePlaybackTime(time); if (!isPreviewSeekingRef.current) locatePlaybackClip(time, 'continuous'); }} onSeeked={(event) => updatePlaybackTime(event.currentTarget.currentTime)} />
+            <CompatibleVideo hdr={Boolean(analysis.video.native_video && analysis.video.native_video.hdr !== 'sdr')} ref={videoRef} src={video.mediaUrl} controls={false} preload="metadata" playsInline tabIndex={0} aria-label={translations.togglePlayback} onClick={togglePlayback} onKeyDown={handleVideoKeyDown} onLoadedMetadata={(event) => { lastPlaybackClipIdRef.current = null; isPreviewSeekingRef.current = false; event.currentTarget.currentTime = 0; updatePlaybackTime(0); }} onPlay={startVideoFrameTracking} onPause={stopVideoFrameTracking} onEnded={stopVideoFrameTracking} onTimeUpdate={(event) => { const time = event.currentTarget.currentTime; updatePlaybackTime(time); if (!isPreviewSeekingRef.current) locatePlaybackClip(time, 'continuous'); }} onSeeked={(event) => updatePlaybackTime(event.currentTarget.currentTime)} />
           </div></div>
 
           <CustomTimeline clips={clips} duration={analysis.video.duration_seconds} fps={analysis.video.fps} currentTime={currentTime} timelineLabel={translations.timeline} resizeStartLabel={translations.resizeStart} resizeEndLabel={translations.resizeEnd} toolMode={toolMode} onSeek={seek} onScrubCancel={() => { isPreviewSeekingRef.current = false; }} onPlayClip={playClip} onAddAt={addManualAt} onDeleteClip={(clipId) => onClipsChange(deleteCustomClip(clips, clipId))} onResize={(clipId, edge, time) => {

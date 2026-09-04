@@ -1,3 +1,4 @@
+import { CompatibleVideo } from './CompatibleVideo';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT,
@@ -136,11 +137,14 @@ export function App() {
     setVideoTaskOwnerState(owner);
   }, []);
   const t = messages(settings.language as Language);
+  const isMac = window.ttcut.platform === 'darwin';
   const platformSupported = bootstrap?.platformCompatibility.status === 'supported';
   const useManualCalibration = settings.calibration_method === 'manual' || forceManual;
   const platformDetail = !bootstrap
     ? ''
-    : platformSupported
+    : isMac
+      ? (settings.language === 'en' ? 'Requires macOS 15 or later on Apple Silicon (arm64).' : '需要 macOS 15 或更高版本，以及 Apple Silicon（arm64）芯片。')
+      : platformSupported
       ? interpolate(t.platformSupportedDetail, { build: bootstrap.platformCompatibility.build_number ?? '—' })
       : bootstrap.platformCompatibility.reason === 'probe_failed'
         ? t.platformProbeFailedDetail
@@ -590,7 +594,7 @@ export function App() {
   };
 
   return (
-    <div className={`app-shell ${languageTransition ? 'language-changing' : ''} ${customWorkspace ? 'custom-workspace-shell' : ''}`}>
+    <div className={`app-shell ${isMac ? 'macos-shell' : ''} ${languageTransition ? 'language-changing' : ''} ${customWorkspace ? 'custom-workspace-shell' : ''}`}>
       <header className="titlebar" onDoubleClick={() => void window.ttcut.toggleMaximize()}>
         {canReturnToSelection && (
           <button
@@ -603,11 +607,11 @@ export function App() {
           </button>
         )}
         <div className="titlebar-spacer" />
-        <div className="window-controls" onDoubleClick={(event) => event.stopPropagation()}>
+        {!isMac && <div className="window-controls" onDoubleClick={(event) => event.stopPropagation()}>
           <button type="button" aria-label="Minimize" onClick={() => void window.ttcut.minimize()}>—</button>
           <button type="button" aria-label="Maximize or restore" onClick={() => void window.ttcut.toggleMaximize()}>□</button>
           <button type="button" className="close-control" aria-label="Close" onClick={() => void window.ttcut.close()}>×</button>
-        </div>
+        </div>}
       </header>
       <aside className="sidebar">
         <div className="brand"><img className="brand-icon" src={ttcutIcon} alt="" /><span>TTcut</span><small>v{bootstrap?.version ?? appVersion}</small></div>
@@ -622,6 +626,7 @@ export function App() {
         {multiVideos.length > 0 && (
           <div hidden={view !== 'multi'}>
             <MultiTaskPage
+              allowShutdown={!isMac}
               initialVideos={multiVideos}
               preRoll={settings.pre_roll_seconds}
               postRoll={settings.post_roll_seconds}
@@ -661,7 +666,7 @@ export function App() {
                     </button>
                   )}
                 </div>
-                {updateState.status !== 'idle' && <p className="update-detail">{updateState.status === 'up-to-date' ? (settings.language === 'zh-CN' ? '当前已是最新稳定版。' : 'You are using the latest stable version.') : updateState.status === 'available' ? (settings.language === 'zh-CN' ? '发现新版本，正在后台下载。' : 'A new version is downloading in the background.') : updateState.status === 'error' ? updateErrorMessage(updateState.message, settings.language) : updateState.status === 'unsupported' ? (settings.language === 'zh-CN' ? '开发环境或当前平台不支持自动更新。' : 'Automatic updates are unavailable in this environment.') : ''}</p>}
+                {updateState.status !== 'idle' && <p className="update-detail">{updateState.status === 'up-to-date' ? (settings.language === 'zh-CN' ? '当前已是最新稳定版。' : 'You are using the latest stable version.') : updateState.status === 'available' ? (settings.language === 'zh-CN' ? '发现新版本，正在后台下载。' : 'A new version is downloading in the background.') : updateState.status === 'error' ? updateErrorMessage(updateState.message, settings.language) : updateState.status === 'unsupported' ? (settings.language === 'zh-CN' ? (isMac ? '本测试版暂不提供自动更新。' : '开发环境或当前平台不支持自动更新。') : (isMac ? 'Automatic updates are unavailable in this test build.' : 'Automatic updates are unavailable in this environment.')) : ''}</p>}
               </article>
               <article className="card setting-card">
                 <div><h2>{t.language}</h2></div>
@@ -757,13 +762,13 @@ export function App() {
               <article className="card components-card">
                 <h2>{t.components}</h2>
                 <div className="component-row"><div><strong>{t.analysisComponent}</strong><span>{bootstrap?.components.analysis.version ?? t.unavailable}</span>{bootstrap?.components.analysis.path && <span>{t.componentPath}: {bootstrap.components.analysis.path}</span>}</div><span className={`status ${bootstrap?.components.analysis.available ? 'ok' : ''}`}>{bootstrap?.components.analysis.available ? t.available : t.unavailable}</span></div>
-                <div className="component-row"><div><strong>{t.mediaComponent}</strong><span>{bootstrap?.components.media.version ?? t.unavailable}</span>{bootstrap?.components.media.available && <span>{t.activeEncoder}: {bootstrap.components.media.active_encoder === 'libx264' ? t.x264 : t.openh264}</span>}{bootstrap?.components.media.path && <span>{t.componentPath}: {bootstrap.components.media.path}</span>}</div><span className={`status ${bootstrap?.components.media.available ? 'ok' : ''}`}>{bootstrap?.components.media.available ? t.available : t.unavailable}</span></div>
-                <div className="component-row"><div><strong>{t.acceleration}</strong><span>{bootstrap?.components.analysis.acceleration === 'cuda' ? t.gpu : bootstrap?.components.analysis.acceleration === 'cpu' ? t.cpu : t.unavailable}</span></div></div>
+                <div className="component-row"><div><strong>{t.mediaComponent}</strong><span>{bootstrap?.components.media.version ?? t.unavailable}</span>{bootstrap?.components.media.available && <span>{t.activeEncoder}: {isMac ? 'x264 / x265' : bootstrap.components.media.active_encoder === 'libx264' ? t.x264 : t.openh264}</span>}{bootstrap?.components.media.path && <span>{t.componentPath}: {bootstrap.components.media.path}</span>}</div><span className={`status ${bootstrap?.components.media.available ? 'ok' : ''}`}>{bootstrap?.components.media.available ? t.available : t.unavailable}</span></div>
+                <div className="component-row"><div><strong>{t.acceleration}</strong><span>{isMac ? 'Core ML · CPU / GPU' : bootstrap?.components.analysis.acceleration === 'cuda' ? t.gpu : bootstrap?.components.analysis.acceleration === 'cpu' ? t.cpu : t.unavailable}</span></div></div>
               </article>
               <article className="card setup-card">
-                <div className="setup-heading"><div><h2>{t.setupTitle}</h2><p>{t.setupDetail}</p></div><button className="secondary" disabled={Boolean(setupTask)} onClick={() => void refreshComponents()}>{t.refreshComponents}</button></div>
-                <p className="setup-purpose">{t.setupPurpose}</p>
-                {setupProgress ? (
+                <div className="setup-heading"><div><h2>{isMac ? (settings.language === 'en' ? 'Built-in runtime' : '内置运行时') : t.setupTitle}</h2>{!isMac && <p>{t.setupDetail}</p>}</div><button className="secondary" disabled={Boolean(setupTask)} onClick={() => void refreshComponents()}>{t.refreshComponents}</button></div>
+                {!isMac && <p className="setup-purpose">{t.setupPurpose}</p>}
+                {isMac ? <p>{settings.language === 'en' ? 'Models and media tools are included. No component installation is required.' : '已内置模型和媒体工具，无需安装组件。'}{bootstrap?.components.analysis.detail && <span role="alert"> {bootstrap.components.analysis.detail}</span>}</p> : setupProgress ? (
                   <div className="setup-progress" role="status">
                     <div><strong>{t.setupWorking}</strong><span>{t.setupStages[setupProgress.stage as keyof typeof t.setupStages] ?? setupProgress.stage}</span><b>{Math.round(setupProgress.percent)}%</b></div>
                     <div className="progress-track"><span style={{ width: `${setupProgress.percent}%` }} /></div>
@@ -962,7 +967,7 @@ export function App() {
                     allowed: exportResult.timing.allowedDriftSeconds.toFixed(2),
                   })}</span></div>
                 )}
-                <video className="output-preview" src={exportResult.mediaUrl} controls preload="metadata" />
+                <CompatibleVideo hdr={Boolean(analysis?.video.native_video && analysis.video.native_video.hdr !== 'sdr')} className="output-preview" src={exportResult.mediaUrl} controls preload="metadata" />
                 <div className="card output-details"><div><span>{t.outputName}</span><strong>{exportResult.outputName}</strong></div><div><span>{t.outputPath}</span><strong>{exportResult.outputPath}</strong></div></div>
                 <div className="footer-actions"><button className="secondary" onClick={() => void window.ttcut.revealOutput(exportResult.outputPath)}>{t.openFolder}</button><button className="primary" onClick={reset}>{t.cutAnother}</button></div>
                 {exportResult.warning && (

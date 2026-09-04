@@ -686,3 +686,7 @@ td input { accent-color: var(--blue); }
   :root { --line: rgba(0,0,0,.28); --line-strong: rgba(0,0,0,.48); }
   .sidebar, .titlebar, .modal { background: white; backdrop-filter: none; }
 }
+
+.macos-shell .titlebar { padding-left: 86px; }
+.compatibility-preview-status { position: absolute; z-index: 5; bottom: 12px; left: 12px; right: 12px; padding: 10px 14px; border-radius: 10px; background: rgba(255,255,255,.95); color: #222; display: flex; gap: 12px; align-items: center; justify-content: space-between; font-size: 13px; }
+.compatibility-preview-status button { flex-shrink: 0; padding: 5px 12px; }

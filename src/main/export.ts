@@ -1,3 +1,4 @@
+import { renderMacMedia } from './macos/client';
 import { access, copyFile, mkdir, open, rename, rm, stat, statfs, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -685,6 +686,12 @@ async function executeExport(
     const requestedBudget = assessExportDuration(duration, duration, groups.length, analysis.video);
     await logExportTiming(taskId, 'Export timing budget (fast segmented)', requestedBudget, analysis.video);
     const signal = getTaskController(taskId)?.signal;
+    if (process.platform === 'darwin') {
+      const rendered = await renderMacMedia(taskId, 'export', analysis.video.path, partial, groups, (percent) => send(window, { type: 'progress', data: { taskId, kind: 'export', stage: 'cutting', percent } }));
+      if (!rendered) throw new Error('EXPORT_INVALID');
+      finalTiming = assessExportDuration(rendered.duration_seconds, duration, groups.length, analysis.video);
+      if (!finalTiming.withinTolerance) throw new ExportDurationMismatchError(finalTiming);
+    } else {
     const canCopy = await streamCopyEligibility(
       taskId,
       analysis.video.path,
@@ -778,6 +785,7 @@ async function executeExport(
         signal,
       );
       finalTiming = validation.timing;
+    }
     }
     if (!finalTiming) throw new Error('EXPORT_INVALID');
     if (await available(output)) throw new Error('OUTPUT_COLLISION');
@@ -972,7 +980,7 @@ async function executeCustomArtifactExport(
           analysis.video,
           components.mediaEncoder,
         );
-        keyframes = await probeExportKeyframes(taskId, analysis.video.path, components.ffprobe, signal);
+        keyframes = process.platform === 'darwin' ? [] : await probeExportKeyframes(taskId, analysis.video.path, components.ffprobe, signal);
       } catch (error) {
         if (exportCode(error) === 'EXPORT_CANCELLED' || getTaskController(taskId)?.cancelRequested) throw error;
         for (const segment of segments) failedRallies.push(artifactFailure(error, 'EXPORT_SEGMENT_FAILED', segment));
@@ -987,6 +995,9 @@ async function executeCustomArtifactExport(
         const percent = 5 + Math.round((offset / segments.length) * 90);
         send(window, { type: 'progress', data: { taskId, kind: 'export', stage: 'exporting-rallies', percent, current: position, total: segments.length } });
         try {
+          if (process.platform === 'darwin') {
+            await renderMacMedia(taskId, 'export', analysis.video.path, partialPath, [segment]);
+          } else {
           const seekStart = selectSeekStart(segment.start, keyframes);
           await runFfmpeg(
             window,
@@ -1012,6 +1023,7 @@ async function executeCustomArtifactExport(
             signal,
           );
           await logExportTiming(taskId, `Rally segment ${position} timing`, validation.timing, analysis.video);
+          }
           assertExportNotCancelled(taskId);
           await rename(partialPath, finalPath);
           rallyVideos.push({

@@ -41,7 +41,9 @@ public enum TableAggregation {
       return Point((a.x + b.x) / 2, (a.y + b.y) / 2)
     }
     let result = Calibration(width: width, height: height, points: ordered(points))
-    try result.validate()
+    do { try result.validate() } catch {
+      throw TTError("AUTO_CALIBRATION_FAILED", "球桌样本无法形成有效标定，请手动标定 / Manual calibration required")
+    }
     return result
   }
 }

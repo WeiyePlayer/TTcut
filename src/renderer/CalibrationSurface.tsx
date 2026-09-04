@@ -1,3 +1,4 @@
+import { CompatibleVideo } from './CompatibleVideo';
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type { Calibration, VideoMetadata } from '../shared/contracts';
 import type { SelectedVideo } from '../shared/api';
@@ -82,7 +83,7 @@ export function CalibrationSurface({
         }}
         onPointerUp={() => { dragging.current = null; }}
       >
-        <video ref={videoRef} src={video.mediaUrl} preload="metadata" muted playsInline />
+        <CompatibleVideo hdr={Boolean(metadata.native_video && metadata.native_video.hdr !== 'sdr')} ref={videoRef} src={video.mediaUrl} preload="metadata" muted playsInline />
         {pointOrder.map((name, index) => points[name] && (
           <button
             type="button"

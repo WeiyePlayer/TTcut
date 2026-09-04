@@ -1,3 +1,4 @@
+import { startMacAnalysis } from './macos/analysis';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { BrowserWindow } from 'electron';
@@ -176,6 +177,7 @@ export async function startAnalysis(
     blurballStage2ConfidenceThreshold: number;
   },
 ): Promise<string> {
+  if (process.platform === 'darwin') return startMacAnalysis(window, value);
   if (hasActiveTasks()) throw new Error('TASK_BUSY');
   let sourceMetadata = await probeVideo(value.videoPath);
   if ((value.calibrationChoice.method === 'manual' || value.calibrationChoice.method === 'precalibrated')

@@ -1,3 +1,4 @@
+import { startMacCalibration } from './macos/analysis';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { BrowserWindow } from 'electron';
@@ -26,6 +27,7 @@ export async function startAutoCalibration(
     device: 'auto' | 'cuda' | 'cpu';
   },
 ): Promise<string> {
+  if (process.platform === 'darwin') return startMacCalibration(window, value);
   if (hasActiveTasks()) throw new Error('TASK_BUSY');
   const metadata = await probeVideo(value.videoPath);
   const taskId = randomUUID();

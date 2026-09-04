@@ -247,7 +247,7 @@ export function CustomTimeline({
   wheelHandlerRef.current = (event) => {
     const viewport = viewportRef.current;
     if (!viewport) return;
-    if (event.ctrlKey) {
+    if (event.ctrlKey || event.metaKey) {
       // The track is the sole owner of Ctrl+wheel while the pointer is over it.
       // This prevents Chromium/Electron page zoom from resizing the monitor.
       event.preventDefault();

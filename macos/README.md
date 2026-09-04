@@ -1,3 +1,5 @@
+> The primary Mac app now retains Electron UI. Use [ELECTRON.md](ELECTRON.md) for current build and verification. The SwiftUI instructions below are historical reference.
+
 # TTcut for macOS
 
 Native SwiftUI application for Apple Silicon, deployment target macOS 15.0. The Windows application stays at the repository root; this implementation is isolated in `macos/`. Its source behavior is frozen at Windows commit `b9e359b3b7ea113dd5b23f203b03e53fb7690d88` (1.2.10), not the later online release.

@@ -20,7 +20,15 @@
     "test:python": "python -m pytest worker/tests -q",
     "verify:release": "node scripts/verify-model-assets.mjs && node scripts/stage-worker.mjs && node scripts/generate-release-metadata.mjs && node scripts/make-nsis.mjs && node scripts/verify-release.mjs",
     "verify:signatures": "node scripts/verify-signatures.mjs",
-    "release:assets": "node scripts/generate-public-release-assets.mjs"
+    "release:assets": "node scripts/generate-public-release-assets.mjs",
+    "start:mac": "electron-forge start --arch=arm64",
+    "build:native:mac": "python3 scripts/stage-macos-runtime.py",
+    "package:mac": "node scripts/make-macos.mjs --app-only",
+    "make:mac": "node scripts/make-macos.mjs",
+    "test:mac": "vitest run tests/macos-*.test.ts",
+    "verify:mac": "node scripts/verify-electron-macos.mjs",
+    "verify:mac:ui": "node scripts/verify-electron-macos-ui.mjs",
+    "test:native:mac": "TTCUT_NATIVE_TESTS=1 swift test --package-path macos"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.8",

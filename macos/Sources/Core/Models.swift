@@ -342,6 +342,8 @@ public struct AnalysisRequest: Codable, Sendable {
   }
 }
 public struct WorkerEvent: Codable, Sendable {
+  public var schemaVersion = 1
+  public var roi: AnalysisROI?
   public var type: String
   public var taskID: String
   public var stage: String?

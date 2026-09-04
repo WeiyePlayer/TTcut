@@ -1,3 +1,7 @@
+import { beforeAll as beforeWindowsSuite, afterAll as afterWindowsSuite } from 'vitest';
+const actualPlatform = process.platform;
+beforeWindowsSuite(() => Object.defineProperty(process, 'platform', { value: 'win32' }));
+afterWindowsSuite(() => Object.defineProperty(process, 'platform', { value: actualPlatform }));
 import { access, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';

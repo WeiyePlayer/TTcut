@@ -4,6 +4,13 @@ import type { AppSettings, BlurBallAnalysisMode, CalibrationChoice, ExportReques
 import { IPC } from '../shared/ipc';
 
 const api: TTcutApi = {
+  platform: process.platform,
+  preparePreview: (mediaUrl, taskId) => ipcRenderer.invoke(IPC.previewPrepare, mediaUrl, taskId),
+  onPreviewProgress: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, value: { taskId: string; percent: number }) => listener(value);
+    ipcRenderer.on(IPC.previewProgress, wrapped);
+    return () => ipcRenderer.removeListener(IPC.previewProgress, wrapped);
+  },
   bootstrap: () => ipcRenderer.invoke(IPC.appBootstrap),
   saveSettings: (settings: AppSettings) => ipcRenderer.invoke(IPC.settingsSave, settings),
   refreshComponents: () => ipcRenderer.invoke(IPC.componentsRefresh),

@@ -123,12 +123,11 @@ _Avoid_: PR project file, `.prproj`, FCPXML
 
 ## Analysis Runtime
 
-The managed Python and PyTorch environment installed separately from the
-application package to execute local analysis.
+The platform-specific local environment that executes analysis. Windows uses a separately managed Python/PyTorch environment; macOS uses the bundled Core ML models and native analysis helper.
 
 ## Installation Root
 
-The stable user-selected folder that owns one TTcut installation and its managed
+The Windows-specific stable user-selected folder that owns one TTcut installation and its managed
 component data. Changing drives requires uninstalling before reinstalling.
 
 ## Program Area
@@ -173,6 +172,11 @@ _Avoid_: Crop-relative trajectory
 ## 处理媒体（Processing Media）
 
 球路分析、分析后预览和剪辑实际读取的媒体。源本来就是固定帧率时处理媒体就是原始媒体；可变帧率源仅在设置中启用“重编码为固定帧率”后使用 CFR 派生媒体，默认直接使用原始媒体。
+
+## 预览副本（Playback Preview）
+
+仅用于界面播放的兼容媒体，可从原始媒体或处理媒体生成。它保留对应时间位置，但不作为分析输入、导出输入或历史源身份；删除它不会删除原始媒体、处理媒体或用户导出文件。
+_Avoid_: 处理媒体、分析源
 
 ## CFR 派生媒体（CFR Derived Media）
 

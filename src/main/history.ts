@@ -1,3 +1,4 @@
+import { renderMacMedia, probeMacVideo } from './macos/client';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -12,7 +13,7 @@ import {
 } from '../shared/contracts';
 import { resolveUsableMediaComponents } from './components';
 import { logLine } from './logger';
-import { runProcess } from './processes';
+import { runProcess, activeTaskIds } from './processes';
 import { clearProcessingMediaCache, processingCachePath, removeProcessingCache } from './processing-media';
 
 const historyIndexSchema = z.object({
@@ -66,6 +67,7 @@ export function buildHistoryCoverArgs(sourcePath: string, destination: string): 
 }
 
 async function defaultCreateCover(sourcePath: string, destination: string): Promise<void> {
+  if (process.platform === 'darwin') { await renderMacMedia(activeTaskIds()[0] ?? randomUUID(), 'cover', sourcePath, destination); return; }
   const components = await resolveUsableMediaComponents();
   if (!components.ffmpeg) throw new Error('MEDIA_COMPONENT_MISSING');
   await runProcess(components.ffmpeg, buildHistoryCoverArgs(sourcePath, destination), { timeoutMs: 30_000 });
@@ -270,6 +272,15 @@ export class HistoryStore {
     if (record.analysis.processing?.mode === 'normalized_cfr') {
       const processingInfo = await stat(record.analysis.video.path).catch(() => null);
       if (!processingInfo?.isFile() || processingInfo.size <= 0) throw new Error('HISTORY_PROCESSING_MEDIA_MISSING');
+      if (process.platform === 'darwin' && record.analysis.video.native_video) {
+        const expected = record.analysis.video;
+        const actual = await probeMacVideo(expected.path).catch(() => null);
+        if (!actual || actual.variable_frame_rate || actual.width !== expected.width || actual.height !== expected.height
+          || Math.abs(actual.duration_seconds - expected.duration_seconds) > 0.1
+          || actual.native_video?.bitDepth !== expected.native_video?.bitDepth || actual.native_video?.hdr !== expected.native_video?.hdr) {
+          throw new Error('HISTORY_PROCESSING_MEDIA_CORRUPT');
+        }
+      }
     }
     return record;
   }

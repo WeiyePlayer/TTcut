@@ -217,7 +217,7 @@ final class Worker {
           currentInterval = index
         }
         if index != nil { try infer([a, b, c], channels: [1], targets: [b]) }
-        if b.index % 30 == 0 { progress("refinement", b.index + 1, total) }
+        if b.index % 30 == 0 { progress("refinement_analysis", b.index + 1, total) }
       }
       if let first = try decoder.prepare(roi) {
         if var center = try decoder.prepare(roi) {
@@ -241,7 +241,7 @@ final class Worker {
           try autoreleasepool { try infer(window, channels: [0, 1, 2], targets: window) }
           window.removeAll(keepingCapacity: true)
         }
-        if frame.index % 30 == 0 { progress("analysis", frame.index + 1, total) }
+        if frame.index % 30 == 0 { progress(request.mode == .twoStage ? "candidate_analysis" : "analysis", frame.index + 1, total) }
       }
       if let last = window.last {
         let targets = window
@@ -292,6 +292,7 @@ final class Worker {
     }
     let set = Set(frames)
     var event = WorkerEvent(type: "result", taskID: request.taskID)
+    event.roi = try AnalysisROI(calibration: calibration)
     event.rallies = rallies
     event.bounceTimes = points.filter { set.contains($0.frame) }.map(\.time).sorted()
     emit(event)
