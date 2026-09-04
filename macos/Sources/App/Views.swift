@@ -50,9 +50,6 @@ struct RootView: View {
             }
           }.padding(14)
         }.buttonStyle(.plain)
-        if !isCollapsed {
-          Text("macOS · Apple Silicon").font(.caption).foregroundStyle(.secondary).padding(16)
-        }
       }.frame(width: isCollapsed ? 72 : 220).background(Color(nsColor: .windowBackgroundColor))
       Divider()
       Group {
@@ -106,14 +103,7 @@ struct CutView: View {
                 Text(subtitle).foregroundStyle(.secondary)
               }
               Spacer()
-              if state.flow != .idle {
-                Button(state.english ? "New task" : "新建任务") { state.reset() }.disabled(state.busy)
-              }
             }.padding([.horizontal, .top], 28)
-            if state.flow != .calibration, state.source != nil {
-              VideoMonitor(playback: state.playback).frame(maxWidth: .infinity).frame(height: 320)
-                .padding(.horizontal, 28)
-            }
             Group {
               switch state.flow {
               case .idle:
@@ -192,7 +182,11 @@ struct ProgressCard: View {
 
 struct ReviewView: View {
   @EnvironmentObject var state: AppState
-  @State private var outputs = ExportOutputs()
+  private var matchingRallyCount: Int {
+    (try? Segments.selected(
+      state.result?.rallies ?? [], mode: state.mode, threshold: state.highlightThreshold
+    ).count) ?? 0
+  }
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
       Picker("模式", selection: $state.mode) {
@@ -207,32 +201,19 @@ struct ReviewView: View {
             Text("3 板").tag(3)
             Text("5 板").tag(5)
             Text("7 板").tag(7)
-          }.labelsHidden().frame(width: 130)
+          }.labelsHidden().frame(width: 130).accessibilityIdentifier("highlightThreshold")
+          Text("符合要求的回合：\(matchingRallyCount) 个")
+            .foregroundStyle(.secondary).accessibilityIdentifier("matchingRallyCount")
         }
+      } else {
+        Text("识别到 \(matchingRallyCount) 个回合").foregroundStyle(.secondary)
       }
-      if state.mode == .custom, let source = state.source {
-        ClipTimeline(
-          clips: $state.custom, video: source, bounces: state.result?.bounceTimes ?? [],
-          add: state.addManualClip, playback: state.playback
-        ).frame(height: 210)
-        Toggle("合并导出", isOn: $outputs.combined)
-        Toggle("分段导出", isOn: $outputs.rallyVideos).disabled(outputs.combined)
-        Toggle("Premiere XML", isOn: $outputs.xml).disabled(outputs.combined)
-      }
-      Text(
-        "识别到 \(state.result?.rallies.count ?? 0) 个回合、\(state.result?.bounceTimes.count ?? 0) 次弹跳"
-      ).foregroundStyle(.secondary)
       HStack {
         Spacer()
-        Button("开始剪辑") { state.export(outputs: state.mode == .custom ? outputs : ExportOutputs()) }
-          .buttonStyle(.borderedProminent)
+        Button("开始剪辑") { state.export(outputs: ExportOutputs()) }
+          .buttonStyle(.borderedProminent).disabled(matchingRallyCount == 0)
       }
-    }.card().onChange(of: outputs.combined) {
-      if outputs.combined {
-        outputs.rallyVideos = false
-        outputs.xml = false
-      }
-    }
+    }.card()
   }
 }
 

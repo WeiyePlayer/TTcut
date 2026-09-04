@@ -646,7 +646,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
 					"\"Vendor\"",
@@ -672,7 +672,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
 					"\"Vendor\"",
@@ -687,7 +687,7 @@
 				INFOPLIST_KEY_SUEnableAutomaticChecks = NO;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
 				MARKETING_VERSION = 1.2.10;
-				PRODUCT_BUNDLE_IDENTIFIER = com.weiyeplayer.ttcut.macos;
+				PRODUCT_BUNDLE_IDENTIFIER = com.weiyeplayer.ttcut.macos.debug;
 				PRODUCT_NAME = TTcut;
 				SDKROOT = macosx;
 			};

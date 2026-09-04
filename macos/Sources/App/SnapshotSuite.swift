@@ -6,6 +6,30 @@
 
   /// Rendering-only QA for this app's own views. Does not automate the desktop or replace interaction tests.
   @MainActor enum SnapshotSuite {
+    /// Explicit synthetic results for UI interaction tests; never used by a Release build.
+    static func prepareReview(state: AppState, video: URL) async throws {
+      guard let paths = state.runtime else { throw TTError("NO_RUNTIME") }
+      let info = try await MediaProbe(paths: paths).inspect(video)
+      let calibration = Calibration(
+        width: info.width, height: info.height,
+        points: [Point(0, 0), Point(Double(info.width), 0),
+          Point(Double(info.width), Double(info.height)), Point(0, Double(info.height))])
+      let rallies = [3, 5, 7].enumerated().map { index, count in
+        Rally(id: "ui-\(index)", index: index + 1,
+          start: info.duration * (Double(index) * 0.3 + 0.05),
+          end: info.duration * (Double(index) * 0.3 + 0.15), bounceCount: count)
+      }
+      state.source = info
+      state.calibration = calibration
+      state.result = AnalysisResult(
+        source: try SourceIdentity(url: video), sourceVideo: info, video: info,
+        processing: ProcessingMedia(mode: .originalCFR, path: info.path),
+        calibration: calibration, mode: .full, rallies: rallies, bounceTimes: [])
+      state.custom = Clips.draft(
+        rallies: rallies, pre: 0, post: 0, duration: info.duration, fps: info.fps)
+      state.flow = .review
+      state.playback.load(video: info, paths: paths)
+    }
     static func run(state: AppState, directory: URL, video: URL?) async {
       do {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -46,6 +70,15 @@
           state.result = result
           state.custom = Clips.draft(
             rallies: rallies, pre: 0.1, post: 0.1, duration: info.duration, fps: info.fps)
+          state.flow = .review
+          state.mode = .all
+          try await capture(state, "review-all", in: directory)
+          state.mode = .highlight
+          try await capture(state, "review-highlights", in: directory)
+          state.flow = .analyzing
+          state.stage = "正在分析"
+          state.progress = 0.4
+          try await capture(state, "analyzing", in: directory)
           state.flow = .review
           state.mode = .custom
           state.playback.load(video: info, paths: paths)

@@ -4,10 +4,9 @@
 "好" = "OK";
 "选择乒乓球视频" = "Choose Table-Tennis Videos";
 "支持 MP4、MOV 等 FFmpeg 可解码格式" = "MP4, MOV and other FFmpeg-supported formats";
-"新建任务" = "New Task";
 "取消" = "Cancel";
 "开始分析" = "Start Analysis";
-"仅保留大于 %lld 板的回合" = "Keep rallies with more than %lld bounces";
+"仅保留大于 %lld 板的回合" = "Keep rallies with more than %lld strokes";
 "全部剪辑" = "All Rallies";
 "精彩回合" = "Highlights";
 "自定义" = "Custom";
@@ -17,7 +16,6 @@
 "开始剪辑" = "Start Cutting";
 "成功导出" = "Export Complete";
 "在 Finder 中显示" = "Show in Finder";
-"识别到 %lld 个回合、%lld 次弹跳" = "Found %lld rallies and %lld bounces";
 "球台标定" = "Table Calibration";
 "按左上、右上、右下、左下顺序选择球桌四角。" = "Select top-left, top-right, bottom-right and bottom-left table corners.";
 "重置" = "Reset";
@@ -27,7 +25,7 @@
 "增加回合" = "Add Rally";
 "删除回合" = "Delete Rally";
 "保留回合" = "Include Rally";
-"%lld · %@ 板" = "%lld · %@ bounces";
+"%lld · %@ 板" = "%lld · %@ strokes";
 "开始" = "Start";
 "结束" = "End";
 "单击片段查看，双击片段选择或排除；拖动两端调整范围。" = "Click to inspect, double-click to include or exclude, drag edges to trim.";
@@ -36,7 +34,7 @@
 "回合列表" = "Rallies";
 "回合 %lld" = "Rally %lld";
 "手动回合" = "Manual Rally";
-"%lld 板" = "%lld bounces";
+"%lld 板" = "%lld strokes";
 "XML 剪辑点按标称帧率量化。" = "XML edit points are quantized to nominal frame rate.";
 "自定义导出选项" = "Custom Export Options";
 "导出" = "Export";
@@ -47,9 +45,9 @@
 "所有回合" = "All Rallies";
 "只分析" = "Analyze Only";
 "大于" = "More than";
-"3 板" = "3 bounces";
-"5 板" = "5 bounces";
-"7 板" = "7 bounces";
+"3 板" = "3 strokes";
+"5 板" = "5 strokes";
+"7 板" = "7 strokes";
 "手动标定" = "Manual Calibration";
 "查看回合" = "Review Rallies";
 "打开输出" = "Show Output";
@@ -111,3 +109,12 @@
 "继续批量任务" = "Continue Batch";
 "选择一个或多个视频" = "Choose one or more videos";
 "正在标定球桌" = "Calibrating table";
+
+"识别到 %lld 个回合" = "Found %lld rallies";
+"符合要求的回合：%lld 个" = "%lld matching rallies";
+"全选" = "Select All";
+"取消全选" = "Deselect All";
+"视频轨缩放" = "Timeline Zoom";
+"缩小时间轴" = "Zoom Out";
+"放大时间轴" = "Zoom In";
+"适应全部" = "Fit All";

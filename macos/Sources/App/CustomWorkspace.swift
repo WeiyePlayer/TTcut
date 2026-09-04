@@ -16,11 +16,17 @@ struct CustomWorkspace: View {
         Text(state.sourceName ?? "").font(.headline).lineLimit(1)
         Spacer()
         Text("\(state.custom.filter(\.selected).count) / \(state.custom.count) 回合").foregroundStyle(
-          .secondary)
+          .secondary).accessibilityIdentifier("customSelectionCount")
       }
       HStack(alignment: .top, spacing: 18) {
         VStack(alignment: .leading) {
-          Text("回合列表").font(.headline).padding(.horizontal, 12)
+          HStack {
+            Text("回合列表").font(.headline)
+            Spacer()
+            Button(state.custom.allSatisfy(\.selected) ? "取消全选" : "全选") {
+              state.setAllCustomSelected(!state.custom.allSatisfy(\.selected))
+            }.disabled(state.custom.isEmpty).accessibilityIdentifier("toggleAllRallies")
+          }.padding(.horizontal, 12)
           List {
             ForEach(state.custom) { clip in
               HStack(alignment: .top) {
@@ -36,15 +42,18 @@ struct CustomWorkspace: View {
                     })
                 ).labelsHidden().toggleStyle(.checkbox)
                 VStack(alignment: .leading, spacing: 5) {
-                  Text("回合 \(clip.index)").font(.headline)
+                  HStack {
+                    Text("回合 \(clip.index)").font(.headline)
+                    Spacer()
+                    if clip.isManual {
+                      Text("手动回合").font(.caption).foregroundStyle(.secondary)
+                    } else {
+                      Text("\(clip.bounceCount ?? 0) 板").font(.caption).foregroundStyle(.secondary)
+                    }
+                  }
                   Text(String(format: "%.2f – %.2f", clip.start, clip.end)).font(
                     .caption.monospacedDigit()
                   ).foregroundStyle(.secondary)
-                  if clip.isManual {
-                    Text("手动回合").font(.caption)
-                  } else {
-                    Text("\(clip.bounceCount ?? 0) 板").font(.caption)
-                  }
                 }.contentShape(Rectangle()).onTapGesture { state.playback.seek(clip.start) }
               }.padding(.vertical, 5)
             }
@@ -56,7 +65,7 @@ struct CustomWorkspace: View {
             ClipTimeline(
               clips: $state.custom, video: video, bounces: state.result?.bounceTimes ?? [],
               add: state.addManualClip, playback: state.playback
-            ).frame(height: 180)
+            ).frame(height: 200)
           }
           HStack {
             if state.source?.variableFrameRate == true {

@@ -104,6 +104,7 @@ struct VideoMonitor: View {
         Text(error).foregroundStyle(.white).padding().background(.black.opacity(0.8))
       }
     }.background(.black).clipShape(RoundedRectangle(cornerRadius: 12))
+      .accessibilityIdentifier("videoMonitor")
   }
 }
 struct PlayerPanel: NSViewRepresentable {

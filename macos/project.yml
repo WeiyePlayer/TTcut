@@ -76,7 +76,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.weiyeplayer.ttcut.macos
         PRODUCT_NAME: TTcut
         MARKETING_VERSION: 1.2.10
-        CURRENT_PROJECT_VERSION: 1
+        CURRENT_PROJECT_VERSION: 2
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.video
         INFOPLIST_KEY_NSHighResolutionCapable: YES
@@ -86,6 +86,9 @@ targets:
         INFOPLIST_KEY_SUAllowsAutomaticUpdates: NO
         INFOPLIST_KEY_NSHumanReadableCopyright: ''
         LD_RUNPATH_SEARCH_PATHS: '$(inherited) @executable_path/../Frameworks'
+      configs:
+        Debug:
+          PRODUCT_BUNDLE_IDENTIFIER: com.weiyeplayer.ttcut.macos.debug
     postBuildScripts:
       - name: Embed native runtime and Core ML models
         script: /usr/bin/python3 "$SRCROOT/scripts/bundle_runtime.py" "$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH" "$BUILT_PRODUCTS_DIR/TTcutWorker"

@@ -80,7 +80,16 @@ enum Flow { case idle, calibration, analyzing, review, exporting, complete }
             state: self, directory: URL(fileURLWithPath: directory), video: video)
           return
         }
-        if let path = ProcessInfo.processInfo.environment["TTCUT_UI_TEST_VIDEO"] {
+        if let path = ProcessInfo.processInfo.environment["TTCUT_UI_TEST_REVIEW_VIDEO"] {
+          do {
+            try await SnapshotSuite.prepareReview(state: self, video: URL(fileURLWithPath: path))
+            if ProcessInfo.processInfo.environment["TTCUT_UI_TEST_ANALYZING"] == "1" {
+              flow = .analyzing
+              progress = 0.4
+              stage = "正在分析"
+            }
+          } catch { message = error.localizedDescription }
+        } else if let path = ProcessInfo.processInfo.environment["TTCUT_UI_TEST_VIDEO"] {
           load(URL(fileURLWithPath: path), automatic: false)
         }
       #endif
@@ -320,6 +329,14 @@ enum Flow { case idle, calibration, analyzing, review, exporting, complete }
         message = error.localizedDescription
         flow = .review
       }
+    }
+  }
+  func setAllCustomSelected(_ selected: Bool) {
+    guard let source else { return }
+    // Reuse individual selection's overlap recovery instead of bypassing timeline constraints.
+    for id in custom.map(\.id) {
+      custom = Clips.setSelected(
+        custom, id: id, selected: selected, duration: source.duration, fps: source.fps)
     }
   }
   func addManualClip(at time: Double) {
