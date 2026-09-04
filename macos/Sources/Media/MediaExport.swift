@@ -290,7 +290,8 @@ public struct MediaExporter: Sendable {
       at: request.destination, withIntermediateDirectories: true)
     let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
     let name =
-      video.url.deletingPathExtension().lastPathComponent + "_TTcut_" + stamp + "_"
+      request.result.sourceVideo.url.deletingPathExtension().lastPathComponent + "_TTcut_" + stamp
+      + "_"
       + UUID().uuidString.prefix(6)
     let work = request.destination.appendingPathComponent(
       "." + name + ".partial", isDirectory: true)
@@ -344,6 +345,9 @@ public struct MediaExporter: Sendable {
         to: work.appendingPathComponent("export-report.json"))
     } catch { warnings.append("导出报告写入失败：" + error.localizedDescription) }
     try Task.checkCancellation()
+    guard request.result.source.currentStatus == .available else {
+      throw TTError("SOURCE_CHANGED_OR_MISSING")
+    }
     try FileManager.default.moveItem(at: work, to: final)
     return ExportResult(folder: final, files: files, warnings: warnings)
   }

@@ -13,7 +13,7 @@ struct CustomWorkspace: View {
         } label: {
           Label("返回", systemImage: "chevron.left")
         }
-        Text(state.source?.name ?? "").font(.headline).lineLimit(1)
+        Text(state.sourceName ?? "").font(.headline).lineLimit(1)
         Spacer()
         Text("\(state.custom.filter(\.selected).count) / \(state.custom.count) 回合").foregroundStyle(
           .secondary)

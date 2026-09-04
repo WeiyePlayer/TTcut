@@ -4,9 +4,9 @@ Baseline: `b9e359b3b7ea113dd5b23f203b03e53fb7690d88`. This map describes impleme
 
 | Area | Preserved behavior / intentional change | Native implementation | Evidence |
 |---|---|---|---|
-| Layout/navigation | Auto Cut and History sidebar, Settings below; collapsed sidebar in custom editing | `Views.swift`, `CustomWorkspace.swift` | Own-view screenshots, navigation UITest available |
+| Layout/navigation | Auto Cut and History sidebar, Settings below; collapsed sidebar in custom editing | `Views.swift`, `CustomWorkspace.swift` | Own-view screenshots, navigation UITest passed |
 | Inputs | Single and multiple video selection; drag/drop local URLs; multiple inputs enter batch | `AppState.acceptVideos`, `DropCard` | Workflow loading tests; drag gesture remains in interactive test scope |
-| Calibration | First-frame preview; 4 corners; reset, zoom and drag; automatic five-position table inference; manual fallback | `CalibrationView.swift`, native worker, `TableAggregation.swift` | Original preprocessing fixture, model numeric check, native table invocation; manual UI test available |
+| Calibration | First-frame preview; 4 corners; reset, zoom and drag; automatic five-position table inference; manual fallback | `CalibrationView.swift`, native worker, `TableAggregation.swift` | Original preprocessing fixture, model numeric check, native table invocation; four-corner UI test passed |
 | Ball/table models | Same BlurBall and table weights/architecture; native Core ML replaces Windows Python/CUDA runtime | Worker, native bridge, conversion scripts | Both output-tensor comparisons pass fixed tolerances |
 | Analysis | Full and two-stage analysis; original ROI, temporal windows, thresholds, tracking, bounce and rally grouping | Worker, `Geometry`, `BounceDetector`, `Segments` | 60 original Python trajectory cases / 240 bounces; native full/two-stage tests |
 | Modes | All rallies, highlights strictly greater than 3/5/7 bounces, custom | `Segments`, `ReviewView`, `CustomWorkspace` | Domain tests, rendered views |

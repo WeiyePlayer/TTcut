@@ -87,6 +87,7 @@ enum Flow { case idle, calibration, analyzing, review, exporting, complete }
     }
   }
   var english: Bool { settings.language == "en" }
+  var sourceName: String? { result?.sourceVideo.name ?? originalVideo?.name ?? source?.name }
   func chooseFiles(multiple: Bool = false) -> [URL] {
     let panel = NSOpenPanel()
     panel.canChooseFiles = true
@@ -113,13 +114,14 @@ enum Flow { case idle, calibration, analyzing, review, exporting, complete }
       load(url)
     }
   }
-  func load(_ url: URL, automatic: Bool? = nil) {
+  func load(_ url: URL, automatic: Bool? = nil, batchID: UUID? = nil) {
     guard !busy else { return }
     guard let runtime else {
       message = "应用内置组件不完整 / Bundled components are missing"
       return
     }
     cancel()
+    editingBatchID = batchID
     message = nil
     source = nil
     result = nil
@@ -368,6 +370,7 @@ enum Flow { case idle, calibration, analyzing, review, exporting, complete }
   }
   func openHistory(_ entry: HistoryEntry) {
     guard !busy else { return }
+    editingBatchID = nil
     busy = true
     Task {
       defer { busy = false }
@@ -448,6 +451,7 @@ enum Flow { case idle, calibration, analyzing, review, exporting, complete }
         }
         batch[index].status = .calibrating
         batch[index].error = nil
+        var tableInferenceStarted = false
         do {
           let original = try await MediaProbe(paths: runtime).inspect(batch[index].url)
           let identity = try SourceIdentity(url: original.url)
@@ -457,6 +461,7 @@ enum Flow { case idle, calibration, analyzing, review, exporting, complete }
             source: original, identity: identity, video: pair.0, media: pair.1)
           batch[index].lease = await store.retainMedia(pair.1)
           if batch[index].calibration == nil {
+            tableInferenceStarted = true
             let event = try await AnalysisClient.run(
               request("calibrate", video: pair.0), paths: runtime
             ) { _ in }
@@ -471,12 +476,12 @@ enum Flow { case idle, calibration, analyzing, review, exporting, complete }
           batch[index].status = .pending
           return
         } catch {
-          batch[index].status = .manualRequired
+          batch[index].status = tableInferenceStarted ? .manualRequired : .failed
           batch[index].error = error.localizedDescription
         }
       }
       for index in batch.indices
-      where batch[index].status != .done && batch[index].status != .manualRequired {
+      where batch[index].status == .pending {
         if Task.isCancelled { return }
         batch[index].status = .running
         batch[index].error = nil
@@ -561,12 +566,12 @@ enum Flow { case idle, calibration, analyzing, review, exporting, complete }
   }
   func manuallyCalibrateBatch(_ id: UUID) {
     guard !busy, let item = batch.first(where: { $0.id == id }) else { return }
-    editingBatchID = id
     page = .cut
-    load(item.url, automatic: false)
+    load(item.url, automatic: false, batchID: id)
   }
   func reviewBatch(_ id: UUID) {
     guard !busy, let value = batch.first(where: { $0.id == id })?.result else { return }
+    editingBatchID = nil
     guard value.source.currentStatus == .available,
       FileManager.default.fileExists(atPath: value.video.path)
     else {

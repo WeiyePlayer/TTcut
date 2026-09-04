@@ -149,7 +149,7 @@ struct CutView: View {
     }
   }
   var subtitle: String {
-    state.source?.name
+    state.sourceName
       ?? (state.english ? "Analyze and cut table-tennis video locally." : "在本机分析乒乓球视频并完成剪辑")
   }
 }
@@ -168,7 +168,8 @@ struct DropCard: View {
       ).overlay(
         RoundedRectangle(cornerRadius: 16).strokeBorder(style: StrokeStyle(lineWidth: 2, dash: [8]))
           .foregroundStyle(.quaternary))
-    }.buttonStyle(.plain).accessibilityIdentifier("selectVideos").dropDestination(for: URL.self) { urls, _ in
+    }.buttonStyle(.plain).accessibilityIdentifier("selectVideos").dropDestination(for: URL.self) {
+      urls, _ in
       accept(urls)
       return !urls.isEmpty
     }

@@ -114,7 +114,7 @@
         try await settle(state)
         try require(
           state.batch[0].status == .done && state.batch[1].status == .done
-            && state.batch[2].status == .manualRequired,
+            && state.batch[2].status == .failed,
           "Batch failure prevented valid items completing")
         try require(
           state.batch[0].result?.modelDigests == AppState.modelDigests,
@@ -122,6 +122,7 @@
         passed.append("serial batch analysis, isolated failure and provenance")
         // Recover a queued item through the same manual calibration callbacks as the UI.
         state.batch[2].url = second
+        state.batch[2].status = .manualRequired
         let recoveryID = state.batch[2].id
         state.manuallyCalibrateBatch(recoveryID)
         try await settle(state)

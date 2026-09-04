@@ -6,6 +6,6 @@ Native implementation, Core ML conversion, 21 native tests, 10 in-process applic
 
 Remaining delivery work: final Release archive and relocated runtime audit; verified DMG/checksums; selected evidence archive; source push and GitHub draft upload. No public release is authorized.
 
-External Xcode UI automation is blocked by local macOS authentication (`System authentication is running`); it has not passed. The user has been asked to complete the system prompt. No system permissions were changed. The in-process workflow and view-rendering checks do not replace external UI interaction tests.
+External Xcode UI automation passed both tests after retrying local authentication and correcting selectors to match SwiftUI's accessibility roles. No system permissions were changed. Release dependency isolation and actual launch also passed after correcting this app's ad-hoc build configuration.
 
 Real match/8K/HDR footage, real NLE import, macOS 15 execution, Developer ID/notarization and a production update feed remain deferred or unavailable as recorded in `VERIFICATION.md`.
