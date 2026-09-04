@@ -9,6 +9,10 @@ import traceback
 from .blurball_bounce import detect_blurball_bounce_frames
 from .blurball_models import load_blurball
 from .blurball_predictor import BlurBallPredictor
+from .blurball_rallies import (
+    blurball_inter_rally_filter_provenance,
+    blurball_visibility_rallies,
+)
 from .analysis_intervals import REFINEMENT_EXPANSION_SECONDS, expanded_union_intervals
 from .calibration import TableCalibration
 from .errors import InvalidRequestError, ModelResourceError, TableModelResourceError, WorkerError
@@ -58,7 +62,6 @@ from .visibility_rallies import (
     CONTINUOUS_VISIBILITY_SHORT_VERTICAL_FILTER_SECONDS,
     CONTINUOUS_VISIBILITY_START_SECONDS,
     VisibilityMotionConfig,
-    continuous_visibility_rallies,
     is_end_on_table_view,
 )
 
@@ -233,9 +236,10 @@ def analyze(request: dict) -> dict:
                 motion_config=motion_config,
             )
             if profile == "tracknet_v1"
-            else continuous_visibility_rallies(
+            else blurball_visibility_rallies(
                 points,
                 float(info.fps or 0.0),
+                calibration,
                 motion_config=motion_config,
             )
         )
@@ -351,6 +355,9 @@ def analyze(request: dict) -> dict:
                     "expanded_table_width_margin_cm": TRACKNET_EXPANDED_TABLE_WIDTH_MARGIN_CM,
                     "reliable_fragment_bridge_seconds": TRACKNET_RELIABLE_FRAGMENT_BRIDGE_SECONDS,
                 }} if profile == "tracknet_v1" else {}),
+                **({"inter_rally_fragment_filter": (
+                    blurball_inter_rally_filter_provenance()
+                )} if profile == "blurball_v1" else {}),
             }
         ),
         "calibration": {

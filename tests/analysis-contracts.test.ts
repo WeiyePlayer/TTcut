@@ -187,4 +187,38 @@ describe('BlurBall analysis request contracts', () => {
       rallies: [{ ...result.rallies[0], bounce_count: 3 }],
     })).toThrow();
   });
+
+  it('models BlurBall inter-rally fragment filter provenance', () => {
+    const result = analysisResultSchema.parse({
+      schema_version: 2,
+      video: {
+        path: 'match.mp4', duration_seconds: 10, width: 1280, height: 720, fps: 30,
+        variable_frame_rate: false, video_codec: 'h264', audio_codec: null, container: 'mp4',
+      },
+      rallies: [],
+      rally_recognition: {
+        method: 'continuous_visibility',
+        start_visible_seconds: 0.2,
+        end_invisible_seconds: 0.5,
+        inter_rally_fragment_filter: {
+          side_on_views_only: true,
+          minimum_candidate_seconds: 1,
+          maximum_candidate_seconds: 6,
+          maximum_expanded_table_ratio: 0.45,
+          minimum_visible_run_count: 3,
+          minimum_one_way_range_ratio: 0.55,
+          maximum_sparse_visibility_ratio: 0.3,
+          minimum_contiguous_flight_seconds: 0.15,
+          minimum_coherent_reversal_ratio: 0.2,
+          minimum_coherent_flight_displacement_ratio: 0.15,
+          expanded_table_length_margin_cm: 35,
+          expanded_table_width_margin_cm: 25,
+        },
+      },
+    });
+    if (result.schema_version !== 2 || result.rally_recognition.method !== 'continuous_visibility') {
+      throw new Error('Expected a continuous-visibility v2 result');
+    }
+    expect(result.rally_recognition.inter_rally_fragment_filter?.minimum_visible_run_count).toBe(3);
+  });
 });

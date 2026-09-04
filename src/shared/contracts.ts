@@ -373,6 +373,20 @@ export const continuousVisibilityAnalysisResultV2Schema = analysisResultBaseSche
       expanded_table_width_margin_cm: finiteNumber.nonnegative(),
       reliable_fragment_bridge_seconds: finiteNumber.positive(),
     }).strict().optional(),
+    inter_rally_fragment_filter: z.object({
+      side_on_views_only: z.boolean(),
+      minimum_candidate_seconds: finiteNumber.positive(),
+      maximum_candidate_seconds: finiteNumber.positive(),
+      maximum_expanded_table_ratio: finiteNumber.min(0).max(1),
+      minimum_visible_run_count: z.number().int().positive(),
+      minimum_one_way_range_ratio: finiteNumber.positive(),
+      maximum_sparse_visibility_ratio: finiteNumber.min(0).max(1),
+      minimum_contiguous_flight_seconds: finiteNumber.positive(),
+      minimum_coherent_reversal_ratio: finiteNumber.positive(),
+      minimum_coherent_flight_displacement_ratio: finiteNumber.positive(),
+      expanded_table_length_margin_cm: finiteNumber.nonnegative(),
+      expanded_table_width_margin_cm: finiteNumber.nonnegative(),
+    }).strict().optional(),
   }).strict(),
 }).strict();
 
