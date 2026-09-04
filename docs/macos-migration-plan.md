@@ -1,6 +1,6 @@
 # TTcut macOS migration
 
-Status: implementation in progress. Baseline: `b9e359b3b7ea113dd5b23f203b03e53fb7690d88` (1.2.10).
+Status: native implementation and the agreed automated/synthetic validation are complete; delivery is draft-only. Actual evidence and deferred acceptance are recorded in [macOS verification](../macos/VERIFICATION.md). Baseline: `b9e359b3b7ea113dd5b23f203b03e53fb7690d88` (1.2.10).
 
 ## Accepted scope
 

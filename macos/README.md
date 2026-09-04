@@ -81,6 +81,10 @@ This archives the Xcode Release app, copies it outside the checkout into a path 
 
 The app is locally ad-hoc signed and is not notarized. Copy it from the DMG to Applications. For a first-launch block, use Apple's documented per-app Privacy & Security flow; no script disables Gatekeeper. See [Apple's instructions](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unknown-developer-mh40616/mac).
 
+This account-free build disables hardened runtime for its own targets so ad-hoc framework loading does not require a Team ID. It does not change system protections. Developer ID/hardened runtime configuration can be introduced separately when a certificate is available.
+
 Sparkle 2.9.6 is integrated, but the production feed and public key are intentionally unset, and the UI says updates are not configured. `local_update_test.py` exercises a real isolated signed update, installation and relaunch, plus rejection of a wrong EdDSA signature. Temporary private keys remain in ignored `.tools/update-test-keys/`, never in the app, repository or release assets. See [Sparkle documentation](https://sparkle-project.org/documentation/).
 
 GitHub delivery targets a new draft release in `WeiyePlayer/TTcut`. Publishing remains manual. See `VERIFICATION.md` for actual results and limits; real match/8K/HDR material, real NLE XML import, macOS 15 execution and Developer ID/notarization are not claimed as verified.
+
+`scripts/assemble_evidence.py` packages selected reports and own-view screenshots after all gates. Preserve the native/Windows test logs with their documented filenames, run UI tests with `-resultBundlePath output/UITests.xcresult`, and export the summary using `xcrun xcresulttool get test-results summary --path output/UITests.xcresult > output/verification/ui-tests.json`. The evidence script reads the latest workflow report, verifies the DMG hash and refuses failed gates. Run `shasum -a 256 -c SHA256SUMS` from `output/`, where the checksum file's relative asset names resolve.

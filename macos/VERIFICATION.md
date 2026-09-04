@@ -14,9 +14,17 @@ Verification host: Apple M5 / 16 GB, macOS 26.6.2, Xcode 26.6. Source baseline: 
 - Real Sparkle localhost update test passed: version 1 discovered version 2, downloaded, verified, installed and relaunched. A wrong EdDSA signature was rejected and version 1 remained installed. Production updater URL/key are unset. No test private key is shipped.
 - Windows baseline TypeScript type checking passed. Original Python tests passed: 45. Running Windows Vitest on this Mac produced 233 passed, 10 failed, 20 skipped. The failures are Windows path/installation registration, Windows updater platform and PowerShell/certificate assumptions; this is not a green Windows-native regression run. Windows code was not modified.
 
-## Pending final artifact audit
+## Final artifact audit
 
-The packaging script must write `release-bundle.json`, `standalone/standalone.json`, `package.json` and `SHA256SUMS` before delivery. This section will be replaced with the actual packaging result.
+Release archive and DMG passed validation. All 19 Mach-O files are arm64, have deployment targets no newer than macOS 15, have app-relative/system dependencies and pass deep ad-hoc signature validation. A copy outside the checkout, in a path with spaces, launched with a restricted system-only PATH and exercised bundled FFmpeg plus both Core ML inference paths. On synthetic patterns table detection may correctly return `AUTO_CALIBRATION_FAILED`; the test checks that the table model actually ran, not that a pattern contains a real table.
+
+The read-only DMG mounted successfully. Its app signature was verified, the signed executable/resource seal matched the Release archive, its Applications link was present and its bundled ffprobe ran.
+
+- File: `TTcut-1.2.10-macOS-arm64-build1.dmg`
+- Size: 117,532,052 bytes.
+- SHA256: `d34b707b19701273f83a1fcc8758076db342c1a8e9262e011b6f7856425cd7a6`.
+- Application source commit: `21f4816cd564c5b6f91c2768de277b0cc0119d62`, with no uncommitted macOS changes at packaging time. Subsequent delivery documentation does not change the app binary.
+- Signature: ad-hoc, without hardened runtime/Developer ID/notarization. No production update endpoint/key is included.
 
 ## Deferred and unavailable
 
