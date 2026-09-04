@@ -6,17 +6,28 @@ import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
 const root = path.resolve(import.meta.dirname, '..');
 const app = path.resolve(process.argv[2] ?? path.join(root, 'out/TTcut-darwin-arm64/TTcut.app'));
-const out = path.join(root, 'output/electron-macos'); await mkdir(out, { recursive: true });
+const out = path.resolve(process.env.TTCUT_VERIFY_OUTPUT ?? path.join(root, 'output/electron-macos')); await mkdir(out, { recursive: true });
 const run = await mkdtemp(path.join(out, 'run-')); const userData = path.join(run, 'user-data');
 const media = path.join(run, '合成素材 with spaces.mp4');
 const ffmpeg = path.join(app, 'Contents/Resources/runtime/bin/ffmpeg');
 const generated = spawnSync(ffmpeg, ['-v','error','-f','lavfi','-i','testsrc2=size=320x180:rate=15:duration=10','-f','lavfi','-i','sine=frequency=600:sample_rate=48000:duration=10','-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac',media], { encoding: 'utf8' });
 assert.equal(generated.status, 0, generated.stderr);
 const server = createServer(); await new Promise((r) => server.listen(0, '127.0.0.1', r)); const port = server.address().port; await new Promise((r) => server.close(r));
-const child = spawn(path.join(app,'Contents/MacOS/TTcut'), [`--remote-debugging-port=${port}`,`--user-data-dir=${userData}`], { env: { ...process.env, PATH: '/usr/bin:/bin:/usr/sbin:/sbin' }, stdio: ['ignore','pipe','pipe'] });
+const offlineSandbox = process.env.TTCUT_VERIFY_OFFLINE_SANDBOX === '1';
+const networkProfile = '(version 1)(allow default)(deny network-outbound (remote ip "*:*"))(allow network-outbound (remote ip "localhost:*"))';
+if (offlineSandbox) {
+  const blocked=spawnSync('/usr/bin/sandbox-exec',['-p',networkProfile,'/usr/bin/python3','-c','import socket\ntry: socket.create_connection(("1.1.1.1",443),2)\nexcept PermissionError: raise SystemExit(0)\nraise SystemExit(1)'],{encoding:'utf8'});
+  assert.equal(blocked.status,0,'Offline sandbox must reject outbound connections: '+blocked.stderr);
+}
+const executable=path.join(app,'Contents/MacOS/TTcut');
+const args=[`--remote-debugging-port=${port}`,`--user-data-dir=${userData}`];
+// Test-only: macOS rejects Chromium's nested sandbox under sandbox-exec. The outer
+// OS sandbox blocks internet for this entire process tree. Default launch is tested separately.
+if (offlineSandbox) args.push('--no-sandbox');
+const child = spawn(offlineSandbox ? '/usr/bin/sandbox-exec' : executable, offlineSandbox ? ['-p',networkProfile,executable,...args] : args, { env: { ...process.env, PATH: '/usr/bin:/bin:/usr/sbin:/sbin' }, stdio: ['ignore','pipe','pipe'] });
 let stderr=''; child.stderr.on('data',(b)=>{stderr+=b.toString();}); child.stdout.on('data',(b)=>{stderr+=b.toString();});
 let browser; let page; const checks=[];
-async function check(name, work) { const value=await work(); checks.push({ name, passed:true }); console.log(`PASS ${name}`); await writeFile(path.join(run,'report.json'),JSON.stringify({app,checks},null,2)); return value; }
+async function check(name, work) { const value=await work(); checks.push({ name, passed:true }); console.log(`PASS ${name}`); await writeFile(path.join(run,'report.json'),JSON.stringify({app,offlineSandbox,checks},null,2)); return value; }
 async function task(method, input) {
   const id=await page.evaluate(async({method,input})=>window.ttcut[method](input),{method,input});
   await page.waitForFunction((id)=>window.__events.some((e)=>e.taskId===id && ['analysis-result','calibration-result','export-result','error'].includes(e.type)),id,{timeout:180000});
@@ -26,7 +37,8 @@ try {
   const deadline=Date.now()+45000;
   while (Date.now()<deadline) { try { browser=await chromium.connectOverCDP(`http://127.0.0.1:${port}`); break; } catch { if(child.exitCode!==null) throw new Error(stderr); await new Promise(r=>setTimeout(r,250)); } }
   assert.ok(browser,'CDP unavailable');
-  page=browser.contexts()[0].pages()[0]; await page.waitForFunction(()=>Boolean(window.ttcut),null,{timeout:30000});
+  for(let attempt=0;attempt<100&&!page;attempt++){page=browser.contexts()[0]?.pages()[0];if(!page)await new Promise(r=>setTimeout(r,100));}
+  assert.ok(page,'Renderer did not launch: '+stderr); await page.waitForFunction(()=>Boolean(window.ttcut),null,{timeout:30000});
   await page.evaluate(()=>{window.__events=[];window.ttcut.onTaskEvent(e=>window.__events.push(e));});
   await browser.contexts()[0].setOffline(true);
   const bootstrap=await check('offline runtime bootstrap with system-only PATH', async()=>{const value=await page.evaluate(()=>window.ttcut.bootstrap()); assert.equal(value.platformCompatibility.status,'supported');assert.equal(value.components.analysis.acceleration,'coreml');assert.equal(value.components.media.available,true);assert.equal(value.capabilities.managedComponents,false);assert.ok(value.logsPath.startsWith(userData));return value;});
@@ -120,4 +132,4 @@ try {
   await writeFile(path.join(out,'latest-run.txt'),run+'\n');
   console.log(`Verification: ${run}`);
 } catch(error) { await writeFile(path.join(run,'failure.txt'),error.stack+'\n'+stderr); if(page) await page.screenshot({path:path.join(run,'failure.png')}).catch(()=>{}); throw error; }
-finally { if(child.exitCode===null) child.kill('SIGTERM');await browser?.close();await writeFile(path.join(run,'electron.log'),stderr); }
+finally { if(child.exitCode===null) child.kill('SIGTERM');await Promise.race([browser?.close().catch(()=>{}),new Promise(r=>setTimeout(r,1000))]);await writeFile(path.join(run,'electron.log'),stderr); }

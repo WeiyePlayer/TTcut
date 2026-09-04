@@ -21,6 +21,7 @@ macos/.venv/bin/python macos/scripts/convert_models.py all --verify-only
 npm run verify:mac
 npm run verify:mac:ui
 python3 scripts/verify-macos-bundle.py out/TTcut-darwin-arm64/TTcut.app
+python3 scripts/verify-macos-delivery.py
 ```
 
 The Electron verifier generates synthetic media, uses the built application and real Core ML/media helpers, and writes isolated user data, screenshots and results under `output/electron-macos/run-*`. It also uses explicitly labeled controlled nonempty history for UI interactions. It does not imply real-match accuracy. An optional app path verifies a relocated bundle. The standard `--user-data-dir` switch isolates test data from the default `~/Library/Application Support/TTcut-Electron`; development uses its `development` subdirectory.
@@ -30,3 +31,5 @@ The UI verifier additionally uses the existing development-only file-dialog fixt
 Windows-specific tests and tools retain Windows behavior. macOS execution cannot establish a green Windows-native release. Local signing is ad-hoc; production signing/notarization/updates remain deferred.
 
 The pre-migration asset backup is `/Users/weiye/DOS/TTcut-backups/swiftui-macos-20260904/manifest.json`; source changes are preserved on `backup/swiftui-macos-20260904`. Neither is uploaded automatically.
+
+For an independent archive test, extract the ZIP outside the checkout and pass that app path to `verify-electron-macos.mjs`. `TTCUT_VERIFY_OUTPUT` places all fixtures and test data outside the checkout too. `TTCUT_VERIFY_OFFLINE_SANDBOX=1` adds a process-scoped OS sandbox denying outgoing internet (loopback remains available for debugging), verified by a rejected socket connection. macOS prohibits Chromium sandbox reinitialization inside this outer sandbox, so this diagnostic mode adds `--no-sandbox` only to the test invocation; the normal shipped application retains its default sandbox. Run both modes and report them separately. No host network setting is changed.
