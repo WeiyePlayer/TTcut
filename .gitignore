@@ -22,3 +22,12 @@ artifacts/dual-ball-ab/
 artifacts/dual-ball-ab-bgr/
 artifacts/dual-ball-ab-refined/
 artifacts/manual-import/
+macos/.build/
+macos/.venv/
+macos/.tools/
+macos/Vendor/
+macos/Resources/Models/
+macos/output/
+macos/*.xcarchive/
+*.xcuserstate
+xcuserdata/

@@ -1,0 +1,104 @@
+name: TTcut
+options:
+  minimumXcodeGenVersion: 2.46.0
+  deploymentTarget:
+    macOS: '15.0'
+  createIntermediateGroups: true
+  developmentLanguage: zh-Hans
+settings:
+  base:
+    ARCHS: arm64
+    ONLY_ACTIVE_ARCH: YES
+    MACOSX_DEPLOYMENT_TARGET: '15.0'
+    SWIFT_VERSION: '5.10'
+    CODE_SIGN_IDENTITY: '-'
+    CODE_SIGN_STYLE: Manual
+    ENABLE_HARDENED_RUNTIME: YES
+    ENABLE_APP_SANDBOX: NO
+    CLANG_CXX_LANGUAGE_STANDARD: c++17
+packages:
+  TTcutNative:
+    path: .
+targets:
+  TTcutUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - Tests/UI
+    dependencies:
+      - target: TTcut
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.weiyeplayer.ttcut.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        ENABLE_HARDENED_RUNTIME: NO
+        CODE_SIGN_ENTITLEMENTS: Tests/UI/Runner.entitlements
+  TTcutWorker:
+    type: tool
+    platform: macOS
+    sources:
+      - Sources/Worker
+    dependencies:
+      - package: TTcutNative
+        product: TTcutCore
+      - package: TTcutNative
+        product: TTNative
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.weiyeplayer.ttcut.worker
+        SKIP_INSTALL: YES
+  TTcut:
+    type: application
+    platform: macOS
+    sources:
+      - Sources/App
+      - path: Resources/TTcut.icns
+        buildPhase: resources
+      - path: Resources/en.lproj
+        buildPhase: resources
+      - path: ../src/renderer/assets/ttcut-icon.png
+        buildPhase: resources
+      - path: ../src/renderer/assets/contact-author-qr.png
+        buildPhase: resources
+    dependencies:
+      - package: TTcutNative
+        product: TTcutCore
+      - package: TTcutNative
+        product: TTcutMedia
+      - target: TTcutWorker
+        embed: false
+      - framework: Vendor/Sparkle.framework
+        embed: true
+        codeSign: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.weiyeplayer.ttcut.macos
+        PRODUCT_NAME: TTcut
+        MARKETING_VERSION: 1.2.10
+        CURRENT_PROJECT_VERSION: 1
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.video
+        INFOPLIST_KEY_NSHighResolutionCapable: YES
+        INFOPLIST_KEY_CFBundleIconFile: TTcut
+        INFOPLIST_KEY_SUEnableAutomaticChecks: NO
+        INFOPLIST_KEY_SUAutomaticallyUpdate: NO
+        INFOPLIST_KEY_SUAllowsAutomaticUpdates: NO
+        INFOPLIST_KEY_NSHumanReadableCopyright: ''
+        LD_RUNPATH_SEARCH_PATHS: '$(inherited) @executable_path/../Frameworks'
+    postBuildScripts:
+      - name: Embed native runtime and Core ML models
+        script: /usr/bin/python3 "$SRCROOT/scripts/bundle_runtime.py" "$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH" "$BUILT_PRODUCTS_DIR/TTcutWorker"
+        basedOnDependencyAnalysis: false
+schemes:
+  TTcut:
+    build:
+      targets:
+        TTcut: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+    test:
+      config: Debug
+      targets:
+        - TTcutUITests

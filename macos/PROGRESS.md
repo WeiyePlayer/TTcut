@@ -1,0 +1,11 @@
+# Delivery checkpoint
+
+Baseline: `b9e359b3b7ea113dd5b23f203b03e53fb7690d88`; branch `codex/macos-native`.
+
+Native implementation, Core ML conversion, 21 native tests, 10 in-process application workflow checks, view rendering and actual localhost Sparkle update tests are complete. See `BEHAVIOR_PARITY.md` and `VERIFICATION.md` for the evidence and its limits.
+
+Remaining delivery work: final Release archive and relocated runtime audit; verified DMG/checksums; selected evidence archive; source push and GitHub draft upload. No public release is authorized.
+
+External Xcode UI automation is blocked by local macOS authentication (`System authentication is running`); it has not passed. The user has been asked to complete the system prompt. No system permissions were changed. The in-process workflow and view-rendering checks do not replace external UI interaction tests.
+
+Real match/8K/HDR footage, real NLE import, macOS 15 execution, Developer ID/notarization and a production update feed remain deferred or unavailable as recorded in `VERIFICATION.md`.

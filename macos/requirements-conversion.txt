@@ -1,0 +1,5 @@
+coremltools==9.0
+torch==2.7.0
+numpy==2.2.6
+opencv-python==4.11.0.86
+pytest==8.4.2
