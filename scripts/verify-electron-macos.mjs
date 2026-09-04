@@ -122,8 +122,9 @@ try {
     await page.locator('.timeline-clip[data-clip-id^="manual_"]').waitFor();assert.equal(await page.locator('.timeline-clip').count(),3);
     await page.getByRole('button',{name:'Delete rally',exact:true}).click();await page.locator('.timeline-clip[data-clip-id^="manual_"]').click();assert.equal(await page.locator('.timeline-clip').count(),2);
     await page.locator('.custom-workspace').click({button:'right',position:{x:2,y:2}});
-    await page.locator('video').evaluate(async(video)=>{ await video.play(); });
-    await page.waitForFunction(()=>document.querySelector('video').currentTime>0.1);
+    await page.locator('video').evaluate(video=>{video.pause();video.currentTime=0;video.muted=true;});
+    await page.locator('video').press('Space');
+    await page.waitForFunction(()=>document.querySelector('video').currentTime>0.1,null,{polling:100});
     await page.locator('video').evaluate(video=>video.pause());
     await page.screenshot({path:path.join(run,'custom-en.png')});});
   await check('history deletion preserves original and deliverables',async()=>{await appendFile(media,'changed source fixture');const changed=await page.evaluate(async id=>{try{await window.ttcut.openHistory(id);return '';}catch(error){return String(error);}},analysis.analysisId);assert.match(changed,/HISTORY_SOURCE_CHANGED/);await page.evaluate(id=>window.ttcut.deleteHistory(id),analysis.analysisId);assert.ok((await stat(media)).size>0);assert.ok((await stat(combined)).size>0);});
@@ -131,5 +132,5 @@ try {
   await new Promise((resolve,reject)=>{if(child.exitCode!==null)return resolve();child.once('exit',resolve);setTimeout(()=>reject(new Error('App failed to quit')),10000).unref();});
   await writeFile(path.join(out,'latest-run.txt'),run+'\n');
   console.log(`Verification: ${run}`);
-} catch(error) { await writeFile(path.join(run,'failure.txt'),error.stack+'\n'+stderr); if(page) await page.screenshot({path:path.join(run,'failure.png')}).catch(()=>{}); throw error; }
+} catch(error) { await writeFile(path.join(run,'failure.txt'),error.stack+'\n'+stderr); if(page) await writeFile(path.join(run,'video-state.json'),JSON.stringify(await page.evaluate(()=>({visibility:document.visibilityState,videos:[...document.querySelectorAll('video')].map(v=>({src:v.src,paused:v.paused,time:v.currentTime,ready:v.readyState,network:v.networkState,error:v.error?.message}))})).catch(()=>null),null,2)); if(page) await page.screenshot({path:path.join(run,'failure.png')}).catch(()=>{}); throw error; }
 finally { if(child.exitCode===null) child.kill('SIGTERM');await Promise.race([browser?.close().catch(()=>{}),new Promise(r=>setTimeout(r,1000))]);await writeFile(path.join(run,'electron.log'),stderr); }
