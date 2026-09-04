@@ -18,7 +18,7 @@ def main():
     archive = OUTPUT / "TTcut.xcarchive"
     with (ROOT / "archive.log").open("w") as log:
         run("xcodebuild", "-project", ROOT / "TTcut.xcodeproj", "-scheme", "TTcut", "-configuration", "Release",
-            "-derivedDataPath", ROOT / ".build/xcode", "-archivePath", archive, "archive", stdout=log, stderr=subprocess.STDOUT)
+            "-derivedDataPath", ROOT / ".build/release", "-archivePath", archive, "archive", stdout=log, stderr=subprocess.STDOUT)
     built = archive / "Products/Applications/TTcut.app"
     info = plistlib.loads((built / "Contents/Info.plist").read_bytes())
     version = info["CFBundleShortVersionString"]

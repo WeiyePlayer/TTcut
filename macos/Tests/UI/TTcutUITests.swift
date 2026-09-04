@@ -18,7 +18,7 @@ import XCTest
   }
   func testNavigationAndUnconfiguredUpdates() {
     let app = launch()
-    XCTAssertTrue(app.buttons["选择乒乓球视频"].waitForExistence(timeout: 10))
+    XCTAssertTrue(app.buttons["selectVideos"].waitForExistence(timeout: 10))
     capture(app, "home")
     app.buttons["设置"].click()
     XCTAssertTrue(app.staticTexts["更新尚未配置"].waitForExistence(timeout: 5))
@@ -36,7 +36,7 @@ import XCTest
       .allObjects.compactMap { $0 as? URL }.filter { $0.lastPathComponent == "source.mp4" }
     let video = try XCTUnwrap(videos.first)
     let app = launch(video: video.path)
-    let surface = app.otherElements["calibrationSurface"]
+    let surface = app.descendants(matching: .any)["calibrationSurface"]
     XCTAssertTrue(surface.waitForExistence(timeout: 20))
     for point in [
       CGVector(dx: 0.2, dy: 0.35), CGVector(dx: 0.8, dy: 0.35), CGVector(dx: 0.9, dy: 0.9),
@@ -45,7 +45,7 @@ import XCTest
     XCTAssertTrue(app.buttons["开始分析"].isEnabled)
     capture(app, "manual-calibration")
     app.buttons["开始分析"].click()
-    let custom = app.buttons["自定义"]
+    let custom = app.descendants(matching: .any).matching(identifier: "自定义").firstMatch
     XCTAssertTrue(custom.waitForExistence(timeout: 60))
     custom.click()
     XCTAssertTrue(app.buttons["增加回合"].waitForExistence(timeout: 10))

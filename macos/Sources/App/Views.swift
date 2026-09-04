@@ -168,7 +168,7 @@ struct DropCard: View {
       ).overlay(
         RoundedRectangle(cornerRadius: 16).strokeBorder(style: StrokeStyle(lineWidth: 2, dash: [8]))
           .foregroundStyle(.quaternary))
-    }.buttonStyle(.plain).dropDestination(for: URL.self) { urls, _ in
+    }.buttonStyle(.plain).accessibilityIdentifier("selectVideos").dropDestination(for: URL.self) { urls, _ in
       accept(urls)
       return !urls.isEmpty
     }

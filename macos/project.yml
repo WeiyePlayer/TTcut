@@ -13,7 +13,8 @@ settings:
     SWIFT_VERSION: '5.10'
     CODE_SIGN_IDENTITY: '-'
     CODE_SIGN_STYLE: Manual
-    ENABLE_HARDENED_RUNTIME: YES
+    # Ad-hoc builds have no Team ID for library validation. Developer ID is out of scope.
+    ENABLE_HARDENED_RUNTIME: NO
     ENABLE_APP_SANDBOX: NO
     CLANG_CXX_LANGUAGE_STANDARD: c++17
 packages:
