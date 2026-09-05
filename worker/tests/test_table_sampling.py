@@ -84,7 +84,7 @@ def video_metadata(*, frame_count: int | None, duration_seconds: float, fps: flo
     }
 
 
-def test_sampling_seeks_to_five_fixed_frames_without_copying(monkeypatch):
+def test_sampling_seeks_to_eleven_interior_frames_without_copying(monkeypatch):
     capture = FakeCapture(100, 10.0)
     monkeypatch.setattr(cv2, "VideoCapture", lambda _path: capture)
     progress = []
@@ -95,14 +95,15 @@ def test_sampling_seeks_to_five_fixed_frames_without_copying(monkeypatch):
         lambda stage, current, total: progress.append((stage, current, total)),
     )
 
-    assert [sample[0] for sample in samples] == [0, 25, 50, 75, 99]
-    assert capture.read_indices == [0, 25, 50, 75, 99]
+    assert [sample[0] for sample in samples] == [5, 14, 23, 32, 41, 50, 58, 67, 76, 85, 94]
+    assert capture.read_indices == [5, 14, 23, 32, 41, 50, 58, 67, 76, 85, 94]
     assert all(sample[2] is capture.frames[sample[0]] for sample in samples)
-    assert info["decoded_frame_count"] == 5
-    assert info["seek_count"] == 5
+    assert info["decoded_frame_count"] == 11
+    assert info["seek_count"] == 11
+    assert info["sample_count"] == 11
     assert info["copied_frame_count"] == 0
-    assert progress[0] == ("table_sampling", 0, 5)
-    assert progress[-1] == ("table_sampling", 5, 5)
+    assert progress[0] == ("table_sampling", 0, 11)
+    assert progress[-1] == ("table_sampling", 11, 11)
 
 
 def test_sampling_uses_duration_when_frame_count_is_missing(monkeypatch):
@@ -122,10 +123,10 @@ def test_sampling_uses_duration_when_frame_count_is_missing(monkeypatch):
     )
 
     assert len(created) == 1
-    assert [sample[0] for sample in samples] == [0, 25, 50, 75, 99]
-    assert capture.read_indices == [0, 25, 50, 75, 99]
+    assert [sample[0] for sample in samples] == [5, 14, 23, 32, 41, 50, 59, 68, 77, 86, 95]
+    assert capture.read_indices == [5, 14, 23, 32, 41, 50, 59, 68, 77, 86, 95]
     assert info["metadata_frame_count"] == 0
-    assert info["decoded_frame_count"] == 5
+    assert info["decoded_frame_count"] == 11
 
 
 def test_time_seek_decodes_forward_from_keyframe_preroll(monkeypatch):
@@ -143,6 +144,9 @@ def test_time_seek_decodes_forward_from_keyframe_preroll(monkeypatch):
         lambda *_args: None,
     )
 
-    assert [sample[0] for sample in samples] == [0, 25, 50, 75, 99]
-    assert capture.read_indices == [0, 23, 24, 25, 48, 49, 50, 73, 74, 75, 97, 98, 99]
+    assert [sample[0] for sample in samples] == [5, 14, 23, 32, 41, 50, 59, 68, 77, 86, 95]
+    assert capture.read_indices == [
+        3, 4, 5, 12, 13, 14, 21, 22, 23, 30, 31, 32, 39, 40, 41, 48, 49, 50,
+        57, 58, 59, 66, 67, 68, 75, 76, 77, 84, 85, 86, 93, 94, 95,
+    ]
     assert info["decoded_frame_count"] == len(capture.read_indices)

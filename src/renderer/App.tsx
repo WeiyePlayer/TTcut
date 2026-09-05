@@ -21,7 +21,7 @@ import type { AppEvent, BootstrapData, PendingComponentImport, SelectedVideo } f
 import { DONATION_URL, GITHUB_URL, RELEASES_URL, WEBSITE_URL } from '../shared/urls';
 import { formatTimestamp } from '../domain/time';
 import { createCustomClipDraft, customExportSegments, setCustomClipSelected, type CustomRallyClip } from '../domain/custom-clips';
-import { validateCalibration } from '../domain/calibration';
+import { normalizeCalibrationPoints, validateCalibration } from '../domain/calibration';
 import { isSupportedVideoFileName } from '../domain/video-input';
 import { isSupportPromptSuppressed, suppressSupportPromptForThirtyDays } from '../domain/support-prompt';
 import { interpolate, messages, type Language, type Messages } from './i18n';
@@ -312,7 +312,7 @@ export function App() {
   const calibrationValue: Calibration | null = metadata && allPoints ? {
     video_width: metadata.width,
     video_height: metadata.height,
-    points: points as Calibration['points'],
+    points: normalizeCalibrationPoints(pointOrder.map((name) => points[name]!)),
   } : null;
   const calibrationIssue = calibrationValue ? validateCalibration(calibrationValue) : null;
   const analysisUsesContinuousVisibility = analysis ? rallyRecognitionMethod(analysis) === 'continuous_visibility' : false;
@@ -900,7 +900,7 @@ export function App() {
                   <CalibrationSurface video={video} metadata={metadata} points={points} onPointsChange={setPoints} />
                   <div className="point-legend">{[t.point1, t.point2, t.point3, t.point4].map((label, index) => <span className={points[pointOrder[index]!] ? 'done' : ''} key={label}><b>{index + 1}</b>{label.replace(/^\d\s/, '')}</span>)}</div>
                   {calibrationIssue && <p className="calibration-error" role="alert">{t.invalidCalibration}</p>}
-                </> : <div className="card automatic-calibration"><span>⌖</span><div><h2>{settings.language === 'zh-CN' ? '自动球台标定' : 'Automatic table calibration'}</h2><p>{settings.language === 'zh-CN' ? '将识别首帧、25%、50%、75% 和尾帧，并融合为固定球台标定。' : 'The first, 25%, 50%, 75%, and final frames are combined into one fixed table calibration.'}</p></div></div>}
+                </> : <div className="card automatic-calibration"><span>⌖</span><div><h2>{settings.language === 'zh-CN' ? '自动球台标定' : 'Automatic table calibration'}</h2><p>{settings.language === 'zh-CN' ? '将从视频多个位置识别球台，并通过跨帧几何一致性生成固定标定。' : 'The table is detected at multiple video positions and combined using cross-frame geometric consistency.'}</p></div></div>}
                 <div className="footer-actions">{useManualCalibration && <button className="secondary" onClick={() => setPoints({})}>{t.resetPoints}</button>}<button className="primary" disabled={(useManualCalibration && (!allPoints || Boolean(calibrationIssue))) || !platformSupported || !bootstrap?.components.analysis.available} onClick={() => void startAnalysis()}>{t.startAnalysis}</button></div>
               </div>
             )}
