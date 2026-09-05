@@ -14,6 +14,15 @@ import {
 import type { AnalysisResultV1, BounceRally, CustomExportSegmentInput } from '../src/shared/contracts';
 import { cutSelectionSchema, exportRequestSchema } from '../src/shared/contracts';
 
+it('limits only the default continuous lead-in after a transfer and preserves manual handles', () => {
+  const detected = { id: 'rally_001', index: 1, start_time_seconds: 10, end_time_seconds: 15, lead_in_start_time_seconds: 9 };
+  const clips = createCustomClipDraft([detected], 2.5, 1, 30, 30, 'continuous_visibility');
+  expect(clips[0]).toMatchObject({ start: 9, end: 16, defaultStart: 9 });
+  const manuallyExtended = clips.map((clip) => ({ ...clip, start: 8 }));
+  expect(customExportSegments(manuallyExtended)[0]).toMatchObject({ start_time_seconds: 8, end_time_seconds: 16 });
+  expect(createCustomClipDraft([detected], 0, 0, 30, 30, 'continuous_visibility')[0]).toMatchObject({ start: 10, end: 15 });
+});
+
 function rally(id: string, index: number, start: number, end: number): BounceRally {
   return { id, index, bounce_count: index + 2, start_time_seconds: start, end_time_seconds: end };
 }

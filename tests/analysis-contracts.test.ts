@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { analysisRequestSchema, analysisResultSchema } from '../src/shared/contracts';
+import { analysisRequestSchema, analysisResultSchema, continuousVisibilityRallySchema } from '../src/shared/contracts';
+
+it('preserves an optional transfer boundary while accepting older rallies', () => {
+  const rally = { id: 'rally_001', index: 1, start_time_seconds: 10, end_time_seconds: 15 };
+  expect(continuousVisibilityRallySchema.parse(rally)).toEqual(rally);
+  expect(continuousVisibilityRallySchema.parse({ ...rally, lead_in_start_time_seconds: 9 }).lead_in_start_time_seconds).toBe(9);
+  expect(continuousVisibilityRallySchema.safeParse({ ...rally, lead_in_start_time_seconds: 11 }).success).toBe(false);
+});
 
 const base = {
   task_id: '22222222-2222-4222-8222-222222222222',

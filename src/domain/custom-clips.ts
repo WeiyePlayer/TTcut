@@ -6,7 +6,7 @@ import type {
   Rally,
   RallyRecognitionMethod,
 } from '../shared/contracts';
-import { finalRallyTailSeconds } from './segments';
+import { finalRallyTailSeconds, rallyLeadInStart } from './segments';
 
 const EPSILON = 1e-6;
 const PRECISION = 1_000_000;
@@ -105,7 +105,7 @@ export function createCustomClipDraft(
 ): CustomRallyClip[] {
   const minimumDuration = frameDuration(fps);
   const clips = orderedRallies(rallies).map((rally) => {
-    const defaultStart = seconds(Math.max(0, rally.start_time_seconds - preRollSeconds));
+    const defaultStart = seconds(rallyLeadInStart(rally, preRollSeconds, recognitionMethod));
     const defaultEnd = seconds(Math.min(
       videoDuration,
       rally.end_time_seconds + finalRallyTailSeconds(recognitionMethod) + postRollSeconds,

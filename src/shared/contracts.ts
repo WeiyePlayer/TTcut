@@ -259,9 +259,14 @@ export const continuousVisibilityRallySchema = z.object({
   index: z.number().int().positive(),
   start_time_seconds: finiteNumber.nonnegative(),
   end_time_seconds: finiteNumber.positive(),
+  lead_in_start_time_seconds: finiteNumber.nonnegative().optional(),
 }).strict().refine(
   (rally) => rally.end_time_seconds > rally.start_time_seconds,
   { message: 'Rally end time must be after start time' },
+).refine(
+  (rally) => rally.lead_in_start_time_seconds === undefined
+    || rally.lead_in_start_time_seconds <= rally.start_time_seconds,
+  { message: 'Rally lead-in must not start after the rally' },
 );
 
 export const rallySchema = z.union([bounceRallySchema, continuousVisibilityRallySchema]);
@@ -387,7 +392,7 @@ export const continuousVisibilityAnalysisResultV2Schema = analysisResultBaseSche
       expanded_table_length_margin_cm: finiteNumber.nonnegative(),
       expanded_table_width_margin_cm: finiteNumber.nonnegative(),
       motion_refinement: z.object({
-        version: z.literal(2),
+        version: z.union([z.literal(2), z.literal(3)]),
         minimum_motion_run_seconds: finiteNumber.positive(),
         minimum_horizontal_range_ratio: finiteNumber.positive(),
         minimum_speed_ratio_per_second: finiteNumber.positive(),

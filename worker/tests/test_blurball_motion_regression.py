@@ -17,6 +17,34 @@ from ttcut_worker.types import TrajectoryPoint
 from ttcut_worker.visibility_rallies import VisibilityMotionConfig
 
 
+def test_user_labeled_passes_are_removed_without_moving_other_rallies() -> None:
+    payload = json.loads(gzip.decompress(
+        (Path(__file__).parent / "fixtures/visibility-slow-pass-c51.json.gz").read_bytes(),
+    ))
+    value = payload["calibration"]
+    calibration = TableCalibration.from_points(value["video_width"], value["video_height"], [
+        value["points"][key] for key in ("top_left", "top_right", "bottom_right", "bottom_left")
+    ])
+    rallies = blurball_visibility_rallies(
+        [TrajectoryPoint(*point) for point in payload["trajectory"]], payload["fps"], calibration,
+        motion_config=VisibilityMotionConfig(payload["width"], payload["height"]),
+    )
+    expected = [(index, bounds) for index, bounds in enumerate(payload["before"], 1)
+                if index not in payload["drop_indices"]]
+    assert len(rallies) == len(expected) == 40
+    for rally, (index, bounds) in zip(rallies, expected):
+        # No boundary tolerance is needed: every kept source frame is unchanged.
+        assert [rally.start_time, rally.end_time] == bounds
+        if index == 43:
+            assert rally.lead_in_start_time == pytest.approx(474.4, abs=0.001)
+            assert rally.lead_in_start_time < rally.start_time
+        elif index in (28, 30):
+            previous_pass_end = payload["before"][index - 2][1]
+            assert rally.lead_in_start_time == pytest.approx(previous_pass_end + 1 / payload["fps"])
+        else:
+            assert rally.lead_in_start_time is None
+
+
 def test_real_rallies_match_manual_clips_without_splitting_exchanges() -> None:
     payload = json.loads(gzip.decompress(
         (Path(__file__).parent / "fixtures/visibility-motion-c51.json.gz").read_bytes(),

@@ -16,6 +16,12 @@ export function finalRallyTailSeconds(method: RallyRecognitionMethod): number {
   return method === 'bounce_events' ? FINAL_RALLY_TAIL_SECONDS : 0;
 }
 
+export function rallyLeadInStart(rally: Rally, preRollSeconds: number, method: RallyRecognitionMethod): number {
+  const boundary = method === 'continuous_visibility' && 'lead_in_start_time_seconds' in rally
+    ? rally.lead_in_start_time_seconds ?? 0 : 0;
+  return Math.max(0, rally.start_time_seconds - preRollSeconds, Math.min(rally.start_time_seconds, boundary));
+}
+
 export class SelectionError extends Error {
   constructor(public readonly code: 'NO_RALLIES' | 'NO_HIGHLIGHTS' | 'NO_CUSTOM_SELECTION' | 'INVALID_HIGHLIGHT_CRITERION') {
     super(code);
@@ -98,7 +104,8 @@ export function buildCutGroups(
 
   const expanded: CutGroup[] = [];
   for (const group of raw) {
-    const start = Math.max(0, group.rawStart - preRollSeconds);
+    const firstRally = ordered.find((rally) => rally.id === group.rallyIds[0])!;
+    const start = rallyLeadInStart(firstRally, preRollSeconds, recognitionMethod);
     // Only bounce recognition needs the fixed tail; always apply the configured roll.
     const end = Math.min(videoDuration, group.rawEnd + finalRallyTailSeconds(recognitionMethod) + postRollSeconds);
     if (end <= start) continue;

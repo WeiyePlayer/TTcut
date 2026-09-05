@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from bisect import bisect_left, bisect_right
+from dataclasses import replace
 from typing import Sequence
 
 from .calibration import TABLE_LENGTH_CM, TABLE_WIDTH_CM, TableCalibration
@@ -37,6 +38,10 @@ BLURBALL_MOTION_CLUSTER_SHORT_GAP_SECONDS = 1.25
 BLURBALL_MOTION_CLUSTER_LONG_GAP_SECONDS = 2.25
 BLURBALL_MOTION_CLUSTER_MINIMUM_STATIONARY_RUN_SECONDS = 0.50
 BLURBALL_MOTION_CLUSTER_BOUNDARY_CONTEXT_SECONDS = 0.25
+BLURBALL_SLOW_TRANSFER_MINIMUM_SECONDS = 0.85
+BLURBALL_SLOW_TRANSFER_MINIMUM_DISPLACEMENT_RATIO = 0.30
+BLURBALL_SLOW_TRANSFER_MAXIMUM_SPEED_RATIO = 0.85
+BLURBALL_SLOW_TRANSFER_FAST_FLIGHT_SPEED_RATIO = 1.0
 
 
 def blurball_inter_rally_filter_provenance() -> dict[str, object]:
@@ -68,7 +73,7 @@ def blurball_inter_rally_filter_provenance() -> dict[str, object]:
             BLURBALL_INTER_RALLY_FILTER_EXPANDED_TABLE_WIDTH_MARGIN_CM
         ),
         "motion_refinement": {
-            "version": 2,
+            "version": 3,
             "minimum_motion_run_seconds": BLURBALL_MOTION_RUN_MINIMUM_SECONDS,
             "minimum_horizontal_range_ratio": BLURBALL_MOTION_RUN_MINIMUM_HORIZONTAL_RANGE_RATIO,
             "minimum_speed_ratio_per_second": BLURBALL_MOTION_MINIMUM_SPEED_RATIO_PER_SECOND,
@@ -93,7 +98,8 @@ def blurball_visibility_rallies(
     """Refine visible candidates using sustained motion, pauses and transfers.
 
     Missing detections are never movement evidence. All boundaries remain real
-    visible source frames; neither the detector nor the export padding changes.
+    visible source frames. A separate lead-in hint keeps observed transfers out
+    of automatic padding without changing the detector or the serve boundary.
     """
     base = continuous_visibility_rallies(points, fps, motion_config=motion_config)
     if not base or motion_config.vertical_exchange_enabled:
@@ -106,7 +112,76 @@ def blurball_visibility_rallies(
         if _is_inter_rally_fragment(rally, segment, calibration, motion_config):
             continue
         accepted.extend(_refine_motion_candidate(rally, segment, fps, calibration, motion_config))
-    return tuple(accepted)
+    refined: list[VisibilityRallySummary] = []
+    last_rejected: VisibilityRallySummary | None = None
+    for rally in accepted:
+        segment = ordered[bisect_left(frames, rally.start_frame):bisect_right(frames, rally.end_frame)]
+        if _slow_transfer_runs(segment, calibration, motion_config):
+            last_rejected = rally
+            continue
+        # Only trim automatic padding, never move the observed rally/serve start.
+        # A recent observed slow pass is positive evidence; missing frames alone
+        # cannot shorten the configured lead-in.
+        preceding = [point for point in ordered[
+            bisect_left(frames, rally.start_frame - math.ceil(fps * 3)):bisect_left(frames, rally.start_frame)
+        ] if point.time >= rally.start_time - 3 and (
+            not refined or point.time > refined[-1].end_time
+        )]
+        transfers = _slow_transfer_runs(preceding, calibration, motion_config)
+        if transfers and rally.start_time - transfers[-1][-1].time <= BLURBALL_MOTION_CLUSTER_SHORT_GAP_SECONDS:
+            boundary = transfers[-1][-1].time + 1 / fps
+            rally = replace(rally, lead_in_start_time=min(rally.start_time, boundary))
+        if last_rejected is not None and 0 <= rally.start_time - last_rejected.end_time <= 3:
+            # Removing a candidate also removes its overlap with the next clip.
+            # Do not let the next clip's automatic padding restore that pass.
+            boundary = min(rally.start_time, last_rejected.end_time + 1 / fps)
+            rally = replace(rally, lead_in_start_time=max(rally.lead_in_start_time or 0, boundary))
+        refined.append(rally)
+    return tuple(refined)
+
+
+def _slow_transfer_runs(
+    points: Sequence[TrajectoryPoint], calibration: TableCalibration,
+    config: VisibilityMotionConfig,
+) -> tuple[tuple[TrajectoryPoint, ...], ...]:
+    """Positive slow-flight evidence, with sparse serves/returns protected.
+
+    Repeated passes can reverse direction between visible runs. A reversal alone
+    is therefore insufficient; genuine fast flights and observed table flights
+    veto this conservative filter. Speeds use elapsed source time and ROI width.
+    """
+    width = config.analysis_width_pixels
+    runs = [run for run in _contiguous_visible_runs([
+        point for point in points if point.visibility == 1
+    ]) if run[-1].time - run[0].time + 1e-9 >= 0.1]
+    slow: list[tuple[TrajectoryPoint, ...]] = []
+    for run in runs:
+        duration = run[-1].time - run[0].time
+        displacement = abs(run[-1].x - run[0].x) / width
+        span = (max(point.x for point in run) - min(point.x for point in run)) / width
+        if _motion_reversals(run, width):
+            return ()
+        if span >= 0.15 and span / duration >= BLURBALL_SLOW_TRANSFER_FAST_FLIGHT_SPEED_RATIO:
+            return ()
+        if displacement >= 0.30 and _table_activity_ratios(run, calibration)[1] >= 0.60:
+            return ()
+        if (duration >= BLURBALL_SLOW_TRANSFER_MINIMUM_SECONDS
+                and displacement >= BLURBALL_SLOW_TRANSFER_MINIMUM_DISPLACEMENT_RATIO
+                and span / duration < BLURBALL_SLOW_TRANSFER_MAXIMUM_SPEED_RATIO):
+            slow.append(run)
+    if len(slow) == 1:
+        flight = slow[0]
+        # A slow serve followed immediately by a shorter opposite flight is
+        # still an exchange even if neither flight meets the fast-flight gate.
+        if any(
+            0 <= run[0].time - flight[-1].time <= 0.5
+            and run[-1].time - run[0].time <= 0.75
+            and abs(run[-1].x - run[0].x) >= width * 0.30
+            and (run[-1].x - run[0].x) * (flight[-1].x - flight[0].x) < 0
+            for run in runs
+        ):
+            return ()
+    return tuple(slow)
 
 
 def _trim_slow_run_tail(

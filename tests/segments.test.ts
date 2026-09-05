@@ -13,6 +13,14 @@ function rally(id: string, start: number, end: number, bounceCount = 4, index = 
 }
 
 describe('buildCutGroups', () => {
+  it('stops continuous lead-in at an observed transfer without moving the rally', () => {
+    const detected = { id: 'rally_001', index: 1, start_time_seconds: 10, end_time_seconds: 15, lead_in_start_time_seconds: 9 };
+    expect(buildCutGroups([detected], 2.5, 1, 30, 'continuous_visibility')[0]).toMatchObject({
+      start: 9, end: 16, rawStart: 10, rawEnd: 15,
+    });
+    expect(buildCutGroups([detected], 0.5, 1, 30, 'continuous_visibility')[0]?.start).toBe(9.5);
+    expect(buildCutGroups([detected], 2.5, 1, 30, 'bounce_events')[0]).toMatchObject({ start: 7.5, end: 17 });
+  });
   it('merges a 4.999 second gap', () => {
     expect(buildCutGroups([rally('rally_001', 10, 15), rally('rally_002', 19.999, 21)], 0, 0, 60)).toHaveLength(1);
   });

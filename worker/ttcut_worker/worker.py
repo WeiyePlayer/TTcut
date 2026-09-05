@@ -264,6 +264,8 @@ def analyze(request: dict) -> dict:
         }
         if recognition_method == "bounce_events":
             item["bounce_count"] = rally.bounce_count
+        elif rally.lead_in_start_time is not None:
+            item["lead_in_start_time_seconds"] = round(max(0.0, min(start, rally.lead_in_start_time)), 6)
         normalized.append(item)
     emit({"type": "progress", "task_id": task_id, "stage": "postprocess", "current": 1, "total": 1, "percent": 100.0})
     result = {
