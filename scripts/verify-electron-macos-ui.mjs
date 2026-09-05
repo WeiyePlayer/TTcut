@@ -49,7 +49,7 @@ try {
     await page.screenshot({path:path.join(run,'batch-zh.png')});
   });
   await check('explicit menu quit confirms cancellation and waits for cleanup',async()=>{
-    await page.evaluate(async videoPath=>window.ttcut.startAnalysis({videoPath,calibrationChoice:{method:'manual',calibration:{video_width:320,video_height:180,points:{top_left:[60,40],top_right:[250,40],bottom_right:[275,145],bottom_left:[40,145]}}},device:'auto',historyVisibility:'visible',analysisMode:'full',normalizeVariableFrameRate:false,blurballConfidenceThreshold:0.7,blurballStage1ConfidenceThreshold:0.3,blurballStage2ConfidenceThreshold:0.7}),media[0]);
+    await page.evaluate(async videoPath=>window.ttcut.startAnalysis({videoPath,calibrationChoice:{method:'manual',calibration:{video_width:320,video_height:180,points:{top_left:[60,40],top_right:[250,40],bottom_right:[275,145],bottom_left:[40,145]}}},device:'auto',historyVisibility:'visible',analysisMode:'full',rallyRecognitionMethod:'continuous_visibility',normalizeVariableFrameRate:false,blurballConfidenceThreshold:0.7,blurballStage1ConfidenceThreshold:0.3,blurballStage2ConfidenceThreshold:0.7}),media[0]);
     // This is the same app.quit path used by the native app menu and Cmd+Q.
     await instance.evaluate(({app})=>app.quit());
     await expect(page.getByRole('dialog')).toBeVisible();

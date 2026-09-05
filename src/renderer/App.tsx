@@ -124,6 +124,8 @@ export function App() {
   const [closeDialog, setCloseDialog] = useState(false);
   const [languageTransition, setLanguageTransition] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [videoSelectionPending, setVideoSelectionPending] = useState(false);
+  const videoSelectionPendingRef = useRef(false);
   const [setupTask, setSetupTask] = useState<string | null>(null);
   const setupTaskRef = useRef<string | null>(null);
   const multiActiveRef = useRef(false);
@@ -312,7 +314,21 @@ export function App() {
     setMultiVideos(selected);
     setView('multi');
   };
-  const choose = async () => acceptVideos(await window.ttcut.selectVideos());
+  const loadSelectedVideos = async (load: () => Promise<SelectedVideo[]>) => {
+    if (videoSelectionPendingRef.current) return;
+    videoSelectionPendingRef.current = true;
+    setVideoSelectionPending(true);
+    try {
+      await acceptVideos(await load());
+    } catch (caught) {
+      setError({ code: errorCode(caught) });
+      setStep('error');
+    } finally {
+      videoSelectionPendingRef.current = false;
+      setVideoSelectionPending(false);
+    }
+  };
+  const choose = async () => loadSelectedVideos(() => window.ttcut.selectVideos());
   const allPoints = metadata && pointOrder.every((name) => points[name]);
   const calibrationValue: Calibration | null = metadata && allPoints ? {
     video_width: metadata.width,
@@ -880,21 +896,22 @@ export function App() {
                 <button
                   type="button"
                   className={`drop-zone ${dragging ? 'dragging' : ''}`}
+                  disabled={videoSelectionPending}
+                  aria-busy={videoSelectionPending}
                   onClick={() => void choose()}
-                  onDragEnter={(event) => { event.preventDefault(); setDragging(true); }}
+                  onDragEnter={(event) => { event.preventDefault(); if (!videoSelectionPending) setDragging(true); }}
                   onDragOver={(event) => event.preventDefault()}
                   onDragLeave={() => setDragging(false)}
                   onDrop={(event) => {
                     event.preventDefault(); setDragging(false);
+                    if (videoSelectionPending) return;
                     const files = [...event.dataTransfer.files].filter((file) => isSupportedVideoFileName(file.name));
                     if (!files.length) { setToast(t.invalidFile); return; }
-                    void Promise.all(files.map((file) => window.ttcut.acceptDroppedVideo(window.ttcut.pathForDroppedFile(file)))).then(acceptVideos).catch(() => {
-                      setError({ code: 'INVALID_INPUT' }); setStep('error');
-                    });
+                    void loadSelectedVideos(() => Promise.all(files.map((file) => window.ttcut.acceptDroppedVideo(window.ttcut.pathForDroppedFile(file)))));
                   }}
                 >
-                  <span className="drop-icon" aria-hidden="true">＋</span>
-                  <strong>{t.chooseVideo}</strong>
+                  <span className="drop-icon" aria-hidden="true">{videoSelectionPending ? '…' : '＋'}</span>
+                  <strong>{videoSelectionPending ? t.stages.probe : t.chooseVideo}</strong>
                 </button>
               </div>
             )}

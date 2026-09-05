@@ -131,6 +131,7 @@ button:disabled { cursor: not-allowed !important; opacity: 0.42; transform: none
 .drop-zone:hover, .drop-zone.dragging { border-color: var(--blue); background: #f7faff; box-shadow: var(--shadow); }
 .drop-zone.dragging { transform: scale(1.012); }
 .drop-zone:active { transform: scale(0.995); }
+.drop-zone:disabled { cursor: progress !important; opacity: .78; transform: none; box-shadow: none; }
 .drop-zone strong { font-size: 17px; font-weight: 400; }
 .drop-icon { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 50%; background: var(--blue); color: white; font-size: 28px; font-weight: 300; }
 

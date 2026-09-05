@@ -106,6 +106,13 @@ describe('App workflow notices and multi-task entry', () => {
       revealLogs: vi.fn().mockResolvedValue(undefined),
       revealOutput: vi.fn().mockResolvedValue(undefined),
       selectVideos,
+      pathForDroppedFile: vi.fn((file: File) => `C:\\video\\${file.name}`),
+      acceptDroppedVideo: vi.fn((path: string) => Promise.resolve({
+        path,
+        name: path.split('\\').at(-1) ?? path,
+        size: 100,
+        mediaUrl: 'ttcut-media://dropped',
+      })),
       probeVideo: vi.fn((path: string) => Promise.resolve(metadata(path))),
       startAutoCalibration: vi.fn().mockResolvedValue('calibration-task-1'),
       startAnalysis: vi.fn().mockResolvedValue('analysis-task-1'),
@@ -162,6 +169,48 @@ describe('App workflow notices and multi-task entry', () => {
     expect(screen.queryByText('选择 MP4 或 MOV 比赛视频开始本地分析，支持多任务批量处理。')).toBeNull();
     expect(screen.queryByText('或将 MP4 / MOV 文件拖到这里')).toBeNull();
     expect(screen.queryByText(/单个|一次只能处理一个/)).toBeNull();
+  });
+
+  it('shows video probe progress and advances after metadata is ready', async () => {
+    const selected = {
+      path: 'C:\\video\\long-match.mp4', name: 'long-match.mp4', size: 100, mediaUrl: 'ttcut-media://long-match',
+    };
+    let resolveProbe!: (value: VideoMetadata) => void;
+    selectVideos.mockResolvedValue([selected]);
+    vi.mocked(window.ttcut.probeVideo).mockImplementationOnce(() => new Promise((resolve) => { resolveProbe = resolve; }));
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '选择或将文件拖到这里' }));
+
+    const loading = await screen.findByRole('button', { name: '正在读取视频' });
+    expect(loading).toBeDisabled();
+    expect(loading).toHaveAttribute('aria-busy', 'true');
+
+    await act(async () => resolveProbe(metadata(selected.path)));
+    expect(await screen.findByRole('heading', { name: '标定球桌' })).toBeVisible();
+  });
+
+  it('accepts a dropped video and advances after probing it', async () => {
+    const file = new File(['video'], '拖放比赛.mp4', { type: 'video/mp4' });
+    render(<App />);
+
+    const dropZone = await screen.findByRole('button', { name: '选择或将文件拖到这里' });
+    fireEvent.drop(dropZone, { dataTransfer: { files: [file] } });
+
+    expect(await screen.findByRole('heading', { name: '标定球桌' })).toBeVisible();
+    expect(window.ttcut.pathForDroppedFile).toHaveBeenCalledWith(file);
+    expect(window.ttcut.acceptDroppedVideo).toHaveBeenCalledWith('C:\\video\\拖放比赛.mp4');
+    expect(window.ttcut.probeVideo).toHaveBeenCalledWith('C:\\video\\拖放比赛.mp4');
+  });
+
+  it('reports a file-picker failure instead of leaving the selection page stuck', async () => {
+    selectVideos.mockRejectedValue(new Error('INVALID_INPUT'));
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '选择或将文件拖到这里' }));
+
+    expect(await screen.findByRole('heading', { name: '无法完成操作' })).toBeVisible();
+    expect(screen.getByText('INVALID_INPUT')).toBeVisible();
   });
 
   it('groups both timing controls into one card and applies the glass-radio style to settings choices', async () => {

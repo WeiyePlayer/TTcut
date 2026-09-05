@@ -4,55 +4,11 @@ import TTcutCore
 public struct MediaProbe: Sendable {
   public let paths: RuntimePaths
   public init(paths: RuntimePaths) { self.paths = paths }
-  private final class Timeline: @unchecked Sendable {
-    var last: Double?
-    var first: Double?
-    var shortest = Double.infinity
-    var longest = 0.0
-    var count = 0
-    var invalid = false
-    var hdr10Plus = false
-    var dolbyVision = false
-    func accept(_ line: String) {
-      if line.contains("HDR10+") || line.contains("HDR Dynamic Metadata SMPTE2094-40") {
-        hdr10Plus = true
-      }
-      if line.contains("DOVI") || line.contains("Dolby Vision") { dolbyVision = true }
-      for component in line.split(separator: "|")
-      where component.hasPrefix("best_effort_timestamp_time=") {
-        let value = component.dropFirst("best_effort_timestamp_time=".count)
-        guard let time = Double(value), time.isFinite else {
-          invalid = true
-          continue
-        }
-        if let last {
-          let delta = time - last
-          if delta <= 0 {
-            invalid = true
-          } else {
-            shortest = min(shortest, delta)
-            longest = max(longest, delta)
-          }
-        }
-        if first == nil { first = time }
-        last = time
-        count += 1
-      }
-    }
-  }
-  private func scan(_ url: URL) async throws -> Timeline {
-    let timeline = Timeline()
-    _ = try await ProcessRunner.run(
-      paths.ffprobe,
-      [
-        "-v", "error", "-select_streams", "v:0", "-show_frames", "-show_entries",
-        "frame=best_effort_timestamp_time:frame_side_data=side_data_type", "-of",
-        "compact=p=0:nk=0", url.path,
-      ], onLine: { timeline.accept($0) })
-    guard timeline.count > 0, !timeline.invalid else {
-      throw TTError("VIDEO_TIMESTAMP_INVALID", "视频帧时间戳缺失或未递增")
-    }
-    return timeline
+  static func frameSampleIntervals(duration: Double) -> String {
+    let positions = [0.0, 0.25, 0.5, 0.75, 0.95].map { max(0, duration * $0) }
+    return positions.map {
+      String(format: "%.6f%%+#8", locale: Locale(identifier: "en_US_POSIX"), $0)
+    }.joined(separator: ",")
   }
   private func json(_ args: [String], url: URL) async throws -> [String: Any] {
     let result = try await ProcessRunner.run(
@@ -126,10 +82,12 @@ public struct MediaProbe: Sendable {
       info.audioDuration = Double(str(a, "duration"))
       info.audioBitrate = Int(num(a, "bit_rate", 192000))
     }
-    // Inspect an actual decoded frame: HEVC static HDR metadata may not live on the stream.
+    // Sample bounded windows across the source. HEVC HDR metadata may only be attached to
+    // decoded frames, while decoding every frame makes selecting a long video appear frozen.
     let frameDocument = try await json(
       [
-        "-select_streams", "v:0", "-read_intervals", "%+#8", "-show_frames", "-show_entries",
+        "-select_streams", "v:0", "-read_intervals", Self.frameSampleIntervals(duration: info.duration),
+        "-show_frames", "-show_entries",
         "frame=best_effort_timestamp_time:frame_side_data",
       ], url: url)
     let frames = frameDocument["frames"] as? [[String: Any]] ?? []
@@ -158,21 +116,16 @@ public struct MediaProbe: Sendable {
     }
     if info.rotation == 90 || info.rotation == 270 { swap(&info.width, &info.height) }
     let times = frames.compactMap { Double(str($0, "best_effort_timestamp_time")) }
+    guard !times.isEmpty else { throw TTError("VIDEO_TIMESTAMP_INVALID", "视频帧时间戳缺失") }
     if times.count > 2 {
-      let deltas = zip(times, times.dropFirst()).map { $1 - $0 }.filter { $0 > 0 }
+      let intervalGap = max(2.0, info.fps > 0 ? 120 / info.fps : 2.0)
+      let deltas = zip(times, times.dropFirst()).map { $1 - $0 }
+        .filter { $0 > 0 && $0 <= intervalGap }
       if let lo = deltas.min(), let hi = deltas.max(),
         hi - lo > max(0.0001, 2 * VideoInfo.ratio(info.videoTimeBase))
       {
         info.variableFrameRate = true
       }
-    }
-    let timeline = try await scan(url)
-    if timeline.hdr10Plus { info.hdr = .hdr10Plus }
-    if timeline.dolbyVision { info.hdr = .dolbyVision }
-    info.frameCount = timeline.count
-    if timeline.longest > 0 {
-      info.variableFrameRate =
-        timeline.longest - timeline.shortest > max(0.0001, 2 * VideoInfo.ratio(info.videoTimeBase))
     }
     try info.validate()
     return info
