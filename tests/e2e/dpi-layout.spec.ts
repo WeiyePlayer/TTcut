@@ -286,6 +286,13 @@ test('neutral controls use the shared hover surface without overriding semantic 
     await expect(postRollToggle.getByRole('radio', { name: '短', exact: true })).toBeVisible();
     await expect(postRollToggle.getByRole('radio', { name: '短', exact: true })).toBeChecked();
     await expect(preRollToggle.getByRole('radio', { name: '1.5 s' })).toHaveCount(0);
+    const rallyRecognition = page.getByRole('radiogroup', { name: '回合识别方式' });
+    await expect(rallyRecognition.getByRole('radio', { name: '连续运动' })).toBeChecked();
+    await expect(rallyRecognition.getByRole('radio', { name: '落台判定' })).toBeVisible();
+    await expect(rallyRecognition.locator('xpath=..')).toHaveCount(1);
+    await expect(rallyRecognition.locator('xpath=../p')).toHaveCount(0);
+    await expect(page.locator('.detector-settings-card')).toHaveCount(0);
+    await page.locator('label[for="settings-rally-recognition-0"]').click();
     const analysisPrecision = page.locator('.detector-settings-card');
     await expect(analysisPrecision.getByRole('heading', { name: '分析精度' })).toBeVisible();
     await expect(analysisPrecision).toContainText('高精模式识别精度很高，花费时间增长。');
@@ -303,11 +310,8 @@ test('neutral controls use the shared hover surface without overriding semantic 
     expect(analysisPrecisionOrder.index).toBe(analysisPrecisionOrder.rallyRecognition + 1);
     expect(analysisPrecisionOrder.normalizeVariableFrameRate).toBe(analysisPrecisionOrder.index + 1);
     expect(analysisPrecisionOrder.calibration).toBe(analysisPrecisionOrder.normalizeVariableFrameRate + 1);
-    const rallyRecognition = page.getByRole('radiogroup', { name: '回合识别方式' });
     await expect(rallyRecognition.getByRole('radio', { name: '落台判定' })).toBeChecked();
     await expect(rallyRecognition.getByRole('radio', { name: '连续运动' })).toBeVisible();
-    await expect(rallyRecognition.locator('xpath=..')).toHaveCount(1);
-    await expect(rallyRecognition.locator('xpath=../p')).toHaveCount(0);
     await page.locator('label[for="settings-rally-recognition-1"]').click();
     await expect(page.locator('.detector-settings-card')).toHaveCount(0);
     await page.locator('label[for="settings-rally-recognition-0"]').click();

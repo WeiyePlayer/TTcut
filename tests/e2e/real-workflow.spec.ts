@@ -223,7 +223,7 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     await page.getByRole('button', { name: '设置' }).click();
     await expect(page.getByRole('heading', { name: '设置', exact: true })).toBeVisible();
     await expect(page.getByRole('heading', { name: '导出方式', exact: true })).toHaveCount(0);
-    await expect(page.getByText('可用', { exact: true })).toHaveCount(2, { timeout: 60_000 });
+    await expect(page.locator('.component-row .status')).toHaveText(['可用', '可用'], { timeout: 60_000 });
     await expect(page.getByText('GPU 加速', { exact: true })).toBeVisible();
     await page.locator('label[for="settings-language-1"]').click();
     await expect(page.locator('.language-loader')).toBeVisible();
@@ -235,10 +235,9 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     await expect(page.getByRole('heading', { name: '回合后时间' })).toBeVisible();
     await page.locator('label[for="settings-pre-roll-0"]').click();
     await page.locator('label[for="settings-post-roll-0"]').click();
-    const analysisPrecision = page.getByRole('radiogroup', { name: '分析精度' });
-    await expect(analysisPrecision.getByRole('radio', { name: '默认' })).toBeChecked();
-    await page.locator('label[for="settings-blurball-mode-1"]').click();
-    await expect(analysisPrecision.getByRole('radio', { name: '高精' })).toBeChecked();
+    const rallyRecognition = page.getByRole('radiogroup', { name: '回合识别方式' });
+    await expect(rallyRecognition.getByRole('radio', { name: '连续运动' })).toBeChecked();
+    await expect(page.locator('.detector-settings-card')).toHaveCount(0);
 
     await page.getByRole('button', { name: '历史剪辑' }).click();
     await expect(page.getByRole('heading', { name: '还没有历史记录' })).toBeVisible();
@@ -468,11 +467,17 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     await expect(page.locator('.timeline-clip')).toHaveCount(recognizedRallies);
     const deletionCandidate = await page.evaluate(() => {
       const viewport = document.querySelector('.timeline-viewport') as HTMLDivElement | null;
+      const track = document.querySelector('.timeline-track-window');
       const duration = Number(document.querySelector('.timeline-playhead')?.getAttribute('aria-valuemax'));
-      if (!viewport || !Number.isFinite(duration)) return null;
-      const oneSecond = Math.max(viewport.clientWidth, viewport.scrollWidth) / duration;
-      const clips = [...document.querySelectorAll<HTMLDivElement>('.timeline-clip')].reverse();
-      const candidate = clips.find((clip) => Number.parseFloat(clip.style.width) >= oneSecond * 1.5);
+      if (!viewport || !track || !Number.isFinite(duration)) return null;
+      const frame = track.getBoundingClientRect();
+      const oneSecond = viewport.scrollWidth / duration;
+      const clips = [...document.querySelectorAll<HTMLDivElement>('.timeline-clip')];
+      const candidate = clips.find((clip) => {
+        const box = clip.getBoundingClientRect();
+        const visibleWidth = Math.min(box.right, frame.right) - Math.max(box.left, frame.left);
+        return visibleWidth >= oneSecond * 1.5;
+      });
       if (!candidate) return null;
       return { clipId: candidate.dataset.clipId };
     });

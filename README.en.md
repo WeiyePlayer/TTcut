@@ -8,7 +8,7 @@ TTcut is a local automatic table-tennis video cutter for players and enthusiasts
 
 Videos, analysis results, and history stay on the local computer. TTcut requires no account, uploads no video, and collects no telemetry. An internet connection is required when installing the resources needed for the first run; analysis, preview, and cutting can run offline after setup.
 
-> The current stable release is `v1.2.11` for Windows x64.
+> The current stable release is `v1.3.0` for Windows x64.
 
 ## Download and installation
 
@@ -20,13 +20,13 @@ Videos, analysis results, and history stay on the local computer. TTcut requires
 
 TTcut detects an NVIDIA GPU automatically and falls back to CPU if accelerated setup or its self-test fails. Its video-processing capability reads media information, cuts and joins segments, and validates exported files.
 
-## What's new in v1.2.11
+## What's new in v1.3.0
 
-- Settings now provides Rally recognition method. The default, Bounce events, retains existing behavior; Continuous visibility is available when bounce events are insufficient but the ball remains visible for a continuous period.
-- Continuous visibility runs with full analysis and filters highlights by duration tiers. Each analysis result stores the method it actually used, and History presents information from that result.
-- Fixed continuous-visibility handling for end segments, short clear rallies, and small-ball footage, and improved runtime-resource installation reliability.
+- Continuous motion is now the default rally-recognition method, with improved handling for short rallies, vertical movement, between-rally passes, and waiting segments.
+- Automatic calibration samples more points across the video and selects a result using stable candidates and table geometry, improving robustness in complex footage.
+- Manual calibration accepts the four table corners in any order and keeps them directly adjustable afterward.
 
-See the [v1.2.11 release notes](docs/release-notes-v1.2.11.en.md) for the complete details.
+See the [v1.3.0 release notes](docs/release-notes-v1.3.0.en.md) for the complete details.
 
 ## Contact the author on WeChat: m2924931661
 
@@ -39,8 +39,8 @@ Feedback, bug reports, and feature suggestions are welcome.
 - In Automatic cutting, select or drag in one `.mp4` file.
 - Automatic calibration samples the video and detects the table by default.
 - Switch to manual calibration when adjustment is needed, then select a clear frame on the timeline.
-- Click the four corners in this order: top-left, top-right, bottom-right, bottom-left. Drag numbered points to correct them.
-- Confirm that the points do not overlap, cross the frame boundary, or use the wrong order, then start analysis.
+- Click the four table corners in any order. After all four are marked, drag the numbered points to correct them.
+- Confirm that the points do not overlap or cross the frame boundary and form a sufficiently large convex quadrilateral, then start analysis.
 - During calibration or mode selection, use Back in the top-left title bar to choose another video.
 
 ![Four-corner table calibration](docs/images/calibration.png)
@@ -52,7 +52,7 @@ The analysis page reports real processing progress. A running task can be cancel
 ### 3. Choose a cutting mode
 
 - **All rallies**: export every valid rally.
-- **Highlights**: filter by the bounce-based count with Bounce events, or by duration tiers with Continuous visibility.
+- **Highlights**: filter by the bounce-based count with Bounce events, or by duration tiers with Continuous motion.
 - **Custom**: open the dedicated timeline to select rallies individually, preview each clip, and adjust its start and end boundaries. You can also create or delete rally clips manually and choose combined MP4, independent MP4, or Premiere-importable FCP7 XML output.
 
 ![Choose a cutting mode](docs/images/cutting-modes.png)
@@ -85,7 +85,7 @@ Select multiple MP4 files in Batch tasks. On entry, TTcut automatically calibrat
 The full installer includes the ball- and table-recognition resources required at runtime; the online installer downloads and verifies them during installation. Local analysis is responsible for:
 
 - automatic or manual table calibration and coordinate mapping;
-- locating the ball and organizing valid rallies with Bounce events or Continuous visibility;
+- locating the ball and organizing valid rallies with Continuous motion or Bounce events;
 - organizing valid rallies with shared table-region, timing, and rally rules;
 - selecting GPU acceleration or CPU processing according to the local environment.
 
@@ -130,7 +130,7 @@ Videos, model weights, and runtime resources required by the real end-to-end wor
 ## Known limitations
 
 - The single-video workflow handles one MP4 or MOV at a time; Batch tasks accepts multiple MP4/MOV files and runs a serial “calibrate first, then process” queue with manual recovery for failed items.
-- With Bounce events, the displayed count is a bounce-event proxy, not a ground-truth paddle-hit count. Continuous visibility does not display a count.
+- With Bounce events, the displayed count is a bounce-event proxy, not a ground-truth paddle-hit count. Continuous motion does not display a count.
 - Windows x64 remains the primary build. Removing the Windows build-number gate does not guarantee that older Windows versions, x86 systems, or ARM64 systems can run every required dependency.
 
 More implementation and release documentation is available under [`docs`](docs).
