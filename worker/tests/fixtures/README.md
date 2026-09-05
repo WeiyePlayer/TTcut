@@ -3,6 +3,8 @@
 These gzip JSON files contain detector coordinates and timestamps, not video frames.
 Production code never loads the fixtures or the reference XML.
 
+- `visibility-stability-c51.json.gz`: deterministic CUDA detector output using the stabilized source-grid crop, three actual manual calibrations, the earlier 40 rally cores and exported XML intervals, and the newly reported mixed pass/serve candidate. Tests require one-to-one complete core coverage, identical boundaries for the two latest calibrations, and stable crop coordinates. The oldest calibration can still retain one extra candidate; the fixture does not label that as an exact-count success. Full repeatability is additionally checked by three fresh packaged runs, not by replaying this fixture.
+
 - `visibility-slow-pass-c51.json.gz`: full detector output reproducing the user's 2026-09-05 12:23 analysis (44 rallies). The user identified original indices 27, 29, 34 and 41 as pure passes, and passing footage in the lead-in of 43. The test removes exactly those four candidates, requires identical raw boundaries for all 40 others, limits 43's automatic lead-in, and prevents neighboring 28/30 from padding back into deleted passes. Indices and source times are fixture annotations, never production rules.
 
 - `visibility-motion-c51.json.gz`: full 14,847-frame BlurBall 0.30 output from the supplied `c51adbd8152598bcc5fb3aee9e0e2aed.mp4`, using the user's latest calibration. Includes source/model SHA-256 values and the 41 source intervals from the independently edited XML. Trajectory entries are `[time, visibility, x, y]`; the array index is the source frame.

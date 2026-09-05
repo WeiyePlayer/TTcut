@@ -392,7 +392,7 @@ export const continuousVisibilityAnalysisResultV2Schema = analysisResultBaseSche
       expanded_table_length_margin_cm: finiteNumber.nonnegative(),
       expanded_table_width_margin_cm: finiteNumber.nonnegative(),
       motion_refinement: z.object({
-        version: z.union([z.literal(2), z.literal(3)]),
+        version: z.union([z.literal(2), z.literal(3), z.literal(4)]),
         minimum_motion_run_seconds: finiteNumber.positive(),
         minimum_horizontal_range_ratio: finiteNumber.positive(),
         minimum_speed_ratio_per_second: finiteNumber.positive(),

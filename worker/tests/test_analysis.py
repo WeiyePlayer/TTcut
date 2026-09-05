@@ -385,7 +385,7 @@ def test_worker_continuous_visibility_skips_bounce_detection_and_records_provena
             "expanded_table_length_margin_cm": 35.0,
             "expanded_table_width_margin_cm": 25.0,
             "motion_refinement": {
-                "version": 3,
+                "version": 4,
                 "minimum_motion_run_seconds": 0.15,
                 "minimum_horizontal_range_ratio": 0.05,
                 "minimum_speed_ratio_per_second": 0.35,

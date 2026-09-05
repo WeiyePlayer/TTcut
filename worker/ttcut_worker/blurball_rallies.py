@@ -73,7 +73,7 @@ def blurball_inter_rally_filter_provenance() -> dict[str, object]:
             BLURBALL_INTER_RALLY_FILTER_EXPANDED_TABLE_WIDTH_MARGIN_CM
         ),
         "motion_refinement": {
-            "version": 3,
+            "version": 4,
             "minimum_motion_run_seconds": BLURBALL_MOTION_RUN_MINIMUM_SECONDS,
             "minimum_horizontal_range_ratio": BLURBALL_MOTION_RUN_MINIMUM_HORIZONTAL_RANGE_RATIO,
             "minimum_speed_ratio_per_second": BLURBALL_MOTION_MINIMUM_SPEED_RATIO_PER_SECOND,
@@ -106,6 +106,16 @@ def blurball_visibility_rallies(
         return base
     ordered = sorted(points, key=lambda point: point.frame)
     frames = [point.frame for point in ordered]
+    # Preserve positive transfer boundaries even when the motion gate rejects
+    # the candidate before the later refinement/slow-pass stages can see it.
+    pass_ends: list[float] = []
+    for candidate in continuous_visibility_rallies(ordered, fps):
+        observed = ordered[
+            bisect_left(frames, candidate.start_frame - math.ceil(fps * 0.2)):
+            bisect_right(frames, candidate.end_frame)
+        ]
+        if _slow_transfer_runs(observed, calibration, motion_config):
+            pass_ends.append(candidate.end_time)
     accepted: list[VisibilityRallySummary] = []
     for rally in base:
         segment = ordered[bisect_left(frames, rally.start_frame):bisect_right(frames, rally.end_frame)]
@@ -115,7 +125,11 @@ def blurball_visibility_rallies(
     refined: list[VisibilityRallySummary] = []
     last_rejected: VisibilityRallySummary | None = None
     for rally in accepted:
-        segment = ordered[bisect_left(frames, rally.start_frame):bisect_right(frames, rally.end_frame)]
+        if rally.end_time - rally.start_time < 0.6:
+            continue
+        # Confirmation may start after a brief detector dropout. Include only
+        # the small observed prefix when checking whether this is a slow pass.
+        segment = ordered[bisect_left(frames, rally.start_frame - math.ceil(fps * 0.2)):bisect_right(frames, rally.end_frame)]
         if _slow_transfer_runs(segment, calibration, motion_config):
             last_rejected = rally
             continue
@@ -136,8 +150,26 @@ def blurball_visibility_rallies(
             # Do not let the next clip's automatic padding restore that pass.
             boundary = min(rally.start_time, last_rejected.end_time + 1 / fps)
             rally = replace(rally, lead_in_start_time=max(rally.lead_in_start_time or 0, boundary))
+        previous_pass = bisect_right(pass_ends, rally.start_time) - 1
+        if previous_pass >= 0 and rally.start_time - pass_ends[previous_pass] <= 3:
+            boundary = min(rally.start_time, pass_ends[previous_pass] + 1 / fps)
+            rally = replace(rally, lead_in_start_time=max(rally.lead_in_start_time or 0, boundary))
         refined.append(rally)
     return tuple(refined)
+
+
+def _transfer_observation_runs(
+    visible: Sequence[TrajectoryPoint], width: float,
+) -> tuple[tuple[TrajectoryPoint, ...], ...]:
+    groups: list[list[TrajectoryPoint]] = []
+    for run in _contiguous_visible_runs(visible):
+        if (groups and run[0].time - groups[-1][-1].time <= 0.1 + 1e-9
+                and abs(run[0].x - groups[-1][-1].x) <= width * 0.2
+                and (run[-1].x - run[0].x) * (groups[-1][-1].x - groups[-1][0].x) >= 0):
+            groups[-1].extend(run)
+        else:
+            groups.append(list(run))
+    return tuple(tuple(group) for group in groups)
 
 
 def _slow_transfer_runs(
@@ -151,9 +183,9 @@ def _slow_transfer_runs(
     veto this conservative filter. Speeds use elapsed source time and ROI width.
     """
     width = config.analysis_width_pixels
-    runs = [run for run in _contiguous_visible_runs([
+    runs = [run for run in _transfer_observation_runs([
         point for point in points if point.visibility == 1
-    ]) if run[-1].time - run[0].time + 1e-9 >= 0.1]
+    ], width) if run[-1].time - run[0].time + 1e-9 >= 0.1]
     slow: list[tuple[TrajectoryPoint, ...]] = []
     for run in runs:
         duration = run[-1].time - run[0].time
@@ -165,10 +197,20 @@ def _slow_transfer_runs(
             return ()
         if displacement >= 0.30 and _table_activity_ratios(run, calibration)[1] >= 0.60:
             return ()
-        if (duration >= BLURBALL_SLOW_TRANSFER_MINIMUM_SECONDS
+        sample_seconds = min((b.time - a.time for a, b in zip(run, run[1:]) if b.time > a.time), default=0)
+        if (duration + sample_seconds >= BLURBALL_SLOW_TRANSFER_MINIMUM_SECONDS
                 and displacement >= BLURBALL_SLOW_TRANSFER_MINIMUM_DISPLACEMENT_RATIO
                 and span / duration < BLURBALL_SLOW_TRANSFER_MAXIMUM_SPEED_RATIO):
             slow.append(run)
+    if slow and any(
+        run[0].time - slow[-1][-1].time > BLURBALL_MOTION_CLUSTER_SHORT_GAP_SECONDS
+        and run[-1].time - run[0].time >= BLURBALL_MOTION_RUN_MINIMUM_SECONDS
+        and max(point.x for point in run) - min(point.x for point in run) >= width * 0.15
+        for run in runs
+    ):
+        # A pass followed by a separate serve/exchange is a mixed candidate,
+        # not a reason to delete the entire interval.
+        return ()
     if len(slow) == 1:
         flight = slow[0]
         # A slow serve followed immediately by a shorter opposite flight is
@@ -242,6 +284,8 @@ def _motion_runs_have_rally_break(
         run[-1].time - run[0].time >= BLURBALL_MOTION_CLUSTER_MINIMUM_STATIONARY_RUN_SECONDS
         and max(point.x for point in run) - min(point.x for point in run)
         < width * BLURBALL_MOTION_GAP_MINIMUM_RANGE_RATIO
+        and max(point.y for point in run) - min(point.y for point in run)
+        < height * BLURBALL_MOTION_GAP_MINIMUM_RANGE_RATIO
         for run in runs
     )
     # A side-on rally can temporarily move mostly vertically in screen space.
@@ -317,9 +361,14 @@ def _refine_motion_candidate(
     for index, run in enumerate(strong):
         before = run[0].time - strong[index - 1][-1].time if index else math.inf
         after = strong[index + 1][0].time - run[-1].time if index + 1 < len(strong) else math.inf
-        if (len(strong) > 1 and run[-1].time - run[0].time >= 0.9
-                and _motion_reversals(run, width) == 0 and before >= 1.5 and after >= 1.5):
-            isolated.append(run)
+        if (len(strong) > 1 and _motion_reversals(run, width) == 0
+                and before >= 1.5 and after >= 1.5):
+            observed_prefix = [point for point in points
+                               if run[0].time - 0.2 <= point.time <= run[-1].time]
+            # Trimming slow edge samples must not make an observed pass appear
+            # too short to separate from the following serve.
+            if run[-1].time - run[0].time >= 0.9 or _slow_transfer_runs(observed_prefix, calibration, config):
+                isolated.append(run)
     if isolated:
         evidence = [run for run in evidence if not any(
             transfer[0].time - 0.25 <= run[0].time and run[-1].time <= transfer[-1].time + 0.25

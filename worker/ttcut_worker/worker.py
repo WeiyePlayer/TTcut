@@ -7,7 +7,7 @@ import sys
 import traceback
 
 from .blurball_bounce import detect_blurball_bounce_frames
-from .blurball_models import load_blurball
+from .blurball_models import configure_stable_visibility_inference, load_blurball
 from .blurball_predictor import BlurBallPredictor
 from .blurball_rallies import (
     blurball_inter_rally_filter_provenance,
@@ -16,7 +16,7 @@ from .blurball_rallies import (
 from .analysis_intervals import REFINEMENT_EXPANSION_SECONDS, expanded_union_intervals
 from .calibration import TableCalibration
 from .errors import InvalidRequestError, ModelResourceError, TableModelResourceError, WorkerError
-from .roi import AnalysisRoiConfig, build_analysis_roi
+from .roi import AnalysisRoiConfig, build_analysis_roi, stabilize_visibility_roi
 from .rallies import group_rallies
 from .request import (
     analysis_config,
@@ -117,6 +117,9 @@ def analyze(request: dict) -> dict:
     config = analysis_config(request)
     recognition = rally_recognition_config(request)
     recognition_method = recognition["method"]
+    if profile == "blurball_v1" and recognition_method == "continuous_visibility":
+        analysis_roi = stabilize_visibility_roi(analysis_roi)
+        configure_stable_visibility_inference()
     effective_config = (
         {"mode": "full", "confidence_threshold": TRACKNET_CONFIDENCE_THRESHOLD}
         if profile == "tracknet_v1"
