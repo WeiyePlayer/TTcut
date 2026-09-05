@@ -13,7 +13,7 @@ Videos, analysis results, and history stay on the local computer. TTcut requires
 ## Download and installation
 
 1. For Windows x64, download either the full installer or online installer from [TTcut Releases](https://github.com/WeiyePlayer/TTcut/releases). The online installer downloads and verifies the required runtime resources during installation and needs an active connection.
-2. For macOS 15+ on Apple Silicon, download the DMG (recommended) or ZIP from the same [TTcut Releases](https://github.com/WeiyePlayer/TTcut/releases) page. The current macOS build is ad-hoc signed and not notarized; if first launch is blocked, allow it in System Settings > Privacy & Security.
+2. For macOS 15+ on Apple Silicon, download the DMG from the same [TTcut Releases](https://github.com/WeiyePlayer/TTcut/releases) page. The current macOS build is ad-hoc signed and not notarized; if first launch is blocked, allow it in System Settings > Privacy & Security.
 3. Download the Android version from [TTcut-Mobile-Releases](https://github.com/WeiyePlayer/TTcut-Mobile-Releases/releases).
 4. If GitHub downloads are slow, use the Baidu Netdisk mirror for Windows resources: [link](https://pan.baidu.com/s/1LXDzs74xOM1t50-IRM_Vvw?pwd=ttct), extraction code: `ttct`.
 5. On Windows, run the installer, choose the installation root, and decide whether to create a desktop shortcut. Application files are written under `<root>\app`; large runtime resources, downloads, and import staging are stored under `<root>\data\components`. A Start menu shortcut is always created.

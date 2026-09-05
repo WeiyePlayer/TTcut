@@ -13,7 +13,7 @@ TTcut 是一款面向乒乓球爱好者的本地乒乓球视频自动剪辑工�
 ## 下载与安装
 
 1. Windows x64 从 [TTcut Release](https://github.com/WeiyePlayer/TTcut/releases) 下载完整安装包或在线安装包；在线安装包需要联网下载并校验必需运行资源。
-2. macOS 15+ Apple Silicon 从同一 [TTcut Release](https://github.com/WeiyePlayer/TTcut/releases) 下载 DMG（推荐）或 ZIP。当前 macOS 构建使用临时签名且未公证，首次打开若被拦截，请在“系统设置 > 隐私与安全性”中确认允许。
+2. macOS 15+ Apple Silicon 从同一 [TTcut Release](https://github.com/WeiyePlayer/TTcut/releases) 下载 DMG。当前 macOS 构建使用临时签名且未公证，首次打开若被拦截，请在“系统设置 > 隐私与安全性”中确认允许。
 3. Android 从 [TTcut-Mobile-Releases](https://github.com/WeiyePlayer/TTcut-Mobile-Releases/releases) 下载。
 4. Windows 首次启动进入设置，同意后完成分析、视频处理组件安装。
 5. 若 Windows 分析、视频处理组件下载缓慢，可根据电脑硬件情况使用网盘按需下载：[链接](https://pan.baidu.com/s/1LXDzs74xOM1t50-IRM_Vvw?pwd=ttct)，提取码：`ttct`，然后取消软件内下载改为手动导入。

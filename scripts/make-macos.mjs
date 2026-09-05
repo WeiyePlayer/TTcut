@@ -21,12 +21,11 @@ await signAsync({ app, identity: '-', identityValidation: false, platform: 'darw
   optionsForFile: () => ({ hardenedRuntime: false, entitlements: entitlementPath, timestamp: 'none' }),
 });
 run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', app]);
-if (!process.argv.includes('--app-only')) run(process.execPath, [require.resolve('electron-builder/out/cli/cli.js'), '--mac', 'dmg', 'zip', '--arm64', '--prepackaged', app, '--config', 'electron-builder.macos.cjs', '--publish', 'never']);
+if (!process.argv.includes('--app-only')) run(process.execPath, [require.resolve('electron-builder/out/cli/cli.js'), '--mac', 'dmg', '--arm64', '--prepackaged', app, '--config', 'electron-builder.macos.cjs', '--publish', 'never']);
 const output = path.join(root, 'out/make/macos/arm64'); await mkdir(output, { recursive: true });
 const version = require('../package.json').version;
 const releaseArchives = new Set([
  `TTcut-${version}-macOS-arm64-electron.dmg`,
- `TTcut-${version}-macOS-arm64-electron.zip`,
 ]);
 const files = [];
 for (const name of await readdir(output)) {

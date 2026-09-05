@@ -100,13 +100,12 @@ try {
   // Controlled nonempty history is test data only; real model results above are reported separately.
   const recordPath=path.join(userData,'history/records',analysis.analysisId+'.json');
   const record=JSON.parse(await readFile(recordPath,'utf8'));record.analysis.rallies=[{id:'rally_001',index:1,start_time_seconds:0.5,end_time_seconds:2,bounce_count:4},{id:'rally_002',index:2,start_time_seconds:2.5,end_time_seconds:3.5,bounce_count:8}];record.analysis.bounce_times_seconds=[0.5,0.8,1.1,1.5,2.5,2.6,2.7,2.8,2.9,3,3.2,3.4];await writeFile(recordPath,JSON.stringify(record));
-  await check('history review with controlled nonempty fixture',async()=>{await page.reload();await page.waitForFunction(()=>Boolean(window.ttcut));await page.getByRole('button',{name:'History',exact:true}).click();await page.locator('.history-card').first().waitFor();await page.screenshot({path:path.join(run,'history-en.png')});
+  await check('history review with controlled nonempty fixture',async()=>{await page.reload();await page.waitForFunction(()=>Boolean(window.ttcut));await page.getByRole('button',{name:'History',exact:true}).click();await page.locator('.history-card').first().waitFor();
     await page.locator('.history-open').first().click();
     await page.locator('.mode-card').filter({hasText:'All rallies'}).waitFor();
     await page.locator('.mode-card').filter({hasText:'Highlight rallies'}).click();
     await page.getByText('> 7',{exact:true}).click();
     assert.match(await page.locator('.footer-actions').innerText(),/1 \/ 2/);
-    await page.screenshot({path:path.join(run,'highlights-en.png')});
     await page.locator('.mode-card').filter({hasText:'Custom'}).click();
     await page.getByRole('button',{name:'Clear all',exact:true}).click();
     assert.equal(await page.locator('.custom-rally-list input:checked').count(),0);
@@ -125,8 +124,7 @@ try {
     await page.locator('video').evaluate(video=>{video.pause();video.currentTime=0;video.muted=true;});
     await page.locator('video').press('Space');
     await page.waitForFunction(()=>document.querySelector('video').currentTime>0.1,null,{polling:100});
-    await page.locator('video').evaluate(video=>video.pause());
-    await page.screenshot({path:path.join(run,'custom-en.png')});});
+    await page.locator('video').evaluate(video=>video.pause());});
   await check('history deletion preserves original and deliverables',async()=>{await appendFile(media,'changed source fixture');const changed=await page.evaluate(async id=>{try{await window.ttcut.openHistory(id);return '';}catch(error){return String(error);}},analysis.analysisId);assert.match(changed,/HISTORY_SOURCE_CHANGED/);await page.evaluate(id=>window.ttcut.deleteHistory(id),analysis.analysisId);assert.ok((await stat(media)).size>0);assert.ok((await stat(combined)).size>0);});
   await page.evaluate(()=>window.ttcut.confirmClose('exit')).catch(error=>{if(!String(error).includes('closed'))throw error;});
   await new Promise((resolve,reject)=>{if(child.exitCode!==null)return resolve();child.once('exit',resolve);setTimeout(()=>reject(new Error('App failed to quit')),10000).unref();});

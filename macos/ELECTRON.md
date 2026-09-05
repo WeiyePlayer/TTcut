@@ -22,7 +22,7 @@ npm run make:mac
 
 Run on an Apple Silicon Mac with Xcode command-line tools, the repository's existing Node dependencies, `macos/Vendor/native`, and the compiled BlurBall/Table models. `macos/scripts/bootstrap.py`, native dependency/model preparation scripts and their lock files remain the reproducible asset preparation route; Python is a development dependency only. `stage-macos-runtime.py` builds both helpers, stages only their media libraries/models, rewrites install names, checks arm64, signs helpers and writes an integrity manifest. Runtime binaries are separate from ASAR and Electron's own media libraries.
 
-Forge packages the application. `make-macos.mjs` signs the assembled Electron app and invokes the existing electron-builder v26 with a separate Mac configuration and publishing disabled. Output is `out/TTcut-darwin-arm64/TTcut.app` and `out/make/macos/arm64/`. `--skip-native` reuses a staged runtime; use only when native source/assets have not changed. `--app-only` omits DMG/ZIP generation.
+Forge packages the application. `make-macos.mjs` signs the assembled Electron app and invokes the existing electron-builder v26 with a separate Mac configuration and publishing disabled. Output is `out/TTcut-darwin-arm64/TTcut.app` and a DMG under `out/make/macos/arm64/`. `--skip-native` reuses a staged runtime; use only when native source/assets have not changed. `--app-only` omits DMG generation.
 
 ```sh
 npm run typecheck
