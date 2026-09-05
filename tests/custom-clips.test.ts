@@ -31,6 +31,22 @@ function analysis(rallies: BounceRally[] = [rally('rally_001', 1, 10, 12), rally
 }
 
 describe('custom rally clip draft', () => {
+  it('omits only the fixed second in continuous mode and exports those exact handles', () => {
+    const result: AnalysisResultV1 = {
+      schema_version: 2,
+      video: analysis().video,
+      rallies: [
+        { id: 'rally_001', index: 1, start_time_seconds: 10, end_time_seconds: 12 },
+        { id: 'rally_002', index: 2, start_time_seconds: 14, end_time_seconds: 16 },
+      ],
+      rally_recognition: { method: 'continuous_visibility', start_visible_seconds: 0.2, end_invisible_seconds: 0.5 },
+    };
+    const clips = createCustomClipDraft(result.rallies, 2.5, 2, 30, 30, 'continuous_visibility');
+    expect(clips.map(clip => [clip.start, clip.end])).toEqual([[7.5, 12.75], [12.75, 18]]);
+    expect(validateCustomExportSegments(result, customExportSegments(clips)).map(clip => [clip.start, clip.end]))
+      .toEqual([[7.5, 12.75], [12.75, 18]]);
+    expect(createCustomClipDraft(result.rallies, 0, 0, 30, 30, 'continuous_visibility')[0]?.end).toBe(12);
+  });
   it('applies configured rolls, the fixed closing second, and source clamping', () => {
     const clips = createCustomClipDraft([rally('rally_001', 1, 1, 2), rally('rally_002', 2, 28, 29.5)], 2.5, 2, 30, 30);
     expect(clips.map((clip) => [clip.start, clip.end])).toEqual([[0, 5], [25.5, 30]]);

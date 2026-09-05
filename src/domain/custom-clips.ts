@@ -4,8 +4,9 @@ import type {
   CustomExportSegmentInput,
   CutGroup,
   Rally,
+  RallyRecognitionMethod,
 } from '../shared/contracts';
-import { FINAL_RALLY_TAIL_SECONDS } from './segments';
+import { finalRallyTailSeconds } from './segments';
 
 const EPSILON = 1e-6;
 const PRECISION = 1_000_000;
@@ -100,13 +101,14 @@ export function createCustomClipDraft(
   postRollSeconds: number,
   videoDuration: number,
   fps: number,
+  recognitionMethod: RallyRecognitionMethod = 'bounce_events',
 ): CustomRallyClip[] {
   const minimumDuration = frameDuration(fps);
   const clips = orderedRallies(rallies).map((rally) => {
     const defaultStart = seconds(Math.max(0, rally.start_time_seconds - preRollSeconds));
     const defaultEnd = seconds(Math.min(
       videoDuration,
-      rally.end_time_seconds + FINAL_RALLY_TAIL_SECONDS + postRollSeconds,
+      rally.end_time_seconds + finalRallyTailSeconds(recognitionMethod) + postRollSeconds,
     ));
     const end = Math.max(defaultEnd, seconds(Math.min(videoDuration, defaultStart + minimumDuration)));
     return {

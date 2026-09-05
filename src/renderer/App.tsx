@@ -336,6 +336,7 @@ export function App() {
       settings.post_roll_seconds,
       analysis.video.duration_seconds,
       analysis.video.fps,
+      rallyRecognitionMethod(analysis),
     ));
     setCustomOutputs({ combined_video: true, rally_videos: false, premiere_xml: false });
     setStep('custom');
