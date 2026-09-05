@@ -36,12 +36,14 @@ BLURBALL_MOTION_RUN_MINIMUM_SECONDS = 0.15
 BLURBALL_MOTION_RUN_MINIMUM_HORIZONTAL_RANGE_RATIO = 0.05
 BLURBALL_MOTION_CLUSTER_SHORT_GAP_SECONDS = 1.25
 BLURBALL_MOTION_CLUSTER_LONG_GAP_SECONDS = 2.25
+BLURBALL_MOTION_MONOTONIC_PAUSE_SECONDS = 2.0
 BLURBALL_MOTION_CLUSTER_MINIMUM_STATIONARY_RUN_SECONDS = 0.50
 BLURBALL_MOTION_CLUSTER_BOUNDARY_CONTEXT_SECONDS = 0.25
 BLURBALL_SLOW_TRANSFER_MINIMUM_SECONDS = 0.85
 BLURBALL_SLOW_TRANSFER_MINIMUM_DISPLACEMENT_RATIO = 0.30
 BLURBALL_SLOW_TRANSFER_MAXIMUM_SPEED_RATIO = 0.85
 BLURBALL_SLOW_TRANSFER_FAST_FLIGHT_SPEED_RATIO = 1.0
+BLURBALL_MOTION_TIMESTAMP_TOLERANCE_SECONDS = 0.001
 
 
 def blurball_inter_rally_filter_provenance() -> dict[str, object]:
@@ -73,7 +75,7 @@ def blurball_inter_rally_filter_provenance() -> dict[str, object]:
             BLURBALL_INTER_RALLY_FILTER_EXPANDED_TABLE_WIDTH_MARGIN_CM
         ),
         "motion_refinement": {
-            "version": 4,
+            "version": 5,
             "minimum_motion_run_seconds": BLURBALL_MOTION_RUN_MINIMUM_SECONDS,
             "minimum_horizontal_range_ratio": BLURBALL_MOTION_RUN_MINIMUM_HORIZONTAL_RANGE_RATIO,
             "minimum_speed_ratio_per_second": BLURBALL_MOTION_MINIMUM_SPEED_RATIO_PER_SECOND,
@@ -144,7 +146,9 @@ def blurball_visibility_rallies(
         transfers = _slow_transfer_runs(preceding, calibration, motion_config)
         if transfers and rally.start_time - transfers[-1][-1].time <= BLURBALL_MOTION_CLUSTER_SHORT_GAP_SECONDS:
             boundary = transfers[-1][-1].time + 1 / fps
-            rally = replace(rally, lead_in_start_time=min(rally.start_time, boundary))
+            rally = replace(rally, lead_in_start_time=max(
+                rally.lead_in_start_time or 0, min(rally.start_time, boundary),
+            ))
         if last_rejected is not None and 0 <= rally.start_time - last_rejected.end_time <= 3:
             # Removing a candidate also removes its overlap with the next clip.
             # Do not let the next clip's automatic padding restore that pass.
@@ -154,8 +158,107 @@ def blurball_visibility_rallies(
         if previous_pass >= 0 and rally.start_time - pass_ends[previous_pass] <= 3:
             boundary = min(rally.start_time, pass_ends[previous_pass] + 1 / fps)
             rally = replace(rally, lead_in_start_time=max(rally.lead_in_start_time or 0, boundary))
-        refined.append(rally)
+        rally = _trim_returned_ball_prefix(rally, ordered, motion_config, fps)
+        if not _has_insufficient_flight_motion(rally, ordered, calibration, motion_config):
+            refined.append(rally)
+        else:
+            last_rejected = rally
     return tuple(refined)
+
+
+def _has_insufficient_flight_motion(
+    rally: VisibilityRallySummary, points: Sequence[TrajectoryPoint],
+    calibration: TableCalibration, config: VisibilityMotionConfig,
+) -> bool:
+    """Reject static jumps and isolated off-table arcs, preserving sparse returns."""
+    runs = _contiguous_visible_runs([
+        point for point in points
+        if point.visibility and rally.start_time <= point.time <= rally.end_time
+    ])
+    width, height = config.analysis_width_pixels, config.analysis_height_pixels
+    flights = [run for run in runs if (
+        run[-1].time - run[0].time + 1e-9 >= 0.1
+        and max(p.x for p in run) - min(p.x for p in run) >= width * 0.15
+    )]
+    weak_flights = [run for run in runs if (
+        run[-1].time - run[0].time + BLURBALL_MOTION_TIMESTAMP_TOLERANCE_SECONDS >= 0.1
+        and max(p.x for p in run) - min(p.x for p in run) >= width * 0.04
+    )]
+    maximum_range = max((
+        max(p.x for p in run) - min(p.x for p in run)
+        for run in runs if run[-1].time - run[0].time + 1e-9 >= 0.1
+    ), default=0)
+    duration = rally.end_time - rally.start_time
+    if not flights and len(weak_flights) < 2 and duration < 6 and maximum_range < width * 0.08:
+        return True
+    if len(flights) == 1 and duration < 1.2:
+        flight = flights[0]
+        # A brief detection moving entirely above the table can be a face or
+        # racket. It has no observed table flight to support a short rally.
+        if (flight[-1].time - flight[0].time <= 0.35
+                and max(p.y for p in flight) < min(y for _, y in calibration.points) - height * 0.05):
+            return True
+    if len(flights) >= 2 and duration < 3:
+        direction = flights[0][-1].x - flights[0][0].x
+        if all(
+            _motion_reversals(run, width) == 0
+            and max(p.y for p in run) - min(p.y for p in run) > height * 0.3
+            and (run[-1].x - run[0].x) * direction > 0
+            for run in flights
+        ):
+            return True
+    return False
+
+
+def _trim_returned_ball_prefix(
+    rally: VisibilityRallySummary, points: Sequence[TrajectoryPoint],
+    config: VisibilityMotionConfig, fps: float,
+) -> VisibilityRallySummary:
+    """Separate a steep one-way return from a later observed serve toss."""
+    visible = [point for point in points if (
+        point.visibility and rally.start_time <= point.time <= rally.end_time
+    )]
+    runs = _contiguous_visible_runs(visible)
+    width, height = config.analysis_width_pixels, config.analysis_height_pixels
+    for toss in runs:
+        if toss[0].time - rally.start_time < 1.5:
+            continue
+        if not (
+            toss[-1].time - toss[0].time >= 0.2
+            and toss[0].y - min(p.y for p in toss) >= height * 0.35
+            and max(p.x for p in toss) - min(p.x for p in toss) <= width * 0.08
+        ):
+            continue
+        prior_flights = [run for run in runs if (
+            run[-1].time < toss[0].time and run[-1].time - run[0].time >= 0.1
+            and max(p.x for p in run) - min(p.x for p in run) >= width * 0.15
+        )]
+        if len(prior_flights) != 1:
+            continue
+        arc = prior_flights[0]
+        if not (
+            0.4 <= arc[-1].time - arc[0].time <= 1.2
+            and _motion_reversals(arc, width) == 0
+            and max(p.y for p in arc) - min(p.y for p in arc) >= height * 0.4
+            and toss[0].time - arc[-1].time >= 1
+        ):
+            continue
+        if not any(
+            run[0].time > toss[0].time and run[0].time - toss[-1].time < 1
+            and max(p.x for p in run) - min(p.x for p in run) > width * 0.3
+            for run in runs
+        ):
+            continue
+        prefix = [run for run in runs if (
+            arc[-1].time <= run[-1].time < toss[0].time
+            and run[-1].time - run[0].time >= 0.1
+        )]
+        floor = max(run[-1].time for run in prefix) + 1 / fps
+        return replace(
+            rally, start_frame=toss[0].frame, start_time=toss[0].time,
+            lead_in_start_time=max(rally.lead_in_start_time or 0, min(toss[0].time, floor)),
+        )
+    return rally
 
 
 def _transfer_observation_runs(
@@ -297,7 +400,15 @@ def _motion_runs_have_rally_break(
     if (not stationary and elapsed <= 3.0 and len(vertical) >= 2
             and sum(run[-1].time - run[0].time for run in vertical) / elapsed >= 0.15):
         return False
-    return elapsed >= BLURBALL_MOTION_CLUSTER_LONG_GAP_SECONDS or stationary
+    monotonic_pause = (
+        elapsed >= BLURBALL_MOTION_MONOTONIC_PAUSE_SECONDS
+        and previous[-1].time - previous[0].time >= 0.6
+        and _motion_reversals(previous, width) == 0
+        and max(p.y for p in previous) - min(p.y for p in previous) >= height * 0.15
+        and (max(p.x for p in previous) - min(p.x for p in previous))
+        / width / (previous[-1].time - previous[0].time) < 1.0
+    )
+    return elapsed >= BLURBALL_MOTION_CLUSTER_LONG_GAP_SECONDS or stationary or monotonic_pause
 
 
 def _has_rhythmic_exchange(runs: Sequence[Sequence[TrajectoryPoint]], width: float) -> bool:
@@ -362,9 +473,12 @@ def _refine_motion_candidate(
         before = run[0].time - strong[index - 1][-1].time if index else math.inf
         after = strong[index + 1][0].time - run[-1].time if index + 1 < len(strong) else math.inf
         if (len(strong) > 1 and _motion_reversals(run, width) == 0
-                and before >= 1.5 and after >= 1.5):
+                and before >= 1.5 - BLURBALL_MOTION_TIMESTAMP_TOLERANCE_SECONDS
+                and after >= 1.5 - BLURBALL_MOTION_TIMESTAMP_TOLERANCE_SECONDS):
             observed_prefix = [point for point in points
                                if run[0].time - 0.2 <= point.time <= run[-1].time]
+            if (before < 1.5 or after < 1.5) and not _slow_transfer_runs(observed_prefix, calibration, config):
+                continue
             # Trimming slow edge samples must not make an observed pass appear
             # too short to separate from the following serve.
             if run[-1].time - run[0].time >= 0.9 or _slow_transfer_runs(observed_prefix, calibration, config):
@@ -423,6 +537,10 @@ def _refine_motion_candidate(
             continue
         candidate = VisibilityRallySummary(
             observed[0].frame, observed[-1].frame, observed[0].time, observed[-1].time,
+            max((
+                min(observed[0].time, transfer[-1].time + 1 / fps)
+                for transfer in transfers if 0 < observed[0].time - transfer[-1].time <= 3
+            ), default=None),
         )
         if _is_ball_exchange(segment, fps, config) and not _is_inter_rally_fragment(candidate, segment, calibration, config):
             accepted.append(candidate)
@@ -496,7 +614,13 @@ def _is_inter_rally_fragment(
     if expanded_table_ratio >= BLURBALL_INTER_RALLY_FILTER_MAXIMUM_EXPANDED_TABLE_RATIO:
         return False
 
-    if _has_coherent_horizontal_exchange(runs, motion_config.analysis_width_pixels):
+    if _has_coherent_horizontal_exchange(runs, motion_config.analysis_width_pixels) or any(
+        0.1 <= run[-1].time - run[0].time <= 0.75
+        and _significant_reversals(
+            _median_smooth([p.x for p in run]), motion_config.analysis_width_pixels * 0.12,
+        ) >= 1
+        for run in runs
+    ):
         return False
 
     maximum_contiguous_range_ratio = max(
@@ -554,11 +678,10 @@ def _has_coherent_horizontal_exchange(
         duration = run[-1].time - run[0].time
         displacement = float(run[-1].x - run[0].x)
         if (
-            duration + 1e-9
-            >= BLURBALL_INTER_RALLY_FILTER_MINIMUM_CONTIGUOUS_FLIGHT_SECONDS
-            and abs(displacement) + 1e-9
-            >= analysis_width_pixels
-            * BLURBALL_INTER_RALLY_FILTER_MINIMUM_COHERENT_FLIGHT_DISPLACEMENT_RATIO
+            (duration + 1e-9 >= BLURBALL_INTER_RALLY_FILTER_MINIMUM_CONTIGUOUS_FLIGHT_SECONDS
+             and abs(displacement) + 1e-9 >= analysis_width_pixels
+             * BLURBALL_INTER_RALLY_FILTER_MINIMUM_COHERENT_FLIGHT_DISPLACEMENT_RATIO)
+            or (duration + 1e-9 >= 0.10 and abs(displacement) >= analysis_width_pixels * 0.20)
         ):
             directions.append(1 if displacement > 0 else -1)
     return any(first != second for first, second in zip(directions, directions[1:]))

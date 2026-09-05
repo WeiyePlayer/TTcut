@@ -115,4 +115,8 @@ def test_real_video_motion_regressions(case: dict) -> None:
     for start, end in case["drop"]:
         assert not any(rally.start_time < end and rally.end_time > start for rally in rallies)
     if case["name"] == "c51_calibration_perturbation":
-        assert len(rallies) == 41
+        # This older calibration missed reference rally 12 (124.633-128.1 s).
+        # Its short observed return now survives the fragment filter; default
+        # padding covers the independently retained reference core completely.
+        assert len(rallies) == 42
+        assert any(r.start_time <= 124.633334 and r.end_time + 1 >= 128.1 for r in rallies)

@@ -252,7 +252,7 @@ describe('App workflow notices and multi-task entry', () => {
     render(<App />);
     fireEvent.click(await screen.findByRole('button', { name: '设置' }));
     expect(screen.getByRole('radio', { name: '落台判定' })).toBeChecked();
-    fireEvent.click(screen.getByRole('radio', { name: '连续可见' }));
+    fireEvent.click(screen.getByRole('radio', { name: '连续运动' }));
 
     await waitFor(() => expect(window.ttcut.saveSettings).toHaveBeenCalledWith(expect.objectContaining({
       rally_recognition_method: 'continuous_visibility', analysis_mode: 'two_stage',
@@ -261,7 +261,7 @@ describe('App workflow notices and multi-task entry', () => {
     fireEvent.click(screen.getByRole('radio', { name: '落台判定' }));
     expect(await screen.findByRole('heading', { name: '分析精度' })).toBeVisible();
     expect(screen.getByRole('radio', { name: '高精' })).toBeChecked();
-    fireEvent.click(screen.getByRole('radio', { name: '连续可见' }));
+    fireEvent.click(screen.getByRole('radio', { name: '连续运动' }));
 
     fireEvent.click(screen.getByRole('button', { name: '自动剪辑' }));
     fireEvent.click(await screen.findByRole('button', { name: '选择或将文件拖到这里' }));

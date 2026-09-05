@@ -305,7 +305,7 @@ test('neutral controls use the shared hover surface without overriding semantic 
     expect(analysisPrecisionOrder.calibration).toBe(analysisPrecisionOrder.normalizeVariableFrameRate + 1);
     const rallyRecognition = page.getByRole('radiogroup', { name: '回合识别方式' });
     await expect(rallyRecognition.getByRole('radio', { name: '落台判定' })).toBeChecked();
-    await expect(rallyRecognition.getByRole('radio', { name: '连续可见' })).toBeVisible();
+    await expect(rallyRecognition.getByRole('radio', { name: '连续运动' })).toBeVisible();
     await expect(rallyRecognition.locator('xpath=..')).toHaveCount(1);
     await expect(rallyRecognition.locator('xpath=../p')).toHaveCount(0);
     await page.locator('label[for="settings-rally-recognition-1"]').click();
