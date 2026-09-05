@@ -156,6 +156,7 @@ export type ComponentPaths = {
   runtimeVariant: RuntimeLocation | null;
   worker: string;
   blurballWeights: string;
+  tracknetWeights: string | null;
   tableAnalyzeWeights: string;
   ffmpeg: string | null;
   ffprobe: string | null;
@@ -180,6 +181,14 @@ async function modelResource(filename: string): Promise<string> {
     // A standalone local package has no registered install to reuse; its missing model remains visible to setup.
     return bundled;
   }
+}
+
+async function localTrackNetWeight(): Promise<string | null> {
+  if (app.isPackaged || process.env.TTCUT_ENABLE_LOCAL_TRACKNET !== '1') return null;
+  const configured = process.env.TTCUT_TRACKNET_WEIGHTS?.trim();
+  if (!configured) return null;
+  const weight = path.resolve(configured);
+  return await exists(weight) ? weight : null;
 }
 
 export function managedComponentsRoot(): string {
@@ -263,6 +272,7 @@ export async function resolveComponents(device: 'auto' | 'cuda' | 'cpu' = 'auto'
     runtimeVariant: runtimes[0]?.variant ?? null,
     worker: resource('worker'),
     blurballWeights: process.env.TTCUT_BLURBALL_WEIGHTS || await modelResource('blurball_best.pt'),
+    tracknetWeights: await localTrackNetWeight(),
     tableAnalyzeWeights: process.env.TTCUT_TABLE_ANALYZE_WEIGHTS || await modelResource('table_analyze.pt'),
     ffmpeg: media?.ffmpeg ?? null,
     ffprobe: media?.ffprobe ?? null,

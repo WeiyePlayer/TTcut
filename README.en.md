@@ -4,11 +4,11 @@
 
 [简体中文](README.md) | **English**
 
-TTcut is a local automatic table-tennis video cutter for players and enthusiasts. It locates the ball, detects bounce events and valid rallies, then exports edited clips using the selected cutting mode.
+TTcut is a local automatic table-tennis video cutter for players and enthusiasts. It locates the ball, organizes valid rallies with the selected recognition method, then exports edited clips using the selected cutting mode.
 
 Videos, analysis results, and history stay on the local computer. TTcut requires no account, uploads no video, and collects no telemetry. An internet connection is required when installing the resources needed for the first run; analysis, preview, and cutting can run offline after setup.
 
-> The current stable release is `v1.2.10` for Windows x64.
+> The current stable release is `v1.2.11` for Windows x64.
 
 ## Download and installation
 
@@ -20,12 +20,13 @@ Videos, analysis results, and history stay on the local computer. TTcut requires
 
 TTcut detects an NVIDIA GPU automatically and falls back to CPU if accelerated setup or its self-test fails. Its video-processing capability reads media information, cuts and joins segments, and validates exported files.
 
-## What's new in v1.2.10
+## What's new in v1.2.11
 
-- Settings now provides Re-encode as constant frame rate, which is off by default. When off, variable-frame-rate video is processed directly from the original media. When on, TTcut first creates constant-frame-rate processing media for more stable cut timing, with additional processing time and disk use.
-- Fixed an installer issue where pre-install disk-space probing could incorrectly block installation in some environments.
+- Settings now provides Rally recognition method. The default, Bounce events, retains existing behavior; Continuous visibility is available when bounce events are insufficient but the ball remains visible for a continuous period.
+- Continuous visibility runs with full analysis and filters highlights by duration tiers. Each analysis result stores the method it actually used, and History presents information from that result.
+- Fixed continuous-visibility handling for end segments, short clear rallies, and small-ball footage, and improved runtime-resource installation reliability.
 
-See the [v1.2.10 release notes](docs/release-notes-v1.2.10.en.md) for the complete details.
+See the [v1.2.11 release notes](docs/release-notes-v1.2.11.en.md) for the complete details.
 
 ## Contact the author on WeChat: m2924931661
 
@@ -51,7 +52,7 @@ The analysis page reports real processing progress. A running task can be cancel
 ### 3. Choose a cutting mode
 
 - **All rallies**: export every valid rally.
-- **Highlights**: retain rallies whose bounce-based count exceeds the selected threshold of 3, 5, or 7.
+- **Highlights**: filter by the bounce-based count with Bounce events, or by duration tiers with Continuous visibility.
 - **Custom**: open the dedicated timeline to select rallies individually, preview each clip, and adjust its start and end boundaries. You can also create or delete rally clips manually and choose combined MP4, independent MP4, or Premiere-importable FCP7 XML output.
 
 ![Choose a cutting mode](docs/images/cutting-modes.png)
@@ -84,7 +85,7 @@ Select multiple MP4 files in Batch tasks. On entry, TTcut automatically calibrat
 The full installer includes the ball- and table-recognition resources required at runtime; the online installer downloads and verifies them during installation. Local analysis is responsible for:
 
 - automatic or manual table calibration and coordinate mapping;
-- locating the ball and detecting bounce events;
+- locating the ball and organizing valid rallies with Bounce events or Continuous visibility;
 - organizing valid rallies with shared table-region, timing, and rally rules;
 - selecting GPU acceleration or CPU processing according to the local environment.
 
@@ -129,7 +130,7 @@ Videos, model weights, and runtime resources required by the real end-to-end wor
 ## Known limitations
 
 - The single-video workflow handles one MP4 or MOV at a time; Batch tasks accepts multiple MP4/MOV files and runs a serial “calibrate first, then process” queue with manual recovery for failed items.
-- The displayed count is a bounce-event proxy, not a ground-truth paddle-hit count.
+- With Bounce events, the displayed count is a bounce-event proxy, not a ground-truth paddle-hit count. Continuous visibility does not display a count.
 - Windows x64 remains the primary build. Removing the Windows build-number gate does not guarantee that older Windows versions, x86 systems, or ARM64 systems can run every required dependency.
 
 More implementation and release documentation is available under [`docs`](docs).

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { buildCutGroups, selectRallies } from '../src/domain/segments';
-import type { AnalysisResultV1, Rally } from '../src/shared/contracts';
+import { buildCutGroups, SelectionError, selectRallies } from '../src/domain/segments';
+import type { AnalysisResultV1, BounceRally, Rally } from '../src/shared/contracts';
 
-function rally(id: string, start: number, end: number, bounceCount = 4, index = 1): Rally {
+function rally(id: string, start: number, end: number, bounceCount = 4, index = 1): BounceRally {
   return {
     id,
     index,
@@ -75,5 +75,50 @@ describe('selectRallies', () => {
     expect(selectRallies(result, {
       mode: 'highlight', highlight_threshold: 5, pre_roll_seconds: 2.5, post_roll_seconds: 2,
     }).map((item) => item.id)).toEqual(['rally_002']);
+  });
+
+  it('keeps legacy highlight selections compatible with bounce results', () => {
+    expect(selectRallies(result, {
+      mode: 'highlight', highlight_threshold: 5, pre_roll_seconds: 2.5, post_roll_seconds: 2,
+    }).map((item) => item.id)).toEqual(['rally_002']);
+  });
+
+  it('uses strict, cumulative duration tiers for continuous visibility results', () => {
+    const visibilityResult: AnalysisResultV1 = {
+      schema_version: 2,
+      video: result.video,
+      rallies: [
+        { id: 'rally_001', index: 1, start_time_seconds: 0, end_time_seconds: 2.7 },
+        { id: 'rally_002', index: 2, start_time_seconds: 3, end_time_seconds: 7.01 },
+        { id: 'rally_003', index: 3, start_time_seconds: 8, end_time_seconds: 12.81 },
+      ],
+      rally_recognition: {
+        method: 'continuous_visibility', start_visible_seconds: 0.2, end_invisible_seconds: 0.5,
+      },
+    };
+    const common = { mode: 'highlight' as const, pre_roll_seconds: 2.5 as const, post_roll_seconds: 2 as const };
+    const short = selectRallies(visibilityResult, { ...common, criterion: { kind: 'duration_tier', tier: 'short_rally' } });
+    const medium = selectRallies(visibilityResult, { ...common, criterion: { kind: 'duration_tier', tier: 'rally' } });
+    const long = selectRallies(visibilityResult, { ...common, criterion: { kind: 'duration_tier', tier: 'long_rally' } });
+    expect(short.map((item) => item.id)).toEqual(['rally_002', 'rally_003']);
+    expect(medium.map((item) => item.id)).toEqual(['rally_002', 'rally_003']);
+    expect(long.map((item) => item.id)).toEqual(['rally_003']);
+  });
+
+  it('rejects a criterion for the other recognition method', () => {
+    const visibilityResult: AnalysisResultV1 = {
+      schema_version: 2,
+      video: result.video,
+      rallies: [{ id: 'rally_001', index: 1, start_time_seconds: 0, end_time_seconds: 5 }],
+      rally_recognition: {
+        method: 'continuous_visibility', start_visible_seconds: 0.2, end_invisible_seconds: 0.5,
+      },
+    };
+    expect(() => selectRallies(visibilityResult, {
+      mode: 'highlight', criterion: { kind: 'bounce_count', threshold: 3 }, pre_roll_seconds: 2.5, post_roll_seconds: 2,
+    })).toThrow(new SelectionError('INVALID_HIGHLIGHT_CRITERION'));
+    expect(() => selectRallies(result, {
+      mode: 'highlight', criterion: { kind: 'duration_tier', tier: 'short_rally' }, pre_roll_seconds: 2.5, post_roll_seconds: 2,
+    })).toThrow(new SelectionError('INVALID_HIGHLIGHT_CRITERION'));
   });
 });

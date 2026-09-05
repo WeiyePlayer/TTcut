@@ -3,11 +3,14 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT,
   BLURBALL_STAGE1_CONFIDENCE_THRESHOLD_DEFAULT,
+  DURATION_HIGHLIGHT_TIER_VALUES,
   AnalysisResultV1,
   BlurBallAnalysisMode,
   Calibration,
   CutSelectionV1,
   ExportWarning,
+  DurationHighlightTier,
+  RallyRecognitionMethod,
   TableAnalysis,
   VideoMetadata,
 } from '../shared/contracts';
@@ -32,6 +35,7 @@ type BatchItem = {
   metadata: VideoMetadata;
   mode: BatchMode;
   threshold: 3 | 5 | 7;
+  durationTier: DurationHighlightTier;
   calibrationStatus: CalibrationStatus;
   processingStatus: ProcessingStatus;
   progress: number;
@@ -52,6 +56,7 @@ interface MultiTaskPageProps {
   preRoll: 1.5 | 2.5 | 5;
   postRoll: 0.5 | 1 | 2 | 4;
   analysisMode?: BlurBallAnalysisMode;
+  rallyRecognitionMethod?: RallyRecognitionMethod;
   normalizeVariableFrameRate?: boolean;
   blurballConfidenceThreshold?: number;
   blurballStage1ConfidenceThreshold?: number;
@@ -76,6 +81,7 @@ async function createItems(videos: SelectedVideo[]): Promise<BatchItem[]> {
     metadata: await window.ttcut.probeVideo(video.path),
     mode: 'all' as const,
     threshold: 5 as const,
+    durationTier: 'rally' as const,
     calibrationStatus: 'pending' as const,
     processingStatus: 'waiting' as const,
     progress: 0,
@@ -91,9 +97,11 @@ async function createItems(videos: SelectedVideo[]): Promise<BatchItem[]> {
   })));
 }
 
-function modeLabel(item: BatchItem): string {
+function modeLabel(item: BatchItem, rallyRecognitionMethod: RallyRecognitionMethod): string {
   if (item.mode === 'all') return '所有回合';
-  if (item.mode === 'highlight') return `精彩回合_${item.threshold}板`;
+  if (item.mode === 'highlight') return rallyRecognitionMethod === 'continuous_visibility'
+    ? `精彩回合_${({ short_rally: '短回合', rally: '相持', long_rally: '长相持' } as const)[item.durationTier]}`
+    : `精彩回合_${item.threshold}板`;
   return '只分析';
 }
 
@@ -116,6 +124,7 @@ export function MultiTaskPage({
   preRoll,
   postRoll,
   analysisMode = 'full',
+  rallyRecognitionMethod = 'bounce_events',
   normalizeVariableFrameRate = false,
   blurballConfidenceThreshold = BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT,
   blurballStage1ConfidenceThreshold = BLURBALL_STAGE1_CONFIDENCE_THRESHOLD_DEFAULT,
@@ -149,6 +158,7 @@ export function MultiTaskPage({
     preRoll,
     postRoll,
     analysisMode,
+    rallyRecognitionMethod,
     normalizeVariableFrameRate,
     blurballConfidenceThreshold,
     blurballStage1ConfidenceThreshold,
@@ -276,12 +286,14 @@ export function MultiTaskPage({
       setActivePhase('export');
       const selection: CutSelectionV1 = candidate.mode === 'all'
         ? { mode: 'all', pre_roll_seconds: optionsRef.current.preRoll, post_roll_seconds: optionsRef.current.postRoll }
-        : { mode: 'highlight', highlight_threshold: candidate.threshold, pre_roll_seconds: optionsRef.current.preRoll, post_roll_seconds: optionsRef.current.postRoll };
+        : optionsRef.current.rallyRecognitionMethod === 'continuous_visibility'
+          ? { mode: 'highlight', criterion: { kind: 'duration_tier', tier: candidate.durationTier }, pre_roll_seconds: optionsRef.current.preRoll, post_roll_seconds: optionsRef.current.postRoll }
+          : { mode: 'highlight', criterion: { kind: 'bounce_count', threshold: candidate.threshold }, pre_roll_seconds: optionsRef.current.preRoll, post_roll_seconds: optionsRef.current.postRoll };
       const startPromise = window.ttcut.startExport({
         analysis_id: candidate.analysisId,
         selection,
         destination: 'source',
-        mode_label: modeLabel(candidate),
+        mode_label: modeLabel(candidate, optionsRef.current.rallyRecognitionMethod),
       });
       pendingTaskStartRef.current = startPromise;
       void startPromise.then((taskId) => {
@@ -326,7 +338,8 @@ export function MultiTaskPage({
       calibrationChoice,
       device: 'auto',
       historyVisibility: candidate.mode === 'analyze-only' ? 'visible' : 'deferred',
-      analysisMode: optionsRef.current.analysisMode,
+      analysisMode: optionsRef.current.rallyRecognitionMethod === 'continuous_visibility' ? 'full' : optionsRef.current.analysisMode,
+      rallyRecognitionMethod: optionsRef.current.rallyRecognitionMethod,
       normalizeVariableFrameRate: optionsRef.current.normalizeVariableFrameRate,
       blurballConfidenceThreshold: optionsRef.current.blurballConfidenceThreshold,
       blurballStage1ConfidenceThreshold: optionsRef.current.blurballStage1ConfidenceThreshold,
@@ -710,7 +723,16 @@ export function MultiTaskPage({
                         </button>
                       ))}
                     </div>
-                    {item.mode === 'highlight' && <GlassRadioGroup
+                    {item.mode === 'highlight' && (rallyRecognitionMethod === 'continuous_visibility' ? <GlassRadioGroup
+                      ariaLabel={language === 'zh-CN' ? '时长档位' : 'Duration tier'}
+                      className="compact"
+                      disabled={active}
+                      idPrefix={`batch-duration-tier-${item.id}`}
+                      name={`batch-duration-tier-${item.id}`}
+                      onChange={(durationTier) => updateItem(item.id, (current) => ({ ...current, durationTier }))}
+                      options={DURATION_HIGHLIGHT_TIER_VALUES.map((value) => ({ value, label: ({ short_rally: language === 'zh-CN' ? '短回合' : 'Short rally', rally: language === 'zh-CN' ? '相持' : 'Rally', long_rally: language === 'zh-CN' ? '长相持' : 'Long rally' } as const)[value] }))}
+                      value={item.durationTier}
+                    /> : <GlassRadioGroup
                       ariaLabel={language === 'zh-CN' ? '板数筛选' : 'Bounce filter'}
                       className="compact"
                       disabled={active}
@@ -719,7 +741,7 @@ export function MultiTaskPage({
                       onChange={(threshold) => updateItem(item.id, (current) => ({ ...current, threshold }))}
                       options={([3, 5, 7] as const).map((value) => ({ value, label: `${value}${language === 'zh-CN' ? '板' : ' bounces'}` }))}
                       value={item.threshold}
-                    />}
+                    />)}
                   </div>
                   <button className="batch-remove" type="button" aria-label={`${text.remove} ${item.video.name}`} disabled={active} onClick={() => void remove(item)}>×</button>
                 </>

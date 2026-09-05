@@ -8,9 +8,11 @@ import {
   calibrationResultSchema,
   workerEventSchema,
   type AnalysisResultV1,
+  type BallModelProfile,
   type Calibration,
   type CalibrationChoice,
   type BlurBallAnalysisMode,
+  type RallyRecognitionMethod,
   type TableAnalysis,
   type WorkerEventV1,
 } from '../shared/contracts';
@@ -61,12 +63,14 @@ function workerFailure(code: string, message: string, options: { logPath?: strin
 function workerEnvironment(
   components: Awaited<ReturnType<typeof resolveUsableAnalysisComponents>>,
   includeBlurball: boolean,
+  includeTrackNet = false,
 ): NodeJS.ProcessEnv {
   return {
     ...analysisProcessEnvironment(process.env),
     PYTHONPATH: components.worker,
     PYTHONUTF8: '1',
     ...(includeBlurball ? { TTCUT_BLURBALL_WEIGHTS: components.blurballWeights } : {}),
+    ...(includeTrackNet && components.tracknetWeights ? { TTCUT_TRACKNET_WEIGHTS: components.tracknetWeights } : {}),
     TTCUT_TABLE_ANALYZE_WEIGHTS: components.tableAnalyzeWeights,
   };
 }
@@ -171,6 +175,7 @@ export async function startAnalysis(
     device: 'auto' | 'cuda' | 'cpu';
     historyVisibility: 'visible' | 'deferred';
     analysisMode: BlurBallAnalysisMode;
+    rallyRecognitionMethod: RallyRecognitionMethod;
     normalizeVariableFrameRate: boolean;
     blurballConfidenceThreshold: number;
     blurballStage1ConfidenceThreshold: number;
@@ -189,6 +194,8 @@ export async function startAnalysis(
   const requestedDevice = requestedAnalysisDevice(value.device);
   const analysisComponents = await resolveUsableAnalysisComponents(requestedDevice);
   if (!analysisComponents.python) throw new Error('RUNTIME_MISSING');
+  const ballModelProfile: BallModelProfile = analysisComponents.tracknetWeights ? 'tracknet_v1' : 'blurball_v1';
+  const effectiveAnalysisMode: BlurBallAnalysisMode = ballModelProfile === 'tracknet_v1' ? 'full' : value.analysisMode;
   const python = analysisComponents.python;
   const mediaComponents = await resolveUsableMediaComponents();
   const encoder = mediaComponents.mediaEncoder === 'unavailable' ? null : mediaComponents.mediaEncoder;
@@ -348,26 +355,32 @@ export async function startAnalysis(
       if (!processing) throw workerFailure('CFR_PROCESSING_MEDIA_MISSING', 'Processing media was not prepared.');
       const processingMedia = processing;
       const request = analysisRequestSchema.parse({
-        schema_version: 2,
+        schema_version: 4,
         task_id: taskId,
         video_path: processingMedia.metadata.path,
         device: requestedDevice,
         video_metadata: workerVideoMetadata(processingMedia.metadata),
         calibration_choice: calibrationChoice,
-        analysis: value.analysisMode === 'full'
+        ball_model_profile: ballModelProfile,
+        analysis: effectiveAnalysisMode === 'full'
           ? { mode: 'full', confidence_threshold: value.blurballConfidenceThreshold }
           : {
             mode: 'two_stage',
             stage1_confidence_threshold: value.blurballStage1ConfidenceThreshold,
             stage2_confidence_threshold: value.blurballStage2ConfidenceThreshold,
           },
+        rally_recognition: { method: value.rallyRecognitionMethod },
       });
       const workerResult = await runWorker({
         taskId,
         executable: python,
         args: ['-m', 'ttcut_worker.worker'],
         cwd: analysisComponents.worker,
-        env: workerEnvironment(analysisComponents, true),
+        env: workerEnvironment(
+          analysisComponents,
+          ballModelProfile === 'blurball_v1',
+          ballModelProfile === 'tracknet_v1',
+        ),
         request,
         parseResult: (data): AnalysisResultV1 => analysisResultSchema.parse(data),
         onProgress: (event) => emitProgress(
@@ -375,7 +388,7 @@ export async function startAnalysis(
           taskId,
           event,
           value.calibrationChoice.method,
-          value.analysisMode,
+          effectiveAnalysisMode,
           processingMedia.mode === 'normalized_cfr' ? 'normalized' : 'source',
         ),
       });

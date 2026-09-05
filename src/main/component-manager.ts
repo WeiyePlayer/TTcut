@@ -639,7 +639,10 @@ async function prepareImportedMedia(
   const extracted = path.join(staging, media.asset.archive_root);
   const normalized = path.join(staging, media.asset.install_directory);
   if (!await exists(extracted)) throw new Error('COMPONENT_ARCHIVE_LAYOUT_MISMATCH');
-  await rename(extracted, normalized);
+  // tar.exe has closed, but Windows may still briefly hold handles while it or
+  // endpoint protection finishes releasing freshly extracted executables.
+  await delay(100);
+  await renameWithRetry(extracted, normalized);
   sendProgress(window, taskId, 'self_test', progress + 5);
   await validateMediaLicense(normalized);
   const ffmpeg = path.join(normalized, 'bin', 'ffmpeg.exe');

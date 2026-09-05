@@ -68,6 +68,8 @@ beforeAll(async () => {
   process.env.TTCUT_E2E_COMPONENTS_ROOT = root;
   delete process.env.TTCUT_FFMPEG;
   delete process.env.TTCUT_FFPROBE;
+  delete process.env.TTCUT_ENABLE_LOCAL_TRACKNET;
+  delete process.env.TTCUT_TRACKNET_WEIGHTS;
   for (const installDirectory of ['ffmpeg-x264-N-125716-g1b1f602699', 'ffmpeg-8.1']) {
     const bin = path.join(root, installDirectory, 'bin');
     await mkdir(bin, { recursive: true });
@@ -79,6 +81,8 @@ beforeAll(async () => {
 afterAll(async () => {
   delete process.env.TTCUT_E2E;
   delete process.env.TTCUT_E2E_COMPONENTS_ROOT;
+  delete process.env.TTCUT_ENABLE_LOCAL_TRACKNET;
+  delete process.env.TTCUT_TRACKNET_WEIGHTS;
   await rm(root, { recursive: true, force: true });
 });
 
@@ -132,6 +136,32 @@ describe('packaged model lookup', () => {
       Object.defineProperty(process, 'resourcesPath', { configurable: true, value: originalResourcesPath });
       await rm(packageResources, { recursive: true, force: true });
       await rm(installedRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('local TrackNet test weight lookup', () => {
+  it('requires an explicit development opt-in and never resolves a weight for packaged builds', async () => {
+    const weight = path.join(root, 'TrackNet_best.pt');
+    const originalResourcesPath = process.resourcesPath;
+    await writeFile(weight, 'local-test-only');
+    process.env.TTCUT_TRACKNET_WEIGHTS = weight;
+
+    try {
+      expect((await resolveComponents()).tracknetWeights).toBeNull();
+
+      process.env.TTCUT_ENABLE_LOCAL_TRACKNET = '1';
+      expect((await resolveComponents()).tracknetWeights).toBe(path.resolve(weight));
+
+      appMock.isPackaged = true;
+      Object.defineProperty(process, 'resourcesPath', { configurable: true, value: root });
+      expect((await resolveComponents()).tracknetWeights).toBeNull();
+    } finally {
+      appMock.isPackaged = false;
+      Object.defineProperty(process, 'resourcesPath', { configurable: true, value: originalResourcesPath });
+      delete process.env.TTCUT_ENABLE_LOCAL_TRACKNET;
+      delete process.env.TTCUT_TRACKNET_WEIGHTS;
+      await rm(weight, { force: true });
     }
   });
 });
