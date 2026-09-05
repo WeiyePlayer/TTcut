@@ -23,14 +23,19 @@ await signAsync({ app, identity: '-', identityValidation: false, platform: 'darw
 run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', app]);
 if (!process.argv.includes('--app-only')) run(process.execPath, [require.resolve('electron-builder/out/cli/cli.js'), '--mac', 'dmg', 'zip', '--arm64', '--prepackaged', app, '--config', 'electron-builder.macos.cjs', '--publish', 'never']);
 const output = path.join(root, 'out/make/macos/arm64'); await mkdir(output, { recursive: true });
+const version = require('../package.json').version;
+const releaseArchives = new Set([
+ `TTcut-${version}-macOS-arm64-electron.dmg`,
+ `TTcut-${version}-macOS-arm64-electron.zip`,
+]);
 const files = [];
 for (const name of await readdir(output)) {
- if (!/\.(dmg|zip)$/.test(name)) continue;
+ if (!releaseArchives.has(name)) continue;
  const file = path.join(output, name); const bytes = await readFile(file);
  files.push({ file: name, bytes: (await stat(file)).size, sha256: createHash('sha256').update(bytes).digest('hex') });
 }
 const git = (args) => spawnSync('git', args, { encoding: 'utf8', cwd: root }).stdout.trim();
-const report = { app, version: require('../package.json').version, build: `electron-local-${new Date().toISOString().replace(/[-:.TZ]/g, '')}`, sourceCommit: git(['rev-parse', 'HEAD']), sourceDirty: Boolean(git(['status', '--porcelain', '--untracked-files=no'])), untrackedFiles: git(['ls-files', '--others', '--exclude-standard']).split('\n').filter(Boolean), signature: 'ad-hoc', notarized: false, updater: 'disabled', files };
+const report = { app, version, build: `electron-local-${new Date().toISOString().replace(/[-:.TZ]/g, '')}`, sourceCommit: git(['rev-parse', 'HEAD']), sourceDirty: Boolean(git(['status', '--porcelain', '--untracked-files=no'])), untrackedFiles: git(['ls-files', '--others', '--exclude-standard']).split('\n').filter(Boolean), signature: 'ad-hoc', notarized: false, updater: 'disabled', files };
 await writeFile(path.join(output, 'build-manifest.json'), JSON.stringify(report, null, 2) + '\n');
 await writeFile(path.join(output, 'SHA256SUMS'), files.map((f) => `${f.sha256}  ${f.file}`).join('\n') + '\n');
 console.log(JSON.stringify(report, null, 2));
