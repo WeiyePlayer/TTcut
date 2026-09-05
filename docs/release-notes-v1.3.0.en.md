@@ -28,7 +28,7 @@
 - **Windows x64 · v1.3.0**: includes full and online installers. The online installer downloads and verifies required runtime resources during installation and needs an active connection; the full installer supports one-step setup.
 - **macOS 15+ · Apple Silicon · v1.3.0**: includes a DMG with the native Core ML analysis and media runtimes bundled. Intel Macs are not supported.
 - The Windows installers continue to use the pinned `CN=weiye` self-signed Authenticode certificate, RFC 3161 timestamping, and a signed update manifest. Windows systems that do not trust the certificate may still show Unknown Publisher or SmartScreen warnings.
-- The macOS packages are ad-hoc signed and not Apple-notarized. If macOS blocks the first launch, allow it in System Settings > Privacy & Security. Automatic updates are not available in the current macOS build.
+- The macOS package is ad-hoc signed and not Apple-notarized. If macOS blocks the first launch, allow it in System Settings > Privacy & Security. Automatic updates are not available in the current macOS build.
 
 ## Scope
 
