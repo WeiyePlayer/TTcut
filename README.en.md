@@ -23,8 +23,9 @@ TTcut detects an NVIDIA GPU automatically and falls back to CPU if accelerated s
 
 ## What's new in v1.3.0
 
-- Continuous motion is now the default rally-recognition method, with improved handling for short rallies, vertical movement, between-rally passes, and waiting segments.
-- Automatic calibration samples more points across the video and selects a result using stable candidates and table geometry, improving robustness in complex footage.
+- Windows: Continuous motion is now the default rally-recognition method, with improved handling for short rallies, vertical movement, between-rally passes, and waiting segments.
+- Windows: Automatic calibration samples more points across the video and selects a result using stable candidates and table geometry, improving robustness in complex footage.
+- macOS: the first macOS 15+ Apple Silicon desktop build includes native Core ML analysis and media runtimes. Although the interface offers Continuous motion, the current native analysis result still uses Bounce events.
 - Manual calibration accepts the four table corners in any order and keeps them directly adjustable afterward.
 
 See the [v1.3.0 release notes](docs/release-notes-v1.3.0.en.md) for the complete details.

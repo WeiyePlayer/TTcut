@@ -2,20 +2,26 @@
 
 [简体中文](release-notes-v1.3.0.md) | **English**
 
-`v1.3.0` is a stable TTcut release with desktop packages for Windows x64 and macOS 15+ on Apple Silicon. It improves Continuous motion and automatic calibration.
+`v1.3.0` is a stable TTcut release with desktop packages for Windows x64 and macOS 15+ on Apple Silicon. The Windows build improves Continuous motion and automatic calibration; the first macOS build provides local analysis and media processing through native Core ML services.
 
-## Continuous motion
+## Windows: Continuous motion
 
 - Continuous motion is now the default rally-recognition method. Bounce events remain available in Settings.
 - Continuity handling is improved for short rallies, vertical movement, and sparse tracks, reducing cases where valid rallies are cut short or filtered out.
 - Detection and separation of slow between-rally passes, pauses, waiting, and ball-retrieval footage are improved. Rally boundaries continue to come from actual visible tracks.
 - Highlights use duration tiers with Continuous motion. History and the custom timeline continue to present information according to the recognition method stored in each analysis result.
 
-## Automatic calibration
+## Windows: Automatic calibration
 
 - Automatic calibration samples table candidates at 11 points across the video, reducing reliance on any single obstructed or distracting frame.
 - Stable candidates are clustered across time and evaluated against consistent table geometry. Only results with sufficient geometric support are accepted.
 - Manual calibration accepts the four table corners in any order, draws their outline when complete, and keeps every point directly adjustable.
+
+## First macOS desktop release
+
+- Uses the same Electron interface as Windows while bundled native Core ML workers perform table, ball, and media processing locally.
+- The macOS interface offers both Bounce events and Continuous motion, but its native worker is not yet connected to the Continuous motion algorithm. Current analysis results use Bounce events regardless of that selection.
+- Automatic calibration on macOS currently samples 5 points across the video. Manual calibration supports marking the four corners in any order and adjusting them afterward.
 
 ## Platforms and packages
 
@@ -28,6 +34,7 @@
 
 - Continuous motion has regression coverage on reviewed samples, but those samples do not establish one universal accuracy rate for every camera angle, image quality, or scene.
 - Automatic calibration can still be affected by severe occlusion, similar-looking tables in the background, blurred footage, or videos that cannot seek reliably. Manual calibration remains available when automatic calibration fails.
+- The platforms use different analysis runtimes. Windows algorithm regression results do not establish macOS algorithm accuracy.
 
 ## Verification
 
