@@ -259,9 +259,14 @@ export const continuousVisibilityRallySchema = z.object({
   index: z.number().int().positive(),
   start_time_seconds: finiteNumber.nonnegative(),
   end_time_seconds: finiteNumber.positive(),
+  lead_in_start_time_seconds: finiteNumber.nonnegative().optional(),
 }).strict().refine(
   (rally) => rally.end_time_seconds > rally.start_time_seconds,
   { message: 'Rally end time must be after start time' },
+).refine(
+  (rally) => rally.lead_in_start_time_seconds === undefined
+    || rally.lead_in_start_time_seconds <= rally.start_time_seconds,
+  { message: 'Rally lead-in must not start after the rally' },
 );
 
 export const rallySchema = z.union([bounceRallySchema, continuousVisibilityRallySchema]);
@@ -372,6 +377,48 @@ export const continuousVisibilityAnalysisResultV2Schema = analysisResultBaseSche
       expanded_table_length_margin_cm: finiteNumber.nonnegative(),
       expanded_table_width_margin_cm: finiteNumber.nonnegative(),
       reliable_fragment_bridge_seconds: finiteNumber.positive(),
+    }).strict().optional(),
+    inter_rally_fragment_filter: z.object({
+      side_on_views_only: z.boolean(),
+      minimum_candidate_seconds: finiteNumber.positive(),
+      maximum_candidate_seconds: finiteNumber.positive(),
+      maximum_expanded_table_ratio: finiteNumber.min(0).max(1),
+      minimum_visible_run_count: z.number().int().positive(),
+      minimum_one_way_range_ratio: finiteNumber.positive(),
+      maximum_sparse_visibility_ratio: finiteNumber.min(0).max(1),
+      minimum_contiguous_flight_seconds: finiteNumber.positive(),
+      minimum_coherent_reversal_ratio: finiteNumber.positive(),
+      minimum_coherent_flight_displacement_ratio: finiteNumber.positive(),
+      expanded_table_length_margin_cm: finiteNumber.nonnegative(),
+      expanded_table_width_margin_cm: finiteNumber.nonnegative(),
+      motion_refinement: z.object({
+        version: z.union([z.literal(2), z.literal(3), z.literal(4), z.literal(5)]),
+        minimum_motion_run_seconds: finiteNumber.positive(),
+        minimum_horizontal_range_ratio: finiteNumber.positive(),
+        minimum_speed_ratio_per_second: finiteNumber.positive(),
+        reversal_range_ratio: finiteNumber.positive(),
+        gap_minimum_motion_range_ratio: finiteNumber.positive(),
+        gap_minimum_motion_support_ratio: finiteNumber.min(0).max(1),
+        short_gap_seconds: finiteNumber.positive(),
+        long_gap_seconds: finiteNumber.positive(),
+        stationary_run_seconds: finiteNumber.positive(),
+        boundary_context_seconds: finiteNumber.nonnegative(),
+      }).strict().optional(),
+      long_candidate_segmentation: z.object({
+        minimum_candidate_seconds: finiteNumber.positive(),
+        minimum_motion_run_seconds: finiteNumber.positive(),
+        minimum_motion_run_horizontal_range_ratio: finiteNumber.positive(),
+        short_gap_seconds: finiteNumber.positive(),
+        long_gap_seconds: finiteNumber.positive(),
+        minimum_visible_gap_ratio: finiteNumber.min(0).max(1),
+        minimum_stationary_run_seconds: finiteNumber.positive(),
+        boundary_context_seconds: finiteNumber.nonnegative(),
+        leading_pass_minimum_motion_seconds: finiteNumber.positive(),
+        leading_pass_minimum_run_count: z.number().int().positive(),
+        leading_pass_maximum_expanded_table_ratio: finiteNumber.min(0).max(1),
+        internal_transfer_minimum_motion_seconds: finiteNumber.positive(),
+        internal_transfer_minimum_strict_table_ratio: finiteNumber.min(0).max(1),
+      }).strict().optional(),
     }).strict().optional(),
   }).strict(),
 }).strict();

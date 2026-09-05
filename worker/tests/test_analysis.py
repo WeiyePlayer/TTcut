@@ -308,6 +308,8 @@ def test_worker_applies_the_tracknet_visibility_filter_and_records_its_threshold
 
 
 def test_worker_continuous_visibility_skips_bounce_detection_and_records_provenance(monkeypatch):
+    captured = {}
+
     class FakeBlurBallPredictor:
         def __init__(self, loaded, confidence_threshold=0.7):
             self.confidence_threshold = confidence_threshold
@@ -327,6 +329,12 @@ def test_worker_continuous_visibility_skips_bounce_detection_and_records_provena
     monkeypatch.setenv("TTCUT_BLURBALL_WEIGHTS", "blurball.pt")
     monkeypatch.setattr("ttcut_worker.worker.load_blurball", lambda path, device: fake_loaded)
     monkeypatch.setattr("ttcut_worker.worker.BlurBallPredictor", FakeBlurBallPredictor)
+
+    def fake_blurball_rallies(points, fps, table, *, motion_config):
+        captured["blurball_filter_called"] = True
+        return (VisibilityRallySummary(0, 5, 0.0, 0.5, lead_in_start_time=0.0),)
+
+    monkeypatch.setattr("ttcut_worker.worker.blurball_visibility_rallies", fake_blurball_rallies)
     monkeypatch.setattr(
         "ttcut_worker.worker.detect_blurball_bounce_frames",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("bounce detection must be skipped")),
@@ -363,9 +371,38 @@ def test_worker_continuous_visibility_skips_bounce_detection_and_records_provena
             "maximum_boundary_displacement_ratio": 0.35,
             "maximum_boundary_speed_ratio_per_second": 0.26,
         },
+        "inter_rally_fragment_filter": {
+            "side_on_views_only": True,
+            "minimum_candidate_seconds": 1.0,
+            "maximum_candidate_seconds": 6.0,
+            "maximum_expanded_table_ratio": 0.45,
+            "minimum_visible_run_count": 3,
+            "minimum_one_way_range_ratio": 0.55,
+            "maximum_sparse_visibility_ratio": 0.3,
+            "minimum_contiguous_flight_seconds": 0.15,
+            "minimum_coherent_reversal_ratio": 0.2,
+            "minimum_coherent_flight_displacement_ratio": 0.15,
+            "expanded_table_length_margin_cm": 35.0,
+            "expanded_table_width_margin_cm": 25.0,
+            "motion_refinement": {
+                "version": 5,
+                "minimum_motion_run_seconds": 0.15,
+                "minimum_horizontal_range_ratio": 0.05,
+                "minimum_speed_ratio_per_second": 0.35,
+                "reversal_range_ratio": 0.06,
+                "gap_minimum_motion_range_ratio": 0.04,
+                "gap_minimum_motion_support_ratio": 0.35,
+                "short_gap_seconds": 1.25,
+                "long_gap_seconds": 2.25,
+                "stationary_run_seconds": 0.5,
+                "boundary_context_seconds": 0.25,
+            },
+        },
     }
+    assert captured == {"blurball_filter_called": True}
     assert result["rallies"] == [{
         "id": "rally_001", "index": 1, "start_time_seconds": 0.0, "end_time_seconds": 0.5,
+        "lead_in_start_time_seconds": 0.0,
     }]
     assert "bounce_times_seconds" not in result
     assert "detection" not in result["model_provenance"]

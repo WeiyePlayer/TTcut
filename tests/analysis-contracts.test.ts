@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { analysisRequestSchema, analysisResultSchema } from '../src/shared/contracts';
+import { analysisRequestSchema, analysisResultSchema, continuousVisibilityRallySchema } from '../src/shared/contracts';
+
+it('preserves an optional transfer boundary while accepting older rallies', () => {
+  const rally = { id: 'rally_001', index: 1, start_time_seconds: 10, end_time_seconds: 15 };
+  expect(continuousVisibilityRallySchema.parse(rally)).toEqual(rally);
+  expect(continuousVisibilityRallySchema.parse({ ...rally, lead_in_start_time_seconds: 9 }).lead_in_start_time_seconds).toBe(9);
+  expect(continuousVisibilityRallySchema.safeParse({ ...rally, lead_in_start_time_seconds: 11 }).success).toBe(false);
+});
 
 const base = {
   task_id: '22222222-2222-4222-8222-222222222222',
@@ -186,5 +193,89 @@ describe('BlurBall analysis request contracts', () => {
       ...result,
       rallies: [{ ...result.rallies[0], bounce_count: 3 }],
     })).toThrow();
+  });
+
+  it('models BlurBall inter-rally fragment filter provenance', () => {
+    const result = analysisResultSchema.parse({
+      schema_version: 2,
+      video: {
+        path: 'match.mp4', duration_seconds: 10, width: 1280, height: 720, fps: 30,
+        variable_frame_rate: false, video_codec: 'h264', audio_codec: null, container: 'mp4',
+      },
+      rallies: [],
+      rally_recognition: {
+        method: 'continuous_visibility',
+        start_visible_seconds: 0.2,
+        end_invisible_seconds: 0.5,
+        inter_rally_fragment_filter: {
+          side_on_views_only: true,
+          minimum_candidate_seconds: 1,
+          maximum_candidate_seconds: 6,
+          maximum_expanded_table_ratio: 0.45,
+          minimum_visible_run_count: 3,
+          minimum_one_way_range_ratio: 0.55,
+          maximum_sparse_visibility_ratio: 0.3,
+          minimum_contiguous_flight_seconds: 0.15,
+          minimum_coherent_reversal_ratio: 0.2,
+          minimum_coherent_flight_displacement_ratio: 0.15,
+          expanded_table_length_margin_cm: 35,
+          expanded_table_width_margin_cm: 25,
+          long_candidate_segmentation: {
+            minimum_candidate_seconds: 10,
+            minimum_motion_run_seconds: 0.15,
+            minimum_motion_run_horizontal_range_ratio: 0.15,
+            short_gap_seconds: 1.25,
+            long_gap_seconds: 2.25,
+            minimum_visible_gap_ratio: 0.36,
+            minimum_stationary_run_seconds: 0.5,
+            boundary_context_seconds: 0.25,
+            leading_pass_minimum_motion_seconds: 2.5,
+            leading_pass_minimum_run_count: 3,
+            leading_pass_maximum_expanded_table_ratio: 0.36,
+            internal_transfer_minimum_motion_seconds: 1,
+            internal_transfer_minimum_strict_table_ratio: 0.9,
+          },
+        },
+      },
+    });
+    if (result.schema_version !== 2 || result.rally_recognition.method !== 'continuous_visibility') {
+      throw new Error('Expected a continuous-visibility v2 result');
+    }
+    expect(result.rally_recognition.inter_rally_fragment_filter?.minimum_visible_run_count).toBe(3);
+    expect(
+      result.rally_recognition.inter_rally_fragment_filter
+        ?.long_candidate_segmentation?.minimum_candidate_seconds,
+    ).toBe(10);
+    const { long_candidate_segmentation: _legacy, ...filter } =
+      result.rally_recognition.inter_rally_fragment_filter!;
+    const refined = analysisResultSchema.parse({
+      ...result,
+      rally_recognition: {
+        ...result.rally_recognition,
+        inter_rally_fragment_filter: {
+          ...filter,
+          motion_refinement: {
+            version: 2,
+            minimum_motion_run_seconds: 0.15,
+            minimum_horizontal_range_ratio: 0.05,
+            minimum_speed_ratio_per_second: 0.35,
+            reversal_range_ratio: 0.06,
+            gap_minimum_motion_range_ratio: 0.04,
+            gap_minimum_motion_support_ratio: 0.35,
+            short_gap_seconds: 1.25,
+            long_gap_seconds: 2.25,
+            stationary_run_seconds: 0.5,
+            boundary_context_seconds: 0.25,
+          },
+        },
+      },
+    });
+    if (refined.schema_version !== 2) throw new Error('Expected a v2 result');
+    expect(refined.rally_recognition).toMatchObject({
+      inter_rally_fragment_filter: { motion_refinement: { version: 2 } },
+    });
+    expect(refined.rally_recognition).not.toHaveProperty(
+      'inter_rally_fragment_filter.long_candidate_segmentation',
+    );
   });
 });
