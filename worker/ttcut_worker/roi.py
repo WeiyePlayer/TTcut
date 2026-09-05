@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -18,6 +18,29 @@ MODEL_STRIDE = 8
 MODEL_REFERENCE_WIDTH = 512
 MODEL_REFERENCE_HEIGHT = 288
 DEFAULT_ROI_MODEL_SCALE = 1.25
+
+
+def stabilize_visibility_roi(roi: AnalysisRoi) -> AnalysisRoi:
+    """Anchor continuous-mode model sampling to a coarse source-image grid.
+
+    Homography extrapolation magnifies small manual corner adjustments. Keeping
+    nearby crops on the same grid avoids resampling every model pixel after a
+    tiny adjustment. The calibration itself and bounce-mode ROI are unchanged.
+    The lower table projection uses a coarser grid than the padded upper edge.
+    """
+    grid_x = max(1, 2 ** round(math.log2(roi.source_width / 32)))
+    grid_y = max(1, 2 ** round(math.log2(roi.source_height / 32)))
+
+    def snap(value: int, grid: int, limit: int) -> int:
+        return max(0, min(limit, math.floor(value / grid + 0.5) * grid))
+
+    bounds = (
+        snap(roi.x0, grid_x, roi.source_width), snap(roi.y0, grid_y, roi.source_height),
+        snap(roi.x1, grid_x, roi.source_width), snap(roi.y1, grid_y * 2, roi.source_height),
+    )
+    if bounds[2] <= bounds[0] or bounds[3] <= bounds[1]:
+        return roi
+    return replace(roi, x0=bounds[0], y0=bounds[1], x1=bounds[2], y1=bounds[3])
 
 
 @dataclass(frozen=True)

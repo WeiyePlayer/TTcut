@@ -6,10 +6,21 @@ import {
   type CutGroup,
   type CutSelectionV1,
   type Rally,
+  type RallyRecognitionMethod,
 } from '../shared/contracts';
 
 const EPSILON = 1e-9;
 export const FINAL_RALLY_TAIL_SECONDS = 1;
+
+export function finalRallyTailSeconds(method: RallyRecognitionMethod): number {
+  return method === 'bounce_events' ? FINAL_RALLY_TAIL_SECONDS : 0;
+}
+
+export function rallyLeadInStart(rally: Rally, preRollSeconds: number, method: RallyRecognitionMethod): number {
+  const boundary = method === 'continuous_visibility' && 'lead_in_start_time_seconds' in rally
+    ? rally.lead_in_start_time_seconds ?? 0 : 0;
+  return Math.max(0, rally.start_time_seconds - preRollSeconds, Math.min(rally.start_time_seconds, boundary));
+}
 
 export class SelectionError extends Error {
   constructor(public readonly code: 'NO_RALLIES' | 'NO_HIGHLIGHTS' | 'NO_CUSTOM_SELECTION' | 'INVALID_HIGHLIGHT_CRITERION') {
@@ -58,6 +69,7 @@ export function buildCutGroups(
   preRollSeconds: number,
   postRollSeconds: number,
   videoDuration: number,
+  recognitionMethod: RallyRecognitionMethod = 'bounce_events',
 ): CutGroup[] {
   if (!Number.isFinite(videoDuration) || videoDuration <= 0) return [];
   if (!Number.isFinite(preRollSeconds) || preRollSeconds < 0) return [];
@@ -92,10 +104,10 @@ export function buildCutGroups(
 
   const expanded: CutGroup[] = [];
   for (const group of raw) {
-    const start = Math.max(0, group.rawStart - preRollSeconds);
-    // Add the fixed tail once, after the final rally in this cut group. The
-    // configured after-rally option remains unchanged and is applied in full.
-    const end = Math.min(videoDuration, group.rawEnd + FINAL_RALLY_TAIL_SECONDS + postRollSeconds);
+    const firstRally = ordered.find((rally) => rally.id === group.rallyIds[0])!;
+    const start = rallyLeadInStart(firstRally, preRollSeconds, recognitionMethod);
+    // Only bounce recognition needs the fixed tail; always apply the configured roll.
+    const end = Math.min(videoDuration, group.rawEnd + finalRallyTailSeconds(recognitionMethod) + postRollSeconds);
     if (end <= start) continue;
     const previous = expanded.at(-1);
     if (previous && start <= previous.end + EPSILON) {
@@ -117,6 +129,7 @@ export function createCutGroups(result: AnalysisResultV1, selection: CutSelectio
     selection.pre_roll_seconds,
     selection.post_roll_seconds,
     result.video.duration_seconds,
+    rallyRecognitionMethod(result),
   );
 }
 
