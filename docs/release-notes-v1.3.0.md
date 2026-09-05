@@ -26,7 +26,7 @@
 ## 平台与安装包
 
 - **Windows x64 · v1.3.0**：提供完整安装包和在线安装包。在线安装包会在安装阶段下载并校验必需运行资源，需要保持联网；完整安装包适合希望一次完成安装的场景。
-- **macOS 15+ · Apple Silicon · v1.3.0**：提供 DMG，已内置原生 Core ML 分析及媒体处理运行资源，不支持 Intel Mac。
+- **macOS 15+ · Apple Silicon · v1.3.0**：提供 DMG（推荐）和 ZIP，已内置原生 Core ML 分析及媒体处理运行资源，不支持 Intel Mac。
 - Windows 安装包继续使用固定 `CN=weiye` 自签名 Authenticode 证书、RFC 3161 时间戳和签名更新清单。未信任该证书的 Windows 环境仍可能显示“未知发布者”或 SmartScreen 提示。
 - macOS 安装包使用临时签名且未经过 Apple 公证；首次打开若被系统拦截，请在“系统设置 > 隐私与安全性”中确认允许。当前 macOS 版本不提供自动更新。
 
