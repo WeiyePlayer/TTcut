@@ -1,0 +1,39 @@
+{
+  "removed": [
+    {
+      "path": "/Users/weiye/DOS/TTcut-windows/TTcut/.tasks/fp16-preview-20260905",
+      "file_bytes": 1616305607
+    },
+    {
+      "path": "/Users/weiye/Desktop/TTcut-FP16-Test-20260905",
+      "file_bytes": 696002874
+    },
+    {
+      "path": "/Users/weiye/DOS/TTcut-windows/TTcut/macos/output/optimization-1-193/package",
+      "file_bytes": 55176863
+    },
+    {
+      "path": "/Users/weiye/DOS/TTcut-windows/TTcut/macos/output/optimization-1-193/fp16/BlurBall.mlpackage",
+      "file_bytes": 2736232
+    },
+    {
+      "path": "/Users/weiye/DOS/TTcut-windows/TTcut/macos/output/optimization-1-193/fp16/BlurBall.mlmodelc",
+      "file_bytes": 2746779
+    },
+    {
+      "path": "/Users/weiye/DOS/TTcut-windows/TTcut/macos/output/optimization-1-193/mixed/BlurBall.mlpackage",
+      "file_bytes": 2746111
+    },
+    {
+      "path": "/Users/weiye/DOS/TTcut-windows/TTcut/macos/output/optimization-1-193/mixed/BlurBall.mlmodelc",
+      "file_bytes": 2756535
+    }
+  ],
+  "removed_file_bytes": 2378471001,
+  "preserved": [
+    "Source video, original app and production models",
+    "~/Library/Application Support/TTcut-Electron-FP16-Test (manual-test history)",
+    "Benchmark JSON, diagnostics, conversion scripts and adoption evidence"
+  ],
+  "symlink_targets_preserved": true
+}

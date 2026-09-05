@@ -1,0 +1,11 @@
+{
+  "app": "/Users/weiye/DOS/TTcut-windows/TTcut/out/TTcut-darwin-arm64/TTcut.app",
+  "passed": true,
+  "checks": [
+    "Packaged Electron starts with bundled runtime and system-only PATH",
+    "FP16 runtime available",
+    "Media runtime available",
+    "Settings UI visible"
+  ],
+  "version": "Core ML · BlurBall FP16 + Table"
+}

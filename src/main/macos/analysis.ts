@@ -105,7 +105,7 @@ export async function startMacAnalysis(window: BrowserWindow, value: AnalysisOpt
         ...(table ? { table_analysis: table } : {}),
         rallies: result.rallies.map((rally, i) => ({ id: `rally_${String(i + 1).padStart(3, '0')}`, index: i + 1, start_time_seconds: rally.start, end_time_seconds: rally.end, bounce_count: rally.bounceCount })),
         bounce_times_seconds: [...new Set(result.bounceTimes)].sort((a, b) => a - b),
-        inference_runtime: { engine: 'coreml', compute_units: 'cpuAndGPU', checkpoint_sha256: checkpoint.blurball },
+        inference_runtime: { engine: 'coreml', compute_units: 'cpuAndNeuralEngine', precision: 'float16', prediction_concurrency: 4, checkpoint_sha256: checkpoint.blurball },
         model_provenance: { profile: 'blurball_v1', component_version: null, roi: { x: roi.x, y: roi.y, width: roi.width, height: roi.height }, main_input: { width: roi.modelWidth, height: roi.modelHeight }, aux_input: null,
           analysis: { schema_version: 2, mode: value.analysisMode, ...(value.analysisMode === 'two_stage' ? { interval_expansion_seconds: 0.75 } : {}), stages: value.analysisMode === 'full'
             ? [{ name: 'full', confidence_threshold: value.blurballConfidenceThreshold, window_size: 3, window_stride: 3, retained_output: 'all_window_frames' }]

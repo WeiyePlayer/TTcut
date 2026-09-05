@@ -1,0 +1,51 @@
+{
+  "model": "BlurBall",
+  "checkpoint_sha256": "3545206c7155194ea654899d33579c88c9fd8e82c632cbdbae3b0c0ec3f2985f",
+  "torch": "2.7.0",
+  "coremltools": "9.0",
+  "precision": "float16",
+  "compute_units": "ComputeUnit.CPU_AND_NE",
+  "comparisons": [
+    {
+      "shape": [
+        1,
+        9,
+        160,
+        280
+      ],
+      "max_abs_error": 0.00041146762669086456,
+      "mean_abs_error": 2.4539294827263802e-05,
+      "violations": 0,
+      "seconds": 0.0849682499829214
+    },
+    {
+      "shape": [
+        1,
+        9,
+        192,
+        336
+      ],
+      "max_abs_error": 0.0003019990399479866,
+      "mean_abs_error": 4.032072865811642e-06,
+      "violations": 0,
+      "seconds": 0.14787275000708178
+    },
+    {
+      "shape": [
+        1,
+        9,
+        288,
+        512
+      ],
+      "max_abs_error": 0.0014413706958293915,
+      "mean_abs_error": 4.455765065358719e-06,
+      "violations": 0,
+      "seconds": 0.5213295419816859
+    }
+  ],
+  "tolerance": {
+    "atol": 0.005,
+    "rtol": 0.01
+  },
+  "passed": true
+}

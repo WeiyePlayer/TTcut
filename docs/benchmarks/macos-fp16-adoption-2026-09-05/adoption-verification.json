@@ -1,0 +1,110 @@
+{
+  "video": "/Users/weiye/Documents/1-193.mp4",
+  "request": {
+    "schemaVersion": 1,
+    "taskID": "11111111-1111-4111-8111-111111111111",
+    "operation": "analyze",
+    "video": {
+      "path": "/Users/weiye/Documents/1-193.mp4",
+      "width": 1280,
+      "height": 720,
+      "duration": 507.408,
+      "fps": 29.969964998581023,
+      "nominalFPS": 29.97002997002997,
+      "frameRate": "633625/21142",
+      "frameCount": 15207,
+      "variableFrameRate": true,
+      "videoCodec": "h264",
+      "profile": "High",
+      "pixelFormat": "yuv420p",
+      "bitDepth": 8,
+      "chroma": "420",
+      "videoTimeBase": "1/16000",
+      "videoStart": 0.032,
+      "videoDuration": 507.408,
+      "audioCodec": "aac",
+      "audioChannels": 2,
+      "audioSampleRate": 48000,
+      "audioTimeBase": "1/48000",
+      "audioStart": 0,
+      "audioDuration": 507.405167,
+      "audioBitrate": 218139,
+      "bitrate": 787549,
+      "sar": "1:1",
+      "rotation": 0,
+      "colorRange": "tv",
+      "colorPrimaries": "bt709",
+      "colorTransfer": "bt709",
+      "colorSpace": "bt709",
+      "hdr": "sdr",
+      "keyframes": [],
+      "audioBoundaries": []
+    },
+    "calibration": {
+      "width": 1280,
+      "height": 720,
+      "points": [
+        {
+          "x": 693.0764840182649,
+          "y": 302.9109589041096
+        },
+        {
+          "x": 927.6826484018266,
+          "y": 312.9680365296804
+        },
+        {
+          "x": 825.5936073059361,
+          "y": 414.7888127853882
+        },
+        {
+          "x": 468.6073059360731,
+          "y": 387.36872146118725
+        }
+      ]
+    },
+    "modelsDirectory": "/Users/weiye/DOS/TTcut-windows/TTcut/.runtime/macos/Models",
+    "mode": "twoStage",
+    "confidence": 0.7,
+    "stage1Confidence": 0.3,
+    "stage2Confidence": 0.7
+  },
+  "profile": {
+    "precision": "float16",
+    "compute_units": "cpuAndNeuralEngine",
+    "prediction_concurrency": 4,
+    "prefetch_windows": 4
+  },
+  "runs": [
+    {
+      "label": "full-1",
+      "mode": "full",
+      "wall_seconds": 54.220589167,
+      "rallies": 53,
+      "bounce_count": 224,
+      "rallies_and_bounce_times_identical_to_accepted_preview": true,
+      "completed_frames": 15207
+    },
+    {
+      "label": "full-2",
+      "mode": "full",
+      "wall_seconds": 52.319928875,
+      "rallies": 53,
+      "bounce_count": 224,
+      "rallies_and_bounce_times_identical_to_accepted_preview": true,
+      "completed_frames": 15207
+    },
+    {
+      "label": "two-stage",
+      "mode": "twoStage",
+      "wall_seconds": 151.604447,
+      "rallies": 52,
+      "bounce_count": 212,
+      "rallies_and_bounce_times_identical_to_accepted_preview": true,
+      "completed_frames": 15207
+    }
+  ],
+  "reference": "Manually accepted FP16 preview, not FP32 ground truth",
+  "passed": true,
+  "worker_sha256": "f96de7e49b84a17f2d5f7e8f37bdcc93c5f8da7f1c87d2e7ff6c82ac2f701600",
+  "model_weights_sha256": "0bf2126da35ecbec7b5a2ec6b7c6b9a7d71756f8c23dda790e3842259e89e10d"
+}

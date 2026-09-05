@@ -322,6 +322,19 @@ describe('App workflow notices and multi-task entry', () => {
     bootstrap.settings.rally_recognition_method = 'bounce_events';
   });
 
+  it('opens each settings website button through the external-link API', async () => {
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: '设置' }));
+    for (const [name, url] of [
+      ['官方网站', 'https://ttcut.vercel.app/'],
+      ['GitHub', 'https://github.com/WeiyePlayer/TTcut'],
+      ['打赏作者', 'https://ifdian.net/a/weiye'],
+    ] as const) {
+      fireEvent.click(screen.getByRole('button', { name }));
+      expect(window.ttcut.openExternalUrl).toHaveBeenLastCalledWith(url);
+    }
+  });
+
   it('replaces release notes with an author-contact QR tooltip', async () => {
     render(<App />);
     fireEvent.click(await screen.findByRole('button', { name: '设置' }));

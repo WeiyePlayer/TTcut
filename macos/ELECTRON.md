@@ -2,6 +2,17 @@
 
 The primary Mac application now uses the existing Electron UI. The Xcode SwiftUI app is retained only as a historical reference. Native development uses Swift Package Manager; it does not build the SwiftUI app or Sparkle.
 
+BlurBall defaults to FP16 with CPU/Neural Engine, four asynchronous predictions and four prefetched windows, including both full and two-stage analysis. Postprocessing consumes predictions in frame order. Table remains FP32 CPU. Existing FP32 Core ML history stays readable. See [acceptance and measured limits](../docs/performance/macos-fp16-adoption-2026-09-05.md).
+
+When upgrading existing local FP32 assets, regenerate and compile BlurBall before staging:
+
+```sh
+macos/.venv/bin/python macos/scripts/convert_models.py BlurBall
+xcrun coremlcompiler compile macos/Resources/Models/BlurBall.mlpackage macos/Resources/Models/compiled
+```
+
+Staging rejects a compiled BlurBall model without FP16 computation. Conversion uses a separate FP16 tensor tolerance (`atol=0.005`, `rtol=0.01`); it is a numerical screening check, not a guarantee of unchanged rally boundaries. Table retains its FP32 tolerance.
+
 ```sh
 npm run build:native:mac
 npm run start:mac

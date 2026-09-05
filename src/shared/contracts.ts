@@ -380,7 +380,7 @@ const analysisResultBaseSchema = z.object({
   }).strict().optional(),
   calibration: calibrationSchema.optional(),
   table_analysis: tableAnalysisSchema.optional(),
-  inference_runtime: z.object({ engine: z.literal('coreml'), compute_units: z.enum(['cpuOnly', 'cpuAndGPU']), checkpoint_sha256: z.string().regex(/^[a-f0-9]{64}$/) }).strict().optional(),
+  inference_runtime: z.object({ engine: z.literal('coreml'), compute_units: z.enum(['cpuOnly', 'cpuAndGPU', 'cpuAndNeuralEngine']), precision: z.enum(['float32', 'float16']).optional(), prediction_concurrency: z.number().int().positive().optional(), checkpoint_sha256: z.string().regex(/^[a-f0-9]{64}$/) }).strict().optional(),
   model_provenance: z.object({
     // TrackNet remains readable for legacy history and explicit local development analyses.
     profile: z.enum(LEGACY_RESULT_MODEL_PROFILES),

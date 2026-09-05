@@ -38,6 +38,26 @@ const base = {
   },
 };
 
+it('round-trips FP16 CPU/NE provenance while retaining older Core ML history', () => {
+  const result = {
+    schema_version: 1,
+    video: {
+      path: 'match.mp4', duration_seconds: 10, width: 1280, height: 720, fps: 30,
+      variable_frame_rate: false, video_codec: 'h264', audio_codec: null, container: 'mp4',
+    },
+    rallies: [], bounce_times_seconds: [],
+  };
+  const legacy = { engine: 'coreml', compute_units: 'cpuAndGPU', checkpoint_sha256: 'a'.repeat(64) };
+  const current = { ...legacy, compute_units: 'cpuAndNeuralEngine', precision: 'float16', prediction_concurrency: 4 };
+  for (const inference_runtime of [legacy, current]) {
+    const parsed = analysisResultSchema.parse(JSON.parse(JSON.stringify({ ...result, inference_runtime })));
+    expect(parsed.inference_runtime).toEqual(inference_runtime);
+  }
+  expect(analysisResultSchema.safeParse({
+    ...result, inference_runtime: { ...current, prediction_concurrency: 0 },
+  }).success).toBe(false);
+});
+
 describe('BlurBall analysis request contracts', () => {
   it('keeps legacy v1 requests valid and defaults their threshold', () => {
     const parsed = analysisRequestSchema.parse({ schema_version: 1, ...base });

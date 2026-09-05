@@ -1,0 +1,44 @@
+{
+  "baseHead": "8f9bb7bddeae3dd942d11d54c2dd80c2470bc645",
+  "baseBranch": "fix/analyzespeed",
+  "temporaryOnly": true,
+  "sourceDirectory": "/Users/weiye/DOS/TTcut-windows/TTcut/.tasks/fp16-preview-20260905",
+  "sourcePatchSHA256": "391c58cb259b4e0d32904bc08b8c1643b3aa93fc9a3d1c453be5349647bce0cf",
+  "computeUnits": "cpuAndNeuralEngine",
+  "precision": "float16",
+  "predictionConcurrency": 4,
+  "prefetchWindows": 4,
+  "bundleId": "com.weiye.ttcut.electron.macos.fp16test",
+  "bundleVersion": "1.2.11-fp16-test.1",
+  "dataDirectory": "~/Library/Application Support/TTcut-Electron-FP16-Test",
+  "modelFiles": {
+    "metadata.json": "f9f47c465731c57b93af5e976b349482473de281b0ce8bd78e375b6e2ea41682",
+    "model.mil": "7d1633eab6eb870ae2f7c5d01de79417166c34cfb5fbc4264512e8e0f4bae706",
+    "coremldata.bin": "5970567837b8bf0f15f4f82f7803704156ecebcc373eb82426d4a0bd5fe229cc",
+    "weights/weight.bin": "0bf2126da35ecbec7b5a2ec6b7c6b9a7d71756f8c23dda790e3842259e89e10d",
+    "analytics/coremldata.bin": "763bf468dcc0d56b01c1c86407b72d3489d385cf7d29f2e810765f436cb16718"
+  },
+  "sourceFiles": {
+    "package.json": "cc921b5842b567ac8c1b9f4646d5bfb21fad91cf05b039847ba476e8b154040c",
+    "forge.config.ts": "933687349ebe2d6148793bc9e5a4ceaf53da28b6097b9e9976efa9d1d146da51",
+    "electron-builder.macos.cjs": "58a91052c9853ca5dd8398f90f2e6e07aa90d7ac15481102d76c7ab49798ae9a",
+    "src/main/index.ts": "3d2f7c3656165f0372cf0194841f7fec0d222cd1b851c22fbc510fea089b5803",
+    "src/shared/contracts.ts": "ca9ae3bf20acc42fad27085ea9f4fe33cb18e66e8fd5cc0e5cb108b42dbd45e8",
+    "src/main/macos/analysis.ts": "cac5a5ca9c591339841791fc6fe4c70f243bd1e0d5af7aa57f44ee92124c2a46",
+    "src/main/macos/runtime.ts": "36e5daeb922ebde539d22b6667dff6385fa21737eadb946e0dde2ee6e67b9d69",
+    "scripts/stage-macos-runtime.py": "403f5efc5279035339724864fd2fa808fb7cd6df2da1fed3527484abf0d78d60",
+    "scripts/make-macos.mjs": "85db6e91401382dc8c1dca16843e0879d9b3904a54f845c68d86bfcbbb1df2b6",
+    "macos/Sources/Worker/main.swift": "d64fd50ebdbf55ad9c6a7a150daedeed5e7dd906da724b1a4bbd90a570b8881e",
+    "macos/Sources/Worker/PredictionJobs.swift": "e52741055b66b910d33d42fb0f3d9db334f47e06d93bf8ee4947a6771219e1b5"
+  },
+  "artifacts": {
+    "TTcut-FP16-Test-1.2.11-fp16-test.1-macOS-arm64.dmg": {
+      "bytes": 238977611,
+      "sha256": "cc75bb709deb695d89b25d858df1b6b225c61b2301fad1d8ec5cf154e1f1d896"
+    },
+    "TTcut-FP16-Test-1.2.11-fp16-test.1-macOS-arm64.zip": {
+      "bytes": 237284475,
+      "sha256": "0aa3a113d397aa8fba2c578257e87cfc6104386a644d27c2faa89f3525e9e4c8"
+    }
+  }
+}

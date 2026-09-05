@@ -5,6 +5,10 @@ import subprocess, shutil, json, hashlib, re
 ROOT = Path(__file__).resolve().parents[1]
 NATIVE = ROOT / 'macos'
 STAGE = ROOT / '.runtime/macos'
+# Reject stale FP32 assets before replacing the staged runtime.
+ball_metadata = json.loads((NATIVE / 'Resources/Models/compiled/BlurBall.mlmodelc/metadata.json').read_text())
+if len(ball_metadata) != 1 or 'Float16' not in ball_metadata[0].get('computePrecision', ''):
+ raise RuntimeError('BlurBall must be converted and compiled as FP16; see macos/ELECTRON.md')
 def run(*args): return subprocess.check_output(list(map(str,args)),text=True).strip()
 def digest(p):
  h=hashlib.sha256()

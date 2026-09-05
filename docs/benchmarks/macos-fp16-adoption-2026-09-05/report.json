@@ -1,0 +1,21 @@
+{
+  "app": "/Users/weiye/DOS/TTcut-windows/TTcut/.tasks/fp16-preview-20260905/out/TTcut FP16 Test-darwin-arm64/TTcut FP16 Test.app",
+  "video": "/Users/weiye/Documents/1-193.mp4",
+  "checks": [
+    "isolated app bootstrap with bundled runtime",
+    "cancel real video analysis",
+    "full results exactly match tested FP16 CPU/NE concurrency 4 candidate",
+    "two-stage complete and saved history opens"
+  ],
+  "full": {
+    "wallSeconds": 49.775,
+    "rallies": 53,
+    "bounces": 224
+  },
+  "two_stage": {
+    "wallSeconds": 154.169,
+    "rallies": 52,
+    "bounces": 212
+  },
+  "passed": true
+}

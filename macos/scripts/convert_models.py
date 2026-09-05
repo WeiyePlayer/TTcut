@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Convert the exact TTcut networks to FP32 Core ML and compare fixed inputs."""
+"""Convert BlurBall to FP16 CPU/NE and Table to FP32 CPU; screen fixed inputs."""
 from __future__ import annotations
 import argparse
 import hashlib
@@ -44,7 +44,8 @@ def convert(name: str, verify_only: bool):
     package = destination / f"{name}.mlpackage"
     # Table token-matching order is sensitive to tiny GPU accumulation changes.
     # Core ML CPU preserves the fixed FP32 reference tolerance on this model.
-    units = ct.ComputeUnit.CPU_AND_GPU if is_ball else ct.ComputeUnit.CPU_ONLY
+    units = ct.ComputeUnit.CPU_AND_NE if is_ball else ct.ComputeUnit.CPU_ONLY
+    precision = "float16" if is_ball else "float32"
     if not verify_only:
         print(f"Tracing {name} {shape}", flush=True)
         original_matching = table_module.bipartite_soft_matching_random2d
@@ -63,25 +64,34 @@ def convert(name: str, verify_only: bool):
             inputs=[ct.TensorType(name="frames", shape=input_shape, dtype=np.float32)],
             outputs=[ct.TensorType(name="heatmaps", dtype=np.float32)],
             convert_to="mlprogram", minimum_deployment_target=ct.target.macOS15,
-            compute_precision=ct.precision.FLOAT32, compute_units=units,
+            compute_precision=ct.precision.FLOAT16 if is_ball else ct.precision.FLOAT32, compute_units=units,
         )
-        converted.short_description = f"TTcut {name}, immutable Windows-reference weights, FP32"
+        converted.short_description = f"TTcut {name}, immutable Windows-reference weights, {precision}"
         converted.user_defined_metadata["checkpoint_sha256"] = hashlib.sha256(weights.read_bytes()).hexdigest()
+        converted.user_defined_metadata["compute_precision"] = precision
         converted.save(str(package))
         table_module.bipartite_soft_matching_random2d = original_matching
     else:
         converted = ct.models.MLModel(str(package), compute_units=units)
+        if is_ball and converted.user_defined_metadata.get("compute_precision") != precision:
+            raise RuntimeError("Reconvert BlurBall without --verify-only to replace the old precision profile")
     shapes = [(1, 9, 160, 280), (1, 9, 192, 336), (1, 9, 288, 512)] if is_ball else [shape]
     report = {"model": name, "checkpoint_sha256": hashlib.sha256(weights.read_bytes()).hexdigest(),
-              "torch": torch.__version__, "coremltools": ct.__version__, "precision": "float32", "compute_units": str(units), "comparisons": []}
+              "torch": torch.__version__, "coremltools": ct.__version__, "precision": precision, "compute_units": str(units), "comparisons": []}
+    # FP16 intentionally differs from FP32. This tensor screening does not prove
+    # trajectory/rally equivalence; real-video acceptance is recorded separately.
+    atol, rtol = (5e-3, 1e-2) if is_ball else (1e-4, 1e-3)
+    report["tolerance"] = {"atol": atol, "rtol": rtol}
     for case_shape in shapes:
         inputs = np.random.default_rng(42).uniform(-1, 1, case_shape).astype(np.float32)
         started = time.monotonic()
         with torch.inference_mode():
             expected = model(torch.from_numpy(inputs)).numpy()
         result = converted.predict({"frames": inputs})["heatmaps"]
+        if result.shape != expected.shape:
+            raise RuntimeError(f"{name} output shape mismatch: {result.shape} != {expected.shape}")
         difference = np.abs(expected - result)
-        allowed = 1e-4 + 1e-3 * np.abs(expected)
+        allowed = atol + rtol * np.abs(expected)
         case = {"shape": case_shape, "max_abs_error": float(difference.max()),
                 "mean_abs_error": float(difference.mean()), "violations": int(np.sum(difference > allowed)),
                 "seconds": time.monotonic() - started}

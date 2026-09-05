@@ -1,0 +1,594 @@
+{
+  "app": "/Users/weiye/DOS/TTcut-windows/TTcut/.tasks/fp16-preview-20260905/out/TTcut FP16 Test-darwin-arm64/TTcut FP16 Test.app",
+  "bundle_id": "com.weiye.ttcut.electron.macos.fp16test",
+  "minimum_os": "15.0",
+  "signature": "verified ad-hoc",
+  "binaries": [
+    {
+      "path": "Contents/MacOS/TTcut",
+      "architecture": "arm64",
+      "minimum_os": [
+        "12.0"
+      ],
+      "dependencies": [
+        "@rpath/Electron Framework.framework/Electron Framework",
+        "/usr/lib/libSystem.B.dylib"
+      ]
+    },
+    {
+      "path": "Contents/Resources/runtime/bin/ffmpeg",
+      "architecture": "arm64",
+      "minimum_os": [
+        "15.0"
+      ],
+      "dependencies": [
+        "@rpath/libavdevice.63.dylib",
+        "@rpath/libavfilter.12.dylib",
+        "@rpath/libavformat.63.dylib",
+        "@rpath/libavcodec.63.dylib",
+        "@rpath/libswresample.7.dylib",
+        "@rpath/libswscale.10.dylib",
+        "@rpath/libavutil.61.dylib",
+        "/System/Library/Frameworks/AudioToolbox.framework/Versions/A/AudioToolbox",
+        "/System/Library/Frameworks/CoreAudio.framework/Versions/A/CoreAudio",
+        "/usr/lib/libSystem.B.dylib",
+        "/System/Library/Frameworks/VideoToolbox.framework/Versions/A/VideoToolbox",
+        "@rpath/libzimg.2.dylib",
+        "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation",
+        "/System/Library/Frameworks/CoreMedia.framework/Versions/A/CoreMedia",
+        "/System/Library/Frameworks/CoreVideo.framework/Versions/A/CoreVideo",
+        "/System/Library/Frameworks/CoreServices.framework/Versions/A/CoreServices",
+        "@rpath/libx264.165.dylib",
+        "@rpath/libx265.217.dylib"
+      ]
+    },
+    {
+      "path": "Contents/Resources/runtime/bin/TTcutWorker",
+      "architecture": "arm64",
+      "minimum_os": [
+        "15.0"
+      ],
+      "dependencies": [
+        "/System/Library/Frameworks/Accelerate.framework/Versions/A/Accelerate",
+        "/usr/lib/libc++.1.dylib",
+        "@rpath/libavformat.63.dylib",
+        "@rpath/libavcodec.63.dylib",
+        "@rpath/libavfilter.12.dylib",
+        "@rpath/libavutil.61.dylib",
+        "/usr/lib/libz.1.dylib",
+        "/usr/lib/libSystem.B.dylib",
+        "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation",
+        "/System/Library/Frameworks/CoreML.framework/Versions/A/CoreML",
+        "/System/Library/Frameworks/CryptoKit.framework/Versions/A/CryptoKit",
+        "/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation",
+        "/usr/lib/libobjc.A.dylib",
+        "/usr/lib/swift/libswiftCore.dylib",
+        "/usr/lib/swift/libswiftCoreFoundation.dylib",
+        "/usr/lib/swift/libswiftDispatch.dylib",
+        "/usr/lib/swift/libswiftIOKit.dylib",
+        "/usr/lib/swift/libswiftMetal.dylib",
+        "/usr/lib/swift/libswiftObjectiveC.dylib",
+        "/usr/lib/swift/libswiftUniformTypeIdentifiers.dylib",
+        "/usr/lib/swift/libswiftXPC.dylib",
+        "/usr/lib/swift/libswift_Builtin_float.dylib",
+        "/usr/lib/swift/libswift_Concurrency.dylib"
+      ]
+    },
+    {
+      "path": "Contents/Resources/runtime/bin/ffprobe",
+      "architecture": "arm64",
+      "minimum_os": [
+        "15.0"
+      ],
+      "dependencies": [
+        "@rpath/libavdevice.63.dylib",
+        "@rpath/libavfilter.12.dylib",
+        "@rpath/libavformat.63.dylib",
+        "@rpath/libavcodec.63.dylib",
+        "@rpath/libswresample.7.dylib",
+        "@rpath/libswscale.10.dylib",
+        "@rpath/libavutil.61.dylib",
+        "/System/Library/Frameworks/AudioToolbox.framework/Versions/A/AudioToolbox",
+        "/System/Library/Frameworks/CoreAudio.framework/Versions/A/CoreAudio",
+        "/usr/lib/libSystem.B.dylib",
+        "/System/Library/Frameworks/VideoToolbox.framework/Versions/A/VideoToolbox",
+        "@rpath/libzimg.2.dylib",
+        "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation",
+        "/System/Library/Frameworks/CoreMedia.framework/Versions/A/CoreMedia",
+        "/System/Library/Frameworks/CoreVideo.framework/Versions/A/CoreVideo",
+        "/System/Library/Frameworks/CoreServices.framework/Versions/A/CoreServices",
+        "@rpath/libx264.165.dylib",
+        "@rpath/libx265.217.dylib"
+      ]
+    },
+    {
+      "path": "Contents/Resources/runtime/bin/TTcutMediaWorker",
+      "architecture": "arm64",
+      "minimum_os": [
+        "15.0"
+      ],
+      "dependencies": [
+        "/usr/lib/libSystem.B.dylib",
+        "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation",
+        "/System/Library/Frameworks/CryptoKit.framework/Versions/A/CryptoKit",
+        "/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation",
+        "/usr/lib/libobjc.A.dylib",
+        "/usr/lib/swift/libswiftCore.dylib",
+        "/usr/lib/swift/libswiftCoreFoundation.dylib",
+        "/usr/lib/swift/libswiftDispatch.dylib",
+        "/usr/lib/swift/libswiftIOKit.dylib",
+        "/usr/lib/swift/libswiftObjectiveC.dylib",
+        "/usr/lib/swift/libswiftXPC.dylib",
+        "/usr/lib/swift/libswift_Builtin_float.dylib",
+        "/usr/lib/swift/libswift_Concurrency.dylib",
+        "/usr/lib/swift/libswift_signal.dylib"
+      ]
+    },
+    {
+      "path": "Contents/Resources/runtime/lib/libzimg.2.dylib",
+      "architecture": "arm64",
+      "minimum_os": [
+        "15.0"
+      ],
+      "dependencies": [
+        "@rpath/libzimg.2.dylib",
+        "/usr/lib/libc++.1.dylib",
+        "/usr/lib/libSystem.B.dylib"
+      ]
+    },
+    {
+      "path": "Contents/Resources/runtime/lib/libavdevice.63.1.101.dylib",
+      "architecture": "arm64",
+      "minimum_os": [
+        "15.0"
+      ],
+      "dependencies": [
+        "@rpath/libavdevice.63.1.101.dylib",
+        "@rpath/libavfilter.12.dylib",
+        "@rpath/libswscale.10.dylib",
+        "@rpath/libavformat.63.dylib",
+        "@rpath/libavcodec.63.dylib",
+        "@rpath/libswresample.7.dylib",
+        "@rpath/libavutil.61.dylib",
+        "/System/Library/Frameworks/AudioToolbox.framework/Versions/A/AudioToolbox",
+        "/System/Library/Frameworks/CoreAudio.framework/Versions/A/CoreAudio",
+        "/usr/lib/libSystem.B.dylib",
+        "/System/Library/Frameworks/VideoToolbox.framework/Versions/A/VideoToolbox",
+        "@rpath/libzimg.2.dylib",
+        "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation",
+        "/System/Library/Frameworks/CoreMedia.framework/Versions/A/CoreMedia",
+        "/System/Library/Frameworks/CoreVideo.framework/Versions/A/CoreVideo",
+        "/System/Library/Frameworks/CoreServices.framework/Versions/A/CoreServices",
+        "@rpath/libx264.165.dylib",
+        "@rpath/libx265.217.dylib"
+      ]
+    },
+    {
+      "path": "Contents/Resources/runtime/lib/libavfilter.12.1.101.dylib",
+      "architecture": "arm64",
+      "minimum_os": [
+        "15.0"
+      ],
+      "dependencies": [
+        "@rpath/libavfilter.12.1.101.dylib",
+        "@rpath/libswscale.10.dylib",
+        "@rpath/libavformat.63.dylib",
+        "@rpath/libavcodec.63.dylib",
+        "@rpath/libswresample.7.dylib",
+        "@rpath/libavutil.61.dylib",
+        "/usr/lib/libSystem.B.dylib",
+        "/System/Library/Frameworks/VideoToolbox.framework/Versions/A/VideoToolbox",
+        "@rpath/libzimg.2.dylib",
+        "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation",
+        "/System/Library/Frameworks/CoreMedia.framework/Versions/A/CoreMedia",
+        "/System/Library/Frameworks/CoreVideo.framework/Versions/A/CoreVideo",
+        "/System/Library/Frameworks/CoreServices.framework/Versions/A/CoreServices",
+        "/System/Library/Frameworks/AudioToolbox.framework/Versions/A/AudioToolbox",
+        "@rpath/libx264.165.dylib",
+        "@rpath/libx265.217.dylib"
+      ]
+    },
+    {
+      "path": "Contents/Resources/runtime/lib/libx264.165.dylib",
+      "architecture": "arm64",
+      "minimum_os": [
+        "15.0"
+      ],
+      "dependencies": [
+        "@rpath/libx264.165.dylib",
+        "/usr/lib/libSystem.B.dylib"
+      ]
+    },
+    {
+      "path": "Contents/Resources/runtime/lib/libswresample.7.1.101.dylib",
+      "architecture": "arm64",
+      "minimum_os": [
+        "15.0"
+      ],
+      "dependencies": [
+        "@rpath/libswresample.7.1.101.dylib",
+        "@rpath/libavutil.61.dylib",
+        "/usr/lib/libSystem.B.dylib",
+        "/System/Library/Frameworks/VideoToolbox.framework/Versions/A/VideoToolbox",
+        "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation",
+        "/System/Library/Frameworks/CoreMedia.framework/Versions/A/CoreMedia",
+        "/System/Library/Frameworks/CoreVideo.framework/Versions/A/CoreVideo",
+        "/System/Library/Frameworks/CoreServices.framework/Versions/A/CoreServices"
+      ]
+    },
+    {
+      "path": "Contents/Resources/runtime/lib/libswscale.10.1.101.dylib",
+      "architecture": "arm64",
+      "minimum_os": [
+        "15.0"
+      ],
+      "dependencies": [
+        "@rpath/libswscale.10.1.101.dylib",
+        "@rpath/libavutil.61.dylib",
+        "/usr/lib/libSystem.B.dylib",
+        "/System/Library/Frameworks/VideoToolbox.framework/Versions/A/VideoToolbox",
+        "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation",
+        "/System/Library/Frameworks/CoreMedia.framework/Versions/A/CoreMedia",
+        "/System/Library/Frameworks/CoreVideo.framework/Versions/A/CoreVideo",
+        "/System/Library/Frameworks/CoreServices.framework/Versions/A/CoreServices"
+      ]
+    },
+    {
+      "path": "Contents/Resources/runtime/lib/libavutil.61.1.101.dylib",
+      "architecture": "arm64",
+      "minimum_os": [
+        "15.0"
+      ],
+      "dependencies": [
+        "@rpath/libavutil.61.1.101.dylib",
+        "/usr/lib/libSystem.B.dylib",
+        "/System/Library/Frameworks/VideoToolbox.framework/Versions/A/VideoToolbox",
+        "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation",
+        "/System/Library/Frameworks/CoreMedia.framework/Versions/A/CoreMedia",
+        "/System/Library/Frameworks/CoreVideo.framework/Versions/A/CoreVideo",
+        "/System/Library/Frameworks/CoreServices.framework/Versions/A/CoreServices"
+      ]
+    },
+    {
+      "path": "Contents/Resources/runtime/lib/libx265.217.dylib",
+      "architecture": "arm64",
+      "minimum_os": [
+        "15.0"
+      ],
+      "dependencies": [
+        "@rpath/libx265.217.dylib",
+        "/usr/lib/libSystem.B.dylib",
+        "/usr/lib/libc++.1.dylib"
+      ]
+    },
+    {
+      "path": "Contents/Resources/runtime/lib/libavcodec.63.1.101.dylib",
+      "architecture": "arm64",
+      "minimum_os": [
+        "15.0"
+      ],
+      "dependencies": [
+        "@rpath/libavcodec.63.1.101.dylib",
+        "@rpath/libswresample.7.dylib",
+        "@rpath/libavutil.61.dylib",
+        "/usr/lib/libSystem.B.dylib",
+        "/System/Library/Frameworks/AudioToolbox.framework/Versions/A/AudioToolbox",
+        "@rpath/libx264.165.dylib",
+        "@rpath/libx265.217.dylib",
+        "/System/Library/Frameworks/VideoToolbox.framework/Versions/A/VideoToolbox",
+        "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation",
+        "/System/Library/Frameworks/CoreMedia.framework/Versions/A/CoreMedia",
+        "/System/Library/Frameworks/CoreVideo.framework/Versions/A/CoreVideo",
+        "/System/Library/Frameworks/CoreServices.framework/Versions/A/CoreServices"
+      ]
+    },
+    {
+      "path": "Contents/Resources/runtime/lib/libavformat.63.1.101.dylib",
+      "architecture": "arm64",
+      "minimum_os": [
+        "15.0"
+      ],
+      "dependencies": [
+        "@rpath/libavformat.63.1.101.dylib",
+        "@rpath/libavcodec.63.dylib",
+        "@rpath/libswresample.7.dylib",
+        "@rpath/libavutil.61.dylib",
+        "/usr/lib/libSystem.B.dylib",
+        "/System/Library/Frameworks/AudioToolbox.framework/Versions/A/AudioToolbox",
+        "@rpath/libx264.165.dylib",
+        "@rpath/libx265.217.dylib",
+        "/System/Library/Frameworks/VideoToolbox.framework/Versions/A/VideoToolbox",
+        "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation",
+        "/System/Library/Frameworks/CoreMedia.framework/Versions/A/CoreMedia",
+        "/System/Library/Frameworks/CoreVideo.framework/Versions/A/CoreVideo",
+        "/System/Library/Frameworks/CoreServices.framework/Versions/A/CoreServices"
+      ]
+    },
+    {
+      "path": "Contents/Frameworks/TTcut FP16 Test Helper (Renderer).app/Contents/MacOS/TTcut FP16 Test Helper (Renderer)",
+      "architecture": "arm64",
+      "minimum_os": [
+        "12.0"
+      ],
+      "dependencies": [
+        "@rpath/Electron Framework.framework/Electron Framework",
+        "/usr/lib/libsandbox.1.dylib",
+        "/usr/lib/libSystem.B.dylib"
+      ]
+    },
+    {
+      "path": "Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework",
+      "architecture": "arm64",
+      "minimum_os": [
+        "12.0"
+      ],
+      "dependencies": [
+        "@rpath/Electron Framework.framework/Electron Framework",
+        "/System/Library/Frameworks/IOSurface.framework/Versions/A/IOSurface",
+        "/System/Library/Frameworks/AuthenticationServices.framework/Versions/A/AuthenticationServices",
+        "/System/Library/Frameworks/AVFoundation.framework/Versions/A/AVFoundation",
+        "/System/Library/Frameworks/AVFAudio.framework/Versions/A/AVFAudio",
+        "/System/Library/Frameworks/Carbon.framework/Versions/A/Carbon",
+        "/System/Library/Frameworks/ApplicationServices.framework/Versions/A/ApplicationServices",
+        "/System/Library/Frameworks/CoreGraphics.framework/Versions/A/CoreGraphics",
+        "/System/Library/Frameworks/CoreServices.framework/Versions/A/CoreServices",
+        "/System/Library/Frameworks/CFNetwork.framework/Versions/A/CFNetwork",
+        "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation",
+        "/usr/lib/libobjc.A.dylib",
+        "/System/Library/Frameworks/CoreText.framework/Versions/A/CoreText",
+        "/System/Library/Frameworks/LocalAuthentication.framework/Versions/A/LocalAuthentication",
+        "/System/Library/Frameworks/QuartzCore.framework/Versions/A/QuartzCore",
+        "/System/Library/Frameworks/CoreImage.framework/Versions/A/CoreImage",
+        "/System/Library/Frameworks/CoreVideo.framework/Versions/A/CoreVideo",
+        "/System/Library/Frameworks/Quartz.framework/Versions/A/Quartz",
+        "/System/Library/Frameworks/QuickLookUI.framework/Versions/A/QuickLookUI",
+        "/System/Library/Frameworks/Security.framework/Versions/A/Security",
+        "/System/Library/Frameworks/SecurityInterface.framework/Versions/A/SecurityInterface",
+        "/System/Library/Frameworks/ServiceManagement.framework/Versions/A/ServiceManagement",
+        "/System/Library/Frameworks/StoreKit.framework/Versions/A/StoreKit",
+        "/System/Library/Frameworks/UserNotifications.framework/Versions/A/UserNotifications",
+        "@rpath/Squirrel.framework/Squirrel",
+        "@rpath/ReactiveObjC.framework/ReactiveObjC",
+        "@rpath/Mantle.framework/Mantle",
+        "/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation",
+        "/System/Library/Frameworks/AppKit.framework/Versions/C/AppKit",
+        "/System/Library/Frameworks/IOKit.framework/Versions/A/IOKit",
+        "/System/Library/Frameworks/OpenDirectory.framework/Versions/A/OpenDirectory",
+        "/System/Library/Frameworks/CryptoTokenKit.framework/Versions/A/CryptoTokenKit",
+        "/System/Library/Frameworks/Network.framework/Versions/A/Network",
+        "/System/Library/Frameworks/SystemConfiguration.framework/Versions/A/SystemConfiguration",
+        "/System/Library/Frameworks/UniformTypeIdentifiers.framework/Versions/A/UniformTypeIdentifiers",
+        "/System/Library/Frameworks/CoreMedia.framework/Versions/A/CoreMedia",
+        "/System/Library/Frameworks/Metal.framework/Versions/A/Metal",
+        "/System/Library/Frameworks/AudioToolbox.framework/Versions/A/AudioToolbox",
+        "/System/Library/Frameworks/CoreAudio.framework/Versions/A/CoreAudio",
+        "/System/Library/Frameworks/AudioUnit.framework/Versions/A/AudioUnit",
+        "/System/Library/Frameworks/OpenGL.framework/Versions/A/OpenGL",
+        "/System/Library/Frameworks/Cocoa.framework/Versions/A/Cocoa",
+        "/System/Library/Frameworks/Accelerate.framework/Versions/A/Accelerate",
+        "/System/Library/Frameworks/VideoToolbox.framework/Versions/A/VideoToolbox",
+        "/System/Library/Frameworks/CoreMediaIO.framework/Versions/A/CoreMediaIO",
+        "/System/Library/Frameworks/Accessibility.framework/Versions/A/Accessibility",
+        "/System/Library/Frameworks/MetalKit.framework/Versions/A/MetalKit",
+        "/System/Library/Frameworks/CoreBluetooth.framework/Versions/A/CoreBluetooth",
+        "/System/Library/Frameworks/IOBluetooth.framework/Versions/A/IOBluetooth",
+        "/System/Library/Frameworks/CoreMIDI.framework/Versions/A/CoreMIDI",
+        "/System/Library/Frameworks/MediaAccessibility.framework/Versions/A/MediaAccessibility",
+        "/System/Library/Frameworks/MediaPlayer.framework/Versions/A/MediaPlayer",
+        "/System/Library/Frameworks/CoreHaptics.framework/Versions/A/CoreHaptics",
+        "/System/Library/Frameworks/GameController.framework/Versions/A/GameController",
+        "/System/Library/Frameworks/ForceFeedback.framework/Versions/A/ForceFeedback",
+        "/System/Library/Frameworks/CoreWLAN.framework/Versions/A/CoreWLAN",
+        "/System/Library/Frameworks/CoreLocation.framework/Versions/A/CoreLocation",
+        "/System/Library/Frameworks/Vision.framework/Versions/A/Vision",
+        "/System/Library/Frameworks/CoreML.framework/Versions/A/CoreML",
+        "/System/Library/Frameworks/DiskArbitration.framework/Versions/A/DiskArbitration",
+        "/System/Library/Frameworks/QuickLookThumbnailing.framework/Versions/A/QuickLookThumbnailing",
+        "/System/Library/Frameworks/ScreenCaptureKit.framework/Versions/A/ScreenCaptureKit",
+        "@rpath/libffmpeg.dylib",
+        "/usr/lib/libcups.2.dylib",
+        "/usr/lib/libbsm.0.dylib",
+        "/usr/lib/libpmenergy.dylib",
+        "/usr/lib/libpmsample.dylib",
+        "/usr/lib/libresolv.9.dylib",
+        "/usr/lib/libsandbox.1.dylib",
+        "/usr/lib/libSystem.B.dylib"
+      ]
+    },
+    {
+      "path": "Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries/libEGL.dylib",
+      "architecture": "arm64",
+      "minimum_os": [
+        "12.0"
+      ],
+      "dependencies": [
+        "./libEGL.dylib",
+        "/System/Library/Frameworks/Metal.framework/Versions/A/Metal",
+        "/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation",
+        "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation",
+        "/usr/lib/libSystem.B.dylib"
+      ]
+    },
+    {
+      "path": "Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries/libvk_swiftshader.dylib",
+      "architecture": "arm64",
+      "minimum_os": [
+        "12.0"
+      ],
+      "dependencies": [
+        "@rpath/libvk_swiftshader.dylib",
+        "/System/Library/Frameworks/Metal.framework/Versions/A/Metal",
+        "/System/Library/Frameworks/Cocoa.framework/Versions/A/Cocoa",
+        "/System/Library/Frameworks/AppKit.framework/Versions/C/AppKit",
+        "/usr/lib/libobjc.A.dylib",
+        "/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation",
+        "/System/Library/Frameworks/QuartzCore.framework/Versions/A/QuartzCore",
+        "/usr/lib/libSystem.B.dylib"
+      ]
+    },
+    {
+      "path": "Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries/libGLESv2.dylib",
+      "architecture": "arm64",
+      "minimum_os": [
+        "12.0"
+      ],
+      "dependencies": [
+        "./libGLESv2.dylib",
+        "/System/Library/Frameworks/Metal.framework/Versions/A/Metal",
+        "/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation",
+        "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation",
+        "/usr/lib/libobjc.A.dylib",
+        "/System/Library/Frameworks/CoreGraphics.framework/Versions/A/CoreGraphics",
+        "/System/Library/Frameworks/OpenGL.framework/Versions/A/OpenGL",
+        "/System/Library/Frameworks/IOKit.framework/Versions/A/IOKit",
+        "/System/Library/Frameworks/IOSurface.framework/Versions/A/IOSurface",
+        "/System/Library/Frameworks/QuartzCore.framework/Versions/A/QuartzCore",
+        "/System/Library/Frameworks/Cocoa.framework/Versions/A/Cocoa",
+        "/usr/lib/libSystem.B.dylib"
+      ]
+    },
+    {
+      "path": "Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries/libffmpeg.dylib",
+      "architecture": "arm64",
+      "minimum_os": [
+        "12.0"
+      ],
+      "dependencies": [
+        "@loader_path/libffmpeg.dylib",
+        "/usr/lib/libSystem.B.dylib"
+      ]
+    },
+    {
+      "path": "Contents/Frameworks/Electron Framework.framework/Versions/A/Helpers/chrome_crashpad_handler",
+      "architecture": "arm64",
+      "minimum_os": [
+        "12.0"
+      ],
+      "dependencies": [
+        "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation",
+        "/usr/lib/libobjc.A.dylib",
+        "/System/Library/Frameworks/CoreGraphics.framework/Versions/A/CoreGraphics",
+        "/System/Library/Frameworks/CoreText.framework/Versions/A/CoreText",
+        "/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation",
+        "/System/Library/Frameworks/Security.framework/Versions/A/Security",
+        "/System/Library/Frameworks/ApplicationServices.framework/Versions/A/ApplicationServices",
+        "/System/Library/Frameworks/CoreServices.framework/Versions/A/CoreServices",
+        "/System/Library/Frameworks/AppKit.framework/Versions/C/AppKit",
+        "/System/Library/Frameworks/IOKit.framework/Versions/A/IOKit",
+        "/System/Library/Frameworks/OpenDirectory.framework/Versions/A/OpenDirectory",
+        "/usr/lib/libbsm.0.dylib",
+        "/usr/lib/libpmenergy.dylib",
+        "/usr/lib/libpmsample.dylib",
+        "/usr/lib/libSystem.B.dylib"
+      ]
+    },
+    {
+      "path": "Contents/Frameworks/ReactiveObjC.framework/Versions/A/ReactiveObjC",
+      "architecture": "arm64",
+      "minimum_os": [
+        "12.0"
+      ],
+      "dependencies": [
+        "@rpath/ReactiveObjC.framework/ReactiveObjC",
+        "/System/Library/Frameworks/AppKit.framework/Versions/C/AppKit",
+        "/System/Library/Frameworks/CFNetwork.framework/Versions/A/CFNetwork",
+        "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation",
+        "/usr/lib/libobjc.A.dylib",
+        "/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation",
+        "/usr/lib/libSystem.B.dylib"
+      ]
+    },
+    {
+      "path": "Contents/Frameworks/Squirrel.framework/Versions/A/Squirrel",
+      "architecture": "arm64",
+      "minimum_os": [
+        "12.0"
+      ],
+      "dependencies": [
+        "@rpath/Squirrel.framework/Squirrel",
+        "/System/Library/Frameworks/AppKit.framework/Versions/C/AppKit",
+        "/System/Library/Frameworks/CFNetwork.framework/Versions/A/CFNetwork",
+        "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation",
+        "/usr/lib/libobjc.A.dylib",
+        "/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation",
+        "/System/Library/Frameworks/IOKit.framework/Versions/A/IOKit",
+        "/System/Library/Frameworks/Security.framework/Versions/A/Security",
+        "/System/Library/Frameworks/ServiceManagement.framework/Versions/A/ServiceManagement",
+        "/System/Library/Frameworks/UniformTypeIdentifiers.framework/Versions/A/UniformTypeIdentifiers",
+        "@rpath/Mantle.framework/Mantle",
+        "@rpath/ReactiveObjC.framework/ReactiveObjC",
+        "/usr/lib/libSystem.B.dylib"
+      ]
+    },
+    {
+      "path": "Contents/Frameworks/Squirrel.framework/Versions/A/Resources/ShipIt",
+      "architecture": "arm64",
+      "minimum_os": [
+        "12.0"
+      ],
+      "dependencies": [
+        "/System/Library/Frameworks/AppKit.framework/Versions/C/AppKit",
+        "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation",
+        "/usr/lib/libobjc.A.dylib",
+        "/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation",
+        "/System/Library/Frameworks/IOKit.framework/Versions/A/IOKit",
+        "/System/Library/Frameworks/Security.framework/Versions/A/Security",
+        "@rpath/Mantle.framework/Mantle",
+        "@rpath/ReactiveObjC.framework/ReactiveObjC",
+        "/usr/lib/libSystem.B.dylib"
+      ]
+    },
+    {
+      "path": "Contents/Frameworks/Mantle.framework/Versions/A/Mantle",
+      "architecture": "arm64",
+      "minimum_os": [
+        "12.0"
+      ],
+      "dependencies": [
+        "@rpath/Mantle.framework/Mantle",
+        "/System/Library/Frameworks/CoreData.framework/Versions/A/CoreData",
+        "/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation",
+        "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation",
+        "/usr/lib/libobjc.A.dylib",
+        "/usr/lib/libSystem.B.dylib"
+      ]
+    },
+    {
+      "path": "Contents/Frameworks/TTcut FP16 Test Helper.app/Contents/MacOS/TTcut FP16 Test Helper",
+      "architecture": "arm64",
+      "minimum_os": [
+        "12.0"
+      ],
+      "dependencies": [
+        "@rpath/Electron Framework.framework/Electron Framework",
+        "/usr/lib/libsandbox.1.dylib",
+        "/usr/lib/libSystem.B.dylib"
+      ]
+    },
+    {
+      "path": "Contents/Frameworks/TTcut FP16 Test Helper (GPU).app/Contents/MacOS/TTcut FP16 Test Helper (GPU)",
+      "architecture": "arm64",
+      "minimum_os": [
+        "12.0"
+      ],
+      "dependencies": [
+        "@rpath/Electron Framework.framework/Electron Framework",
+        "/usr/lib/libsandbox.1.dylib",
+        "/usr/lib/libSystem.B.dylib"
+      ]
+    },
+    {
+      "path": "Contents/Frameworks/TTcut FP16 Test Helper (Plugin).app/Contents/MacOS/TTcut FP16 Test Helper (Plugin)",
+      "architecture": "arm64",
+      "minimum_os": [
+        "12.0"
+      ],
+      "dependencies": [
+        "@rpath/Electron Framework.framework/Electron Framework",
+        "/usr/lib/libsandbox.1.dylib",
+        "/usr/lib/libSystem.B.dylib"
+      ]
+    }
+  ],
+  "passed": true
+}

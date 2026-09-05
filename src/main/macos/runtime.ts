@@ -35,7 +35,7 @@ export function verifyMacRuntime(): Promise<void> {
 export async function inspectMacComponents(): Promise<ComponentStatus> {
   const error = await verifyMacRuntime().then(() => null, (error: Error) => error.message);
   return {
-    analysis: { available: !error, version: 'Core ML · BlurBall + Table', path: macRuntimeRoot(), acceleration: error ? 'unavailable' : 'coreml', detail: error },
+    analysis: { available: !error, version: 'Core ML · BlurBall FP16 + Table', path: macRuntimeRoot(), acceleration: error ? 'unavailable' : 'coreml', detail: error },
     media: { available: !error, version: 'FFmpeg · x264 / x265', path: macRuntimeRoot(), active_encoder: error ? 'unavailable' : 'libx264', x264_available: !error, detail: error },
   };
 }

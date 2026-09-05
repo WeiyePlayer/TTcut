@@ -40,7 +40,8 @@ import {
   SUPPORTED_VIDEO_EXTENSIONS,
   videoContainerFromFileName,
 } from '../domain/video-input';
-import { COMPONENT_ASSETS_RELEASE_URL, DONATION_URL, GITHUB_URL, RELEASES_URL, WEBSITE_URL } from '../shared/urls';
+import { COMPONENT_ASSETS_RELEASE_URL } from '../shared/urls';
+import { openExternalUrl } from './external-links';
 import { getUpdater } from './updater';
 import { runInstallerMigrationRequest } from './installer-migration';
 import { requestSystemShutdown } from './system-power';
@@ -319,25 +320,7 @@ function registerIpc(): void {
       : path.join(app.getAppPath(), '.runtime', 'release-metadata', 'THIRD_PARTY_NOTICES.html');
     return shell.openPath(license);
   });
-  ipcMain.handle(IPC.externalOpen, async (_event, value: unknown) => {
-    if (typeof value !== 'string') throw new Error('INVALID_REQUEST');
-    if (isMac) throw new Error('MANAGED_COMPONENTS_UNSUPPORTED');
-    const catalog = await loadComponentCatalog();
-    const allowed = new Set([
-      COMPONENT_ASSETS_RELEASE_URL,
-      catalog.analysis_runtime.license_url,
-      catalog.ffmpeg.license_url,
-      catalog.ffmpeg.url,
-      catalog.ffmpeg_x264.license_url,
-      catalog.ffmpeg_x264.source_url,
-      WEBSITE_URL,
-      GITHUB_URL,
-      RELEASES_URL,
-      DONATION_URL,
-    ]);
-    if (!allowed.has(value)) throw new Error('EXTERNAL_URL_REJECTED');
-    await shell.openExternal(value);
-  });
+  ipcMain.handle(IPC.externalOpen, (_event, value: unknown) => openExternalUrl(value));
   ipcMain.handle(IPC.windowMinimize, () => currentWindow().minimize());
   ipcMain.handle(IPC.updateGetState, () => getUpdater().getState());
   ipcMain.handle(IPC.updateCheck, () => getUpdater().check());

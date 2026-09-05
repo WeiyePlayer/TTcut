@@ -26,7 +26,8 @@ def main():
     compiled.mkdir(parents=True, exist_ok=True)
     for name in ["BlurBall", "Table"]:
         package = ROOT / "Resources/Models" / (name + ".mlpackage")
-        args = ["--verify-only"] if package.exists() else []
+        # Rebuild BlurBall so an existing FP32 package cannot survive migration.
+        args = ["--verify-only"] if package.exists() and name != "BlurBall" else []
         run(python, ROOT / "scripts/convert_models.py", name, *args)
         target = compiled / (name + ".mlmodelc")
         if target.exists(): shutil.rmtree(target)

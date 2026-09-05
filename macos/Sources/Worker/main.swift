@@ -5,7 +5,7 @@ import TTcutCore
 
 func nativeError() -> TTError { TTError("NATIVE_MEDIA_ERROR", String(cString: tt_last_error())) }
 
-struct PreparedFrame {
+struct PreparedFrame: Sendable {
   var index: Int
   var time: Double
   var pixels: [Float]
@@ -80,6 +80,21 @@ final class Inference {
     ])
     guard
       let output = try model.prediction(from: provider).featureValue(for: "heatmaps")?
+        .multiArrayValue
+    else { throw TTError("MODEL_OUTPUT_MISSING") }
+    return output
+  }
+  func predictAsync(_ values: [Float], shape: [Int]) async throws -> MLMultiArray {
+    let array = try MLMultiArray(shape: shape.map(NSNumber.init), dataType: .float32)
+    guard array.count == values.count else { throw TTError("MODEL_INPUT_SHAPE") }
+    values.withUnsafeBufferPointer {
+      array.dataPointer.copyMemory(from: $0.baseAddress!, byteCount: values.count * 4)
+    }
+    let provider = try MLDictionaryFeatureProvider(dictionary: [
+      "frames": MLFeatureValue(multiArray: array)
+    ])
+    guard
+      let output = try await model.prediction(from: provider).featureValue(for: "heatmaps")?
         .multiArrayValue
     else { throw TTError("MODEL_OUTPUT_MISSING") }
     return output
@@ -173,16 +188,12 @@ final class Worker {
   }
   func trajectories(
     calibration: Calibration, predictor: Inference, threshold: Float, intervals: [CutRange]?
-  ) throws -> [TrajectoryPoint] {
+  ) async throws -> [TrajectoryPoint] {
     let roi = try AnalysisROI(calibration: calibration)
-    let decoder = try Decoder(request.video)
     var points: [TrajectoryPoint] = []
     var previous: Point?
-    var currentInterval: Int?
     let total = request.video.frameCount ?? Int(ceil(request.video.duration * request.video.fps))
-    func infer(_ frames: [PreparedFrame], channels: [Int], targets: [PreparedFrame]) throws {
-      let output = try predictor.predict(
-        frames.flatMap(\.pixels), shape: [1, 9, roi.modelHeight, roi.modelWidth])
+    func consume(_ output: MLMultiArray, channels: [Int], targets: [PreparedFrame]) throws {
       for (channel, frame) in zip(channels, targets) {
         let plane = try Inference.plane(output, channel: channel)
         var detections = [TTDetection](repeating: TTDetection(), count: plane.width * plane.height)
@@ -209,49 +220,44 @@ final class Worker {
         }
       }
     }
-    if let intervals {
-      func enqueue(_ a: PreparedFrame, _ b: PreparedFrame, _ c: PreparedFrame) throws {
-        let index = intervals.firstIndex { b.time >= $0.start && b.time <= $0.end }
-        if index != currentInterval {
-          previous = nil
-          currentInterval = index
+    let source = try PredictionJobs(video: request.video, roi: roi, intervals: intervals)
+    defer { source.close() }
+    typealias Pending = (job: PredictionJob, task: Task<MLMultiArray?, Error>)
+    var pending: [Pending] = []
+    func submit() throws -> Bool {
+      guard let job = try source.next() else { return false }
+      let task = Task.detached(priority: .userInitiated) { () throws -> MLMultiArray? in
+        try Task.checkCancellation()
+        guard !job.channels.isEmpty else { return nil }
+        return try await predictor.predictAsync(job.frames.flatMap(\.pixels), shape: [1,9,roi.modelHeight,roi.modelWidth])
+      }
+      pending.append((job, task))
+      return true
+    }
+    do {
+      for _ in 0..<4 { if try !submit() { break } }
+      while !pending.isEmpty {
+        try Task.checkCancellation()
+        let first = pending.removeFirst()
+        let output = try await first.task.value
+        if first.job.resetPrevious { previous = nil }
+        if let output {
+          try autoreleasepool { try consume(output, channels: first.job.channels, targets: first.job.targets) }
         }
-        if index != nil { try infer([a, b, c], channels: [1], targets: [b]) }
-        if b.index % 30 == 0 { progress("refinement_analysis", b.index + 1, total) }
-      }
-      if let first = try decoder.prepare(roi) {
-        if var center = try decoder.prepare(roi) {
-          var older = first
-          try enqueue(first, first, center)
-          while let next = try decoder.prepare(roi) {
-            try autoreleasepool { try enqueue(older, center, next) }
-            older = center
-            center = next
-          }
-          try enqueue(older, center, center)
-        } else {
-          try enqueue(first, first, first)
+        let current = first.job.progressIndex + 1
+        if current % 30 == 0 || current >= total {
+          progress(intervals != nil ? "refinement_analysis" : request.mode == .twoStage ? "candidate_analysis" : "analysis", current, total)
         }
+        _ = try submit()
       }
-    } else {
-      var window: [PreparedFrame] = []
-      while let frame = try decoder.prepare(roi) {
-        window.append(frame)
-        if window.count == 3 {
-          try autoreleasepool { try infer(window, channels: [0, 1, 2], targets: window) }
-          window.removeAll(keepingCapacity: true)
-        }
-        if frame.index % 30 == 0 { progress(request.mode == .twoStage ? "candidate_analysis" : "analysis", frame.index + 1, total) }
-      }
-      if let last = window.last {
-        let targets = window
-        while window.count < 3 { window.append(last) }
-        try infer(window, channels: Array(0..<targets.count), targets: targets)
-      }
+    } catch {
+      pending.forEach { $0.task.cancel() }
+      for item in pending { _ = await item.task.result }
+      throw error
     }
     return points
   }
-  func run() throws {
+  func run() async throws {
     guard request.schemaVersion == 1, UUID(uuidString: request.taskID) != nil else {
       throw TTError("INVALID_REQUEST")
     }
@@ -269,8 +275,8 @@ final class Worker {
     }
     try calibration.validate()
     let predictor = try Inference(
-      directory: request.modelsDirectory, name: "BlurBall", units: .cpuAndGPU)
-    var points = try trajectories(
+      directory: request.modelsDirectory, name: "BlurBall", units: .cpuAndNeuralEngine)
+    var points = try await trajectories(
       calibration: calibration, predictor: predictor,
       threshold: Float(request.mode == .twoStage ? request.stage1Confidence : request.confidence),
       intervals: nil)
@@ -279,7 +285,7 @@ final class Worker {
     if request.mode == .twoStage {
       let intervals = Segments.refinement(rallies, duration: request.video.duration)
       if !intervals.isEmpty {
-        points = try trajectories(
+        points = try await trajectories(
           calibration: calibration, predictor: predictor,
           threshold: Float(request.stage2Confidence), intervals: intervals)
         frames = try BounceDetector.detect(points, calibration: calibration)
@@ -306,7 +312,7 @@ do {
   }
   let request = try JSONDecoder().decode(AnalysisRequest.self, from: data)
   taskID = request.taskID
-  try Worker(request).run()
+  try await Worker(request).run()
 } catch {
   var event = WorkerEvent(type: "error", taskID: taskID)
   event.error = (error as? TTError) ?? TTError("ANALYSIS_FAILED", error.localizedDescription)
