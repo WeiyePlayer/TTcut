@@ -384,6 +384,21 @@ def test_worker_continuous_visibility_skips_bounce_detection_and_records_provena
             "minimum_coherent_flight_displacement_ratio": 0.15,
             "expanded_table_length_margin_cm": 35.0,
             "expanded_table_width_margin_cm": 25.0,
+            "long_candidate_segmentation": {
+                "minimum_candidate_seconds": 10.0,
+                "minimum_motion_run_seconds": 0.15,
+                "minimum_motion_run_horizontal_range_ratio": 0.15,
+                "short_gap_seconds": 1.25,
+                "long_gap_seconds": 2.25,
+                "minimum_visible_gap_ratio": 0.36,
+                "minimum_stationary_run_seconds": 0.5,
+                "boundary_context_seconds": 0.25,
+                "leading_pass_minimum_motion_seconds": 2.5,
+                "leading_pass_minimum_run_count": 3,
+                "leading_pass_maximum_expanded_table_ratio": 0.36,
+                "internal_transfer_minimum_motion_seconds": 1.0,
+                "internal_transfer_minimum_strict_table_ratio": 0.9,
+            },
         },
     }
     assert captured == {"blurball_filter_called": True}

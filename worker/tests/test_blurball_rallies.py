@@ -6,7 +6,10 @@ from pathlib import Path
 import pytest
 
 from ttcut_worker.blurball_rallies import (
+    _MotionCluster,
     _is_inter_rally_fragment,
+    _is_long_candidate_pass_fragment,
+    _long_candidate_motion_clusters,
     blurball_visibility_rallies,
 )
 from ttcut_worker.calibration import TableCalibration
@@ -135,6 +138,96 @@ def test_blurball_filter_is_disabled_for_end_on_views() -> None:
         StubCalibration(fail_if_used=True),
         motion_config=VisibilityMotionConfig(200, 100, vertical_exchange_enabled=True),
     )) == 1
+
+
+def test_long_candidate_splits_reliable_motion_across_a_long_idle_gap() -> None:
+    xs: list[int | None] = [None] * 121
+    xs[0:10] = [0, 20, 40, 60, 80, 100, 120, 100, 80, 60]
+    xs[60:70] = [0, 20, 40, 60, 80, 100, 120, 100, 80, 60]
+    for frame in range(14, 60, 5):
+        xs[frame] = 100
+    for frame in range(74, 121, 5):
+        xs[frame] = 100
+    values = points(xs)
+
+    rallies = blurball_visibility_rallies(
+        values,
+        FPS,
+        StubCalibration(inside_table=True),
+        motion_config=MOTION_CONFIG,
+    )
+
+    assert [(item.start_time, item.end_time) for item in rallies] == [
+        (0.0, 0.9),
+        (5.9, 6.9),
+    ]
+
+
+def test_long_candidate_keeps_sparse_two_second_occlusion_inside_one_cluster() -> None:
+    xs: list[int | None] = [None] * 121
+    xs[0:10] = [0, 20, 40, 60, 80, 100, 120, 100, 80, 60]
+    xs[30:40] = [0, 20, 40, 60, 80, 100, 120, 100, 80, 60]
+    for frame in range(14, 30, 5):
+        xs[frame] = 100
+    values = points(xs)
+    candidate = VisibilityRallySummary(0, 120, 0.0, 12.0)
+
+    clusters = _long_candidate_motion_clusters(
+        candidate,
+        values,
+        FPS,
+        MOTION_CONFIG.analysis_width_pixels,
+    )
+
+    assert len(clusters) == 1
+    assert clusters[0].segmented
+    assert clusters[0].evidence_run_count == 2
+
+
+def test_long_candidate_splits_a_shorter_gap_with_stationary_visibility() -> None:
+    xs: list[int | None] = [None] * 121
+    xs[0:10] = [0, 20, 40, 60, 80, 100, 120, 100, 80, 60]
+    xs[11:23] = [100] * 12
+    xs[24:34] = [0, 20, 40, 60, 80, 100, 120, 100, 80, 60]
+    values = points(xs)
+    candidate = VisibilityRallySummary(0, 120, 0.0, 12.0)
+
+    clusters = _long_candidate_motion_clusters(
+        candidate,
+        values,
+        FPS,
+        MOTION_CONFIG.analysis_width_pixels,
+    )
+
+    assert len(clusters) == 2
+
+
+def test_long_candidate_rejects_a_leading_multi_flight_off_table_pass() -> None:
+    values = one_way_fragment()
+    cluster = _MotionCluster(summary(values), 3, 2.5, True)
+
+    assert _is_long_candidate_pass_fragment(
+        cluster,
+        0,
+        2,
+        values,
+        StubCalibration(),
+        MOTION_CONFIG,
+    )
+
+
+def test_long_candidate_rejects_an_internal_slow_table_transfer() -> None:
+    values = points(list(range(0, 151, 10)))
+    cluster = _MotionCluster(summary(values), 1, 1.5, True)
+
+    assert _is_long_candidate_pass_fragment(
+        cluster,
+        1,
+        3,
+        values,
+        StubCalibration(inside_table=True),
+        MOTION_CONFIG,
+    )
 
 
 def test_blurball_filter_preserves_the_tracked_istanbul_regression() -> None:
