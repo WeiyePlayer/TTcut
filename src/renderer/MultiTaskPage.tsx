@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT,
+  RALLY_RECOGNITION_METHOD_DEFAULT,
   BLURBALL_STAGE1_CONFIDENCE_THRESHOLD_DEFAULT,
   DURATION_HIGHLIGHT_TIER_VALUES,
   AnalysisResultV1,
@@ -121,7 +122,7 @@ export function MultiTaskPage({
   preRoll,
   postRoll,
   analysisMode = 'full',
-  rallyRecognitionMethod = 'bounce_events',
+  rallyRecognitionMethod = RALLY_RECOGNITION_METHOD_DEFAULT,
   normalizeVariableFrameRate = false,
   blurballConfidenceThreshold = BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT,
   blurballStage1ConfidenceThreshold = BLURBALL_STAGE1_CONFIDENCE_THRESHOLD_DEFAULT,

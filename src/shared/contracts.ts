@@ -13,7 +13,7 @@ export const BLURBALL_ANALYSIS_MODE_VALUES = ['full', 'two_stage'] as const;
 export const BLURBALL_ANALYSIS_MODE_DEFAULT = 'full' as const;
 export const BLURBALL_REFINEMENT_EXPANSION_SECONDS = 0.75;
 export const RALLY_RECOGNITION_METHOD_VALUES = ['bounce_events', 'continuous_visibility'] as const;
-export const RALLY_RECOGNITION_METHOD_DEFAULT = 'bounce_events' as const;
+export const RALLY_RECOGNITION_METHOD_DEFAULT = 'continuous_visibility' as const;
 export const DURATION_HIGHLIGHT_TIER_VALUES = ['short_rally', 'rally', 'long_rally'] as const;
 export const DURATION_HIGHLIGHT_SECONDS = {
   short_rally: 2.7,
@@ -765,7 +765,7 @@ export type ContinuousVisibilityAnalysisResultV2 = z.infer<typeof continuousVisi
 export type BounceAnalysisResult = LegacyAnalysisResultV1 | BounceAnalysisResultV2;
 
 export function rallyRecognitionMethod(result: AnalysisResultV1): RallyRecognitionMethod {
-  return result.schema_version === 2 ? result.rally_recognition.method : RALLY_RECOGNITION_METHOD_DEFAULT;
+  return result.schema_version === 2 ? result.rally_recognition.method : 'bounce_events';
 }
 
 export function hasBounceCounts(result: AnalysisResultV1): result is BounceAnalysisResult {

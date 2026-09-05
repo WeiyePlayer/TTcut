@@ -123,7 +123,7 @@ describe('multi-task clipping', () => {
     await waitFor(() => expect(highlight).not.toBeDisabled());
     fireEvent.click(highlight);
     expect(highlight).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getAllByRole('radio', { name: '5板' })[0]).toBeChecked();
+    expect(screen.queryByRole('radio', { name: '5板' })).not.toBeInTheDocument();
   });
 
   it('runs ready videos serially with precalibrated analysis and 70/30 progress mapping', async () => {
@@ -141,7 +141,7 @@ describe('multi-task clipping', () => {
       device: 'auto',
       historyVisibility: 'deferred',
       analysisMode: 'full',
-      rallyRecognitionMethod: 'bounce_events',
+      rallyRecognitionMethod: 'continuous_visibility',
       normalizeVariableFrameRate: true,
       blurballConfidenceThreshold: 0.7,
       blurballStage1ConfidenceThreshold: 0.3,
@@ -342,6 +342,7 @@ describe('multi-task clipping', () => {
         preRoll={2.5}
         postRoll={1}
         analysisMode="two_stage"
+        rallyRecognitionMethod="bounce_events"
         blurballConfidenceThreshold={0.55}
         blurballStage1ConfidenceThreshold={0.3}
         blurballStage2ConfidenceThreshold={0.7}
@@ -536,6 +537,7 @@ describe('multi-task clipping', () => {
         preRoll={2.5}
         postRoll={1}
         analysisMode="two_stage"
+        rallyRecognitionMethod="bounce_events"
         blurballConfidenceThreshold={0.55}
         blurballStage1ConfidenceThreshold={0.3}
         blurballStage2ConfidenceThreshold={0.7}
@@ -553,6 +555,7 @@ describe('multi-task clipping', () => {
         preRoll={5}
         postRoll={4}
         analysisMode="full"
+        rallyRecognitionMethod="bounce_events"
         blurballConfidenceThreshold={0.8}
         blurballStage1ConfidenceThreshold={0.8}
         blurballStage2ConfidenceThreshold={0.9}

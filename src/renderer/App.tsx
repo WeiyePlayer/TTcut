@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT,
+  RALLY_RECOGNITION_METHOD_DEFAULT,
   BLURBALL_STAGE1_CONFIDENCE_THRESHOLD_DEFAULT,
   DURATION_HIGHLIGHT_SECONDS,
   DURATION_HIGHLIGHT_TIER_VALUES,
@@ -85,7 +86,7 @@ export function App() {
     language: 'zh-CN', calibration_method: 'automatic',
     pre_roll_seconds: 2.5, post_roll_seconds: 1,
     analysis_mode: 'full',
-    rally_recognition_method: 'bounce_events',
+    rally_recognition_method: RALLY_RECOGNITION_METHOD_DEFAULT,
     normalize_variable_frame_rate: false,
   });
   const [view, setView] = useState<View>('auto');
