@@ -6,10 +6,8 @@ from pathlib import Path
 import pytest
 
 from ttcut_worker.blurball_rallies import (
-    _MotionCluster,
     _is_inter_rally_fragment,
-    _is_long_candidate_pass_fragment,
-    _long_candidate_motion_clusters,
+    _refine_motion_candidate,
     blurball_visibility_rallies,
 )
 from ttcut_worker.calibration import TableCalibration
@@ -172,16 +170,13 @@ def test_long_candidate_keeps_sparse_two_second_occlusion_inside_one_cluster() -
     values = points(xs)
     candidate = VisibilityRallySummary(0, 120, 0.0, 12.0)
 
-    clusters = _long_candidate_motion_clusters(
-        candidate,
-        values,
-        FPS,
-        MOTION_CONFIG.analysis_width_pixels,
+    clusters = _refine_motion_candidate(
+        candidate, values, FPS, StubCalibration(inside_table=True), MOTION_CONFIG,
     )
 
     assert len(clusters) == 1
-    assert clusters[0].segmented
-    assert clusters[0].evidence_run_count == 2
+    assert clusters[0].start_time == 0.0
+    assert clusters[0].end_time >= 3.9
 
 
 def test_long_candidate_splits_a_shorter_gap_with_stationary_visibility() -> None:
@@ -192,42 +187,11 @@ def test_long_candidate_splits_a_shorter_gap_with_stationary_visibility() -> Non
     values = points(xs)
     candidate = VisibilityRallySummary(0, 120, 0.0, 12.0)
 
-    clusters = _long_candidate_motion_clusters(
-        candidate,
-        values,
-        FPS,
-        MOTION_CONFIG.analysis_width_pixels,
+    clusters = _refine_motion_candidate(
+        candidate, values, FPS, StubCalibration(inside_table=True), MOTION_CONFIG,
     )
 
     assert len(clusters) == 2
-
-
-def test_long_candidate_rejects_a_leading_multi_flight_off_table_pass() -> None:
-    values = one_way_fragment()
-    cluster = _MotionCluster(summary(values), 3, 2.5, True)
-
-    assert _is_long_candidate_pass_fragment(
-        cluster,
-        0,
-        2,
-        values,
-        StubCalibration(),
-        MOTION_CONFIG,
-    )
-
-
-def test_long_candidate_rejects_an_internal_slow_table_transfer() -> None:
-    values = points(list(range(0, 151, 10)))
-    cluster = _MotionCluster(summary(values), 1, 1.5, True)
-
-    assert _is_long_candidate_pass_fragment(
-        cluster,
-        1,
-        3,
-        values,
-        StubCalibration(inside_table=True),
-        MOTION_CONFIG,
-    )
 
 
 def test_blurball_filter_preserves_the_tracked_istanbul_regression() -> None:

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import math
 from bisect import bisect_left, bisect_right
-from dataclasses import dataclass
 from typing import Sequence
 
 from .calibration import TABLE_LENGTH_CM, TABLE_WIDTH_CM, TableCalibration
@@ -28,27 +27,16 @@ BLURBALL_INTER_RALLY_FILTER_MINIMUM_COHERENT_REVERSAL_RATIO = 0.20
 BLURBALL_INTER_RALLY_FILTER_MINIMUM_COHERENT_FLIGHT_DISPLACEMENT_RATIO = 0.15
 BLURBALL_INTER_RALLY_FILTER_EXPANDED_TABLE_LENGTH_MARGIN_CM = 35.0
 BLURBALL_INTER_RALLY_FILTER_EXPANDED_TABLE_WIDTH_MARGIN_CM = 25.0
-BLURBALL_LONG_CANDIDATE_MINIMUM_SECONDS = 10.0
+BLURBALL_MOTION_MINIMUM_SPEED_RATIO_PER_SECOND = 0.35
+BLURBALL_MOTION_REVERSAL_RANGE_RATIO = 0.06
+BLURBALL_MOTION_GAP_MINIMUM_RANGE_RATIO = 0.04
+BLURBALL_MOTION_GAP_MINIMUM_SUPPORT_RATIO = 0.35
 BLURBALL_MOTION_RUN_MINIMUM_SECONDS = 0.15
-BLURBALL_MOTION_RUN_MINIMUM_HORIZONTAL_RANGE_RATIO = 0.15
+BLURBALL_MOTION_RUN_MINIMUM_HORIZONTAL_RANGE_RATIO = 0.05
 BLURBALL_MOTION_CLUSTER_SHORT_GAP_SECONDS = 1.25
 BLURBALL_MOTION_CLUSTER_LONG_GAP_SECONDS = 2.25
-BLURBALL_MOTION_CLUSTER_MINIMUM_VISIBLE_GAP_RATIO = 0.36
 BLURBALL_MOTION_CLUSTER_MINIMUM_STATIONARY_RUN_SECONDS = 0.50
 BLURBALL_MOTION_CLUSTER_BOUNDARY_CONTEXT_SECONDS = 0.25
-BLURBALL_LEADING_PASS_MINIMUM_MOTION_SECONDS = 2.50
-BLURBALL_LEADING_PASS_MINIMUM_RUN_COUNT = 3
-BLURBALL_LEADING_PASS_MAXIMUM_EXPANDED_TABLE_RATIO = 0.36
-BLURBALL_INTERNAL_TRANSFER_MINIMUM_MOTION_SECONDS = 1.0
-BLURBALL_INTERNAL_TRANSFER_MINIMUM_STRICT_TABLE_RATIO = 0.90
-
-
-@dataclass(frozen=True)
-class _MotionCluster:
-    rally: VisibilityRallySummary
-    evidence_run_count: int
-    evidence_duration: float
-    segmented: bool
 
 
 def blurball_inter_rally_filter_provenance() -> dict[str, object]:
@@ -79,38 +67,18 @@ def blurball_inter_rally_filter_provenance() -> dict[str, object]:
         "expanded_table_width_margin_cm": (
             BLURBALL_INTER_RALLY_FILTER_EXPANDED_TABLE_WIDTH_MARGIN_CM
         ),
-        "long_candidate_segmentation": {
-            "minimum_candidate_seconds": BLURBALL_LONG_CANDIDATE_MINIMUM_SECONDS,
+        "motion_refinement": {
+            "version": 2,
             "minimum_motion_run_seconds": BLURBALL_MOTION_RUN_MINIMUM_SECONDS,
-            "minimum_motion_run_horizontal_range_ratio": (
-                BLURBALL_MOTION_RUN_MINIMUM_HORIZONTAL_RANGE_RATIO
-            ),
+            "minimum_horizontal_range_ratio": BLURBALL_MOTION_RUN_MINIMUM_HORIZONTAL_RANGE_RATIO,
+            "minimum_speed_ratio_per_second": BLURBALL_MOTION_MINIMUM_SPEED_RATIO_PER_SECOND,
+            "reversal_range_ratio": BLURBALL_MOTION_REVERSAL_RANGE_RATIO,
+            "gap_minimum_motion_range_ratio": BLURBALL_MOTION_GAP_MINIMUM_RANGE_RATIO,
+            "gap_minimum_motion_support_ratio": BLURBALL_MOTION_GAP_MINIMUM_SUPPORT_RATIO,
             "short_gap_seconds": BLURBALL_MOTION_CLUSTER_SHORT_GAP_SECONDS,
             "long_gap_seconds": BLURBALL_MOTION_CLUSTER_LONG_GAP_SECONDS,
-            "minimum_visible_gap_ratio": (
-                BLURBALL_MOTION_CLUSTER_MINIMUM_VISIBLE_GAP_RATIO
-            ),
-            "minimum_stationary_run_seconds": (
-                BLURBALL_MOTION_CLUSTER_MINIMUM_STATIONARY_RUN_SECONDS
-            ),
-            "boundary_context_seconds": (
-                BLURBALL_MOTION_CLUSTER_BOUNDARY_CONTEXT_SECONDS
-            ),
-            "leading_pass_minimum_motion_seconds": (
-                BLURBALL_LEADING_PASS_MINIMUM_MOTION_SECONDS
-            ),
-            "leading_pass_minimum_run_count": (
-                BLURBALL_LEADING_PASS_MINIMUM_RUN_COUNT
-            ),
-            "leading_pass_maximum_expanded_table_ratio": (
-                BLURBALL_LEADING_PASS_MAXIMUM_EXPANDED_TABLE_RATIO
-            ),
-            "internal_transfer_minimum_motion_seconds": (
-                BLURBALL_INTERNAL_TRANSFER_MINIMUM_MOTION_SECONDS
-            ),
-            "internal_transfer_minimum_strict_table_ratio": (
-                BLURBALL_INTERNAL_TRANSFER_MINIMUM_STRICT_TABLE_RATIO
-            ),
+            "stationary_run_seconds": BLURBALL_MOTION_CLUSTER_MINIMUM_STATIONARY_RUN_SECONDS,
+            "boundary_context_seconds": BLURBALL_MOTION_CLUSTER_BOUNDARY_CONTEXT_SECONDS,
         },
     }
 
@@ -122,197 +90,228 @@ def blurball_visibility_rallies(
     *,
     motion_config: VisibilityMotionConfig,
 ) -> tuple[VisibilityRallySummary, ...]:
-    """Apply a conservative BlurBall inter-rally-fragment filter."""
+    """Refine visible candidates using sustained motion, pauses and transfers.
 
+    Missing detections are never movement evidence. All boundaries remain real
+    visible source frames; neither the detector nor the export padding changes.
+    """
     base = continuous_visibility_rallies(points, fps, motion_config=motion_config)
     if not base or motion_config.vertical_exchange_enabled:
         return base
-
     ordered = sorted(points, key=lambda point: point.frame)
     frames = [point.frame for point in ordered]
     accepted: list[VisibilityRallySummary] = []
     for rally in base:
-        segment = ordered[
-            bisect_left(frames, rally.start_frame):bisect_right(frames, rally.end_frame)
-        ]
-        clusters = _long_candidate_motion_clusters(
-            rally,
-            segment,
-            fps,
-            motion_config.analysis_width_pixels,
-        )
-        for cluster_index, cluster in enumerate(clusters):
-            candidate = cluster.rally
-            candidate_segment = ordered[
-                bisect_left(frames, candidate.start_frame):
-                bisect_right(frames, candidate.end_frame)
-            ]
-            if cluster.segmented and not _is_ball_exchange(
-                candidate_segment,
-                fps,
-                motion_config,
-            ):
-                continue
-            if cluster.segmented and _is_long_candidate_pass_fragment(
-                cluster,
-                cluster_index,
-                len(clusters),
-                candidate_segment,
-                calibration,
-                motion_config,
-            ):
-                continue
-            if not _is_inter_rally_fragment(
-                candidate,
-                candidate_segment,
-                calibration,
-                motion_config,
-            ):
-                accepted.append(candidate)
+        segment = ordered[bisect_left(frames, rally.start_frame):bisect_right(frames, rally.end_frame)]
+        if _is_inter_rally_fragment(rally, segment, calibration, motion_config):
+            continue
+        accepted.extend(_refine_motion_candidate(rally, segment, fps, calibration, motion_config))
     return tuple(accepted)
 
 
-def _long_candidate_motion_clusters(
-    rally: VisibilityRallySummary,
-    points: Sequence[TrajectoryPoint],
-    fps: float,
-    analysis_width_pixels: float,
-) -> tuple[_MotionCluster, ...]:
-    duration = rally.end_time - rally.start_time
-    original = _MotionCluster(rally, 0, duration, False)
-    if duration + 1e-9 < BLURBALL_LONG_CANDIDATE_MINIMUM_SECONDS:
-        return (original,)
+def _trim_slow_run_tail(
+    run: Sequence[TrajectoryPoint], fps: float, config: VisibilityMotionConfig,
+) -> tuple[tuple[TrajectoryPoint, ...], bool]:
+    if run[-1].time - run[0].time < 0.5:
+        return tuple(run), False
+    xs = _median_smooth([point.x for point in run])
+    ys = _median_smooth([point.y for point in run])
+    step = max(1, round(fps * 0.1))
+    active: list[int] = []
+    for index in range(len(run) - step):
+        elapsed = run[index + step].time - run[index].time
+        speed = math.hypot(
+            (xs[index + step] - xs[index]) / config.analysis_width_pixels,
+            (ys[index + step] - ys[index]) / config.analysis_height_pixels,
+        ) / elapsed
+        if speed >= BLURBALL_MOTION_MINIMUM_SPEED_RATIO_PER_SECOND:
+            active.extend((index, index + step))
+    if not active:
+        return tuple(run), False
+    context = round(fps * 0.1)
+    start = max(0, min(active) - context)
+    end = min(len(run) - 1, max(active) + context)
+    trimmed_tail = run[-1].time - run[end].time >= 0.4
+    return tuple(run[start:end + 1]), trimmed_tail
 
-    visible = [point for point in points if point.visibility == 1]
-    evidence = [
-        run
-        for run in _contiguous_visible_runs(visible)
-        if (
-            run[-1].time - run[0].time + 1e-9
-            >= BLURBALL_MOTION_RUN_MINIMUM_SECONDS
-            and max(point.x for point in run) - min(point.x for point in run) + 1e-9
-            >= (
-                analysis_width_pixels
-                * BLURBALL_MOTION_RUN_MINIMUM_HORIZONTAL_RANGE_RATIO
-            )
-        )
-    ]
-    if not evidence:
-        return (original,)
 
-    ordered = sorted(points, key=lambda point: point.frame)
-    frames = [point.frame for point in ordered]
-    grouped: list[list[tuple[TrajectoryPoint, ...]]] = []
-    for run in evidence:
-        if not grouped or _motion_runs_have_rally_break(
-            grouped[-1][-1],
-            run,
-            ordered,
-            frames,
-        ):
-            grouped.append([run])
-        else:
-            grouped[-1].append(run)
-
-    context_frames = math.ceil(
-        fps * BLURBALL_MOTION_CLUSTER_BOUNDARY_CONTEXT_SECONDS
+def _motion_reversals(run: Sequence[TrajectoryPoint], width: float) -> int:
+    return _significant_reversals(
+        _median_smooth([point.x for point in run]),
+        width * BLURBALL_MOTION_REVERSAL_RANGE_RATIO,
     )
-    clusters: list[_MotionCluster] = []
-    for group in grouped:
-        start_frame = max(rally.start_frame, group[0][0].frame - context_frames)
-        end_frame = min(rally.end_frame, group[-1][-1].frame + context_frames)
-        candidate_points = ordered[
-            bisect_left(frames, start_frame):bisect_right(frames, end_frame)
-        ]
-        candidate_visible = [
-            point for point in candidate_points if point.visibility == 1
-        ]
-        if len(candidate_visible) < 2:
-            continue
-        clusters.append(_MotionCluster(
-            rally=VisibilityRallySummary(
-                start_frame=candidate_visible[0].frame,
-                end_frame=candidate_visible[-1].frame,
-                start_time=candidate_visible[0].time,
-                end_time=candidate_visible[-1].time,
-            ),
-            evidence_run_count=len(group),
-            evidence_duration=group[-1][-1].time - group[0][0].time,
-            segmented=True,
-        ))
-    return tuple(clusters) or (original,)
 
 
 def _motion_runs_have_rally_break(
-    previous: Sequence[TrajectoryPoint],
-    current: Sequence[TrajectoryPoint],
-    points: Sequence[TrajectoryPoint],
-    frames: Sequence[int],
+    previous: Sequence[TrajectoryPoint], current: Sequence[TrajectoryPoint],
+    points: Sequence[TrajectoryPoint], frames: Sequence[int], width: float,
+    height: float | None = None,
 ) -> bool:
-    gap_seconds = current[0].time - previous[-1].time
-    if gap_seconds + 1e-9 >= BLURBALL_MOTION_CLUSTER_LONG_GAP_SECONDS:
-        return True
-    if gap_seconds + 1e-9 < BLURBALL_MOTION_CLUSTER_SHORT_GAP_SECONDS:
+    height = height or width
+    elapsed = current[0].time - previous[-1].time
+    if elapsed < BLURBALL_MOTION_CLUSTER_SHORT_GAP_SECONDS:
         return False
+    gap = points[bisect_right(frames, previous[-1].frame):bisect_left(frames, current[0].frame)]
+    runs = _contiguous_visible_runs([point for point in gap if point.visibility == 1])
+    moving = [run for run in runs if (
+        run[-1].time - run[0].time >= BLURBALL_MOTION_RUN_MINIMUM_SECONDS
+        and max(point.x for point in run) - min(point.x for point in run)
+        >= width * BLURBALL_MOTION_GAP_MINIMUM_RANGE_RATIO
+    )]
+    support = sum(run[-1].time - run[0].time for run in moving) / elapsed
+    if len(moving) >= 3 and support >= BLURBALL_MOTION_GAP_MINIMUM_SUPPORT_RATIO:
+        return False
+    # A visible ball is not necessarily stationary. Check movement before using
+    # a held-ball interval as a break; sparse occlusions alone remain bridgeable.
+    stationary = any(
+        run[-1].time - run[0].time >= BLURBALL_MOTION_CLUSTER_MINIMUM_STATIONARY_RUN_SECONDS
+        and max(point.x for point in run) - min(point.x for point in run)
+        < width * BLURBALL_MOTION_GAP_MINIMUM_RANGE_RATIO
+        for run in runs
+    )
+    # A side-on rally can temporarily move mostly vertically in screen space.
+    # Repeated observed flights support continuity across that short interval.
+    vertical = [run for run in runs if (
+        run[-1].time - run[0].time + 1e-9 >= 0.1
+        and max(point.y for point in run) - min(point.y for point in run) >= height * 0.15
+    )]
+    if (not stationary and elapsed <= 3.0 and len(vertical) >= 2
+            and sum(run[-1].time - run[0].time for run in vertical) / elapsed >= 0.15):
+        return False
+    return elapsed >= BLURBALL_MOTION_CLUSTER_LONG_GAP_SECONDS or stationary
 
-    gap = points[
-        bisect_right(frames, previous[-1].frame):
-        bisect_left(frames, current[0].frame)
+
+def _has_rhythmic_exchange(runs: Sequence[Sequence[TrajectoryPoint]], width: float) -> bool:
+    for run in runs:
+        reversals = _motion_reversals(run, width)
+        if reversals and (run[-1].time - run[0].time) / (reversals + 1) <= 1.0:
+            return True
+    directions = [
+        run[-1].x - run[0].x for run in runs
+        if abs(run[-1].x - run[0].x) >= width * 0.08
+        and run[-1].time - run[0].time <= 1.0
     ]
-    frame_span = current[0].frame - previous[-1].frame - 1
-    visible = [point for point in gap if point.visibility == 1]
-    visibility_ratio = len(visible) / frame_span if frame_span > 0 else 0.0
-    longest_visible_run_seconds = max(
-        (run[-1].time - run[0].time for run in _contiguous_visible_runs(visible)),
-        default=0.0,
-    )
-    return (
-        visibility_ratio + 1e-9
-        >= BLURBALL_MOTION_CLUSTER_MINIMUM_VISIBLE_GAP_RATIO
-        or longest_visible_run_seconds + 1e-9
-        >= BLURBALL_MOTION_CLUSTER_MINIMUM_STATIONARY_RUN_SECONDS
-    )
+    return any(first * second < 0 for first, second in zip(directions, directions[1:]))
 
 
-def _is_long_candidate_pass_fragment(
-    cluster: _MotionCluster,
-    cluster_index: int,
-    cluster_count: int,
-    points: Sequence[TrajectoryPoint],
-    calibration: TableCalibration,
-    motion_config: VisibilityMotionConfig,
-) -> bool:
+def _refine_motion_candidate(
+    rally: VisibilityRallySummary, points: Sequence[TrajectoryPoint], fps: float,
+    calibration: TableCalibration, config: VisibilityMotionConfig,
+) -> tuple[VisibilityRallySummary, ...]:
+    width = config.analysis_width_pixels
     visible = [point for point in points if point.visibility == 1]
-    if not visible or cluster_count < 2:
-        return False
+    evidence: list[tuple[TrajectoryPoint, ...]] = []
+    transfers: list[tuple[TrajectoryPoint, ...]] = []
+    for original in _contiguous_visible_runs(visible):
+        run, trimmed_tail = _trim_slow_run_tail(original, fps, config)
+        if trimmed_tail:
+            transfers.append(tuple(point for point in original if point.frame >= run[-1].frame))
+        duration = run[-1].time - run[0].time
+        span = max(point.x for point in run) - min(point.x for point in run)
+        if duration < BLURBALL_MOTION_RUN_MINIMUM_SECONDS or span < width * BLURBALL_MOTION_RUN_MINIMUM_HORIZONTAL_RANGE_RATIO:
+            continue
+        strict, _ = _table_activity_ratios(run, calibration)
+        if duration >= 1.0 and strict >= 0.90 and _motion_reversals(run, width) == 0:
+            transfers.append(run)
+        else:
+            evidence.append(run)
+    if not evidence:
+        # Long, partially observed rallies need more than lack of large motion
+        # to reject them. Short candidates consisting of static detections and
+        # disconnected jumps have no sustained flight evidence.
+        short_flights = [run for run in _contiguous_visible_runs(visible) if (
+            run[-1].time - run[0].time + 1e-9 >= 0.1
+            and max(point.x for point in run) - min(point.x for point in run) >= width * 0.08
+        )]
+        vertical_flight = any(
+            run[-1].time - run[0].time >= BLURBALL_MOTION_RUN_MINIMUM_SECONDS
+            and max(point.y for point in run) - min(point.y for point in run)
+            >= config.analysis_height_pixels * 0.15
+            for run in _contiguous_visible_runs(visible)
+        )
+        table_flight = any(_table_activity_ratios(run, calibration)[1] >= 0.6 for run in short_flights)
+        return (rally,) if (
+            rally.end_time - rally.start_time > 3.0 or len(short_flights) >= 2
+            or vertical_flight or table_flight
+        ) else ()
 
-    strict_table_ratio, expanded_table_ratio = _table_activity_ratios(
-        visible,
-        calibration,
+    strong = [run for run in evidence if (
+        max(point.x for point in run) - min(point.x for point in run) >= width * 0.15
+    )]
+    isolated: list[tuple[TrajectoryPoint, ...]] = []
+    for index, run in enumerate(strong):
+        before = run[0].time - strong[index - 1][-1].time if index else math.inf
+        after = strong[index + 1][0].time - run[-1].time if index + 1 < len(strong) else math.inf
+        if (len(strong) > 1 and run[-1].time - run[0].time >= 0.9
+                and _motion_reversals(run, width) == 0 and before >= 1.5 and after >= 1.5):
+            isolated.append(run)
+    if isolated:
+        evidence = [run for run in evidence if not any(
+            transfer[0].time - 0.25 <= run[0].time and run[-1].time <= transfer[-1].time + 0.25
+            for transfer in isolated
+        )]
+        transfers.extend(isolated)
+    if not evidence:
+        return ()
+
+    frames = [point.frame for point in points]
+    groups: list[list[tuple[TrajectoryPoint, ...]]] = []
+    for run in evidence:
+        if not groups or _motion_runs_have_rally_break(
+            groups[-1][-1], run, points, frames, width, config.analysis_height_pixels,
+        ):
+            groups.append([run])
+        else:
+            groups[-1].append(run)
+    if len(groups) == 1 and not transfers and rally.end_time - rally.start_time < 5.0:
+        # Missing tail detections do not establish an idle/transfer boundary.
+        # Preserve the validated visibility interval when there is no positive
+        # reason to split it or remove a slow/isolated flight.
+        return (rally,)
+    accepted: list[VisibilityRallySummary] = []
+    context = round(fps * BLURBALL_MOTION_CLUSTER_BOUNDARY_CONTEXT_SECONDS)
+    for index, group in enumerate(groups):
+        first, last = group[0][0], group[-1][-1]
+        # Short exchanges may contain only one detected fast flight. Include
+        # neighboring short runs, which were too brief to form a motion group.
+        nearby_runs = _contiguous_visible_runs([
+            point for point in visible if first.time - 0.5 <= point.time <= last.time + 0.25
+        ])
+        fast_short_flight = last.time - first.time < 1.5 and any(
+            (max(point.x for point in run) - min(point.x for point in run))
+            / width / (run[-1].time - run[0].time) >= 0.9
+            for run in nearby_runs
+            if run[-1].time - run[0].time + 1e-9 >= 0.1
+        )
+        if len(groups) > 1 and not fast_short_flight and not _has_rhythmic_exchange(group, width):
+            continue
+        start = max(rally.start_frame, first.frame - context)
+        end = min(rally.end_frame, last.frame + context)
+        if index == 0 and first.time - rally.start_time < BLURBALL_MOTION_CLUSTER_SHORT_GAP_SECONDS:
+            start = rally.start_frame
+        if (index == len(groups) - 1
+                and rally.end_time - last.time < BLURBALL_MOTION_CLUSTER_SHORT_GAP_SECONDS
+                and not any(run[0].time >= last.time for run in transfers)):
+            end = rally.end_frame
+        segment = points[bisect_left(frames, start):bisect_right(frames, end)]
+        observed = [point for point in segment if point.visibility == 1]
+        if not observed or observed[-1].time - observed[0].time < 0.6:
+            continue
+        candidate = VisibilityRallySummary(
+            observed[0].frame, observed[-1].frame, observed[0].time, observed[-1].time,
+        )
+        if _is_ball_exchange(segment, fps, config) and not _is_inter_rally_fragment(candidate, segment, calibration, config):
+            accepted.append(candidate)
+    sparse_groups = len(groups) > 1 and all(
+        group[-1][-1].time - group[0][0].time < 0.6 for group in groups
     )
-    coherent_exchange = _has_coherent_horizontal_exchange(
-        _contiguous_visible_runs(visible),
-        motion_config.analysis_width_pixels,
-    )
-    leading_pass = (
-        cluster_index == 0
-        and cluster.evidence_run_count
-        >= BLURBALL_LEADING_PASS_MINIMUM_RUN_COUNT
-        and cluster.evidence_duration + 1e-9
-        >= BLURBALL_LEADING_PASS_MINIMUM_MOTION_SECONDS
-        and expanded_table_ratio
-        < BLURBALL_LEADING_PASS_MAXIMUM_EXPANDED_TABLE_RATIO
-    )
-    internal_table_transfer = (
-        0 < cluster_index < cluster_count - 1
-        and cluster.evidence_run_count == 1
-        and cluster.evidence_duration + 1e-9
-        >= BLURBALL_INTERNAL_TRANSFER_MINIMUM_MOTION_SECONDS
-        and strict_table_ratio + 1e-9
-        >= BLURBALL_INTERNAL_TRANSFER_MINIMUM_STRICT_TABLE_RATIO
-        and not coherent_exchange
-    )
-    return leading_pass or internal_table_transfer
+    if not accepted and not transfers and (
+        rally.end_time - rally.start_time < 4.0 or sparse_groups
+    ):
+        # Do not erase an already validated rally because its sparse motion
+        # samples cannot independently establish new start/end boundaries.
+        return (rally,)
+    return tuple(accepted)
 
 
 def _table_activity_ratios(

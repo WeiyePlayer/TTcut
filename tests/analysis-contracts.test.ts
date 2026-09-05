@@ -239,5 +239,36 @@ describe('BlurBall analysis request contracts', () => {
       result.rally_recognition.inter_rally_fragment_filter
         ?.long_candidate_segmentation?.minimum_candidate_seconds,
     ).toBe(10);
+    const { long_candidate_segmentation: _legacy, ...filter } =
+      result.rally_recognition.inter_rally_fragment_filter!;
+    const refined = analysisResultSchema.parse({
+      ...result,
+      rally_recognition: {
+        ...result.rally_recognition,
+        inter_rally_fragment_filter: {
+          ...filter,
+          motion_refinement: {
+            version: 2,
+            minimum_motion_run_seconds: 0.15,
+            minimum_horizontal_range_ratio: 0.05,
+            minimum_speed_ratio_per_second: 0.35,
+            reversal_range_ratio: 0.06,
+            gap_minimum_motion_range_ratio: 0.04,
+            gap_minimum_motion_support_ratio: 0.35,
+            short_gap_seconds: 1.25,
+            long_gap_seconds: 2.25,
+            stationary_run_seconds: 0.5,
+            boundary_context_seconds: 0.25,
+          },
+        },
+      },
+    });
+    if (refined.schema_version !== 2) throw new Error('Expected a v2 result');
+    expect(refined.rally_recognition).toMatchObject({
+      inter_rally_fragment_filter: { motion_refinement: { version: 2 } },
+    });
+    expect(refined.rally_recognition).not.toHaveProperty(
+      'inter_rally_fragment_filter.long_candidate_segmentation',
+    );
   });
 });
