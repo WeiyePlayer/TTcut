@@ -6,17 +6,18 @@
 
 TTcut is a local automatic table-tennis video cutter for players and enthusiasts. It locates the ball, organizes valid rallies with the selected recognition method, then exports edited clips using the selected cutting mode.
 
-Videos, analysis results, and history stay on the local computer. TTcut requires no account, uploads no video, and collects no telemetry. An internet connection is required when installing the resources needed for the first run; analysis, preview, and cutting can run offline after setup.
+Videos, analysis results, and history stay on the local computer. TTcut requires no account, uploads no video, and collects no telemetry. The Windows online installer needs a connection while installing runtime resources; the Windows full installer and macOS packages already include their runtime resources. Analysis, preview, and cutting can run offline after setup.
 
-> The current stable release is `v1.3.0` for Windows x64.
+> The current stable release is `v1.3.0` for Windows x64 and macOS 15+ on Apple Silicon.
 
 ## Download and installation
 
-1. Download the Windows version from [TTcut Releases](https://github.com/WeiyePlayer/TTcut/releases). The full installer is for a one-step setup; the online installer downloads and verifies the required runtime resources during installation and needs an active connection.
-2. Download the Android version from [TTcut-Mobile-Releases](https://github.com/WeiyePlayer/TTcut-Mobile-Releases/releases).
-3. If GitHub downloads are slow, use the Baidu Netdisk mirror: [link](https://pan.baidu.com/s/1LXDzs74xOM1t50-IRM_Vvw?pwd=ttct), extraction code: `ttct`.
-4. Run the installer, choose the installation root, and decide whether to create a desktop shortcut. Application files are written under `<root>\app`; large runtime resources, downloads, and import staging are stored under `<root>\data\components`. A Start menu shortcut is always created.
-5. On first launch, open Settings, review the prompts, and install the required runtime resources.
+1. For Windows x64, download either the full installer or online installer from [TTcut Releases](https://github.com/WeiyePlayer/TTcut/releases). The online installer downloads and verifies the required runtime resources during installation and needs an active connection.
+2. For macOS 15+ on Apple Silicon, download the DMG (recommended) or ZIP from the same [TTcut Releases](https://github.com/WeiyePlayer/TTcut/releases) page. The current macOS build is ad-hoc signed and not notarized; if first launch is blocked, allow it in System Settings > Privacy & Security.
+3. Download the Android version from [TTcut-Mobile-Releases](https://github.com/WeiyePlayer/TTcut-Mobile-Releases/releases).
+4. If GitHub downloads are slow, use the Baidu Netdisk mirror for Windows resources: [link](https://pan.baidu.com/s/1LXDzs74xOM1t50-IRM_Vvw?pwd=ttct), extraction code: `ttct`.
+5. On Windows, run the installer, choose the installation root, and decide whether to create a desktop shortcut. Application files are written under `<root>\app`; large runtime resources, downloads, and import staging are stored under `<root>\data\components`. A Start menu shortcut is always created.
+6. On first Windows launch, open Settings, review the prompts, and install the required runtime resources.
 
 TTcut detects an NVIDIA GPU automatically and falls back to CPU if accelerated setup or its self-test fails. Its video-processing capability reads media information, cuts and joins segments, and validates exported files.
 

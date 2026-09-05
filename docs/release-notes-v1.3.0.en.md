@@ -2,7 +2,7 @@
 
 [简体中文](release-notes-v1.3.0.md) | **English**
 
-`v1.3.0` is a stable TTcut release. It improves Continuous motion and automatic calibration.
+`v1.3.0` is a stable TTcut release with desktop packages for Windows x64 and macOS 15+ on Apple Silicon. It improves Continuous motion and automatic calibration.
 
 ## Continuous motion
 
@@ -17,10 +17,12 @@
 - Stable candidates are clustered across time and evaluated against consistent table geometry. Only results with sufficient geometric support are accepted.
 - Manual calibration accepts the four table corners in any order, draws their outline when complete, and keeps every point directly adjustable.
 
-## Installers
+## Platforms and packages
 
-- The draft Release provides both a full installer and an online installer. The online installer downloads and verifies required runtime resources during installation and needs an active connection; the full installer supports one-step setup.
-- The installers continue to use the pinned `CN=weiye` self-signed Authenticode certificate, RFC 3161 timestamping, and a signed update manifest. Windows systems that do not trust the certificate may still show Unknown Publisher or SmartScreen warnings.
+- **Windows x64 · v1.3.0**: includes full and online installers. The online installer downloads and verifies required runtime resources during installation and needs an active connection; the full installer supports one-step setup.
+- **macOS 15+ · Apple Silicon · v1.3.0**: includes DMG (recommended) and ZIP packages with the native Core ML analysis and media runtimes bundled. Intel Macs are not supported.
+- The Windows installers continue to use the pinned `CN=weiye` self-signed Authenticode certificate, RFC 3161 timestamping, and a signed update manifest. Windows systems that do not trust the certificate may still show Unknown Publisher or SmartScreen warnings.
+- The macOS packages are ad-hoc signed and not Apple-notarized. If macOS blocks the first launch, allow it in System Settings > Privacy & Security. Automatic updates are not available in the current macOS build.
 
 ## Scope
 
@@ -33,3 +35,4 @@
 - The Python Worker passed 120 tests. The website production build and 2 rendered-page tests passed.
 - Real Electron E2E passed 10 tests with 1 conditionally skipped, covering default Continuous motion analysis, automatic calibration, unordered manual calibration, batch recovery, export, and preview.
 - Both installers passed fixed-certificate signing, signed update metadata, installation-structure, and runtime-resource delivery-boundary checks.
+- The macOS-specific Vitest suite passed 16 tests and the native Swift suite passed 22 tests. The app also passed Apple Silicon bundle-structure, runtime-resource, code-signing, and DMG-mount checks. This verification does not establish Apple notarization or Intel Mac compatibility.
