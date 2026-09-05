@@ -21,7 +21,6 @@ import { IPC } from '../shared/ipc';
 import type { ComponentPaths } from './components';
 import {
   inspectComponentPaths,
-  inspectComponents,
   managedComponentsRoot,
   activateManagedAnalysisRuntime,
   formatAnalysisRuntimeDiagnostics,
@@ -31,6 +30,7 @@ import {
   validateX264EightKCapability,
 } from './components';
 import { loadComponentCatalog } from './component-catalog';
+import { inspectInstalledComponents } from './component-status';
 import { getLogPath, logLine } from './logger';
 import { beginExternalTask, endExternalTask, runProcess } from './processes';
 import {
@@ -484,7 +484,7 @@ function runSetupTask(
   });
 
   void work(controller.signal).then(async ({ imported, pendingImports }) => {
-    const components = await inspectComponents();
+    const components = await inspectInstalledComponents();
     window.webContents.send(IPC.taskEvent, { type: 'component-result', taskId, data: components, imported, pendingImports });
   }).catch(async (error: unknown) => {
     const code = setupErrorCode(error);

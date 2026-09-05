@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { analysisRequestSchema, analysisResultSchema } from '../src/shared/contracts';
+import {
+  analysisRequestSchema,
+  analysisResultSchema,
+  continuousVisibilityRallySchema,
+  tableAnalysisSchema,
+} from '../src/shared/contracts';
+
+it('preserves an optional transfer boundary while accepting older rallies', () => {
+  const rally = { id: 'rally_001', index: 1, start_time_seconds: 10, end_time_seconds: 15 };
+  expect(continuousVisibilityRallySchema.parse(rally)).toEqual(rally);
+  expect(continuousVisibilityRallySchema.parse({ ...rally, lead_in_start_time_seconds: 9 }).lead_in_start_time_seconds).toBe(9);
+  expect(continuousVisibilityRallySchema.safeParse({ ...rally, lead_in_start_time_seconds: 11 }).success).toBe(false);
+});
 
 const base = {
   task_id: '22222222-2222-4222-8222-222222222222',
@@ -186,5 +198,173 @@ describe('BlurBall analysis request contracts', () => {
       ...result,
       rallies: [{ ...result.rallies[0], bounce_count: 3 }],
     })).toThrow();
+  });
+
+  it('models BlurBall inter-rally fragment filter provenance', () => {
+    const result = analysisResultSchema.parse({
+      schema_version: 2,
+      video: {
+        path: 'match.mp4', duration_seconds: 10, width: 1280, height: 720, fps: 30,
+        variable_frame_rate: false, video_codec: 'h264', audio_codec: null, container: 'mp4',
+      },
+      rallies: [],
+      rally_recognition: {
+        method: 'continuous_visibility',
+        start_visible_seconds: 0.2,
+        end_invisible_seconds: 0.5,
+        inter_rally_fragment_filter: {
+          side_on_views_only: true,
+          minimum_candidate_seconds: 1,
+          maximum_candidate_seconds: 6,
+          maximum_expanded_table_ratio: 0.45,
+          minimum_visible_run_count: 3,
+          minimum_one_way_range_ratio: 0.55,
+          maximum_sparse_visibility_ratio: 0.3,
+          minimum_contiguous_flight_seconds: 0.15,
+          minimum_coherent_reversal_ratio: 0.2,
+          minimum_coherent_flight_displacement_ratio: 0.15,
+          expanded_table_length_margin_cm: 35,
+          expanded_table_width_margin_cm: 25,
+          long_candidate_segmentation: {
+            minimum_candidate_seconds: 10,
+            minimum_motion_run_seconds: 0.15,
+            minimum_motion_run_horizontal_range_ratio: 0.15,
+            short_gap_seconds: 1.25,
+            long_gap_seconds: 2.25,
+            minimum_visible_gap_ratio: 0.36,
+            minimum_stationary_run_seconds: 0.5,
+            boundary_context_seconds: 0.25,
+            leading_pass_minimum_motion_seconds: 2.5,
+            leading_pass_minimum_run_count: 3,
+            leading_pass_maximum_expanded_table_ratio: 0.36,
+            internal_transfer_minimum_motion_seconds: 1,
+            internal_transfer_minimum_strict_table_ratio: 0.9,
+          },
+        },
+      },
+    });
+    if (result.schema_version !== 2 || result.rally_recognition.method !== 'continuous_visibility') {
+      throw new Error('Expected a continuous-visibility v2 result');
+    }
+    expect(result.rally_recognition.inter_rally_fragment_filter?.minimum_visible_run_count).toBe(3);
+    expect(
+      result.rally_recognition.inter_rally_fragment_filter
+        ?.long_candidate_segmentation?.minimum_candidate_seconds,
+    ).toBe(10);
+    const { long_candidate_segmentation: _legacy, ...filter } =
+      result.rally_recognition.inter_rally_fragment_filter!;
+    const refined = analysisResultSchema.parse({
+      ...result,
+      rally_recognition: {
+        ...result.rally_recognition,
+        inter_rally_fragment_filter: {
+          ...filter,
+          motion_refinement: {
+            version: 2,
+            minimum_motion_run_seconds: 0.15,
+            minimum_horizontal_range_ratio: 0.05,
+            minimum_speed_ratio_per_second: 0.35,
+            reversal_range_ratio: 0.06,
+            gap_minimum_motion_range_ratio: 0.04,
+            gap_minimum_motion_support_ratio: 0.35,
+            short_gap_seconds: 1.25,
+            long_gap_seconds: 2.25,
+            stationary_run_seconds: 0.5,
+            boundary_context_seconds: 0.25,
+          },
+        },
+      },
+    });
+    if (refined.schema_version !== 2) throw new Error('Expected a v2 result');
+    expect(refined.rally_recognition).toMatchObject({
+      inter_rally_fragment_filter: { motion_refinement: { version: 2 } },
+    });
+    expect(refined.rally_recognition).not.toHaveProperty(
+      'inter_rally_fragment_filter.long_candidate_segmentation',
+    );
+  });
+});
+
+describe('automatic table calibration diagnostics', () => {
+  const planarKeypoints = new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 11, 12]);
+  const keypointLabels = [
+    'close_left', 'close_right', 'center_left', 'center_right', 'far_left', 'far_right',
+    'net_left_bottom', 'net_right_bottom', 'net_center_bottom', 'net_left_top',
+    'net_right_top', 'close_center', 'far_center',
+  ] as const;
+
+  const v2Diagnostics = {
+    schema_version: 2 as const,
+    model: { id: 'table_analyze' as const, filename: 'table_analyze.pt' as const, checkpoint_identifier: 'table_analyze' },
+    device: 'cuda' as const,
+    model_load_seconds: 0.2,
+    video_info: {
+      width: 1920, height: 1080, fps: 60, metadata_frame_count: 600, decoded_frame_count: 11,
+      duration_seconds: 10, sampling_seconds: 0.1, seek_count: 11 as const,
+      copied_frame_count: 0 as const, sample_count: 11 as const,
+    },
+    sampling: Array.from({ length: 11 }, (_, sampleIndex) => ({
+      label: `sample_${String(sampleIndex + 1).padStart(2, '0')}`,
+      sample_ratio: 0.05 + sampleIndex * 0.09,
+      frame_index: 30 + sampleIndex * 54,
+      time_seconds: 0.5 + sampleIndex * 0.9,
+      target_frame_index: 30 + sampleIndex * 54,
+      target_time_seconds: 0.5 + sampleIndex * 0.9,
+      seek_method: 'frame' as const,
+      position_error_seconds: 0,
+      forward_seconds: 0.1,
+      keypoints: keypointLabels.map((label, pointIndex) => ({
+        keypoint: pointIndex + 1, label, x: 100 + pointIndex, y: 200 + pointIndex,
+        activation: 0.7, valid: true,
+      })),
+    })),
+    aggregation_rule: 'temporal_peak_clusters_geometric_consensus' as const,
+    fixed_keypoints: keypointLabels.map((label, pointIndex) => planarKeypoints.has(pointIndex) ? ({
+      keypoint: pointIndex + 1, label, valid: true as const, valid_candidate_count: 12,
+      cluster_support: 11, selected_samples: Array.from({ length: 11 }, (_, index) => `sample_${String(index + 1).padStart(2, '0')}`),
+      x: 100 + pointIndex, y: 200 + pointIndex, activation: 0.7,
+    }) : ({
+      keypoint: pointIndex + 1, label, valid: false as const, valid_candidate_count: 0, cluster_support: 0 as const,
+    })),
+    consensus: {
+      sample_count: 11 as const, semantic_support: 11, score: 8.2,
+      corner_candidate_counts: [4, 4, 4, 4] as [number, number, number, number],
+    },
+  };
+
+  it('accepts the eleven-position geometric-consensus schema and enforces sample order', () => {
+    expect(tableAnalysisSchema.parse(v2Diagnostics).schema_version).toBe(2);
+    expect(() => tableAnalysisSchema.parse({
+      ...v2Diagnostics,
+      sampling: v2Diagnostics.sampling.map((sample, index) => (
+        index === 1 ? { ...sample, label: 'sample_11' } : sample
+      )),
+    })).toThrow();
+  });
+
+  it('keeps the native Core ML five-sample diagnostics compatible with Python schema v2', () => {
+    const nativeDiagnostics = {
+      schema_version: 2 as const,
+      engine: 'coreml' as const,
+      compute_units: 'cpuOnly' as const,
+      checkpoint_sha256: 'a'.repeat(64),
+      aggregation_rule: 'closest_valid_table_pair_mean' as const,
+      sampling: ['first', '25_percent', '50_percent', '75_percent', 'last'].map((label, sampleIndex) => ({
+        label,
+        time: sampleIndex,
+        frameIndex: sampleIndex * 60,
+        points: Array.from({ length: 13 }, (_, pointIndex) => ({
+          index: pointIndex,
+          position: { x: 100 + pointIndex, y: 200 + pointIndex },
+          activation: 0.7,
+          valid: true,
+        })),
+      })),
+    };
+
+    expect(tableAnalysisSchema.parse(nativeDiagnostics)).toMatchObject({
+      schema_version: 2,
+      engine: 'coreml',
+    });
   });
 });

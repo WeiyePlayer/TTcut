@@ -1,15 +1,41 @@
 import type { Calibration } from '../shared/contracts';
 
-export type CalibrationIssue = 'out_of_bounds' | 'overlap' | 'not_convex' | 'area_too_small' | 'wrong_order';
+export type CalibrationPoint = [number, number];
+export type CalibrationIssue = 'out_of_bounds' | 'overlap' | 'not_convex' | 'area_too_small';
+
+export function orderCalibrationPolygon(points: CalibrationPoint[]): CalibrationPoint[] {
+  if (points.length < 3) return [...points];
+  const center = points.reduce(
+    (sum, point) => [sum[0] + point[0] / points.length, sum[1] + point[1] / points.length] as CalibrationPoint,
+    [0, 0] as CalibrationPoint,
+  );
+  return [...points].sort((first, second) => (
+    Math.atan2(first[1] - center[1], first[0] - center[0])
+    - Math.atan2(second[1] - center[1], second[0] - center[0])
+  ));
+}
+
+export function normalizeCalibrationPoints(points: CalibrationPoint[]): Calibration['points'] {
+  if (points.length !== 4) throw new Error('Exactly four calibration points are required.');
+  const verticalOrder = [...points].sort((first, second) => first[1] - second[1]);
+  const top = verticalOrder.slice(0, 2).sort((first, second) => first[0] - second[0]);
+  const bottom = verticalOrder.slice(2).sort((first, second) => first[0] - second[0]);
+  return {
+    top_left: top[0]!,
+    top_right: top[1]!,
+    bottom_right: bottom[1]!,
+    bottom_left: bottom[0]!,
+  };
+}
 
 export function validateCalibration(calibration: Calibration): CalibrationIssue | null {
   const { video_width: width, video_height: height } = calibration;
-  const points = [
+  const points = orderCalibrationPolygon([
     calibration.points.top_left,
     calibration.points.top_right,
     calibration.points.bottom_right,
     calibration.points.bottom_left,
-  ];
+  ]);
   if (points.some(([x, y]) => !Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x >= width || y >= height)) {
     return 'out_of_bounds';
   }
@@ -39,11 +65,5 @@ export function validateCalibration(calibration: Calibration): CalibrationIssue 
   }, 0));
   if (twiceArea / 2 < width * height * 0.001) return 'area_too_small';
 
-  const [topLeft, topRight, bottomRight, bottomLeft] = points;
-  const topY = (topLeft![1] + topRight![1]) / 2;
-  const bottomY = (bottomLeft![1] + bottomRight![1]) / 2;
-  const leftX = (topLeft![0] + bottomLeft![0]) / 2;
-  const rightX = (topRight![0] + bottomRight![0]) / 2;
-  if (topY >= bottomY || leftX >= rightX) return 'wrong_order';
   return null;
 }

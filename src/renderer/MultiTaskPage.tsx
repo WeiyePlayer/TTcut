@@ -2,6 +2,7 @@ import { CompatibleVideo } from './CompatibleVideo';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT,
+  RALLY_RECOGNITION_METHOD_DEFAULT,
   BLURBALL_STAGE1_CONFIDENCE_THRESHOLD_DEFAULT,
   DURATION_HIGHLIGHT_TIER_VALUES,
   AnalysisResultV1,
@@ -16,7 +17,7 @@ import {
 } from '../shared/contracts';
 import type { AppEvent, SelectedVideo } from '../shared/api';
 import { formatTimestamp } from '../domain/time';
-import { validateCalibration } from '../domain/calibration';
+import { normalizeCalibrationPoints, validateCalibration } from '../domain/calibration';
 import { overallCalibrationProgress } from '../domain/analysis-progress';
 import { isSupportedVideoFileName } from '../domain/video-input';
 import { CalibrationSurface } from './CalibrationSurface';
@@ -124,7 +125,7 @@ export function MultiTaskPage({
   preRoll,
   postRoll,
   analysisMode = 'full',
-  rallyRecognitionMethod = 'bounce_events',
+  rallyRecognitionMethod = RALLY_RECOGNITION_METHOD_DEFAULT,
   normalizeVariableFrameRate = false,
   blurballConfidenceThreshold = BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT,
   blurballStage1ConfidenceThreshold = BLURBALL_STAGE1_CONFIDENCE_THRESHOLD_DEFAULT,
@@ -186,8 +187,8 @@ export function MultiTaskPage({
     shutdownFailed: isEnglish ? 'Automatic shutdown failed. Please shut down manually.' : '自动关机失败，请手动关机。',
     calibrationTitle: isEnglish ? 'Calibrate the table' : '标定球桌',
     calibrationDescription: isEnglish
-      ? 'Mark top-left, top-right, bottom-right, and bottom-left in order.'
-      : '依次标记左上、右上、右下、左下四个角点。',
+      ? 'Mark the four table corners in any order. Drag a point to fine-tune it.'
+      : '逐个标记球台四个角点，顺序不限。标满四点后可拖动微调。',
     finishCalibration: isEnglish ? 'Finish calibration' : '完成标定',
     resetCalibration: isEnglish ? 'Reset calibration' : '重置标定',
     calibrationFailed: isEnglish ? 'Calibration failed' : '标定失败',
@@ -196,11 +197,11 @@ export function MultiTaskPage({
       ? 'The automatic calibration model is unavailable. Uncalibrated videos can be calibrated manually.'
       : '自动标定模型不可用，尚未标定的视频可改用手动标定。',
     invalidCalibration: isEnglish
-      ? 'The four points must form a valid table quadrilateral.'
-      : '四个点无法组成有效的球台区域，请重新标定。',
+      ? 'The points must be distinct and form a sufficiently large quadrilateral without crossing edges.'
+      : '四个点不能重合，且必须组成对边不相交、面积足够的四边形。',
     pointLabels: isEnglish
-      ? ['1 Top left', '2 Top right', '3 Bottom right', '4 Bottom left']
-      : ['1 左上', '2 右上', '3 右下', '4 左下'],
+      ? ['1 Corner 1', '2 Corner 2', '3 Corner 3', '4 Corner 4']
+      : ['1 角点 1', '2 角点 2', '3 角点 3', '4 角点 4'],
   };
 
   useEffect(() => { itemsRef.current = items; }, [items]);
@@ -566,7 +567,11 @@ export function MultiTaskPage({
   const manualItem = items.find((item) => item.id === manualItemId) ?? null;
   const manualAllPoints = pointOrder.every((name) => manualPoints[name]);
   const manualCalibration: Calibration | null = manualItem && manualAllPoints
-    ? { video_width: manualItem.metadata.width, video_height: manualItem.metadata.height, points: manualPoints as Calibration['points'] }
+    ? {
+      video_width: manualItem.metadata.width,
+      video_height: manualItem.metadata.height,
+      points: normalizeCalibrationPoints(pointOrder.map((name) => manualPoints[name]!)),
+    }
     : null;
   const manualIssue = manualCalibration ? validateCalibration(manualCalibration) : null;
 

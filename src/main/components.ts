@@ -363,7 +363,10 @@ export async function validateAnalysisRuntime(
   };
 }
 
-export async function resolveUsableAnalysisComponents(device: 'auto' | 'cuda' | 'cpu'): Promise<ComponentPaths> {
+export async function resolveUsableAnalysisComponents(
+  device: 'auto' | 'cuda' | 'cpu',
+  activateRuntime = true,
+): Promise<ComponentPaths> {
   const base = await resolveComponents(device);
   const candidates = await runtimeCandidates(device);
   if (!candidates.length) throw new Error('RUNTIME_MISSING');
@@ -374,7 +377,7 @@ export async function resolveUsableAnalysisComponents(device: 'auto' | 'cuda' | 
       const validation = await validateAnalysisComponent(candidate.python, expected);
       if (device === 'cuda' && validation.acceleration !== 'cuda') throw new Error('DEVICE_UNAVAILABLE');
       if (device === 'cpu' && validation.acceleration !== 'cpu') throw new Error('DEVICE_UNAVAILABLE');
-      if (isAnalysisRuntimeVariant(candidate.variant)) await activateManagedAnalysisRuntime(candidate.variant);
+      if (activateRuntime && isAnalysisRuntimeVariant(candidate.variant)) await activateManagedAnalysisRuntime(candidate.variant);
       return { ...base, python: candidate.python, runtimeVariant: candidate.variant };
     } catch (error) {
       lastError = error;
@@ -509,7 +512,8 @@ export async function inspectComponents(): Promise<ComponentStatus> {
     .then(() => true)
     .catch(() => false);
   try {
-    const analysis = await resolveUsableAnalysisComponents('auto');
+    // Inspection must not race with an analysis task changing its active runtime.
+    const analysis = await resolveUsableAnalysisComponents('auto', false);
     return inspectComponentPaths({
       ...analysis,
       ffmpeg: paths.ffmpeg,

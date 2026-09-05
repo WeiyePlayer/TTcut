@@ -25,7 +25,8 @@ import { startAnalysis } from './analysis';
 import { startAutoCalibration } from './calibration';
 import { componentSetupInfo, loadComponentCatalog } from './component-catalog';
 import { recoverComponentInstallState, startAnalysisComponentInstall, startComponentImport, startMediaComponentInstall } from './component-manager';
-import { inspectComponents, managedComponentsRoot } from './components';
+import { managedComponentsRoot } from './components';
+import { inspectInstalledComponents, silentlyInspectComponents, startupComponentStatus } from './component-status';
 import { purgeRemovedModelAssets } from './retired-model-assets';
 import { startExport } from './export';
 import { getLogDirectory, logLine } from './logger';
@@ -93,8 +94,11 @@ async function selectedVideo(filePath: string) {
 function registerIpc(): void {
   ipcMain.handle(IPC.appBootstrap, async () => {
     const [settings, components, setup, platformCompatibility] = await Promise.all([
-      loadSettings(), inspectComponents(), componentSetupInfo(), getPlatformCompatibility(),
+      loadSettings(), startupComponentStatus(), componentSetupInfo(), getPlatformCompatibility(),
     ]);
+    silentlyInspectComponents((error) => {
+      void logLine('app', 'WARN', `Background component check: ${String(error)}`).catch(() => undefined);
+    });
     return {
       version: app.getVersion(),
       windowState: { visible: mainWindow?.isVisible() ?? false },
@@ -115,7 +119,7 @@ function registerIpc(): void {
     return prepareMacPreview(currentWindow(), mediaUrl, taskId);
   });
   ipcMain.handle(IPC.settingsSave, (_event, value: unknown) => saveSettings(appSettingsSchema.parse(value)));
-  ipcMain.handle(IPC.componentsRefresh, () => inspectComponents());
+  ipcMain.handle(IPC.componentsRefresh, () => inspectInstalledComponents());
   ipcMain.handle(IPC.componentsOpenDownloads, async () => {
     if (isMac) throw new Error('MANAGED_COMPONENTS_UNSUPPORTED');
     const catalog = await loadComponentCatalog();

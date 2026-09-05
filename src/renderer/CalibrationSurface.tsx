@@ -4,6 +4,7 @@ import type { Calibration, VideoMetadata } from '../shared/contracts';
 import type { SelectedVideo } from '../shared/api';
 import { formatTimestamp } from '../domain/time';
 import { fittedVideoRectangle } from '../domain/video-input';
+import { orderCalibrationPolygon, type CalibrationPoint } from '../domain/calibration';
 
 type PointName = keyof Calibration['points'];
 
@@ -38,10 +39,10 @@ export function CalibrationSurface({
     ];
   }, [metadata]);
 
-  const sourceToPercent = (point: [number, number]) => {
+  const sourceToSurface = (point: [number, number]): CalibrationPoint => {
     const surface = surfaceRef.current;
     const element = videoRef.current;
-    if (!surface || !element) return { left: '50%', top: '50%' };
+    if (!surface || !element) return [0, 0];
     const rect = element.getBoundingClientRect();
     const parent = surface.getBoundingClientRect();
     const fitted = fittedVideoRectangle(
@@ -51,6 +52,11 @@ export function CalibrationSurface({
     );
     const x = fitted.left - parent.left + point[0] / metadata.width * fitted.width;
     const y = fitted.top - parent.top + point[1] / metadata.height * fitted.height;
+    return [x, y];
+  };
+
+  const sourceToPosition = (point: [number, number]) => {
+    const [x, y] = sourceToSurface(point);
     return { left: `${x}px`, top: `${y}px` };
   };
 
@@ -69,6 +75,13 @@ export function CalibrationSurface({
     return () => element.removeEventListener('timeupdate', update);
   }, []);
 
+  const completePoints = pointOrder
+    .map((name) => points[name])
+    .filter((point): point is CalibrationPoint => point !== undefined);
+  const polygon = completePoints.length === 4
+    ? orderCalibrationPolygon(completePoints).map(sourceToSurface)
+    : [];
+
   return (
     <div className="calibration-shell">
       <div
@@ -84,12 +97,17 @@ export function CalibrationSurface({
         onPointerUp={() => { dragging.current = null; }}
       >
         <CompatibleVideo hdr={Boolean(metadata.native_video && metadata.native_video.hdr !== 'sdr')} ref={videoRef} src={video.mediaUrl} preload="metadata" muted playsInline />
+        {polygon.length === 4 && (
+          <svg className="calibration-polygon" aria-hidden="true">
+            <polygon points={polygon.map(([x, y]) => `${x},${y}`).join(' ')} />
+          </svg>
+        )}
         {pointOrder.map((name, index) => points[name] && (
           <button
             type="button"
             key={name}
             className="calibration-point"
-            style={sourceToPercent(points[name]!)}
+            style={sourceToPosition(points[name]!)}
             aria-label={`Calibration point ${index + 1}`}
             onPointerDown={(event) => {
               event.currentTarget.setPointerCapture(event.pointerId);

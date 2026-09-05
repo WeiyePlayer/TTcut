@@ -2,6 +2,7 @@ import { CompatibleVideo } from './CompatibleVideo';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT,
+  RALLY_RECOGNITION_METHOD_DEFAULT,
   BLURBALL_STAGE1_CONFIDENCE_THRESHOLD_DEFAULT,
   DURATION_HIGHLIGHT_SECONDS,
   DURATION_HIGHLIGHT_TIER_VALUES,
@@ -22,7 +23,7 @@ import type { AppEvent, BootstrapData, PendingComponentImport, SelectedVideo } f
 import { DONATION_URL, GITHUB_URL, RELEASES_URL, WEBSITE_URL } from '../shared/urls';
 import { formatTimestamp } from '../domain/time';
 import { createCustomClipDraft, customExportSegments, setCustomClipSelected, type CustomRallyClip } from '../domain/custom-clips';
-import { validateCalibration } from '../domain/calibration';
+import { normalizeCalibrationPoints, validateCalibration } from '../domain/calibration';
 import { isSupportedVideoFileName } from '../domain/video-input';
 import { isSupportPromptSuppressed, suppressSupportPromptForThirtyDays } from '../domain/support-prompt';
 import { interpolate, messages, type Language, type Messages } from './i18n';
@@ -86,7 +87,7 @@ export function App() {
     language: 'zh-CN', calibration_method: 'automatic',
     pre_roll_seconds: 2.5, post_roll_seconds: 1,
     analysis_mode: 'full',
-    rally_recognition_method: 'bounce_events',
+    rally_recognition_method: RALLY_RECOGNITION_METHOD_DEFAULT,
     normalize_variable_frame_rate: false,
   });
   const [view, setView] = useState<View>('auto');
@@ -316,7 +317,7 @@ export function App() {
   const calibrationValue: Calibration | null = metadata && allPoints ? {
     video_width: metadata.width,
     video_height: metadata.height,
-    points: points as Calibration['points'],
+    points: normalizeCalibrationPoints(pointOrder.map((name) => points[name]!)),
   } : null;
   const calibrationIssue = calibrationValue ? validateCalibration(calibrationValue) : null;
   const analysisUsesContinuousVisibility = analysis ? rallyRecognitionMethod(analysis) === 'continuous_visibility' : false;
@@ -340,6 +341,7 @@ export function App() {
       settings.post_roll_seconds,
       analysis.video.duration_seconds,
       analysis.video.fps,
+      rallyRecognitionMethod(analysis),
     ));
     setCustomOutputs({ combined_video: true, rally_videos: false, premiere_xml: false });
     setStep('custom');
@@ -792,8 +794,8 @@ export function App() {
               </article>
               <article className="card components-card">
                 <h2>{t.components}</h2>
-                <div className="component-row"><div><strong>{t.analysisComponent}</strong><span>{bootstrap?.components.analysis.version ?? t.unavailable}</span>{bootstrap?.components.analysis.path && <span>{t.componentPath}: {bootstrap.components.analysis.path}</span>}</div><span className={`status ${bootstrap?.components.analysis.available ? 'ok' : ''}`}>{bootstrap?.components.analysis.available ? t.available : t.unavailable}</span></div>
-                <div className="component-row"><div><strong>{t.mediaComponent}</strong><span>{bootstrap?.components.media.version ?? t.unavailable}</span>{bootstrap?.components.media.available && <span>{t.activeEncoder}: {isMac ? 'x264 / x265' : bootstrap.components.media.active_encoder === 'libx264' ? t.x264 : t.openh264}</span>}{bootstrap?.components.media.path && <span>{t.componentPath}: {bootstrap.components.media.path}</span>}</div><span className={`status ${bootstrap?.components.media.available ? 'ok' : ''}`}>{bootstrap?.components.media.available ? t.available : t.unavailable}</span></div>
+                <div className="component-row"><div><strong>{t.analysisComponent}</strong><span>{bootstrap?.components.analysis.version ?? (bootstrap?.components.analysis.available ? t.available : bootstrap ? t.unavailable : '—')}</span>{bootstrap?.components.analysis.path && <span>{t.componentPath}: {bootstrap.components.analysis.path}</span>}</div><span className={`status ${bootstrap?.components.analysis.available ? 'ok' : ''}`}>{bootstrap?.components.analysis.available ? t.available : bootstrap ? t.unavailable : '—'}</span></div>
+                <div className="component-row"><div><strong>{t.mediaComponent}</strong><span>{bootstrap?.components.media.version ?? (bootstrap?.components.media.available ? t.available : bootstrap ? t.unavailable : '—')}</span>{bootstrap?.components.media.available && <span>{t.activeEncoder}: {isMac ? 'x264 / x265' : bootstrap.components.media.active_encoder === 'libx264' ? t.x264 : t.openh264}</span>}{bootstrap?.components.media.path && <span>{t.componentPath}: {bootstrap.components.media.path}</span>}</div><span className={`status ${bootstrap?.components.media.available ? 'ok' : ''}`}>{bootstrap?.components.media.available ? t.available : bootstrap ? t.unavailable : '—'}</span></div>
                 <div className="component-row"><div><strong>{t.acceleration}</strong><span>{isMac ? 'Core ML · CPU / GPU' : bootstrap?.components.analysis.acceleration === 'cuda' ? t.gpu : bootstrap?.components.analysis.acceleration === 'cpu' ? t.cpu : t.unavailable}</span></div></div>
               </article>
               <article className="card setup-card">
@@ -905,7 +907,7 @@ export function App() {
                   <CalibrationSurface video={video} metadata={metadata} points={points} onPointsChange={setPoints} />
                   <div className="point-legend">{[t.point1, t.point2, t.point3, t.point4].map((label, index) => <span className={points[pointOrder[index]!] ? 'done' : ''} key={label}><b>{index + 1}</b>{label.replace(/^\d\s/, '')}</span>)}</div>
                   {calibrationIssue && <p className="calibration-error" role="alert">{t.invalidCalibration}</p>}
-                </> : <div className="card automatic-calibration"><span>⌖</span><div><h2>{settings.language === 'zh-CN' ? '自动球台标定' : 'Automatic table calibration'}</h2><p>{settings.language === 'zh-CN' ? '将识别首帧、25%、50%、75% 和尾帧，并融合为固定球台标定。' : 'The first, 25%, 50%, 75%, and final frames are combined into one fixed table calibration.'}</p></div></div>}
+                </> : <div className="card automatic-calibration"><span>⌖</span><div><h2>{settings.language === 'zh-CN' ? '自动球台标定' : 'Automatic table calibration'}</h2><p>{settings.language === 'zh-CN' ? '将从视频多个位置识别球台，并通过跨帧几何一致性生成固定标定。' : 'The table is detected at multiple video positions and combined using cross-frame geometric consistency.'}</p></div></div>}
                 <div className="footer-actions">{useManualCalibration && <button className="secondary" onClick={() => setPoints({})}>{t.resetPoints}</button>}<button className="primary" disabled={(useManualCalibration && (!allPoints || Boolean(calibrationIssue))) || !platformSupported || !bootstrap?.components.analysis.available} onClick={() => void startAnalysis()}>{t.startAnalysis}</button></div>
               </div>
             )}

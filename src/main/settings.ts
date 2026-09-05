@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { app } from 'electron';
-import { appSettingsSchema, type AppSettings } from '../shared/contracts';
+import { appSettingsSchema, RALLY_RECOGNITION_METHOD_DEFAULT, type AppSettings } from '../shared/contracts';
 
 const defaults: AppSettings = {
   language: 'zh-CN',
@@ -9,7 +9,7 @@ const defaults: AppSettings = {
   pre_roll_seconds: 2.5,
   post_roll_seconds: 1,
   analysis_mode: 'full',
-  rally_recognition_method: 'bounce_events',
+  rally_recognition_method: RALLY_RECOGNITION_METHOD_DEFAULT,
   normalize_variable_frame_rate: false,
 };
 
