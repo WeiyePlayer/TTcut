@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { analysisRequestSchema, analysisResultSchema, continuousVisibilityRallySchema } from '../src/shared/contracts';
+import {
+  analysisRequestSchema,
+  analysisResultSchema,
+  continuousVisibilityRallySchema,
+  tableAnalysisSchema,
+} from '../src/shared/contracts';
 
 it('preserves an optional transfer boundary while accepting older rallies', () => {
   const rally = { id: 'rally_001', index: 1, start_time_seconds: 10, end_time_seconds: 15 };
@@ -277,5 +282,63 @@ describe('BlurBall analysis request contracts', () => {
     expect(refined.rally_recognition).not.toHaveProperty(
       'inter_rally_fragment_filter.long_candidate_segmentation',
     );
+  });
+});
+
+describe('automatic table calibration diagnostics', () => {
+  const planarKeypoints = new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 11, 12]);
+  const keypointLabels = [
+    'close_left', 'close_right', 'center_left', 'center_right', 'far_left', 'far_right',
+    'net_left_bottom', 'net_right_bottom', 'net_center_bottom', 'net_left_top',
+    'net_right_top', 'close_center', 'far_center',
+  ] as const;
+
+  const v2Diagnostics = {
+    schema_version: 2 as const,
+    model: { id: 'table_analyze' as const, filename: 'table_analyze.pt' as const, checkpoint_identifier: 'table_analyze' },
+    device: 'cuda' as const,
+    model_load_seconds: 0.2,
+    video_info: {
+      width: 1920, height: 1080, fps: 60, metadata_frame_count: 600, decoded_frame_count: 11,
+      duration_seconds: 10, sampling_seconds: 0.1, seek_count: 11 as const,
+      copied_frame_count: 0 as const, sample_count: 11 as const,
+    },
+    sampling: Array.from({ length: 11 }, (_, sampleIndex) => ({
+      label: `sample_${String(sampleIndex + 1).padStart(2, '0')}`,
+      sample_ratio: 0.05 + sampleIndex * 0.09,
+      frame_index: 30 + sampleIndex * 54,
+      time_seconds: 0.5 + sampleIndex * 0.9,
+      target_frame_index: 30 + sampleIndex * 54,
+      target_time_seconds: 0.5 + sampleIndex * 0.9,
+      seek_method: 'frame' as const,
+      position_error_seconds: 0,
+      forward_seconds: 0.1,
+      keypoints: keypointLabels.map((label, pointIndex) => ({
+        keypoint: pointIndex + 1, label, x: 100 + pointIndex, y: 200 + pointIndex,
+        activation: 0.7, valid: true,
+      })),
+    })),
+    aggregation_rule: 'temporal_peak_clusters_geometric_consensus' as const,
+    fixed_keypoints: keypointLabels.map((label, pointIndex) => planarKeypoints.has(pointIndex) ? ({
+      keypoint: pointIndex + 1, label, valid: true as const, valid_candidate_count: 12,
+      cluster_support: 11, selected_samples: Array.from({ length: 11 }, (_, index) => `sample_${String(index + 1).padStart(2, '0')}`),
+      x: 100 + pointIndex, y: 200 + pointIndex, activation: 0.7,
+    }) : ({
+      keypoint: pointIndex + 1, label, valid: false as const, valid_candidate_count: 0, cluster_support: 0 as const,
+    })),
+    consensus: {
+      sample_count: 11 as const, semantic_support: 11, score: 8.2,
+      corner_candidate_counts: [4, 4, 4, 4] as [number, number, number, number],
+    },
+  };
+
+  it('accepts the eleven-position geometric-consensus schema and enforces sample order', () => {
+    expect(tableAnalysisSchema.parse(v2Diagnostics).schema_version).toBe(2);
+    expect(() => tableAnalysisSchema.parse({
+      ...v2Diagnostics,
+      sampling: v2Diagnostics.sampling.map((sample, index) => (
+        index === 1 ? { ...sample, label: 'sample_11' } : sample
+      )),
+    })).toThrow();
   });
 });

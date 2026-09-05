@@ -425,9 +425,19 @@ describe('multi-task clipping', () => {
     } as DOMRect);
     const surface = document.querySelector('.video-surface');
     expect(surface).not.toBeNull();
-    for (const [clientX, clientY] of [[250, 125], [542, 125], [625, 354], [167, 354]]) {
+    for (const [clientX, clientY] of [[625, 354], [250, 125], [167, 354], [542, 125]]) {
       fireEvent.pointerDown(surface!, { clientX, clientY });
     }
+    const polygon = document.querySelector('.calibration-polygon polygon');
+    expect(polygon).not.toBeNull();
+    const pointsBeforeDrag = polygon!.getAttribute('points');
+    const firstPoint = screen.getByRole('button', { name: 'Calibration point 1' });
+    Object.defineProperty(firstPoint, 'setPointerCapture', { configurable: true, value: vi.fn() });
+    Object.defineProperty(firstPoint, 'releasePointerCapture', { configurable: true, value: vi.fn() });
+    fireEvent.pointerDown(firstPoint, { clientX: 625, clientY: 354, pointerId: 1 });
+    fireEvent.pointerMove(firstPoint, { clientX: 610, clientY: 345, pointerId: 1 });
+    fireEvent.pointerUp(firstPoint, { pointerId: 1 });
+    expect(polygon!.getAttribute('points')).not.toBe(pointsBeforeDrag);
     const finish = screen.getByRole('button', { name: '完成标定' });
     expect(finish).toBeEnabled();
     fireEvent.click(finish);

@@ -25,7 +25,7 @@ const LEGACY_RESULT_MODEL_PROFILES = BALL_MODEL_PROFILE_VALUES;
 
 const finiteNumber = z.number().finite();
 const point = z.tuple([finiteNumber, finiteNumber]);
-const tableSampleLabelSchema = z.enum(['first', '25_percent', '50_percent', '75_percent', 'last']);
+const legacyTableSampleLabelSchema = z.enum(['first', '25_percent', '50_percent', '75_percent', 'last']);
 const tableKeypointLabelSchema = z.enum([
   'close_left',
   'close_right',
@@ -51,8 +51,8 @@ const tableSampleKeypointSchema = z.object({
   valid: z.boolean(),
 }).strict();
 
-const tableSampleSchema = z.object({
-  label: tableSampleLabelSchema,
+const legacyTableSampleSchema = z.object({
+  label: legacyTableSampleLabelSchema,
   frame_index: z.number().int().nonnegative(),
   time_seconds: finiteNumber.nonnegative(),
   target_frame_index: z.number().int().nonnegative().nullable().optional(),
@@ -63,7 +63,7 @@ const tableSampleSchema = z.object({
   keypoints: z.array(tableSampleKeypointSchema).length(13),
 }).strict();
 
-const fixedTableKeypointSchema = z.discriminatedUnion('valid', [
+const legacyFixedTableKeypointSchema = z.discriminatedUnion('valid', [
   z.object({
     keypoint: z.number().int().min(1).max(13),
     label: tableKeypointLabelSchema,
@@ -75,7 +75,7 @@ const fixedTableKeypointSchema = z.discriminatedUnion('valid', [
     label: tableKeypointLabelSchema,
     valid: z.literal(true),
     valid_candidate_count: z.number().int().min(2).max(5),
-    selected_samples: z.tuple([tableSampleLabelSchema, tableSampleLabelSchema]),
+    selected_samples: z.tuple([legacyTableSampleLabelSchema, legacyTableSampleLabelSchema]),
     pair_distance_pixels: finiteNumber.nonnegative(),
     x: finiteNumber,
     y: finiteNumber,
@@ -83,7 +83,7 @@ const fixedTableKeypointSchema = z.discriminatedUnion('valid', [
   }).strict(),
 ]);
 
-export const tableAnalysisSchema = z.object({
+const tableAnalysisV1Schema = z.object({
   schema_version: z.literal(1),
   model: z.object({
     id: z.literal('table_analyze'),
@@ -103,7 +103,7 @@ export const tableAnalysisSchema = z.object({
     seek_count: z.number().int().nonnegative().optional(),
     copied_frame_count: z.number().int().nonnegative().optional(),
   }).strict(),
-  sampling: z.array(tableSampleSchema).length(5).superRefine((samples, context) => {
+  sampling: z.array(legacyTableSampleSchema).length(5).superRefine((samples, context) => {
     const expected = ['first', '25_percent', '50_percent', '75_percent', 'last'];
     samples.forEach((sample, index) => {
       if (sample.label !== expected[index]) context.addIssue({
@@ -114,8 +114,94 @@ export const tableAnalysisSchema = z.object({
     });
   }),
   aggregation_rule: z.literal('closest_valid_pair_mean'),
-  fixed_keypoints: z.array(fixedTableKeypointSchema).length(13),
+  fixed_keypoints: z.array(legacyFixedTableKeypointSchema).length(13),
 }).strict();
+
+const tableSampleLabelSchema = z.string().regex(/^sample_\d{2}$/);
+const tableSampleSchema = z.object({
+  label: tableSampleLabelSchema,
+  sample_ratio: finiteNumber.gt(0).lt(1),
+  frame_index: z.number().int().nonnegative(),
+  time_seconds: finiteNumber.nonnegative(),
+  target_frame_index: z.number().int().nonnegative().nullable(),
+  target_time_seconds: finiteNumber.nonnegative(),
+  seek_method: z.enum(['frame', 'time']),
+  position_error_seconds: finiteNumber.nonnegative(),
+  forward_seconds: finiteNumber.nonnegative(),
+  keypoints: z.array(tableSampleKeypointSchema).length(13),
+}).strict();
+
+const fixedTableKeypointSchema = z.discriminatedUnion('valid', [
+  z.object({
+    keypoint: z.number().int().min(1).max(13),
+    label: tableKeypointLabelSchema,
+    valid: z.literal(false),
+    valid_candidate_count: z.number().int().nonnegative(),
+    cluster_support: z.literal(0),
+  }).strict(),
+  z.object({
+    keypoint: z.number().int().min(1).max(13),
+    label: tableKeypointLabelSchema,
+    valid: z.literal(true),
+    valid_candidate_count: z.number().int().min(2),
+    cluster_support: z.number().int().min(2).max(11),
+    selected_samples: z.array(tableSampleLabelSchema).min(2).max(11),
+    x: finiteNumber,
+    y: finiteNumber,
+    activation: finiteNumber,
+  }).strict(),
+]);
+
+const tableAnalysisV2Schema = z.object({
+  schema_version: z.literal(2),
+  model: z.object({
+    id: z.literal('table_analyze'),
+    filename: z.literal('table_analyze.pt'),
+    checkpoint_identifier: z.string().min(1),
+  }).strict(),
+  device: z.enum(['cpu', 'cuda']),
+  model_load_seconds: finiteNumber.nonnegative(),
+  video_info: z.object({
+    width: z.number().int().positive(),
+    height: z.number().int().positive(),
+    fps: finiteNumber.positive(),
+    metadata_frame_count: z.number().int().nonnegative(),
+    decoded_frame_count: z.number().int().positive(),
+    duration_seconds: finiteNumber.positive(),
+    sampling_seconds: finiteNumber.nonnegative(),
+    seek_count: z.literal(11),
+    copied_frame_count: z.literal(0),
+    sample_count: z.literal(11),
+  }).strict(),
+  sampling: z.array(tableSampleSchema).length(11).superRefine((samples, context) => {
+    samples.forEach((sample, index) => {
+      const expected = `sample_${String(index + 1).padStart(2, '0')}`;
+      if (sample.label !== expected) context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [index, 'label'],
+        message: 'Table samples must use the fixed eleven-position order.',
+      });
+    });
+  }),
+  aggregation_rule: z.literal('temporal_peak_clusters_geometric_consensus'),
+  fixed_keypoints: z.array(fixedTableKeypointSchema).length(13),
+  consensus: z.object({
+    sample_count: z.literal(11),
+    semantic_support: z.number().int().min(10).max(11),
+    score: finiteNumber.min(5.5),
+    corner_candidate_counts: z.tuple([
+      z.number().int().min(1).max(8),
+      z.number().int().min(1).max(8),
+      z.number().int().min(1).max(8),
+      z.number().int().min(1).max(8),
+    ]),
+  }).strict(),
+}).strict();
+
+export const tableAnalysisSchema = z.discriminatedUnion('schema_version', [
+  tableAnalysisV1Schema,
+  tableAnalysisV2Schema,
+]);
 
 export const calibrationSchema = z.object({
   video_width: z.number().int().positive(),
