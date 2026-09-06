@@ -5,6 +5,7 @@ import {
   BLURBALL_STAGE1_CONFIDENCE_THRESHOLD_DEFAULT,
   DURATION_HIGHLIGHT_TIER_VALUES,
   AnalysisResultV1,
+  BatchExportResult,
   BlurBallAnalysisMode,
   Calibration,
   CutSelectionV1,
@@ -30,6 +31,7 @@ type PointName = keyof Calibration['points'];
 
 type BatchItem = {
   id: string;
+  additionOrder: number;
   video: SelectedVideo;
   previewVideo: SelectedVideo | null;
   metadata: VideoMetadata;
@@ -72,9 +74,10 @@ function makeId(video: SelectedVideo): string {
   return `${video.path}:${video.size}:${Date.now()}:${Math.random()}`;
 }
 
-async function createItems(videos: SelectedVideo[]): Promise<BatchItem[]> {
-  return Promise.all(videos.map(async (video) => ({
+async function createItems(videos: SelectedVideo[], firstOrder = 0): Promise<BatchItem[]> {
+  return Promise.all(videos.map(async (video, index) => ({
     id: makeId(video),
+    additionOrder: firstOrder + index,
     video,
     previewVideo: null,
     metadata: await window.ttcut.probeVideo(video.path),
@@ -142,6 +145,18 @@ export function MultiTaskPage({
   const [manualPoints, setManualPoints] = useState<Partial<Record<PointName, [number, number]>>>({});
   const [systemNotice, setSystemNotice] = useState<string | null>(null);
   const [shutdownAfterCompletion, setShutdownAfterCompletion] = useState(false);
+  const [mergeVideos, setMergeVideos] = useState(false);
+  const [batchExport, setBatchExport] = useState<{
+    status: 'idle' | 'blocked' | 'exporting' | 'done' | 'failed' | 'cancelled' | 'empty';
+    progress: number;
+    result: BatchExportResult | null;
+    error: string | null;
+  }>({ status: 'idle', progress: 0, result: null, error: null });
+  const mergeVideosRef = useRef(false);
+  const mergeRunRef = useRef(false);
+  const batchExportRef = useRef<{ taskId: string | null; cancelRequested: boolean } | null>(null);
+  const nextAdditionOrder = useRef(initialVideos.length);
+  const pendingAdditions = useRef(0);
   const itemsRef = useRef(items);
   const activeRef = useRef<{ taskId: string | null; itemId: string; phase: ActivePhase } | null>(null);
   const runningRef = useRef(false);
@@ -182,6 +197,20 @@ export function MultiTaskPage({
     running: isEnglish ? 'Processing serially' : '正在串行处理',
     shutdownAfterTask: isEnglish ? 'Shut down after this task' : '完成本任务后关机',
     shutdownFailed: isEnglish ? 'Automatic shutdown failed. Please shut down manually.' : '自动关机失败，请手动关机。',
+    merge: isEnglish ? 'Merge into one video' : '合并为一个视频',
+    mergeUnavailable: isEnglish ? 'Choose all rallies or highlights for at least one video.' : '至少一个视频选择“所有回合”或“精彩回合”后可用。',
+    merging: isEnglish ? 'Exporting merged video' : '正在合并导出',
+    mergeWaiting: isEnglish ? 'Analyzed · waiting to merge' : '分析完成 · 等待合并',
+    mergeDone: isEnglish ? 'Merged video ready' : '合并视频已完成',
+    mergeBlocked: isEnglish ? 'Finish, retry or remove incomplete videos before merging.' : '请完成标定、重试或移除未完成的视频后再合并。',
+    mergeEmpty: isEnglish ? 'No clips to merge' : '没有可合并的片段',
+    mergeFailed: isEnglish ? 'Merged export failed. You can retry without reanalyzing.' : '合并导出失败，可直接重试，无需重新分析。',
+    mergeCancelled: isEnglish ? 'Merged export cancelled. Analysis results are retained.' : '已取消合并导出，分析结果已保留。',
+    mergeSkipped: isEnglish ? 'No matching clips; skipped:' : '没有符合条件的片段，已跳过：',
+    retry: isEnglish ? 'Retry merge' : '重试合并',
+    viewAnalysis: isEnglish ? 'View analysis' : '查看分析',
+    previewOutput: isEnglish ? 'Preview output' : '预览输出',
+    openFolder: isEnglish ? 'Open folder' : '打开文件夹',
     calibrationTitle: isEnglish ? 'Calibrate the table' : '标定球桌',
     calibrationDescription: isEnglish
       ? 'Mark the four table corners in any order. Drag a point to fine-tune it.'
@@ -204,12 +233,67 @@ export function MultiTaskPage({
   useEffect(() => { itemsRef.current = items; }, [items]);
   useEffect(() => { runningRef.current = running; }, [running]);
   const batchTaskActive = !initialized || running || hasOpenBatchWork(items);
+  const mergeWorkflow = mergeVideos || (running && mergeRunRef.current);
+  const exportLocked = batchExport.status === 'exporting';
+  const hasClippingItems = items.some((item) => item.mode !== 'analyze-only');
   useEffect(() => onTaskStateChange(batchTaskActive), [batchTaskActive, onTaskStateChange]);
 
   const replaceItems = (updater: (current: BatchItem[]) => BatchItem[]) => {
     const next = updater(itemsRef.current);
     itemsRef.current = next;
     setItems(next);
+    const hasClipping = next.some((item) => item.mode !== 'analyze-only');
+    if (!hasClipping || (runningRef.current && mergeRunRef.current)) {
+      mergeVideosRef.current = hasClipping && mergeRunRef.current;
+      setMergeVideos(mergeVideosRef.current);
+    }
+  };
+
+  const invalidateMergedOutput = () => {
+    setBatchExport({ status: 'idle', progress: 0, result: null, error: null });
+  };
+
+  const selectionFor = (item: BatchItem): Exclude<CutSelectionV1, { mode: 'custom' }> => item.mode === 'all'
+    ? { mode: 'all', pre_roll_seconds: optionsRef.current.preRoll, post_roll_seconds: optionsRef.current.postRoll }
+    : optionsRef.current.rallyRecognitionMethod === 'continuous_visibility'
+      ? { mode: 'highlight', criterion: { kind: 'duration_tier', tier: item.durationTier }, pre_roll_seconds: optionsRef.current.preRoll, post_roll_seconds: optionsRef.current.postRoll }
+      : { mode: 'highlight', criterion: { kind: 'bounce_count', threshold: item.threshold }, pre_roll_seconds: optionsRef.current.preRoll, post_roll_seconds: optionsRef.current.postRoll };
+
+  const completeRun = (success: boolean) => {
+    const canShutdown = !mergeRunRef.current || itemsRef.current.every((item) => !item.exportWarning);
+    runningRef.current = false;
+    mergeRunRef.current = false;
+    setRunning(false);
+    if (!success) return;
+    onCompletableTasksFinished();
+    if (shutdownAfterCompletionRef.current && canShutdown) {
+      shutdownAfterCompletionRef.current = false;
+      setShutdownAfterCompletion(false);
+      void window.ttcut.shutdownSystem().catch(() => setSystemNotice(text.shutdownFailed));
+    }
+  };
+
+  const beginMergedExport = () => {
+    // Lock synchronously before the IPC call and snapshot conditions in stable source order.
+    batchExportRef.current = { taskId: null, cancelRequested: false };
+    setBatchExport({ status: 'exporting', progress: 0, result: null, error: null });
+    const participants = itemsRef.current.filter((item) => item.mode !== 'analyze-only')
+      .sort((left, right) => left.additionOrder - right.additionOrder);
+    const promise = window.ttcut.startBatchExport({ items: participants.map((item) => ({
+      analysis_id: item.analysisId!, selection: selectionFor(item),
+    })) });
+    pendingTaskStartRef.current = promise;
+    void promise.then((taskId) => {
+      if (!batchExportRef.current) return;
+      batchExportRef.current.taskId = taskId;
+      if (batchExportRef.current.cancelRequested) void window.ttcut.cancelTask(taskId);
+    }).catch((error) => {
+      batchExportRef.current = null;
+      setBatchExport({ status: 'failed', progress: 0, result: null, error: String(error) });
+      completeRun(false);
+    }).finally(() => {
+      if (pendingTaskStartRef.current === promise) pendingTaskStartRef.current = null;
+    });
   };
 
   const updateItem = (id: string, updater: (item: BatchItem) => BatchItem) => {
@@ -223,7 +307,7 @@ export function MultiTaskPage({
   };
 
   const schedule = () => {
-    if (activeRef.current) return;
+    if (activeRef.current || batchExportRef.current) return;
     const calibrationCandidate = itemsRef.current.find((item) => item.calibrationStatus === 'pending');
     if (calibrationCandidate) {
       if (!autoCalibrationAvailableRef.current) {
@@ -264,16 +348,27 @@ export function MultiTaskPage({
       && item.processingStatus === 'waiting'
     ));
     if (!candidate) {
+      if (pendingAdditions.current > 0) return;
       const completedSuccessfully = itemsRef.current.length > 0
         && itemsRef.current.every((item) => item.processingStatus === 'done');
-      runningRef.current = false;
-      setRunning(false);
-      onCompletableTasksFinished();
-      if (completedSuccessfully && shutdownAfterCompletionRef.current) {
-        shutdownAfterCompletionRef.current = false;
-        setShutdownAfterCompletion(false);
-        void window.ttcut.shutdownSystem().catch(() => setSystemNotice(text.shutdownFailed));
+      if (mergeRunRef.current) {
+        if (!completedSuccessfully) {
+          setBatchExport({ status: 'blocked', progress: 0, result: null, error: null });
+          completeRun(false);
+        } else if (itemsRef.current.some((item) => item.mode !== 'analyze-only')) {
+          beginMergedExport();
+        } else {
+          completeRun(true);
+        }
+      } else {
+        completeRun(completedSuccessfully);
+        if (!completedSuccessfully) onCompletableTasksFinished();
       }
+      return;
+    }
+    if (mergeRunRef.current && candidate.analysisId && candidate.analysis) {
+      updateItem(candidate.id, (item) => ({ ...item, processingStatus: 'done', progress: 100 }));
+      setTimeout(() => scheduleRef.current(), 0);
       return;
     }
     cancelRequested.current = false;
@@ -282,11 +377,7 @@ export function MultiTaskPage({
       updateItem(candidate.id, (item) => ({ ...item, processingStatus: 'exporting', progress: 70, error: null }));
       activeRef.current = { taskId: null, itemId: candidate.id, phase: 'export' };
       setActivePhase('export');
-      const selection: CutSelectionV1 = candidate.mode === 'all'
-        ? { mode: 'all', pre_roll_seconds: optionsRef.current.preRoll, post_roll_seconds: optionsRef.current.postRoll }
-        : optionsRef.current.rallyRecognitionMethod === 'continuous_visibility'
-          ? { mode: 'highlight', criterion: { kind: 'duration_tier', tier: candidate.durationTier }, pre_roll_seconds: optionsRef.current.preRoll, post_roll_seconds: optionsRef.current.postRoll }
-          : { mode: 'highlight', criterion: { kind: 'bounce_count', threshold: candidate.threshold }, pre_roll_seconds: optionsRef.current.preRoll, post_roll_seconds: optionsRef.current.postRoll };
+      const selection = selectionFor(candidate);
       const startPromise = window.ttcut.startExport({
         analysis_id: candidate.analysisId,
         selection,
@@ -335,7 +426,7 @@ export function MultiTaskPage({
       videoPath: candidate.video.path,
       calibrationChoice,
       device: 'auto',
-      historyVisibility: candidate.mode === 'analyze-only' ? 'visible' : 'deferred',
+      historyVisibility: mergeRunRef.current || candidate.mode === 'analyze-only' ? 'visible' : 'deferred',
       analysisMode: optionsRef.current.rallyRecognitionMethod === 'continuous_visibility' ? 'full' : optionsRef.current.analysisMode,
       rallyRecognitionMethod: optionsRef.current.rallyRecognitionMethod,
       normalizeVariableFrameRate: optionsRef.current.normalizeVariableFrameRate,
@@ -390,15 +481,35 @@ export function MultiTaskPage({
   }, [items]);
 
   useEffect(() => window.ttcut.onTaskEvent((event: AppEvent) => {
+    if (event.type === 'component-result') return;
+    const eventTaskId = event.type === 'progress' ? event.data.taskId : event.taskId;
+    if (batchExportRef.current?.taskId === eventTaskId) {
+      if (event.type === 'progress') {
+        setBatchExport((current) => ({ ...current, progress: Math.max(current.progress, event.data.percent) }));
+      } else if (event.type === 'batch-export-result') {
+        batchExportRef.current = null;
+        setBatchExport({ status: 'done', progress: 100, result: event.data, error: null });
+        completeRun(true);
+      } else if (event.type === 'error') {
+        batchExportRef.current = null;
+        setBatchExport({
+          status: event.code === 'BATCH_EXPORT_EMPTY' ? 'empty' : event.code === 'EXPORT_CANCELLED' ? 'cancelled' : 'failed',
+          progress: 0, result: null, error: event.code,
+        });
+        completeRun(false);
+      }
+      return;
+    }
+    if (event.type === 'batch-export-result') return;
     const active = activeRef.current;
-    if (!active || event.type === 'component-result') return;
+    if (!active) return;
     const taskId = event.type === 'progress' ? event.data.taskId : event.taskId;
     if (active.taskId !== taskId) return;
     if (event.type === 'progress') {
       const mapped = active.phase === 'calibration'
         ? overallCalibrationProgress(event.data.stage, event.data.percent)
         : active.phase === 'analysis'
-          ? (itemsRef.current.find((item) => item.id === active.itemId)?.mode === 'analyze-only'
+          ? (mergeRunRef.current || itemsRef.current.find((item) => item.id === active.itemId)?.mode === 'analyze-only'
             ? event.data.percent
             : event.data.stage === 'video_normalization'
               ? event.data.percent
@@ -422,7 +533,7 @@ export function MultiTaskPage({
     }
     if (event.type === 'analysis-result') {
       const current = itemsRef.current.find((item) => item.id === active.itemId);
-      const finishedAtAnalysis = current?.mode === 'analyze-only' || event.data.rallies.length === 0;
+      const finishedAtAnalysis = mergeRunRef.current || current?.mode === 'analyze-only' || event.data.rallies.length === 0;
       updateItem(active.itemId, (item) => ({
         ...item,
         analysisId: event.analysisId,
@@ -509,26 +620,55 @@ export function MultiTaskPage({
   }), []);
 
   const addVideos = async (videos: SelectedVideo[]) => {
+    if (batchExportRef.current) return;
     const existing = new Set(itemsRef.current.map((item) => item.video.path.toLowerCase()));
     const unique = videos.filter((video) => !existing.has(video.path.toLowerCase()));
     if (!unique.length) return;
-    const created = await createItems(unique);
-    const added = autoCalibrationAvailableRef.current
-      ? created
-      : created.map((item) => ({ ...item, calibrationStatus: 'manual-required' as const }));
-    replaceItems((current) => {
-      const currentPaths = new Set(current.map((item) => item.video.path.toLowerCase()));
-      return [...current, ...added.filter((item) => !currentPaths.has(item.video.path.toLowerCase()))];
-    });
-    setTimeout(() => scheduleRef.current(), 0);
+    const firstOrder = nextAdditionOrder.current;
+    nextAdditionOrder.current += unique.length;
+    pendingAdditions.current += 1;
+    try {
+      const created = await createItems(unique, firstOrder);
+      if (batchExportRef.current) return;
+      const added = autoCalibrationAvailableRef.current
+        ? created
+        : created.map((item) => ({ ...item, calibrationStatus: 'manual-required' as const }));
+      invalidateMergedOutput();
+      replaceItems((current) => {
+        const currentPaths = new Set(current.map((item) => item.video.path.toLowerCase()));
+        return [...current, ...added.filter((item) => !currentPaths.has(item.video.path.toLowerCase()))];
+      });
+    } catch (error) {
+      setSystemNotice(String(error));
+    } finally {
+      pendingAdditions.current -= 1;
+      setTimeout(() => scheduleRef.current(), 0);
+    }
   };
 
-  const chooseMore = async () => addVideos(await window.ttcut.selectVideos());
+  const collectVideos = async (select: () => Promise<SelectedVideo[]>) => {
+    if (batchExportRef.current) return;
+    pendingAdditions.current += 1;
+    try {
+      await addVideos(await select());
+    } catch (error) {
+      setSystemNotice(String(error));
+    } finally {
+      pendingAdditions.current -= 1;
+      setTimeout(() => scheduleRef.current(), 0);
+    }
+  };
+
+  const chooseMore = () => collectVideos(() => window.ttcut.selectVideos());
   const start = () => {
-    if (runningRef.current || hasPendingCalibration(itemsRef.current)) return;
+    if (runningRef.current || batchExportRef.current || hasPendingCalibration(itemsRef.current)) return;
     cancelRequested.current = false;
+    mergeRunRef.current = mergeVideosRef.current;
+    invalidateMergedOutput();
     replaceItems((current) => current.map((item) => (
       item.processingStatus === 'failed' || item.processingStatus === 'cancelled'
+        || (!mergeRunRef.current && item.processingStatus === 'done' && item.mode !== 'analyze-only'
+          && item.analysis && item.analysis.rallies.length > 0 && !item.outputPath)
         ? { ...item, processingStatus: 'waiting', recoveredOutputPath: null, exportWarning: null, error: null }
         : item
     )));
@@ -542,6 +682,26 @@ export function MultiTaskPage({
     setShutdownAfterCompletion(enabled);
   };
 
+  const toggleMerge = (enabled: boolean) => {
+    if (runningRef.current || batchExportRef.current) return;
+    mergeVideosRef.current = enabled;
+    setMergeVideos(enabled);
+    invalidateMergedOutput();
+  };
+
+  const changeSelection = (id: string, updater: (item: BatchItem) => BatchItem) => {
+    if (batchExportRef.current) return;
+    invalidateMergedOutput();
+    updateItem(id, updater);
+  };
+
+  const cancelMergedExport = () => {
+    const active = batchExportRef.current;
+    if (!active) return;
+    active.cancelRequested = true;
+    if (active.taskId) void window.ttcut.cancelTask(active.taskId);
+  };
+
   const cancel = async () => {
     const active = activeRef.current;
     if (!active?.taskId || active.phase === 'calibration') return;
@@ -550,9 +710,10 @@ export function MultiTaskPage({
   };
 
   const remove = async (item: BatchItem) => {
-    if (item.id === activeItem) return;
-    if (item.analysisId) await window.ttcut.deleteAnalysis(item.analysisId);
+    if (item.id === activeRef.current?.itemId || batchExportRef.current) return;
+    invalidateMergedOutput();
     replaceItems((current) => current.filter((value) => value.id !== item.id));
+    if (item.analysisId) await window.ttcut.deleteAnalysis(item.analysisId);
     setTimeout(() => scheduleRef.current(), 0);
   };
 
@@ -617,7 +778,11 @@ export function MultiTaskPage({
 
   const ordered = [...items].sort((left, right) => Number(right.processingStatus === 'done') - Number(left.processingStatus === 'done'));
   const calibrationBusy = hasPendingCalibration(items);
-  const canStart = items.some((item) => item.calibrationStatus === 'ready' && item.processingStatus !== 'done');
+  const canStart = items.some((item) => item.calibrationStatus === 'ready' && (
+    item.processingStatus !== 'done'
+    || (mergeVideos && hasClippingItems && batchExport.status !== 'done')
+    || (!mergeVideos && item.mode !== 'analyze-only' && item.analysis && item.analysis.rallies.length > 0 && !item.outputPath)
+  ));
 
   return (
     <section
@@ -625,14 +790,14 @@ export function MultiTaskPage({
       onDragOver={(event) => event.preventDefault()}
       onDrop={(event) => {
         event.preventDefault();
+        if (batchExportRef.current) return;
         const files = [...event.dataTransfer.files].filter((file) => isSupportedVideoFileName(file.name));
-        void Promise.all(files.map((file) => window.ttcut.acceptDroppedVideo(window.ttcut.pathForDroppedFile(file))))
-          .then(addVideos);
+        void collectVideos(() => Promise.all(files.map((file) => window.ttcut.acceptDroppedVideo(window.ttcut.pathForDroppedFile(file)))));
       }}
     >
       <div className="multi-header">
         <h1>{text.title}</h1>
-        <button className="secondary" type="button" onClick={() => void chooseMore()}>{text.add}</button>
+        <button className="secondary" type="button" disabled={exportLocked} onClick={() => void chooseMore()}>{text.add}</button>
       </div>
       {systemNotice && <div className="notice batch-system-notice" role="status"><strong>{systemNotice}</strong></div>}
       <div className="batch-list">
@@ -679,6 +844,11 @@ export function MultiTaskPage({
               <div className="batch-info">
                 <strong title={item.video.name}>{item.video.name}</strong>
                 <span>{formatTimestamp(item.metadata.duration_seconds)} · {item.metadata.width} × {item.metadata.height} · {item.metadata.fps.toFixed(3)} fps</span>
+                {mergeWorkflow && done && item.mode !== 'analyze-only' && batchExport.status !== 'done' && <span>{text.mergeWaiting}</span>}
+                {mergeWorkflow && item.analysisId && (
+                  <button className="text-button" type="button" disabled={batchTaskActive}
+                    onClick={() => onOpenAnalysis(item.analysisId!)}>{text.viewAnalysis}</button>
+                )}
                 {item.error && !manualRequired && <small>{item.error}</small>}
                 {item.exportWarning && (
                   <div className="batch-export-warning" role="alert">
@@ -687,7 +857,7 @@ export function MultiTaskPage({
                   </div>
                 )}
               </div>
-              {done ? (
+              {done && !mergeWorkflow ? (
                 <div className="batch-actions">
                   <button className="secondary" type="button" disabled={!item.outputMediaUrl && batchTaskActive} onClick={() => item.outputMediaUrl ? setPreview({
                     source: item.outputMediaUrl,
@@ -700,7 +870,7 @@ export function MultiTaskPage({
               ) : item.processingStatus === 'failed' && item.recoveredOutputPath ? (
                 <div className="batch-actions">
                   <button className="secondary" type="button" onClick={() => void window.ttcut.revealOutput(item.recoveredOutputPath!)}>{text.openRecovered}</button>
-                  <button className="batch-remove" type="button" aria-label={`${text.remove} ${item.video.name}`} disabled={active} onClick={() => void remove(item)}>×</button>
+                  <button className="batch-remove" type="button" aria-label={`${text.remove} ${item.video.name}`} disabled={active || exportLocked} onClick={() => void remove(item)}>×</button>
                 </div>
               ) : (
                 <>
@@ -716,8 +886,8 @@ export function MultiTaskPage({
                           type="button"
                           className={item.mode === mode ? 'selected' : ''}
                           aria-pressed={item.mode === mode}
-                          disabled={active && activePhase !== 'calibration'}
-                          onClick={() => updateItem(item.id, (value) => ({ ...value, mode }))}
+                          disabled={exportLocked || (!mergeWorkflow && active && activePhase !== 'calibration')}
+                          onClick={() => changeSelection(item.id, (value) => ({ ...value, mode }))}
                         >
                           {label}
                         </button>
@@ -726,47 +896,90 @@ export function MultiTaskPage({
                     {item.mode === 'highlight' && (rallyRecognitionMethod === 'continuous_visibility' ? <GlassRadioGroup
                       ariaLabel={language === 'zh-CN' ? '时长档位' : 'Duration tier'}
                       className="compact"
-                      disabled={active}
+                      disabled={exportLocked || (!mergeWorkflow && active)}
                       idPrefix={`batch-duration-tier-${item.id}`}
                       name={`batch-duration-tier-${item.id}`}
-                      onChange={(durationTier) => updateItem(item.id, (current) => ({ ...current, durationTier }))}
+                      onChange={(durationTier) => changeSelection(item.id, (current) => ({ ...current, durationTier }))}
                       options={DURATION_HIGHLIGHT_TIER_VALUES.map((value) => ({ value, label: ({ short_rally: language === 'zh-CN' ? '短回合' : 'Short rally', rally: language === 'zh-CN' ? '相持' : 'Rally', long_rally: language === 'zh-CN' ? '长相持' : 'Long rally' } as const)[value] }))}
                       value={item.durationTier}
                     /> : <GlassRadioGroup
                       ariaLabel={language === 'zh-CN' ? '板数筛选' : 'Bounce filter'}
                       className="compact"
-                      disabled={active}
+                      disabled={exportLocked || (!mergeWorkflow && active)}
                       idPrefix={`batch-threshold-${item.id}`}
                       name={`batch-threshold-${item.id}`}
-                      onChange={(threshold) => updateItem(item.id, (current) => ({ ...current, threshold }))}
+                      onChange={(threshold) => changeSelection(item.id, (current) => ({ ...current, threshold }))}
                       options={([3, 5, 7] as const).map((value) => ({ value, label: `${value}${language === 'zh-CN' ? '板' : ' bounces'}` }))}
                       value={item.threshold}
                     />)}
                   </div>
-                  <button className="batch-remove" type="button" aria-label={`${text.remove} ${item.video.name}`} disabled={active} onClick={() => void remove(item)}>×</button>
+                  <button className="batch-remove" type="button" aria-label={`${text.remove} ${item.video.name}`} disabled={active || exportLocked} onClick={() => void remove(item)}>×</button>
                 </>
               )}
             </article>
           );
         })}
       </div>
-      <div className={`batch-launcher floating-launcher ${shutdownAfterCompletion ? 'shutdown-armed' : ''}`}>
-        <label className="batch-shutdown-option floating-launch-options">
-          <input
-            type="checkbox"
-            checked={shutdownAfterCompletion}
-            disabled={!batchTaskActive}
-            onChange={(event) => toggleShutdownAfterCompletion(event.target.checked)}
-          />
-          <span>{text.shutdownAfterTask}</span>
-        </label>
+      {batchExport.status !== 'idle' && (
+        <div className="batch-merged-result card" role="status">
+          <strong>{({
+            blocked: text.mergeBlocked, exporting: text.merging, done: text.mergeDone,
+            failed: text.mergeFailed, cancelled: text.mergeCancelled, empty: text.mergeEmpty,
+          })[batchExport.status]}</strong>
+          {exportLocked && <>
+            <progress aria-label={text.merging} max={100} value={batchExport.progress} />
+            <span>{Math.round(batchExport.progress)}%</span>
+            <button className="secondary" type="button" onClick={cancelMergedExport}>{text.cancel}</button>
+          </>}
+          {batchExport.error && batchExport.status === 'failed' && <>
+            <small>{batchExport.error}</small>
+            <button className="text-button" type="button" onClick={() => void window.ttcut.revealLogs()}>{text.logs}</button>
+          </>}
+          {['blocked', 'failed', 'cancelled', 'empty'].includes(batchExport.status) && (
+            <button className="secondary" type="button" disabled={!canStart || calibrationBusy || running} onClick={start}>{text.retry}</button>
+          )}
+          {batchExport.result && <>
+            <span className="batch-merged-path">{batchExport.result.outputPath}</span>
+            {batchExport.result.skippedAnalysisIds.length > 0 && <span>{text.mergeSkipped}{items
+              .filter((item) => item.analysisId && batchExport.result!.skippedAnalysisIds.includes(item.analysisId))
+              .map((item) => item.video.name).join('、')}</span>}
+            <div className="batch-actions">
+              <button className="secondary" type="button" onClick={() => setPreview({
+                source: batchExport.result!.mediaUrl, name: text.mergeDone,
+                width: batchExport.result!.width, height: batchExport.result!.height,
+              })}>{text.previewOutput}</button>
+              <button className="secondary" type="button" onClick={() => void window.ttcut.revealOutput(batchExport.result!.outputPath)}>{text.openFolder}</button>
+            </div>
+          </>}
+        </div>
+      )}
+      <div className={`batch-launcher floating-launcher ${shutdownAfterCompletion ? 'shutdown-armed' : ''}`}
+        tabIndex={0} aria-label={isEnglish ? 'Batch task options' : '多任务选项'}>
+        <div className="batch-launch-options custom-export-options floating-launch-options">
+          <label className="export-checkbox" title={!hasClippingItems ? text.mergeUnavailable : undefined}>
+            <input type="checkbox" checked={mergeVideos} disabled={running || exportLocked || !hasClippingItems}
+              onChange={(event) => toggleMerge(event.target.checked)} />
+            <span className="export-checkbox-control" aria-hidden="true"><span className="export-checkbox-gloss" /></span>
+            <span className="export-checkbox-text">{text.merge}</span>
+          </label>
+          <label className="export-checkbox">
+            <input
+              type="checkbox"
+              checked={shutdownAfterCompletion}
+              disabled={!batchTaskActive && !canStart}
+              onChange={(event) => toggleShutdownAfterCompletion(event.target.checked)}
+            />
+            <span className="export-checkbox-control" aria-hidden="true"><span className="export-checkbox-gloss" /></span>
+            <span className="export-checkbox-text">{text.shutdownAfterTask}</span>
+          </label>
+        </div>
         <button
           className="batch-start primary floating-launch-start"
           type="button"
           disabled={running || calibrationBusy || !canStart}
           onClick={start}
         >
-          {activePhase === 'calibration' ? text.calibrating : running ? text.running : text.start}
+          {exportLocked ? text.merging : activePhase === 'calibration' ? text.calibrating : running ? text.running : text.start}
           {shutdownAfterCompletion && <span className="batch-shutdown-indicator" aria-hidden="true">⏻</span>}
         </button>
       </div>

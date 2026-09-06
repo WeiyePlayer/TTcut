@@ -202,7 +202,7 @@ export function App() {
         }
         setPoints(event.calibration.points);
         setStep(event.data.rallies.length ? 'mode' : 'empty');
-      } else if (event.type === 'calibration-result') {
+      } else if (event.type === 'calibration-result' || event.type === 'batch-export-result') {
         return;
       } else if (event.type === 'export-result') {
         setActiveTask(null);

@@ -1,5 +1,20 @@
 # TTcut Context
 
+## Merged Highlight Video
+
+A single video containing the selected clips from the participating videos in
+a batch, ordered by when each source was added and then by source time. It is
+the batch's shared output, not an individual source video's highlight export.
+_UI_: 合并集锦, 合并为一个视频
+
+## Participating Video
+
+A video currently set to All Rallies or Highlights in a merged batch. Each
+participating video uses its own selection conditions; Analyze Only videos
+do not contribute clips. A successful analysis with no matching clips is an
+empty selection, not a failed video.
+_UI_: 参与剪辑的视频
+
 ## Analysis Model
 
 An immutable checkpoint bundled with the application and verified by filename,
