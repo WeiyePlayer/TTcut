@@ -29,6 +29,7 @@ import { managedComponentsRoot } from './components';
 import { inspectInstalledComponents, silentlyInspectComponents, startupComponentStatus } from './component-status';
 import { purgeRemovedModelAssets } from './retired-model-assets';
 import { startExport } from './export';
+import { startBatchExport } from './batch-export';
 import { getLogDirectory, logLine } from './logger';
 import { getHistoryStore } from './history';
 import { clearMediaPaths, installMediaProtocol, registerMediaPath } from './media-protocol';
@@ -243,6 +244,9 @@ function registerIpc(): void {
   });
   ipcMain.handle(IPC.exportStart, async (_event, value: unknown) => {
     return startExport(currentWindow(), exportRequestSchema.parse(value));
+  });
+  ipcMain.handle(IPC.batchExportStart, async (_event, value: unknown) => {
+    return startBatchExport(currentWindow(), value);
   });
   ipcMain.handle(IPC.historyList, async () => {
     const entries = await getHistoryStore().list(!hasActiveTasks());

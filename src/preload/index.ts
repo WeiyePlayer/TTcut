@@ -31,6 +31,7 @@ const api: TTcutApi = {
     ipcRenderer.invoke(IPC.analysisStart, input)
   ),
   startExport: (input: ExportRequest) => ipcRenderer.invoke(IPC.exportStart, input),
+  startBatchExport: (input) => ipcRenderer.invoke(IPC.batchExportStart, input),
   listHistory: () => ipcRenderer.invoke(IPC.historyList),
   openHistory: (id: string) => ipcRenderer.invoke(IPC.historyOpen, id),
   deleteHistory: (id: string) => ipcRenderer.invoke(IPC.historyDelete, id),

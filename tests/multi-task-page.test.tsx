@@ -62,6 +62,7 @@ describe('multi-task clipping', () => {
       startAutoCalibration,
       startAnalysis,
       startExport,
+      startBatchExport: vi.fn().mockResolvedValue('batch-export-1'),
       onTaskEvent: vi.fn((next: (event: AppEvent) => void) => {
         listener = next;
         return () => { listener = null; };
@@ -91,6 +92,175 @@ describe('multi-task clipping', () => {
       tableAnalysis,
     }));
   }
+
+  async function prepareMergedBatch(onFinished = vi.fn(), initialVideos = videos) {
+    render(<MultiTaskPage initialVideos={initialVideos} preRoll={2.5} postRoll={1}
+      onOpenAnalysis={vi.fn()} onCompletableTasksFinished={onFinished} />);
+    for (let index = 0; index < initialVideos.length; index += 1) {
+      await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledTimes(index + 1));
+      await finishCalibration(`calibration-task-${index + 1}`);
+    }
+    fireEvent.click(screen.getByRole('checkbox', { name: '合并为一个视频' }));
+    return onFinished;
+  }
+
+  async function finishAnalysis(index: number, path = videos[index - 1]!.path) {
+    await waitFor(() => expect(startAnalysis).toHaveBeenCalledTimes(index));
+    act(() => listener?.({ type: 'analysis-result', taskId: `analysis-task-${index}`,
+      analysisId: `${index}${'1'.repeat(7)}-1111-4111-8111-111111111111`, calibration, data: analysis(path) }));
+  }
+
+  it('merges in addition order and completes only after the merged result arrives without shutdown', async () => {
+    const finished = await prepareMergedBatch();
+    fireEvent.click(screen.getByRole('button', { name: '开始分析剪辑' }));
+    expect(screen.getByRole('checkbox', { name: '合并为一个视频' })).toBeDisabled();
+    await finishAnalysis(1);
+    await finishAnalysis(2);
+    expect(startAnalysis.mock.calls.every((call) => call[0].historyVisibility === 'visible')).toBe(true);
+    await waitFor(() => expect(window.ttcut.startBatchExport).toHaveBeenCalledTimes(1));
+    expect(startExport).not.toHaveBeenCalled();
+    expect(window.ttcut.startBatchExport).toHaveBeenCalledWith({ items: [
+      { analysis_id: '11111111-1111-4111-8111-111111111111', selection: { mode: 'all', pre_roll_seconds: 2.5, post_roll_seconds: 1 } },
+      { analysis_id: '21111111-1111-4111-8111-111111111111', selection: { mode: 'all', pre_roll_seconds: 2.5, post_roll_seconds: 1 } },
+    ] });
+    expect(finished).not.toHaveBeenCalled();
+    expect(window.ttcut.shutdownSystem).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: '＋ 添加视频' })).toBeDisabled();
+    for (const group of screen.getAllByRole('group')) {
+      expect(within(group).getByRole('button', { name: '所有回合' })).toBeDisabled();
+    }
+    expect(screen.queryByRole('checkbox', { name: '完成本任务后关机' })).not.toBeInTheDocument();
+    act(() => listener?.({ type: 'progress', data: { taskId: 'batch-export-1', kind: 'export', stage: 'concatenating', percent: 90 } }));
+    expect(screen.getByRole('progressbar')).toHaveAttribute('value', '90');
+    act(() => listener?.({ type: 'batch-export-result', taskId: 'batch-export-1', data: {
+      outputPath: 'C:\\video\\first_TTcut_合并集锦.mp4', mediaUrl: 'ttcut-media://merged',
+      width: 1280, height: 720, skippedAnalysisIds: [],
+    } }));
+    expect(screen.getByRole('button', { name: '开始分析剪辑' })).toBeDisabled();
+    expect(window.ttcut.shutdownSystem).not.toHaveBeenCalled();
+    expect(finished).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('合并视频已完成')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '预览输出' }));
+    expect(document.querySelector('.batch-preview video')).toHaveAttribute('src', 'ttcut-media://merged');
+  });
+
+  it('disables and unchecks merging when every video is analysis only, including an empty list', async () => {
+    await prepareMergedBatch();
+    for (const group of screen.getAllByRole('group')) {
+      fireEvent.click(within(group).getByRole('button', { name: '只分析' }));
+    }
+    const merge = screen.getByRole('checkbox', { name: '合并为一个视频' });
+    expect(merge).toBeDisabled();
+    expect(merge).not.toBeChecked();
+    expect(merge.closest('label')).toHaveAttribute('title', '至少一个视频选择“所有回合”或“精彩回合”后可用。');
+    for (const video of videos) fireEvent.click(screen.getByRole('button', { name: `删除 ${video.name}` }));
+    expect(merge).toBeDisabled();
+    expect(merge).not.toBeChecked();
+  });
+
+  it('allows one participating video and excludes analysis-only videos', async () => {
+    await prepareMergedBatch();
+    fireEvent.click(within(screen.getByRole('group', { name: 'second.mp4 的剪辑模式' })).getByRole('button', { name: '只分析' }));
+    fireEvent.click(screen.getByRole('button', { name: '开始分析剪辑' }));
+    await finishAnalysis(1);
+    await finishAnalysis(2);
+    await waitFor(() => expect(window.ttcut.startBatchExport).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(window.ttcut.startBatchExport).mock.calls[0]![0].items).toHaveLength(1);
+    expect(startExport).not.toHaveBeenCalled();
+  });
+
+  it('uses edits to an already analyzed item and includes videos added during analysis', async () => {
+    await prepareMergedBatch();
+    vi.mocked(window.ttcut.selectVideos).mockResolvedValue([thirdVideo]);
+    startAnalysis.mockResolvedValueOnce('analysis-task-3');
+    fireEvent.click(screen.getByRole('button', { name: '开始分析剪辑' }));
+    await finishAnalysis(1);
+    await waitFor(() => expect(startAnalysis).toHaveBeenCalledTimes(2));
+    fireEvent.click(within(screen.getByRole('group', { name: 'first.mp4 的剪辑模式' })).getByRole('button', { name: '精彩回合' }));
+    fireEvent.click(screen.getByRole('radio', { name: '长相持' }));
+    fireEvent.click(screen.getByRole('button', { name: '＋ 添加视频' }));
+    await screen.findByText('third.mp4');
+    await finishAnalysis(2);
+    await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledTimes(3));
+    await finishCalibration('calibration-task-3');
+    await finishAnalysis(3, thirdVideo.path);
+    await waitFor(() => expect(window.ttcut.startBatchExport).toHaveBeenCalledTimes(1));
+    const request = vi.mocked(window.ttcut.startBatchExport).mock.calls[0]![0];
+    expect(request.items.map((item) => item.analysis_id[0])).toEqual(['1', '2', '3']);
+    expect(request.items[0]!.selection).toMatchObject({ mode: 'highlight', criterion: { kind: 'duration_tier', tier: 'long_rally' } });
+    expect(startAnalysis).toHaveBeenCalledTimes(3);
+  });
+
+  it('blocks merging after a cancelled item and reuses completed analysis on retry', async () => {
+    const finished = await prepareMergedBatch();
+    fireEvent.click(screen.getByRole('button', { name: '开始分析剪辑' }));
+    await waitFor(() => expect(startAnalysis).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: '取消 first.mp4' }));
+    act(() => listener?.({ type: 'error', taskId: 'analysis-task-1', code: 'ANALYSIS_CANCELLED', message: 'cancelled' }));
+    await finishAnalysis(2);
+    await screen.findByText('请完成标定、重试或移除未完成的视频后再合并。');
+    expect(window.ttcut.startBatchExport).not.toHaveBeenCalled();
+    expect(finished).not.toHaveBeenCalled();
+    expect(window.ttcut.shutdownSystem).not.toHaveBeenCalled();
+    startAnalysis.mockResolvedValueOnce('analysis-task-3');
+    fireEvent.click(screen.getByRole('button', { name: '重试合并' }));
+    await finishAnalysis(3, videos[0]!.path);
+    await waitFor(() => expect(window.ttcut.startBatchExport).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(window.ttcut.startBatchExport).mock.calls[0]![0].items.map((item) => item.analysis_id[0])).toEqual(['3', '2']);
+    expect(startAnalysis).toHaveBeenCalledTimes(3);
+  });
+
+  it('waits for an open add-video dialog before taking the final merge snapshot', async () => {
+    await prepareMergedBatch(vi.fn(), videos.slice(0, 1));
+    let resolveSelection!: (videos: SelectedVideo[]) => void;
+    vi.mocked(window.ttcut.selectVideos).mockImplementation(() => new Promise((resolve) => { resolveSelection = resolve; }));
+    fireEvent.click(screen.getByRole('button', { name: '开始分析剪辑' }));
+    await waitFor(() => expect(startAnalysis).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: '＋ 添加视频' }));
+    await finishAnalysis(1);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+    expect(window.ttcut.startBatchExport).not.toHaveBeenCalled();
+    await act(async () => { resolveSelection([videos[1]!]); });
+    await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledTimes(2));
+    await finishCalibration('calibration-task-2');
+    await finishAnalysis(2);
+    await waitFor(() => expect(window.ttcut.startBatchExport).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(window.ttcut.startBatchExport).mock.calls[0]![0].items).toHaveLength(2);
+  });
+
+  it('does not request shutdown when a merged batch contains an analysis warning', async () => {
+    await prepareMergedBatch(vi.fn(), videos.slice(0, 1));
+    fireEvent.click(screen.getByRole('button', { name: '开始分析剪辑' }));
+    await waitFor(() => expect(startAnalysis).toHaveBeenCalledTimes(1));
+    act(() => listener?.({ type: 'analysis-result', taskId: 'analysis-task-1',
+      analysisId: '11111111-1111-4111-8111-111111111111', calibration,
+      data: { ...analysis(videos[0]!.path), processing: {
+        mode: 'vfr_fallback', warning_code: 'CFR_FALLBACK',
+      } } as AnalysisResultV1,
+    }));
+    await waitFor(() => expect(window.ttcut.startBatchExport).toHaveBeenCalledTimes(1));
+    act(() => listener?.({ type: 'batch-export-result', taskId: 'batch-export-1', data: {
+      outputPath: 'C:\\merged.mp4', mediaUrl: 'ttcut-media://merged', width: 1920, height: 1080, skippedAnalysisIds: [],
+    } }));
+    expect(window.ttcut.shutdownSystem).not.toHaveBeenCalled();
+  });
+
+  it.each(['EXPORT_FAILED', 'EXPORT_CANCELLED', 'BATCH_EXPORT_EMPTY'])('does not shut down for %s and retries export without analysis', async (code) => {
+    const finished = await prepareMergedBatch(vi.fn(), videos.slice(0, 1));
+    fireEvent.click(screen.getByRole('button', { name: '开始分析剪辑' }));
+    await finishAnalysis(1);
+    await waitFor(() => expect(window.ttcut.startBatchExport).toHaveBeenCalledTimes(1));
+    if (code === 'EXPORT_CANCELLED') {
+      fireEvent.click(screen.getByRole('button', { name: '取消' }));
+      expect(window.ttcut.cancelTask).toHaveBeenCalledWith('batch-export-1');
+    }
+    act(() => listener?.({ type: 'error', taskId: 'batch-export-1', code, message: code }));
+    expect(finished).not.toHaveBeenCalled();
+    expect(window.ttcut.shutdownSystem).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '重试合并' }));
+    await waitFor(() => expect(window.ttcut.startBatchExport).toHaveBeenCalledTimes(2));
+    expect(startAnalysis).toHaveBeenCalledTimes(1);
+  });
 
   it('auto-calibrates sequentially before allowing mode selection', async () => {
     render(<MultiTaskPage initialVideos={videos} preRoll={2.5} postRoll={1} onOpenAnalysis={vi.fn()} />);
@@ -289,7 +459,6 @@ describe('multi-task clipping', () => {
       />,
     );
     await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledTimes(1));
-    fireEvent.click(screen.getByRole('checkbox', { name: '完成本任务后关机' }));
     act(() => listener?.({
       type: 'error',
       taskId: 'calibration-task-1',
@@ -334,7 +503,7 @@ describe('multi-task clipping', () => {
     expect(window.ttcut.shutdownSystem).not.toHaveBeenCalled();
   });
 
-  it('shuts down once after every item in an armed batch succeeds', async () => {
+  it('completes analysis-only batches without a shutdown option', async () => {
     const onCompletableTasksFinished = vi.fn();
     render(
       <MultiTaskPage
@@ -358,7 +527,6 @@ describe('multi-task clipping', () => {
     for (const group of screen.getAllByRole('group')) {
       fireEvent.click(within(group).getAllByRole('button')[2]!);
     }
-    fireEvent.click(screen.getByRole('checkbox', { name: '完成本任务后关机' }));
     fireEvent.click(document.querySelector('.batch-start')!);
     await waitFor(() => expect(startAnalysis).toHaveBeenCalledTimes(1));
     act(() => listener?.({
@@ -377,9 +545,9 @@ describe('multi-task clipping', () => {
       data: analysis(videos[1]!.path),
     }));
 
-    await waitFor(() => expect(window.ttcut.shutdownSystem).toHaveBeenCalledTimes(1));
-    expect(onCompletableTasksFinished).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole('checkbox', { name: '完成本任务后关机' })).not.toBeChecked();
+    await waitFor(() => expect(onCompletableTasksFinished).toHaveBeenCalledTimes(1));
+    expect(window.ttcut.shutdownSystem).not.toHaveBeenCalled();
+    expect(screen.queryByRole('checkbox', { name: '完成本任务后关机' })).not.toBeInTheDocument();
   });
 
   it('turns all remaining items into manual calibration when the model is unavailable', async () => {

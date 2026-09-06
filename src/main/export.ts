@@ -216,7 +216,7 @@ function customArtifactOutputs(request: ExportRequest): {
   };
 }
 
-async function assertExportPreconditions(
+export async function assertExportPreconditions(
   input: string,
   outputDirectory: string,
   taskId: string,
@@ -259,7 +259,11 @@ async function assertExportPreconditions(
   }
 }
 
-async function runFfmpeg(
+export function clearExportProgress(taskId: string): void {
+  lastExportProgress.delete(taskId);
+}
+
+export async function runFfmpeg(
   window: BrowserWindow,
   taskId: string,
   executable: string,
@@ -267,6 +271,7 @@ async function runFfmpeg(
   totalDuration: number,
   stage: string,
   detail?: { segmentIndex?: number; seekStart?: number },
+  progressRange?: { startPercent: number; endPercent: number },
 ): Promise<void> {
   await logLine(taskId, 'INFO', `FFmpeg arguments: ${JSON.stringify(args)}`);
   await new Promise<void>((resolve, reject) => {
@@ -284,7 +289,10 @@ async function runFfmpeg(
         if ((key === 'out_time_us' || key === 'out_time_ms') && raw) {
           const seconds = Number(raw) / 1_000_000;
           if (Number.isFinite(seconds)) {
-            const candidate = Math.max(0, Math.min(99.5, seconds / totalDuration * 100));
+            const fraction = totalDuration > 0 ? Math.max(0, Math.min(1, seconds / totalDuration)) : 0;
+            const candidate = progressRange
+              ? Math.max(0, Math.min(99.5, progressRange.startPercent + fraction * (progressRange.endPercent - progressRange.startPercent)))
+              : Math.max(0, Math.min(99.5, fraction * 100));
             const percent = Math.max(lastExportProgress.get(taskId) ?? 0, candidate);
             lastExportProgress.set(taskId, percent);
             send(window, {

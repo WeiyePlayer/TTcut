@@ -208,7 +208,7 @@ export function App() {
         }
         setPoints(event.calibration.points);
         setStep(event.data.rallies.length ? 'mode' : 'empty');
-      } else if (event.type === 'calibration-result') {
+      } else if (event.type === 'calibration-result' || event.type === 'batch-export-result') {
         return;
       } else if (event.type === 'export-result') {
         setActiveTask(null);
@@ -659,7 +659,6 @@ export function App() {
         {multiVideos.length > 0 && (
           <div hidden={view !== 'multi'}>
             <MultiTaskPage
-              allowShutdown={!isMac}
               initialVideos={multiVideos}
               preRoll={settings.pre_roll_seconds}
               postRoll={settings.post_roll_seconds}

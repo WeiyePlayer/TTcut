@@ -16,6 +16,7 @@ export const IPC = {
   calibrationStart: 'calibration:start',
   analysisStart: 'analysis:start',
   exportStart: 'export:start',
+  batchExportStart: 'export:batch-start',
   historyList: 'history:list',
   historyOpen: 'history:open',
   historyDelete: 'history:delete',
