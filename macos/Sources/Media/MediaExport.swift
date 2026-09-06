@@ -46,7 +46,7 @@ public struct MediaExporter: Sendable {
   public static func encoding(_ video: VideoInfo) throws -> [String] {
     var args = [
       "-c:v", video.encoder, "-preset", "veryfast", "-crf", "18", "-pix_fmt",
-      try pixelFormat(video), "-threads", "2",
+      try pixelFormat(video),
     ]
     for (flag, value) in [
       ("-color_range", video.colorRange), ("-color_primaries", video.colorPrimaries),
@@ -55,7 +55,7 @@ public struct MediaExporter: Sendable {
       if let value { args += [flag, value] }
     }
     if video.encoder == "libx265" {
-      var options = ["pools=2", "frame-threads=2", "log-level=error", "repeat-headers=1"]
+      var options = ["log-level=error", "repeat-headers=1"]
       if video.hdr == .hdr10 { options += ["hdr10=1"] }
       if let display = video.masteringDisplay { options += ["master-display=" + display] }
       if let light = video.maxCLL { options += ["max-cll=" + light] }
@@ -79,6 +79,15 @@ public struct MediaExporter: Sendable {
     ]
     if !video.variableFrameRate { args += ["-r", video.frameRate] }
     return args
+  }
+  static func inputArguments(_ video: VideoInfo, seekStart: Double?) -> [String] {
+    var args = ["-copyts"]
+    if let seekStart, seekStart > 0 {
+      // Input-side seeking lets FFmpeg jump to the preceding keyframe. Accurate transcoding then
+      // discards frames before the absolute trim boundary while -copyts preserves source timestamps.
+      args += ["-ss", Self.decimal(seekStart)]
+    }
+    return args + ["-i", video.path]
   }
   private func run(
     _ args: [String], duration: Double, progress: @escaping @Sendable (Double) -> Void
@@ -142,6 +151,7 @@ public struct MediaExporter: Sendable {
   public func encode(
     video: VideoInfo, ranges: [CutRange], destination: URL, normalizeFPS: Bool = false,
     disableBFrames: Bool = false,
+    seekStart: Double? = nil,
     progress: @escaping @Sendable (Double) -> Void = { _ in }
   ) async throws {
     guard !ranges.isEmpty,
@@ -158,7 +168,7 @@ public struct MediaExporter: Sendable {
       video.encoder == "libx265"
       && (disableBFrames || ranges.reduce(0) { $0 + $1.duration } * video.fps < 5)
     let args =
-      ["-copyts", "-i", video.path, "-filter_complex_threads", "2", "-filter_complex", graph] + maps
+      Self.inputArguments(video, seekStart: seekStart) + ["-filter_complex", graph] + maps
       + (try Self.encoding(video)) + (shortHEVC ? ["-bf", "0"] : []) + [destination.path]
     try await run(args, duration: ranges.reduce(0) { $0 + $1.duration }, progress: progress)
   }
@@ -226,8 +236,12 @@ public struct MediaExporter: Sendable {
         }
       }
     }
-    if strategy == .compatible || ranges.count == 1 {
+    if strategy == .compatible {
       try await encode(video: video, ranges: ranges, destination: destination, progress: progress)
+    } else if ranges.count == 1 {
+      try await encode(
+        video: video, ranges: ranges, destination: destination, seekStart: ranges[0].start,
+        progress: progress)
     } else {
       let work = destination.deletingLastPathComponent().appendingPathComponent(
         ".segments-" + UUID().uuidString, isDirectory: true)
@@ -239,7 +253,8 @@ public struct MediaExporter: Sendable {
         try Task.checkCancellation()
         let segment = work.appendingPathComponent("\(index).mp4")
         try await encode(
-          video: video, ranges: [range], destination: segment, disableBFrames: shortSegment
+          video: video, ranges: [range], destination: segment, disableBFrames: shortSegment,
+          seekStart: range.start
         ) { part in
           progress((Double(index) + part) / Double(ranges.count + 1))
         }

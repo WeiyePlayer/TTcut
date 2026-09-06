@@ -69,6 +69,21 @@ final class MediaIntegrationTests: XCTestCase {
       XCTAssertEqual(actual.audioChannels, 2)
     }
   }
+  func testExportEncodingUsesInputSeekAndAutomaticThreading() throws {
+    var video = VideoInfo(path: "/tmp/source.mp4")
+    video.videoCodec = "hevc"
+    let input = MediaExporter.inputArguments(video, seekStart: 12.25)
+    XCTAssertEqual(input, ["-copyts", "-ss", "12.250000000", "-i", video.path])
+    XCTAssertEqual(
+      MediaExporter.inputArguments(video, seekStart: 0), ["-copyts", "-i", video.path])
+
+    let encoding = try MediaExporter.encoding(video)
+    XCTAssertFalse(encoding.contains("-threads"))
+    let x265Index = try XCTUnwrap(encoding.firstIndex(of: "-x265-params"))
+    let x265 = encoding[x265Index + 1]
+    XCTAssertFalse(x265.contains("pools="))
+    XCTAssertFalse(x265.contains("frame-threads="))
+  }
   func testHDR10AndHLGPreserveStaticMetadata() async throws {
     let folder = try workspace()
     let exporter = MediaExporter(paths: paths)
