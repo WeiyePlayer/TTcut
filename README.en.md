@@ -8,7 +8,7 @@ TTcut is a local automatic table-tennis video cutter for players and enthusiasts
 
 Videos, analysis results, and history stay on the local computer. TTcut requires no account, uploads no video, and collects no telemetry. An internet connection is required when installing the resources needed for the first run; analysis, preview, and cutting can run offline after setup.
 
-> The current stable release is `v1.3.0` for Windows x64.
+> The current stable release is `v1.3.1` for Windows x64.
 
 ## Download and installation
 
@@ -20,13 +20,11 @@ Videos, analysis results, and history stay on the local computer. TTcut requires
 
 TTcut detects an NVIDIA GPU automatically and falls back to CPU if accelerated setup or its self-test fails. Its video-processing capability reads media information, cuts and joins segments, and validates exported files.
 
-## What's new in v1.3.0
+## What's new in v1.3.1
 
-- Continuous motion is now the default rally-recognition method, with improved handling for short rallies, vertical movement, between-rally passes, and waiting segments.
-- Automatic calibration samples more points across the video and selects a result using stable candidates and table geometry, improving robustness in complex footage.
-- Manual calibration accepts the four table corners in any order and keeps them directly adjustable afterward.
+- Fixed an error that caused the export feature to behave incorrectly.
 
-See the [v1.3.0 release notes](docs/release-notes-v1.3.0.en.md) for the complete details.
+See the [v1.3.1 release notes](docs/release-notes-v1.3.1.en.md) for the complete details.
 
 ## Contact the author on WeChat: m2924931661
 
