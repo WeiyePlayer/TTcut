@@ -11,6 +11,10 @@ public struct TTError: Error, LocalizedError, Codable, Sendable {
 }
 
 public enum AnalysisMode: String, Codable, CaseIterable, Sendable { case full, twoStage }
+public enum RallyRecognitionMethod: String, Codable, Sendable {
+  case bounceEvents = "bounce_events"
+  case continuousVisibility = "continuous_visibility"
+}
 public enum CutMode: String, Codable, CaseIterable, Sendable {
   case all, highlight, custom, analyzeOnly
 }
@@ -333,6 +337,7 @@ public struct AnalysisRequest: Codable, Sendable {
   public var confidence = 0.7
   public var stage1Confidence = 0.3
   public var stage2Confidence = 0.7
+  public var rallyRecognitionMethod: RallyRecognitionMethod?
   public var modelsDirectory: String
   public init(taskID: String, operation: String, video: VideoInfo, modelsDirectory: String) {
     self.taskID = taskID
@@ -351,6 +356,7 @@ public struct WorkerEvent: Codable, Sendable {
   public var total: Int?
   public var calibration: Calibration?
   public var rallies: [Rally]?
+  public var visibilityRallies: [VisibilityRally]?
   public var bounceTimes: [Double]?
   public var tableSamples: [TableSample]?
   public var error: TTError?

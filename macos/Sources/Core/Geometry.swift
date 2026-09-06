@@ -58,6 +58,33 @@ public struct AnalysisROI: Codable, Sendable {
     modelWidth = stride(Double(width) * 512 / Double(calibration.width))
     modelHeight = stride(Double(height) * 288 / Double(calibration.height))
   }
+
+  public func stabilizedForVisibility(sourceWidth: Int, sourceHeight: Int) -> AnalysisROI {
+    guard sourceWidth > 0, sourceHeight > 0 else { return self }
+    let gridX = max(
+      1, Int(pow(2, log2(Double(sourceWidth) / 32).rounded(.toNearestOrEven))))
+    let gridY = max(
+      1, Int(pow(2, log2(Double(sourceHeight) / 32).rounded(.toNearestOrEven))))
+    func snap(_ value: Int, grid: Int, limit: Int) -> Int {
+      max(0, min(limit, Int(floor(Double(value) / Double(grid) + 0.5)) * grid))
+    }
+    let left = snap(x, grid: gridX, limit: sourceWidth)
+    let top = snap(y, grid: gridY, limit: sourceHeight)
+    let right = snap(x + width, grid: gridX, limit: sourceWidth)
+    let bottom = snap(y + height, grid: gridY * 2, limit: sourceHeight)
+    guard right > left, bottom > top else { return self }
+    func stride(_ size: Double) -> Int {
+      max(8, Int(ceil(ceil(size / 8) * 8 * 1.25 / 8)) * 8)
+    }
+    var result = self
+    result.x = left
+    result.y = top
+    result.width = right - left
+    result.height = bottom - top
+    result.modelWidth = stride(Double(result.width) * 512 / Double(sourceWidth))
+    result.modelHeight = stride(Double(result.height) * 288 / Double(sourceHeight))
+    return result
+  }
 }
 
 public struct TrajectoryPoint: Codable, Hashable, Sendable {

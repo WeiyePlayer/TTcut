@@ -49,6 +49,7 @@ try {
   await check('actual table Core ML invocation',async()=>{const result=await task('startAutoCalibration',{videoPath:media,device:'auto'});assert.ok(result.type==='calibration-result'||result.code==='AUTO_CALIBRATION_FAILED',JSON.stringify(result));assert.ok(await page.evaluate(()=>window.__events.some(e=>e.type==='progress'&&e.data.stage==='table_inference')));});
   const input={videoPath:media,calibrationChoice:{method:'manual',calibration},device:'auto',historyVisibility:'visible',analysisMode:'full',rallyRecognitionMethod:'bounce_events',normalizeVariableFrameRate:false,blurballConfidenceThreshold:0.7,blurballStage1ConfidenceThreshold:0.3,blurballStage2ConfidenceThreshold:0.7};
   const analysis=await check('actual BlurBall Core ML full analysis',async()=>{const result=await task('startAnalysis',input);assert.equal(result.type,'analysis-result',JSON.stringify(result));assert.equal(result.data.inference_runtime.engine,'coreml');return result;});
+  const continuousAnalysis=await check('actual BlurBall continuous-visibility analysis',async()=>{const result=await task('startAnalysis',{...input,rallyRecognitionMethod:'continuous_visibility'});assert.equal(result.type,'analysis-result',JSON.stringify(result));assert.equal(result.data.schema_version,2);assert.equal(result.data.rally_recognition.method,'continuous_visibility');assert.equal(result.data.rally_recognition.detection_confidence_threshold,0.3);assert.equal(result.data.model_provenance.analysis.mode,'full');assert.equal('bounce_times_seconds' in result.data,false);return result;});
   await check('actual BlurBall two-stage analysis',async()=>{const result=await task('startAnalysis',{...input,analysisMode:'two_stage'});assert.equal(result.type,'analysis-result',JSON.stringify(result));assert.equal(result.data.model_provenance.analysis.mode,'two_stage');});
   await check('compatible preview is separate from analysis media',async()=>{const url=await page.evaluate(async v=>window.ttcut.preparePreview(v.mediaUrl,crypto.randomUUID()),video);assert.notEqual(url,video.mediaUrl);const reopened=await page.evaluate(id=>window.ttcut.openHistory(id),analysis.analysisId);assert.equal(reopened.analysis.video.path,media);});
   const segment={clip_id:'manual_11111111-1111-4111-8111-111111111111',source:'manual',display_index:1,start_time_seconds:0.5,end_time_seconds:1.5};
@@ -97,15 +98,21 @@ try {
     const repaired=await task('startAnalysis',{...input,videoPath:vfr,normalizeVariableFrameRate:true});assert.equal(repaired.type,'analysis-result',JSON.stringify(repaired));assert.equal(repaired.data.processing.mode,'normalized_cfr');
     await page.evaluate(id=>window.ttcut.deleteHistory(id),repaired.analysisId);assert.equal(await stat(cache).then(()=>true,()=>false),false);assert.ok((await stat(vfr)).size>0);assert.ok((await stat(exported.data.outputPath)).size>0);
   });
-  // Controlled nonempty history is test data only; real model results above are reported separately.
+  // Controlled nonempty rallies exercise the review UI; the surrounding schema and
+  // provenance come from the real packaged continuous analysis above.
   const recordPath=path.join(userData,'history/records',analysis.analysisId+'.json');
-  const record=JSON.parse(await readFile(recordPath,'utf8'));record.analysis.rallies=[{id:'rally_001',index:1,start_time_seconds:0.5,end_time_seconds:2,bounce_count:4},{id:'rally_002',index:2,start_time_seconds:2.5,end_time_seconds:3.5,bounce_count:8}];record.analysis.bounce_times_seconds=[0.5,0.8,1.1,1.5,2.5,2.6,2.7,2.8,2.9,3,3.2,3.4];await writeFile(recordPath,JSON.stringify(record));
-  await check('history review with controlled nonempty fixture',async()=>{await page.reload();await page.waitForFunction(()=>Boolean(window.ttcut));await page.getByRole('button',{name:'History',exact:true}).click();await page.locator('.history-card').first().waitFor();
+  const record=JSON.parse(await readFile(recordPath,'utf8'));record.analysis={...continuousAnalysis.data,rallies:[{id:'rally_001',index:1,start_time_seconds:0.5,end_time_seconds:2},{id:'rally_002',index:2,start_time_seconds:2.5,end_time_seconds:7.5}]};await writeFile(recordPath,JSON.stringify(record));
+  await check('continuous history review uses duration tiers',async()=>{await page.reload();await page.waitForFunction(()=>Boolean(window.ttcut));await page.getByRole('button',{name:'History',exact:true}).click();await page.locator('.history-card').first().waitFor();
     await page.locator('.history-open').first().click();
     await page.locator('.mode-card').filter({hasText:'All rallies'}).waitFor();
     await page.locator('.mode-card').filter({hasText:'Highlight rallies'}).click();
-    await page.getByText('> 7',{exact:true}).click();
+    const durationTier=page.getByRole('radiogroup',{name:'Duration tier'});
+    await durationTier.locator('label[for="single-duration-tier-2"]').click();
+    await page.waitForFunction(()=>document.querySelector('#single-duration-tier-2')?.checked===true);
+    assert.equal(await page.getByRole('radiogroup',{name:'Bounce filter'}).count(),0);
     assert.match(await page.locator('.footer-actions').innerText(),/1 \/ 2/);
+    await page.waitForTimeout(400);
+    await page.screenshot({path:path.join(run,'continuous-duration-review-en.png')});
     await page.locator('.mode-card').filter({hasText:'Custom'}).click();
     await page.getByRole('button',{name:'Clear all',exact:true}).click();
     assert.equal(await page.locator('.custom-rally-list input:checked').count(),0);
@@ -117,7 +124,7 @@ try {
     const endHandle=page.locator('.clip-handle.end').last();const oldEnd=Number(await endHandle.getAttribute('aria-valuenow'));const handleBox=await endHandle.boundingBox();
     await page.mouse.move(handleBox.x+handleBox.width/2,handleBox.y+handleBox.height/2);await page.mouse.down();await page.mouse.move(handleBox.x-25,handleBox.y+handleBox.height/2,{steps:5});await page.mouse.up();
     assert.ok(Number(await endHandle.getAttribute('aria-valuenow'))<oldEnd);
-    await page.getByRole('button',{name:'Add rally',exact:true}).click();const trackBox=await page.locator('.timeline-track-window').boundingBox();await page.mouse.click(trackBox.x+trackBox.width*0.8,trackBox.y+trackBox.height/2);
+    await page.getByRole('button',{name:'Add rally',exact:true}).click();const trackBox=await page.locator('.timeline-track-window').boundingBox();await page.mouse.click(trackBox.x+trackBox.width*0.875,trackBox.y+trackBox.height/2);
     await page.locator('.timeline-clip[data-clip-id^="manual_"]').waitFor();assert.equal(await page.locator('.timeline-clip').count(),3);
     await page.getByRole('button',{name:'Delete rally',exact:true}).click();await page.locator('.timeline-clip[data-clip-id^="manual_"]').click();assert.equal(await page.locator('.timeline-clip').count(),2);
     await page.locator('.custom-workspace').click({button:'right',position:{x:2,y:2}});

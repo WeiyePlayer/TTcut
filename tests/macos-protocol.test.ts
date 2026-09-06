@@ -28,4 +28,18 @@ describe('native subprocess protocol', () => {
     expect(() => reader.finish(1, null)).toThrow(expect.objectContaining({ code: 'DYNAMIC_HDR_UNSUPPORTED' }));
     expect(() => new NativeReplyReader(taskID).feed('x'.repeat(8 * 1024 * 1024 + 1))).toThrow('NATIVE_OUTPUT_LIMIT');
   });
+  it('accepts continuous-visibility rallies and validates their boundaries', () => {
+    const reader = new NativeReplyReader(taskID);
+    reader.feed(event({ type: 'result', visibilityRallies: [{
+      startFrame: 30, endFrame: 180, startTime: 1, endTime: 6, leadInStartTime: 0.5,
+    }] }) + '\n');
+    expect(reader.finish(0, null).visibilityRallies?.[0]).toMatchObject({
+      startFrame: 30, endFrame: 180, leadInStartTime: 0.5,
+    });
+    expect(() => new NativeReplyReader(taskID).feed(event({
+      type: 'result', visibilityRallies: [{
+        startFrame: 30, endFrame: 20, startTime: 1, endTime: 0.5, leadInStartTime: 2,
+      }],
+    }) + '\n')).toThrow();
+  });
 });

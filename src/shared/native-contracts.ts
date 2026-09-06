@@ -20,11 +20,20 @@ export const nativeTableSampleSchema = z.object({
   points: z.array(z.object({ index: number.int().min(0).max(12), position: nativePointSchema, activation: number, valid: z.boolean() }).strict()).length(13),
 }).strict();
 export const nativeRoiSchema = z.object({ x: number.int().nonnegative(), y: number.int().nonnegative(), width: positive.int(), height: positive.int(), modelWidth: positive.int(), modelHeight: positive.int() }).strict();
+export const nativeVisibilityRallySchema = z.object({
+  startFrame: number.int().nonnegative(), endFrame: number.int().nonnegative(),
+  startTime: number.nonnegative(), endTime: positive, leadInStartTime: number.nonnegative().optional(),
+}).strict().refine((rally) => rally.endFrame >= rally.startFrame && rally.endTime > rally.startTime, {
+  message: 'Native visibility rally boundaries are invalid',
+}).refine((rally) => rally.leadInStartTime === undefined || rally.leadInStartTime <= rally.startTime, {
+  message: 'Native visibility rally lead-in is invalid',
+});
 export const nativeEventSchema = z.object({
   schemaVersion: z.literal(1), taskID: z.string().uuid(), type: z.enum(['progress', 'result', 'error']),
   stage: z.string().optional(), current: number.nonnegative().optional(), total: number.nonnegative().optional(),
   calibration: nativeCalibrationSchema.optional(), tableSamples: z.array(nativeTableSampleSchema).length(5).optional(), roi: nativeRoiSchema.optional(),
   rallies: z.array(z.object({ id: z.string(), index: positive.int(), start: number.nonnegative(), end: positive, bounceCount: positive.int(), startFrame: number.int(), endFrame: number.int() }).strict()).optional(),
+  visibilityRallies: z.array(nativeVisibilityRallySchema).optional(),
   bounceTimes: z.array(number.nonnegative()).optional(),
   video: nativeVideoSchema.optional(), outputPath: z.string().optional(),
   error: z.object({ code: z.string(), message: z.string() }).strict().optional(),

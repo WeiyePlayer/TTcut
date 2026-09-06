@@ -187,9 +187,10 @@ final class Worker {
     )
   }
   func trajectories(
-    calibration: Calibration, predictor: Inference, threshold: Float, intervals: [CutRange]?
+    calibration: Calibration, predictor: Inference, threshold: Float, intervals: [CutRange]?,
+    roi requestedROI: AnalysisROI? = nil
   ) async throws -> [TrajectoryPoint] {
-    let roi = try AnalysisROI(calibration: calibration)
+    let roi = try requestedROI ?? AnalysisROI(calibration: calibration)
     var points: [TrajectoryPoint] = []
     var previous: Point?
     let total = request.video.frameCount ?? Int(ceil(request.video.duration * request.video.fps))
@@ -276,10 +277,31 @@ final class Worker {
     try calibration.validate()
     let predictor = try Inference(
       directory: request.modelsDirectory, name: "BlurBall", units: .cpuAndNeuralEngine)
+    let continuous = request.rallyRecognitionMethod == .continuousVisibility
+    let baseROI = try AnalysisROI(calibration: calibration)
+    let analysisROI = continuous
+      ? baseROI.stabilizedForVisibility(
+        sourceWidth: request.video.width, sourceHeight: request.video.height)
+      : baseROI
     var points = try await trajectories(
       calibration: calibration, predictor: predictor,
-      threshold: Float(request.mode == .twoStage ? request.stage1Confidence : request.confidence),
-      intervals: nil)
+      threshold: Float(
+        continuous ? VisibilityRallies.confidenceThreshold
+          : request.mode == .twoStage ? request.stage1Confidence : request.confidence),
+      intervals: nil, roi: analysisROI)
+    if continuous {
+      let config = VisibilityMotionConfig(
+        analysisWidthPixels: Double(analysisROI.width),
+        analysisHeightPixels: Double(analysisROI.height),
+        verticalExchangeEnabled: try VisibilityRallies.isEndOnTableView(calibration.points))
+      let rallies = try BlurBallVisibilityRallies.detect(
+        points, fps: request.video.fps, calibration: calibration, motionConfig: config)
+      var event = WorkerEvent(type: "result", taskID: request.taskID)
+      event.roi = analysisROI
+      event.visibilityRallies = rallies
+      emit(event)
+      return
+    }
     var frames = try BounceDetector.detect(points, calibration: calibration)
     var rallies = RallyGrouping.group(bounceFrames: frames, points: points)
     if request.mode == .twoStage {
@@ -287,7 +309,7 @@ final class Worker {
       if !intervals.isEmpty {
         points = try await trajectories(
           calibration: calibration, predictor: predictor,
-          threshold: Float(request.stage2Confidence), intervals: intervals)
+          threshold: Float(request.stage2Confidence), intervals: intervals, roi: analysisROI)
         frames = try BounceDetector.detect(points, calibration: calibration)
         rallies = RallyGrouping.group(bounceFrames: frames, points: points)
       } else {
@@ -298,7 +320,7 @@ final class Worker {
     }
     let set = Set(frames)
     var event = WorkerEvent(type: "result", taskID: request.taskID)
-    event.roi = try AnalysisROI(calibration: calibration)
+    event.roi = analysisROI
     event.rallies = rallies
     event.bounceTimes = points.filter { set.contains($0.frame) }.map(\.time).sorted()
     emit(event)

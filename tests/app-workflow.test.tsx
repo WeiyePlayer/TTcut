@@ -322,6 +322,51 @@ describe('App workflow notices and multi-task entry', () => {
     bootstrap.settings.rally_recognition_method = 'bounce_events';
   });
 
+  it('shows duration tiers and exports a duration criterion for continuous results', async () => {
+    bootstrap.settings.rally_recognition_method = 'continuous_visibility';
+    const selected = {
+      path: 'C:\\video\\continuous.mp4', name: 'continuous.mp4', size: 100,
+      mediaUrl: 'ttcut-media://continuous',
+    };
+    selectVideos.mockResolvedValue([selected]);
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: '选择或将文件拖到这里' }));
+    fireEvent.click(await screen.findByRole('button', { name: '开始分析' }));
+    act(() => taskListener?.({
+      type: 'analysis-result',
+      taskId: 'analysis-task-1',
+      analysisId: '11111111-1111-4111-8111-111111111111',
+      calibration,
+      data: {
+        schema_version: 2,
+        video: { ...metadata(selected.path), duration_seconds: 30 },
+        rallies: [
+          { id: 'rally_001', index: 1, start_time_seconds: 1, end_time_seconds: 4 },
+          { id: 'rally_002', index: 2, start_time_seconds: 8, end_time_seconds: 13 },
+          { id: 'rally_003', index: 3, start_time_seconds: 18, end_time_seconds: 24 },
+        ],
+        rally_recognition: {
+          method: 'continuous_visibility', start_visible_seconds: 0.2, end_invisible_seconds: 0.5,
+        },
+        calibration,
+      },
+    }));
+
+    fireEvent.click(await screen.findByRole('button', { name: /精彩回合/ }));
+    expect(screen.getByRole('radiogroup', { name: '时长档位' })).toBeVisible();
+    expect(screen.queryByRole('radiogroup', { name: '板数筛选' })).toBeNull();
+    fireEvent.click(within(screen.getByRole('radiogroup', { name: '时长档位' }))
+      .getByRole('radio', { name: '长相持' }));
+    fireEvent.click(screen.getByRole('button', { name: '开始剪辑' }));
+    await waitFor(() => expect(window.ttcut.startExport).toHaveBeenCalledWith(expect.objectContaining({
+      analysis_id: '11111111-1111-4111-8111-111111111111',
+      selection: expect.objectContaining({
+        mode: 'highlight', criterion: { kind: 'duration_tier', tier: 'long_rally' },
+      }),
+    })));
+    bootstrap.settings.rally_recognition_method = 'bounce_events';
+  });
+
   it('opens each settings website button through the external-link API', async () => {
     render(<App />);
     fireEvent.click(await screen.findByRole('button', { name: '设置' }));

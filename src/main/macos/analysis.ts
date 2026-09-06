@@ -15,6 +15,66 @@ import { removeProcessingCache } from '../processing-media';
 
 type AnalysisOptions = Parameters<typeof import('../analysis').startAnalysis>[1];
 const checkpoint = { blurball: '3545206c7155194ea654899d33579c88c9fd8e82c632cbdbae3b0c0ec3f2985f', table: '160e1a9b2d0236b501dc4a4d38bbfb39315eeef6de5d8c11770452623ff102df' };
+const continuousVisibilityProvenance = {
+  detection_confidence_threshold: 0.30,
+  start_visible_seconds: 0.20,
+  end_invisible_seconds: 0.50,
+  motion_filter: {
+    minimum_horizontal_excursion_ratio: 20 / 618,
+    maximum_reversal_gap_seconds: 0.35,
+    minimum_horizontal_to_vertical_range_ratio: 0.70,
+    maximum_monotonic_vertical_reversals: 1,
+    minimum_monotonic_horizontal_range_ratio: 200 / 618,
+    minimum_monotonic_duration_seconds: 0.60,
+    short_vertical_filter_seconds: 1.20,
+    maximum_short_vertical_range_ratio: 0.50,
+    minimum_vertical_to_horizontal_range_ratio: 1.0,
+    end_on_min_opposing_edge_balance: 0.85,
+    end_on_min_screen_aspect_ratio: 2.0,
+  },
+  fragment_bridge: {
+    maximum_gap_seconds: 1.50,
+    maximum_boundary_displacement_ratio: 0.35,
+    maximum_boundary_speed_ratio_per_second: 0.26,
+  },
+  inter_rally_fragment_filter: {
+    side_on_views_only: true,
+    minimum_candidate_seconds: 1.0,
+    maximum_candidate_seconds: 6.0,
+    maximum_expanded_table_ratio: 0.45,
+    minimum_visible_run_count: 3,
+    minimum_one_way_range_ratio: 0.55,
+    maximum_sparse_visibility_ratio: 0.30,
+    minimum_contiguous_flight_seconds: 0.15,
+    minimum_coherent_reversal_ratio: 0.20,
+    minimum_coherent_flight_displacement_ratio: 0.15,
+    expanded_table_length_margin_cm: 35.0,
+    expanded_table_width_margin_cm: 25.0,
+    motion_refinement: {
+      version: 5 as const,
+      minimum_motion_run_seconds: 0.15,
+      minimum_horizontal_range_ratio: 0.05,
+      minimum_speed_ratio_per_second: 0.35,
+      reversal_range_ratio: 0.06,
+      gap_minimum_motion_range_ratio: 0.04,
+      gap_minimum_motion_support_ratio: 0.35,
+      short_gap_seconds: 1.25,
+      long_gap_seconds: 2.25,
+      stationary_run_seconds: 0.50,
+      boundary_context_seconds: 0.25,
+    },
+  },
+} as const;
+function isEndOnTableView(calibration: Calibration): boolean {
+  const { top_left: topLeft, top_right: topRight, bottom_right: bottomRight, bottom_left: bottomLeft } = calibration.points;
+  const distance = (a: readonly [number, number], b: readonly [number, number]) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+  const top = distance(topLeft, topRight);
+  const bottom = distance(bottomLeft, bottomRight);
+  const left = distance(topLeft, bottomLeft);
+  const right = distance(topRight, bottomRight);
+  return Math.min(top, bottom) / Math.max(top, bottom) >= 0.85
+    && (top + bottom) / (left + right) >= 2.0;
+}
 const corners = ['top_left', 'top_right', 'bottom_right', 'bottom_left'] as const;
 function send(window: BrowserWindow, event: AppEvent) { if (!window.isDestroyed()) window.webContents.send(IPC.taskEvent, event); }
 function readCalibration(event: NativeEvent): { calibration: Calibration; table: TableAnalysis } {
@@ -62,7 +122,8 @@ export async function startMacAnalysis(window: BrowserWindow, value: AnalysisOpt
         taskId, kind: 'analysis', stage: event.stage!, percent: overallAnalysisProgress(event.stage!, event.total ? event.current! / event.total * 100 : 0, value.calibrationChoice.method, value.analysisMode,
           value.normalizeVariableFrameRate && source.variable_frame_rate ? 'normalized' : 'source'),
       } });
-      const base = { mode: value.analysisMode === 'two_stage' ? 'twoStage' : 'full', confidence: value.blurballConfidenceThreshold, stage1Confidence: value.blurballStage1ConfidenceThreshold, stage2Confidence: value.blurballStage2ConfidenceThreshold };
+      const continuous = value.rallyRecognitionMethod === 'continuous_visibility';
+      const base = { mode: continuous ? 'full' : value.analysisMode === 'two_stage' ? 'twoStage' : 'full', rallyRecognitionMethod: value.rallyRecognitionMethod, confidence: value.blurballConfidenceThreshold, stage1Confidence: value.blurballStage1ConfidenceThreshold, stage2Confidence: value.blurballStage2ConfidenceThreshold };
       if (value.calibrationChoice.method === 'automatic') {
         const result = readCalibration(await callNative('TTcutWorker', { ...base, operation: 'calibrate', video: source.native_video }, { taskId, onProgress: progress }));
         calibration = result.calibration; table = result.table;
@@ -99,18 +160,38 @@ export async function startMacAnalysis(window: BrowserWindow, value: AnalysisOpt
         } finally { await rm(partial, { force: true }); }
       }
       const result = await callNative('TTcutWorker', { ...base, operation: 'analyze', video: video.native_video, calibration: nativeCalibration(calibration) }, { taskId, onProgress: progress });
-      if (!result.rallies || !result.bounceTimes || !result.roi) throw new Error('NATIVE_ANALYSIS_RESULT_MISSING');
+      if (!result.roi || (continuous ? !result.visibilityRallies : !result.rallies || !result.bounceTimes)) throw new Error('NATIVE_ANALYSIS_RESULT_MISSING');
       const roi = result.roi;
-      data = analysisResultSchema.parse({ schema_version: 1, video, source_video: source, processing, calibration,
+      const commonResult = {
+        video, source_video: source, processing, calibration,
         ...(table ? { table_analysis: table } : {}),
-        rallies: result.rallies.map((rally, i) => ({ id: `rally_${String(i + 1).padStart(3, '0')}`, index: i + 1, start_time_seconds: rally.start, end_time_seconds: rally.end, bounce_count: rally.bounceCount })),
-        bounce_times_seconds: [...new Set(result.bounceTimes)].sort((a, b) => a - b),
-        inference_runtime: { engine: 'coreml', compute_units: 'cpuAndNeuralEngine', precision: 'float16', prediction_concurrency: 4, checkpoint_sha256: checkpoint.blurball },
-        model_provenance: { profile: 'blurball_v1', component_version: null, roi: { x: roi.x, y: roi.y, width: roi.width, height: roi.height }, main_input: { width: roi.modelWidth, height: roi.modelHeight }, aux_input: null,
-          analysis: { schema_version: 2, mode: value.analysisMode, ...(value.analysisMode === 'two_stage' ? { interval_expansion_seconds: 0.75 } : {}), stages: value.analysisMode === 'full'
-            ? [{ name: 'full', confidence_threshold: value.blurballConfidenceThreshold, window_size: 3, window_stride: 3, retained_output: 'all_window_frames' }]
-            : [{ name: 'candidate', confidence_threshold: value.blurballStage1ConfidenceThreshold, window_size: 3, window_stride: 3, retained_output: 'all_window_frames' }, { name: 'refinement', confidence_threshold: value.blurballStage2ConfidenceThreshold, window_size: 3, window_stride: 1, retained_output: 'center_frame' }] },
+        inference_runtime: { engine: 'coreml' as const, compute_units: 'cpuAndNeuralEngine' as const, precision: 'float16' as const, prediction_concurrency: 4, checkpoint_sha256: checkpoint.blurball },
+        model_provenance: { profile: 'blurball_v1' as const, component_version: null, roi: { x: roi.x, y: roi.y, width: roi.width, height: roi.height }, main_input: { width: roi.modelWidth, height: roi.modelHeight }, aux_input: null,
+          analysis: { schema_version: 2 as const, mode: continuous ? 'full' as const : value.analysisMode, ...(!continuous && value.analysisMode === 'two_stage' ? { interval_expansion_seconds: 0.75 } : {}), stages: continuous || value.analysisMode === 'full'
+            ? [{ name: 'full' as const, confidence_threshold: continuous ? continuousVisibilityProvenance.detection_confidence_threshold : value.blurballConfidenceThreshold, window_size: 3 as const, window_stride: 3 as const, retained_output: 'all_window_frames' as const }]
+            : [{ name: 'candidate' as const, confidence_threshold: value.blurballStage1ConfidenceThreshold, window_size: 3 as const, window_stride: 3 as const, retained_output: 'all_window_frames' as const }, { name: 'refinement' as const, confidence_threshold: value.blurballStage2ConfidenceThreshold, window_size: 3 as const, window_stride: 1 as const, retained_output: 'center_frame' as const }] },
         },
+      };
+      data = continuous ? analysisResultSchema.parse({
+        schema_version: 2,
+        ...commonResult,
+        rallies: result.visibilityRallies!.map((rally, i) => ({
+          id: `rally_${String(i + 1).padStart(3, '0')}`, index: i + 1,
+          start_time_seconds: rally.startTime, end_time_seconds: rally.endTime,
+          ...(rally.leadInStartTime === undefined ? {} : { lead_in_start_time_seconds: rally.leadInStartTime }),
+        })),
+        rally_recognition: {
+          method: 'continuous_visibility', ...continuousVisibilityProvenance,
+          motion_filter: {
+            ...continuousVisibilityProvenance.motion_filter,
+            vertical_exchange_enabled: isEndOnTableView(calibration),
+          },
+        },
+      }) : analysisResultSchema.parse({
+        schema_version: 1,
+        ...commonResult,
+        rallies: result.rallies!.map((rally, i) => ({ id: `rally_${String(i + 1).padStart(3, '0')}`, index: i + 1, start_time_seconds: rally.start, end_time_seconds: rally.end, bounce_count: rally.bounceCount })),
+        bounce_times_seconds: [...new Set(result.bounceTimes!)].sort((a, b) => a - b),
       });
       if (controller.signal.aborted) throw new Error('PROCESS_CANCELLED');
       if (await identity(source.path) !== originalIdentity) throw Object.assign(new Error('Source changed during analysis'), { code: 'INPUT_MOVED' });
