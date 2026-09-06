@@ -5,6 +5,7 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  powerSaveBlocker,
   protocol,
   shell,
 } from 'electron';
@@ -31,7 +32,12 @@ import { getLogDirectory, logLine } from './logger';
 import { getHistoryStore } from './history';
 import { clearMediaPaths, installMediaProtocol, registerMediaPath } from './media-protocol';
 import { probeVideo } from './probe';
-import { cancelAllTasksAndWait, cancelTask, hasActiveTasks } from './processes';
+import {
+  cancelAllTasksAndWait,
+  cancelTask,
+  configureTaskSuspensionBlocker,
+  hasActiveTasks,
+} from './processes';
 import { loadSettings, saveSettings } from './settings';
 import { getPlatformCompatibility } from './platform-compatibility';
 import {
@@ -394,6 +400,7 @@ if (installerMigrationRequest) {
     app.exit(exitCode);
   });
 } else app.whenReady().then(async () => {
+  configureTaskSuspensionBlocker(powerSaveBlocker);
   const compatibility = await getPlatformCompatibility();
   await logLine('app', 'INFO', `Platform compatibility gate disabled: ${JSON.stringify(compatibility)}`)
     .catch(() => undefined);
