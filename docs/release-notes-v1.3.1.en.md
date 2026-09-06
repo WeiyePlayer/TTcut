@@ -25,4 +25,7 @@
 
 ## Verification
 
-Release verification results will be added after the final build completes.
+- TypeScript type checking passed, along with 17 macOS-specific Vitest tests and 37 related application/analysis-contract tests.
+- All 27 native Swift tests passed, covering Continuous motion rules, export seeking and automatic threading, H.264/HEVC, HDR, VFR, multichannel audio, and synthetic 8K paths.
+- The packaged Electron application passed 19 workflow checks covering native Core ML calibration, Bounce events, Continuous motion, two-stage analysis, export, HDR, VFR, cancellation, crash recovery, and history. Three additional UI workflows passed for batch recovery, cancel/retry, and quit cleanup.
+- The bundle passed checks for 29 arm64 Mach-O files, packaged dependencies, minimum macOS version, and signatures. DMG mounting, bundled `ffprobe` execution, and DMG/ZIP/`latest-mac.yml` hash and size verification also passed.
