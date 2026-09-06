@@ -10,6 +10,7 @@ vi.mock('electron', () => ({
 }));
 
 import { loadSettings, saveSettings } from '../src/main/settings';
+import { appSettingsSchema } from '../src/shared/contracts';
 
 describe('settings migration', () => {
   beforeEach(async () => {
@@ -28,7 +29,7 @@ describe('settings migration', () => {
       language: 'en', calibration_method: 'automatic',
       pre_roll_seconds: 5, post_roll_seconds: 0.5,
       analysis_mode: 'full',
-      rally_recognition_method: 'bounce_events',
+      rally_recognition_method: 'continuous_visibility',
       normalize_variable_frame_rate: false,
     });
   });
@@ -64,7 +65,7 @@ describe('settings migration', () => {
     await expect(loadSettings()).resolves.toEqual({
       language: 'zh-CN', calibration_method: 'automatic', pre_roll_seconds: 2.5, post_roll_seconds: 2,
       analysis_mode: 'full',
-      rally_recognition_method: 'bounce_events',
+      rally_recognition_method: 'continuous_visibility',
       normalize_variable_frame_rate: false,
     });
     expect(JSON.parse(await readFile(path.join(state.userData, 'settings.json'), 'utf8'))).not.toHaveProperty('ball_model_profile');
@@ -84,13 +85,27 @@ describe('settings migration', () => {
     expect(persisted).not.toHaveProperty('blurball_confidence_threshold');
   });
 
-  it('defaults missing or invalid rally recognition methods to bounce events', async () => {
+  it('defaults missing or invalid rally recognition methods to continuous motion', async () => {
     await writeFile(path.join(state.userData, 'settings.json'), JSON.stringify({
       language: 'zh-CN', calibration_method: 'automatic', pre_roll_seconds: 2.5, post_roll_seconds: 1,
       analysis_mode: 'two_stage', rally_recognition_method: 'unknown',
     }), 'utf8');
     await expect(loadSettings()).resolves.toMatchObject({
-      rally_recognition_method: 'bounce_events', analysis_mode: 'two_stage',
+      rally_recognition_method: 'continuous_visibility', analysis_mode: 'two_stage',
     });
+  });
+
+  it('uses continuous motion on first launch and when parsing settings without a method', async () => {
+    const settings = await loadSettings();
+    expect(settings.rally_recognition_method).toBe('continuous_visibility');
+    const { rally_recognition_method: _method, ...withoutMethod } = settings;
+    expect(appSettingsSchema.parse(withoutMethod).rally_recognition_method).toBe('continuous_visibility');
+  });
+
+  it('preserves an existing bounce-events selection', async () => {
+    await writeFile(path.join(state.userData, 'settings.json'), JSON.stringify({
+      rally_recognition_method: 'bounce_events',
+    }), 'utf8');
+    expect((await loadSettings()).rally_recognition_method).toBe('bounce_events');
   });
 });

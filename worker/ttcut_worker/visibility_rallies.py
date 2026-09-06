@@ -35,6 +35,8 @@ class VisibilityRallySummary:
     end_frame: int
     start_time: float
     end_time: float
+    # Earliest automatic lead-in after an observed transfer; manual edits remain free.
+    lead_in_start_time: float | None = None
 
 
 @dataclass(frozen=True)

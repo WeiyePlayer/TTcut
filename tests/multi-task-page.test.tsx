@@ -123,7 +123,7 @@ describe('multi-task clipping', () => {
     await waitFor(() => expect(highlight).not.toBeDisabled());
     fireEvent.click(highlight);
     expect(highlight).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getAllByRole('radio', { name: '5板' })[0]).toBeChecked();
+    expect(screen.queryByRole('radio', { name: '5板' })).not.toBeInTheDocument();
   });
 
   it('runs ready videos serially with precalibrated analysis and 70/30 progress mapping', async () => {
@@ -141,7 +141,7 @@ describe('multi-task clipping', () => {
       device: 'auto',
       historyVisibility: 'deferred',
       analysisMode: 'full',
-      rallyRecognitionMethod: 'bounce_events',
+      rallyRecognitionMethod: 'continuous_visibility',
       normalizeVariableFrameRate: true,
       blurballConfidenceThreshold: 0.7,
       blurballStage1ConfidenceThreshold: 0.3,
@@ -342,6 +342,7 @@ describe('multi-task clipping', () => {
         preRoll={2.5}
         postRoll={1}
         analysisMode="two_stage"
+        rallyRecognitionMethod="bounce_events"
         blurballConfidenceThreshold={0.55}
         blurballStage1ConfidenceThreshold={0.3}
         blurballStage2ConfidenceThreshold={0.7}
@@ -425,9 +426,19 @@ describe('multi-task clipping', () => {
     } as DOMRect);
     const surface = document.querySelector('.video-surface');
     expect(surface).not.toBeNull();
-    for (const [clientX, clientY] of [[250, 125], [542, 125], [625, 354], [167, 354]]) {
+    for (const [clientX, clientY] of [[625, 354], [250, 125], [167, 354], [542, 125]]) {
       fireEvent.pointerDown(surface!, { clientX, clientY });
     }
+    const polygon = document.querySelector('.calibration-polygon polygon');
+    expect(polygon).not.toBeNull();
+    const pointsBeforeDrag = polygon!.getAttribute('points');
+    const firstPoint = screen.getByRole('button', { name: 'Calibration point 1' });
+    Object.defineProperty(firstPoint, 'setPointerCapture', { configurable: true, value: vi.fn() });
+    Object.defineProperty(firstPoint, 'releasePointerCapture', { configurable: true, value: vi.fn() });
+    fireEvent.pointerDown(firstPoint, { clientX: 625, clientY: 354, pointerId: 1 });
+    fireEvent.pointerMove(firstPoint, { clientX: 610, clientY: 345, pointerId: 1 });
+    fireEvent.pointerUp(firstPoint, { pointerId: 1 });
+    expect(polygon!.getAttribute('points')).not.toBe(pointsBeforeDrag);
     const finish = screen.getByRole('button', { name: '完成标定' });
     expect(finish).toBeEnabled();
     fireEvent.click(finish);
@@ -526,6 +537,7 @@ describe('multi-task clipping', () => {
         preRoll={2.5}
         postRoll={1}
         analysisMode="two_stage"
+        rallyRecognitionMethod="bounce_events"
         blurballConfidenceThreshold={0.55}
         blurballStage1ConfidenceThreshold={0.3}
         blurballStage2ConfidenceThreshold={0.7}
@@ -543,6 +555,7 @@ describe('multi-task clipping', () => {
         preRoll={5}
         postRoll={4}
         analysisMode="full"
+        rallyRecognitionMethod="bounce_events"
         blurballConfidenceThreshold={0.8}
         blurballStage1ConfidenceThreshold={0.8}
         blurballStage2ConfidenceThreshold={0.9}

@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import math
 import time
+from itertools import product
 from pathlib import Path
 from typing import Callable
 
 import cv2
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 from .calibration import TableCalibration
 from .errors import (
@@ -21,7 +23,8 @@ from .device import resolve_device
 from .table_model import FixedTableModel
 
 
-SAMPLE_LABELS = ("first", "25_percent", "50_percent", "75_percent", "last")
+SAMPLE_RATIOS = (0.05, 0.14, 0.23, 0.32, 0.41, 0.50, 0.59, 0.68, 0.77, 0.86, 0.95)
+SAMPLE_LABELS = tuple(f"sample_{index:02d}" for index in range(1, len(SAMPLE_RATIOS) + 1))
 KEYPOINT_LABELS = (
     "close_left",
     "close_right",
@@ -37,14 +40,38 @@ KEYPOINT_LABELS = (
     "close_center",
     "far_center",
 )
-CORNER_INDICES = (0, 1, 4, 5)
+SEMANTIC_CORNER_INDICES = (4, 5, 1, 0)
+PLANAR_KEYPOINT_INDICES = (0, 1, 2, 3, 4, 5, 6, 7, 8, 11, 12)
+TABLE_KEYPOINTS_CM = np.asarray([
+    [-137.0, 76.25],
+    [-137.0, -76.25],
+    [0.0, 76.25],
+    [0.0, -76.25],
+    [137.0, 76.25],
+    [137.0, -76.25],
+    [0.0, 91.5],
+    [0.0, -91.5],
+    [0.0, 0.0],
+    [0.0, 0.0],
+    [0.0, 0.0],
+    [-137.0, 0.0],
+    [137.0, 0.0],
+], dtype=np.float32)
+TABLE_CORNERS_CM = TABLE_KEYPOINTS_CM[list(SEMANTIC_CORNER_INDICES)]
 MODEL_SIZE = (1600, 896)
 KEYPOINT_THRESHOLD = 0.1
+PEAK_CANDIDATE_COUNT = 12
+PEAK_MIN_ACTIVATION = 0.15
+PEAK_CLUSTER_RADIUS_RATIO = 0.025
+PEAK_CLUSTER_LIMIT = 8
+GEOMETRIC_SIGMA_RATIO = 0.018
+GEOMETRIC_MAX_DISTANCE_RATIO = 0.04
+MIN_GEOMETRIC_SUPPORT = 10
+MIN_GEOMETRIC_SCORE = 5.5
 MEAN = np.asarray([0.485, 0.456, 0.406], dtype=np.float32)
 STD = np.asarray([0.229, 0.224, 0.225], dtype=np.float32)
 
 ProgressCallback = Callable[[str, int, int], None]
-SAMPLE_RATIOS = (0.0, 0.25, 0.5, 0.75, 1.0)
 MAX_SEEK_FORWARD_SECONDS = 10.0
 
 
@@ -144,10 +171,7 @@ def _decode_sample_frames(
     if use_frame_seek:
         last_index = metadata_frames - 1
         target_frame_indices: list[int | None] = [
-            0 if ratio == 0 else last_index if ratio == 1 else min(
-                last_index,
-                int(math.ceil(metadata_frames * ratio - 1e-9)),
-            )
+            min(last_index, max(0, int(round(last_index * ratio))))
             for ratio in SAMPLE_RATIOS
         ]
         target_times = [
@@ -157,7 +181,7 @@ def _decode_sample_frames(
     else:
         target_frame_indices = [None] * len(SAMPLE_RATIOS)
         target_times = [
-            0.0 if ratio == 0 else max(0.0, duration - 1.0 / fps) if ratio == 1 else duration * ratio
+            duration * ratio
             for ratio in SAMPLE_RATIOS
         ]
 
@@ -165,8 +189,8 @@ def _decode_sample_frames(
     decoded_frame_count = 0
     progress_callback("table_sampling", 0, len(SAMPLE_LABELS))
     try:
-        for sample_index, (target_frame_index, target_time) in enumerate(
-            zip(target_frame_indices, target_times),
+        for sample_index, (label, ratio, target_frame_index, target_time) in enumerate(
+            zip(SAMPLE_LABELS, SAMPLE_RATIOS, target_frame_indices, target_times),
             start=1,
         ):
             frame_index, timestamp, frame, decoded, seek_method, position_error = _seek_and_decode(
@@ -181,6 +205,8 @@ def _decode_sample_frames(
                 timestamp,
                 frame,
                 {
+                    "label": label,
+                    "sample_ratio": ratio,
                     "target_frame_index": target_frame_index,
                     "target_time_seconds": target_time,
                     "seek_method": seek_method,
@@ -209,6 +235,7 @@ def _decode_sample_frames(
         "sampling_seconds": time.perf_counter() - sampling_started,
         "seek_count": len(samples),
         "copied_frame_count": 0,
+        "sample_count": len(samples),
     }
 
 
@@ -267,10 +294,33 @@ def _extract_raw_keypoints(
     return positions, activations, valid
 
 
+def _extract_peak_candidates(
+    heatmaps: torch.Tensor,
+    image_width: int,
+    image_height: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    maps = heatmaps[0]
+    _, heatmap_height, heatmap_width = maps.shape
+    pooled = F.max_pool2d(maps.unsqueeze(0), kernel_size=9, stride=1, padding=4)[0]
+    local_maxima = torch.where(maps == pooled, maps, torch.full_like(maps, -torch.inf))
+    values, indices = torch.topk(
+        local_maxima.flatten(1),
+        k=min(PEAK_CANDIDATE_COUNT, heatmap_height * heatmap_width),
+        dim=1,
+    )
+    x = indices % heatmap_width
+    y = indices // heatmap_width
+    positions = torch.stack((
+        (x.float() + 0.5) * image_width / heatmap_width - 0.5,
+        (y.float() + 0.5) * image_height / heatmap_height - 0.5,
+    ), dim=2)
+    return positions.cpu().numpy(), values.cpu().numpy()
+
+
 def _predict_samples(model, device, samples, width: int, height: int, progress_callback: ProgressCallback):
     predictions = []
     progress_callback("table_inference", 0, len(samples))
-    for sample_index, (label, (frame_index, timestamp, frame, sample_info)) in enumerate(zip(SAMPLE_LABELS, samples), start=1):
+    for sample_index, (frame_index, timestamp, frame, sample_info) in enumerate(samples, start=1):
         tensor = _preprocess(frame, device)
         started = time.perf_counter()
         try:
@@ -279,109 +329,227 @@ def _predict_samples(model, device, samples, width: int, height: int, progress_c
                 if device.type == "cuda":
                     torch.cuda.synchronize(device)
                 points, activations, valid = _extract_raw_keypoints(heatmaps, width, height)
+                peak_points, peak_activations = _extract_peak_candidates(heatmaps, width, height)
         except torch.cuda.OutOfMemoryError as exc:
             raise DeviceError("CUDA ran out of memory during automatic table calibration.") from exc
         predictions.append({
-            "label": label,
             "frame_index": frame_index,
             "time_seconds": timestamp,
             **sample_info,
             "points": points,
             "activations": activations,
             "valid": valid,
+            "peak_points": peak_points,
+            "peak_activations": peak_activations,
             "forward_seconds": time.perf_counter() - started,
         })
         progress_callback("table_inference", sample_index, len(samples))
     return predictions
 
 
-def _aggregate_nearest_pairs(predictions):
-    fixed = np.zeros((len(KEYPOINT_LABELS), 3), dtype=np.float64)
+def _stable_peak_clusters(predictions, point_index: int, diagonal: float) -> list[dict]:
+    radius = diagonal * PEAK_CLUSTER_RADIUS_RATIO
+    frame_candidates = []
+    for prediction in predictions:
+        points = prediction["peak_points"][point_index]
+        activations = prediction["peak_activations"][point_index]
+        valid = (
+            np.isfinite(points).all(axis=1)
+            & np.isfinite(activations)
+            & (activations >= PEAK_MIN_ACTIVATION)
+        )
+        frame_candidates.append((points[valid], activations[valid], prediction["label"]))
+
+    seeds = [points for points, _activations, _label in frame_candidates if len(points)]
+    if not seeds:
+        return []
+
+    valid_candidate_count = sum(len(points) for points, _activations, _label in frame_candidates)
+    clusters = []
+    for seed in np.concatenate(seeds, axis=0):
+        selected_points = []
+        selected_activations = []
+        selected_samples = []
+        for points, activations, label in frame_candidates:
+            if not len(points):
+                continue
+            distances = np.linalg.norm(points - seed, axis=1)
+            matches = np.flatnonzero(distances <= radius)
+            if not len(matches):
+                continue
+            best = max(
+                matches,
+                key=lambda index: float(activations[index] - distances[index] / radius * 0.15),
+            )
+            selected_points.append(points[best])
+            selected_activations.append(float(activations[best]))
+            selected_samples.append(label)
+        if len(selected_points) < 2:
+            continue
+        center = np.median(np.stack(selected_points), axis=0)
+        clusters.append({
+            "point": center,
+            "support": len(selected_points),
+            "mean_activation": float(np.mean(selected_activations)),
+            "selected_samples": selected_samples,
+            "valid_candidate_count": valid_candidate_count,
+        })
+
+    clusters.sort(key=lambda item: (-item["support"], -item["mean_activation"]))
+    kept = []
+    for cluster in clusters:
+        if any(np.linalg.norm(cluster["point"] - existing["point"]) < radius * 0.6 for existing in kept):
+            continue
+        kept.append(cluster)
+        if len(kept) >= PEAK_CLUSTER_LIMIT:
+            break
+    return kept
+
+
+def _build_peak_clusters(predictions, width: int, height: int) -> dict[int, list[dict]]:
+    diagonal = math.hypot(width, height)
+    return {
+        point_index: _stable_peak_clusters(predictions, point_index, diagonal)
+        for point_index in PLANAR_KEYPOINT_INDICES
+    }
+
+
+def _valid_corner_candidate(corners: np.ndarray, width: int, height: int) -> TableCalibration | None:
+    points = {
+        "top_left": corners[0].tolist(),
+        "top_right": corners[1].tolist(),
+        "bottom_right": corners[2].tolist(),
+        "bottom_left": corners[3].tolist(),
+    }
+    try:
+        calibration = TableCalibration.from_points(width, height, points)
+    except CalibrationError:
+        return None
+    far_edge = float(np.linalg.norm(corners[1] - corners[0]))
+    close_edge = float(np.linalg.norm(corners[2] - corners[3]))
+    if far_edge > close_edge * 1.35:
+        return None
+    return calibration
+
+
+def _score_homography(
+    homography: np.ndarray,
+    clusters: dict[int, list[dict]],
+    diagonal: float,
+    sample_count: int,
+) -> tuple[float, int, list[dict | None]]:
+    world_points = TABLE_KEYPOINTS_CM[list(PLANAR_KEYPOINT_INDICES)]
+    projected = cv2.perspectiveTransform(world_points.reshape(-1, 1, 2), homography).reshape(-1, 2)
+    sigma = diagonal * GEOMETRIC_SIGMA_RATIO
+    maximum_distance = diagonal * GEOMETRIC_MAX_DISTANCE_RATIO
+    score = 0.0
+    support = 0
+    selected = []
+    for projected_point, point_index in zip(projected, PLANAR_KEYPOINT_INDICES):
+        options = clusters[point_index]
+        if not options:
+            selected.append(None)
+            continue
+        distances = np.asarray([
+            np.linalg.norm(projected_point - option["point"])
+            for option in options
+        ])
+        quality = np.asarray([
+            option["support"] / sample_count
+            * (0.7 + 0.3 * np.clip(option["mean_activation"], 0, 1.2) / 1.2)
+            for option in options
+        ])
+        values = quality * np.exp(-0.5 * np.square(distances / sigma))
+        best = int(np.argmax(values))
+        score += float(values[best])
+        if distances[best] <= maximum_distance:
+            support += 1
+            selected.append(options[best])
+        else:
+            selected.append(None)
+    return score, support, selected
+
+
+def _select_geometric_consensus(
+    clusters: dict[int, list[dict]],
+    width: int,
+    height: int,
+    sample_count: int,
+) -> tuple[TableCalibration, list[dict | None], dict]:
+    corner_clusters = [clusters[point_index] for point_index in SEMANTIC_CORNER_INDICES]
+    candidate_counts = [len(options) for options in corner_clusters]
+    if any(count == 0 for count in candidate_counts):
+        raise AutoCalibrationError("Automatic calibration could not find stable candidates for all table corners.")
+
+    diagonal = math.hypot(width, height)
+    best = None
+    for options in product(*corner_clusters):
+        corners = np.stack([option["point"] for option in options]).astype(np.float32)
+        calibration = _valid_corner_candidate(corners, width, height)
+        if calibration is None:
+            continue
+        homography = cv2.getPerspectiveTransform(TABLE_CORNERS_CM, corners)
+        score, support, selected = _score_homography(
+            homography,
+            clusters,
+            diagonal,
+            sample_count,
+        )
+        if support < MIN_GEOMETRIC_SUPPORT:
+            continue
+        candidate = (score, support, calibration, selected)
+        if best is None or candidate[:2] > best[:2]:
+            best = candidate
+
+    if best is None or best[0] < MIN_GEOMETRIC_SCORE:
+        raise AutoCalibrationError("Automatic calibration did not find a consistent table geometry.")
+    score, support, calibration, selected = best
+    return calibration, selected, {
+        "sample_count": sample_count,
+        "semantic_support": support,
+        "score": float(score),
+        "corner_candidate_counts": candidate_counts,
+    }
+
+
+def _fixed_keypoint_details(
+    clusters: dict[int, list[dict]],
+    selected: list[dict | None],
+) -> list[dict]:
+    selected_by_index = dict(zip(PLANAR_KEYPOINT_INDICES, selected))
     details = []
     for point_index, point_label in enumerate(KEYPOINT_LABELS):
-        candidates = []
-        for sample_index, prediction in enumerate(predictions):
-            if prediction["valid"][point_index]:
-                candidates.append((
-                    sample_index,
-                    prediction["points"][point_index].astype(np.float64),
-                    float(prediction["activations"][point_index]),
-                ))
-        if len(candidates) < 2:
+        cluster = selected_by_index.get(point_index)
+        if cluster is None:
             details.append({
                 "keypoint": point_index + 1,
                 "label": point_label,
                 "valid": False,
-                "valid_candidate_count": len(candidates),
+                "valid_candidate_count": sum(
+                    option["valid_candidate_count"]
+                    for option in clusters.get(point_index, [])[:1]
+                ),
+                "cluster_support": 0,
             })
             continue
-
-        best = None
-        for first_index in range(len(candidates)):
-            for second_index in range(first_index + 1, len(candidates)):
-                distance = float(np.linalg.norm(candidates[first_index][1] - candidates[second_index][1]))
-                if best is None or distance < best[0]:
-                    best = (distance, candidates[first_index], candidates[second_index])
-        distance, first, second = best
-        mean_point = (first[1] + second[1]) / 2.0
-        activation = (first[2] + second[2]) / 2.0
-        fixed[point_index, :2] = mean_point
-        fixed[point_index, 2] = 1.0
         details.append({
             "keypoint": point_index + 1,
             "label": point_label,
             "valid": True,
-            "valid_candidate_count": len(candidates),
-            "selected_samples": [predictions[first[0]]["label"], predictions[second[0]]["label"]],
-            "pair_distance_pixels": distance,
-            "x": float(mean_point[0]),
-            "y": float(mean_point[1]),
-            "activation": float(activation),
+            "valid_candidate_count": cluster["valid_candidate_count"],
+            "cluster_support": cluster["support"],
+            "selected_samples": cluster["selected_samples"],
+            "x": float(cluster["point"][0]),
+            "y": float(cluster["point"][1]),
+            "activation": cluster["mean_activation"],
         })
-    return fixed, details
-
-
-def _order_corners(fixed_points: np.ndarray) -> dict[str, list[float]]:
-    corners = fixed_points[list(CORNER_INDICES), :2]
-    vertical_order = np.argsort(corners[:, 1], kind="stable")
-    top = corners[vertical_order[:2]]
-    bottom = corners[vertical_order[2:]]
-    top = top[np.argsort(top[:, 0], kind="stable")]
-    bottom = bottom[np.argsort(bottom[:, 0], kind="stable")]
-    return {
-        "top_left": top[0].tolist(),
-        "top_right": top[1].tolist(),
-        "bottom_right": bottom[1].tolist(),
-        "bottom_left": bottom[0].tolist(),
-    }
-
-
-def _select_coherent_corner_pair(predictions, width: int, height: int) -> tuple[int, int]:
-    candidates = []
-    for sample_index, prediction in enumerate(predictions):
-        if not all(prediction["valid"][index] for index in CORNER_INDICES):
-            continue
-        points = np.column_stack((prediction["points"], prediction["valid"].astype(np.float64)))
-        try:
-            calibration = TableCalibration.from_points(width, height, _order_corners(points))
-        except CalibrationError:
-            continue
-        candidates.append((sample_index, np.asarray(calibration.points, dtype=np.float64)))
-    if len(candidates) < 2:
-        raise AutoCalibrationError("Automatic calibration did not find two coherent table samples.")
-
-    best = None
-    for first_index in range(len(candidates)):
-        for second_index in range(first_index + 1, len(candidates)):
-            distance = float(np.linalg.norm(candidates[first_index][1] - candidates[second_index][1], axis=1).sum())
-            if best is None or distance < best[0]:
-                best = (distance, candidates[first_index][0], candidates[second_index][0])
-    return best[1], best[2]
+    return details
 
 
 def _serializable_prediction(prediction):
     return {
         "label": prediction["label"],
+        "sample_ratio": prediction["sample_ratio"],
         "frame_index": prediction["frame_index"],
         "time_seconds": prediction["time_seconds"],
         "target_frame_index": prediction["target_frame_index"],
@@ -425,31 +593,18 @@ def analyze_table(
             video_info["height"],
             progress_callback,
         )
-        fixed_points, fixed_keypoints = _aggregate_nearest_pairs(predictions)
-        first_sample, second_sample = _select_coherent_corner_pair(
+        clusters = _build_peak_clusters(
             predictions,
             video_info["width"],
             video_info["height"],
         )
-        for point_index in CORNER_INDICES:
-            first_point = predictions[first_sample]["points"][point_index].astype(np.float64)
-            second_point = predictions[second_sample]["points"][point_index].astype(np.float64)
-            mean_point = (first_point + second_point) / 2.0
-            first_activation = float(predictions[first_sample]["activations"][point_index])
-            second_activation = float(predictions[second_sample]["activations"][point_index])
-            fixed_points[point_index, :2] = mean_point
-            fixed_points[point_index, 2] = 1.0
-            fixed_keypoints[point_index].update({
-                "selected_samples": [predictions[first_sample]["label"], predictions[second_sample]["label"]],
-                "pair_distance_pixels": float(np.linalg.norm(first_point - second_point)),
-                "x": float(mean_point[0]),
-                "y": float(mean_point[1]),
-                "activation": (first_activation + second_activation) / 2.0,
-            })
-        if any(fixed_points[index, 2] != 1 for index in CORNER_INDICES):
-            raise AutoCalibrationError("Automatic calibration could not identify all four table corners.")
-        points = _order_corners(fixed_points)
-        calibration = TableCalibration.from_points(video_info["width"], video_info["height"], points)
+        calibration, selected, consensus = _select_geometric_consensus(
+            clusters,
+            video_info["width"],
+            video_info["height"],
+            len(predictions),
+        )
+        fixed_keypoints = _fixed_keypoint_details(clusters, selected)
     except AutoCalibrationError:
         raise
     except CalibrationError as exc:
@@ -460,7 +615,7 @@ def analyze_table(
         raise AutoCalibrationError("Automatic table calibration failed.") from exc
 
     return calibration, {
-        "schema_version": 1,
+        "schema_version": 2,
         "model": {
             "id": "table_analyze",
             "filename": "table_analyze.pt",
@@ -470,6 +625,7 @@ def analyze_table(
         "model_load_seconds": model_load_seconds,
         "video_info": video_info,
         "sampling": [_serializable_prediction(prediction) for prediction in predictions],
-        "aggregation_rule": "closest_valid_pair_mean",
+        "aggregation_rule": "temporal_peak_clusters_geometric_consensus",
         "fixed_keypoints": fixed_keypoints,
+        "consensus": consensus,
     }

@@ -3,12 +3,19 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import cv2
 import numpy as np
 
 from ttcut_worker import calibration_worker
 from ttcut_worker.calibration import TableCalibration
 from ttcut_worker.rallies import group_rallies
-from ttcut_worker.table_analyze import _order_corners, _select_coherent_corner_pair
+from ttcut_worker.table_analyze import (
+    PLANAR_KEYPOINT_INDICES,
+    SEMANTIC_CORNER_INDICES,
+    TABLE_CORNERS_CM,
+    TABLE_KEYPOINTS_CM,
+    _select_geometric_consensus,
+)
 from ttcut_worker.types import TrajectoryPoint
 from ttcut_worker.video import VideoInfo
 from ttcut_worker.visibility_rallies import VisibilityRallySummary
@@ -60,34 +67,44 @@ def test_rally_gap_is_inclusive_and_singletons_are_ignored():
     ]
 
 
-def test_automatic_corners_are_ordered_by_image_geometry():
-    fixed_points = np.zeros((13, 3), dtype=np.float64)
-    fixed_points[0, :2] = [277.9, 300.0]
-    fixed_points[1, :2] = [829.9, 425.4]
-    fixed_points[4, :2] = [468.3, 391.6]
-    fixed_points[5, :2] = [695.5, 312.9]
-    assert _order_corners(fixed_points) == {
-        "top_left": [277.9, 300.0], "top_right": [695.5, 312.9],
-        "bottom_right": [829.9, 425.4], "bottom_left": [468.3, 391.6],
+def test_automatic_calibration_selects_the_geometry_supported_corner_peaks():
+    true_corners = np.asarray([
+        [250.0, 120.0], [390.0, 130.0], [520.0, 360.0], [120.0, 340.0],
+    ], dtype=np.float32)
+    homography = cv2.getPerspectiveTransform(TABLE_CORNERS_CM, true_corners)
+    projected = cv2.perspectiveTransform(
+        TABLE_KEYPOINTS_CM[list(PLANAR_KEYPOINT_INDICES)].reshape(-1, 1, 2),
+        homography,
+    ).reshape(-1, 2)
+    labels = [f"sample_{index:02d}" for index in range(1, 12)]
+
+    def cluster(point, activation=0.7):
+        return {
+            "point": np.asarray(point, dtype=np.float32),
+            "support": 11,
+            "mean_activation": activation,
+            "selected_samples": labels,
+            "valid_candidate_count": 12,
+        }
+
+    clusters = {
+        point_index: [cluster(point)]
+        for point_index, point in zip(PLANAR_KEYPOINT_INDICES, projected)
     }
+    distractors = {
+        4: [40.0, 50.0],
+        5: [600.0, 55.0],
+        1: [560.0, 330.0],
+        0: [80.0, 350.0],
+    }
+    for point_index in SEMANTIC_CORNER_INDICES:
+        clusters[point_index].insert(0, cluster(distractors[point_index], activation=1.1))
 
+    calibration, _selected, consensus = _select_geometric_consensus(clusters, 640, 480, 11)
 
-def test_automatic_calibration_selects_two_coherent_samples():
-    def prediction(label, offset, valid=True):
-        points = np.zeros((13, 2), dtype=np.float64)
-        points[0] = [100 + offset, 100]
-        points[1] = [300 + offset, 300]
-        points[4] = [100 + offset, 300]
-        points[5] = [300 + offset, 100]
-        if not valid:
-            points[5] = points[0]
-        return {"label": label, "points": points, "valid": np.ones(13, dtype=bool)}
-
-    assert _select_coherent_corner_pair(
-        [prediction("first", 0), prediction("25_percent", 4), prediction("50_percent", 0, valid=False)],
-        640,
-        360,
-    ) == (0, 1)
+    assert np.allclose(np.asarray(calibration.points), true_corners)
+    assert consensus["semantic_support"] == 11
+    assert consensus["score"] >= 5.5
 
 
 def local_tracknet_request() -> dict:
@@ -148,9 +165,9 @@ def test_calibration_worker_runs_table_model(monkeypatch):
     progress = []
 
     def fake_analyze_table(video_path, weight_path, device, metadata, callback):
-        callback("table_sampling", 5, 5)
+        callback("table_sampling", 11, 11)
         progress.append((video_path, weight_path, device, metadata))
-        return calibration(), {"schema_version": 1, "diagnostic": "five-frame"}
+        return calibration(), {"schema_version": 2, "diagnostic": "geometric-consensus"}
 
     monkeypatch.setenv("TTCUT_TABLE_ANALYZE_WEIGHTS", "table.pt")
     monkeypatch.setattr(calibration_worker, "analyze_table", fake_analyze_table)
@@ -308,6 +325,8 @@ def test_worker_applies_the_tracknet_visibility_filter_and_records_its_threshold
 
 
 def test_worker_continuous_visibility_skips_bounce_detection_and_records_provenance(monkeypatch):
+    captured = {}
+
     class FakeBlurBallPredictor:
         def __init__(self, loaded, confidence_threshold=0.7):
             self.confidence_threshold = confidence_threshold
@@ -327,6 +346,12 @@ def test_worker_continuous_visibility_skips_bounce_detection_and_records_provena
     monkeypatch.setenv("TTCUT_BLURBALL_WEIGHTS", "blurball.pt")
     monkeypatch.setattr("ttcut_worker.worker.load_blurball", lambda path, device: fake_loaded)
     monkeypatch.setattr("ttcut_worker.worker.BlurBallPredictor", FakeBlurBallPredictor)
+
+    def fake_blurball_rallies(points, fps, table, *, motion_config):
+        captured["blurball_filter_called"] = True
+        return (VisibilityRallySummary(0, 5, 0.0, 0.5, lead_in_start_time=0.0),)
+
+    monkeypatch.setattr("ttcut_worker.worker.blurball_visibility_rallies", fake_blurball_rallies)
     monkeypatch.setattr(
         "ttcut_worker.worker.detect_blurball_bounce_frames",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("bounce detection must be skipped")),
@@ -363,9 +388,38 @@ def test_worker_continuous_visibility_skips_bounce_detection_and_records_provena
             "maximum_boundary_displacement_ratio": 0.35,
             "maximum_boundary_speed_ratio_per_second": 0.26,
         },
+        "inter_rally_fragment_filter": {
+            "side_on_views_only": True,
+            "minimum_candidate_seconds": 1.0,
+            "maximum_candidate_seconds": 6.0,
+            "maximum_expanded_table_ratio": 0.45,
+            "minimum_visible_run_count": 3,
+            "minimum_one_way_range_ratio": 0.55,
+            "maximum_sparse_visibility_ratio": 0.3,
+            "minimum_contiguous_flight_seconds": 0.15,
+            "minimum_coherent_reversal_ratio": 0.2,
+            "minimum_coherent_flight_displacement_ratio": 0.15,
+            "expanded_table_length_margin_cm": 35.0,
+            "expanded_table_width_margin_cm": 25.0,
+            "motion_refinement": {
+                "version": 5,
+                "minimum_motion_run_seconds": 0.15,
+                "minimum_horizontal_range_ratio": 0.05,
+                "minimum_speed_ratio_per_second": 0.35,
+                "reversal_range_ratio": 0.06,
+                "gap_minimum_motion_range_ratio": 0.04,
+                "gap_minimum_motion_support_ratio": 0.35,
+                "short_gap_seconds": 1.25,
+                "long_gap_seconds": 2.25,
+                "stationary_run_seconds": 0.5,
+                "boundary_context_seconds": 0.25,
+            },
+        },
     }
+    assert captured == {"blurball_filter_called": True}
     assert result["rallies"] == [{
         "id": "rally_001", "index": 1, "start_time_seconds": 0.0, "end_time_seconds": 0.5,
+        "lead_in_start_time_seconds": 0.0,
     }]
     assert "bounce_times_seconds" not in result
     assert "detection" not in result["model_provenance"]

@@ -5,6 +5,7 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  powerSaveBlocker,
   protocol,
   shell,
 } from 'electron';
@@ -23,14 +24,20 @@ import { startAnalysis } from './analysis';
 import { startAutoCalibration } from './calibration';
 import { componentSetupInfo, loadComponentCatalog } from './component-catalog';
 import { recoverComponentInstallState, startAnalysisComponentInstall, startComponentImport, startMediaComponentInstall } from './component-manager';
-import { inspectComponents, managedComponentsRoot } from './components';
+import { managedComponentsRoot } from './components';
+import { inspectInstalledComponents, silentlyInspectComponents, startupComponentStatus } from './component-status';
 import { purgeRemovedModelAssets } from './retired-model-assets';
 import { startExport } from './export';
 import { getLogDirectory, logLine } from './logger';
 import { getHistoryStore } from './history';
 import { clearMediaPaths, installMediaProtocol, registerMediaPath } from './media-protocol';
 import { probeVideo } from './probe';
-import { cancelAllTasksAndWait, cancelTask, hasActiveTasks } from './processes';
+import {
+  cancelAllTasksAndWait,
+  cancelTask,
+  configureTaskSuspensionBlocker,
+  hasActiveTasks,
+} from './processes';
 import { loadSettings, saveSettings } from './settings';
 import { getPlatformCompatibility } from './platform-compatibility';
 import {
@@ -85,8 +92,11 @@ async function selectedVideo(filePath: string) {
 function registerIpc(): void {
   ipcMain.handle(IPC.appBootstrap, async () => {
     const [settings, components, setup, platformCompatibility] = await Promise.all([
-      loadSettings(), inspectComponents(), componentSetupInfo(), getPlatformCompatibility(),
+      loadSettings(), startupComponentStatus(), componentSetupInfo(), getPlatformCompatibility(),
     ]);
+    silentlyInspectComponents((error) => {
+      void logLine('app', 'WARN', `Background component check: ${String(error)}`).catch(() => undefined);
+    });
     return {
       version: app.getVersion(),
       settings,
@@ -101,7 +111,7 @@ function registerIpc(): void {
     };
   });
   ipcMain.handle(IPC.settingsSave, (_event, value: unknown) => saveSettings(appSettingsSchema.parse(value)));
-  ipcMain.handle(IPC.componentsRefresh, () => inspectComponents());
+  ipcMain.handle(IPC.componentsRefresh, () => inspectInstalledComponents());
   ipcMain.handle(IPC.componentsOpenDownloads, async () => {
     const catalog = await loadComponentCatalog();
     await shell.openExternal(COMPONENT_ASSETS_RELEASE_URL);
@@ -390,6 +400,7 @@ if (installerMigrationRequest) {
     app.exit(exitCode);
   });
 } else app.whenReady().then(async () => {
+  configureTaskSuspensionBlocker(powerSaveBlocker);
   const compatibility = await getPlatformCompatibility();
   await logLine('app', 'INFO', `Platform compatibility gate disabled: ${JSON.stringify(compatibility)}`)
     .catch(() => undefined);

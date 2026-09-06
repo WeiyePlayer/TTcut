@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateCalibration } from '../src/domain/calibration';
+import { normalizeCalibrationPoints, orderCalibrationPolygon, validateCalibration } from '../src/domain/calibration';
 import type { Calibration } from '../src/shared/contracts';
 
 function calibration(points: Calibration['points']): Calibration {
@@ -13,7 +13,7 @@ describe('calibration validation', () => {
     }))).toBeNull();
   });
 
-  it('rejects overlap, non-convex points, tiny area, and wrong order', () => {
+  it('rejects overlap, non-convex points, and tiny area', () => {
     expect(validateCalibration(calibration({
       top_left: [100, 100], top_right: [101, 101], bottom_right: [300, 300], bottom_left: [100, 300],
     }))).toBe('overlap');
@@ -23,9 +23,18 @@ describe('calibration validation', () => {
     expect(validateCalibration(calibration({
       top_left: [100, 100], top_right: [110, 100], bottom_right: [110, 110], bottom_left: [100, 110],
     }))).toBe('area_too_small');
-    expect(validateCalibration(calibration({
-      top_left: [300, 100], top_right: [100, 100], bottom_right: [100, 300], bottom_left: [300, 300],
-    }))).toBe('wrong_order');
+  });
+
+  it('accepts any click order and normalizes the downstream point names', () => {
+    const clicked = [[300, 300], [100, 100], [100, 300], [300, 100]] as [number, number][];
+    expect(orderCalibrationPolygon(clicked)).toEqual([
+      [100, 100], [300, 100], [300, 300], [100, 300],
+    ]);
+    const normalized = normalizeCalibrationPoints(clicked);
+    expect(normalized).toEqual({
+      top_left: [100, 100], top_right: [300, 100], bottom_right: [300, 300], bottom_left: [100, 300],
+    });
+    expect(validateCalibration(calibration(normalized))).toBeNull();
   });
 
   it('rejects a point outside the source frame', () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildCutGroups, SelectionError, selectRallies } from '../src/domain/segments';
+import { buildCutGroups, createCutGroups, SelectionError, selectRallies } from '../src/domain/segments';
 import type { AnalysisResultV1, BounceRally, Rally } from '../src/shared/contracts';
 
 function rally(id: string, start: number, end: number, bounceCount = 4, index = 1): BounceRally {
@@ -13,6 +13,14 @@ function rally(id: string, start: number, end: number, bounceCount = 4, index = 
 }
 
 describe('buildCutGroups', () => {
+  it('stops continuous lead-in at an observed transfer without moving the rally', () => {
+    const detected = { id: 'rally_001', index: 1, start_time_seconds: 10, end_time_seconds: 15, lead_in_start_time_seconds: 9 };
+    expect(buildCutGroups([detected], 2.5, 1, 30, 'continuous_visibility')[0]).toMatchObject({
+      start: 9, end: 16, rawStart: 10, rawEnd: 15,
+    });
+    expect(buildCutGroups([detected], 0.5, 1, 30, 'continuous_visibility')[0]?.start).toBe(9.5);
+    expect(buildCutGroups([detected], 2.5, 1, 30, 'bounce_events')[0]).toMatchObject({ start: 7.5, end: 17 });
+  });
   it('merges a 4.999 second gap', () => {
     expect(buildCutGroups([rally('rally_001', 10, 15), rally('rally_002', 19.999, 21)], 0, 0, 60)).toHaveLength(1);
   });
@@ -75,6 +83,23 @@ describe('selectRallies', () => {
     expect(selectRallies(result, {
       mode: 'highlight', highlight_threshold: 5, pre_roll_seconds: 2.5, post_roll_seconds: 2,
     }).map((item) => item.id)).toEqual(['rally_002']);
+  });
+
+  it('uses the result recognition method for all and highlight export tails', () => {
+    const visibility: AnalysisResultV1 = {
+      schema_version: 2,
+      video: result.video,
+      rallies: [{ id: 'rally_001', index: 1, start_time_seconds: 10, end_time_seconds: 15 }],
+      rally_recognition: { method: 'continuous_visibility', start_visible_seconds: 0.2, end_invisible_seconds: 0.5 },
+    };
+    const rolls = { pre_roll_seconds: 2.5 as const, post_roll_seconds: 1 as const };
+    expect(createCutGroups(visibility, { mode: 'all', ...rolls })[0]).toMatchObject({ start: 7.5, end: 16 });
+    expect(createCutGroups(visibility, {
+      mode: 'highlight', criterion: { kind: 'duration_tier', tier: 'long_rally' }, ...rolls,
+    })[0]?.end).toBe(16);
+    expect(createCutGroups({ ...result, rallies: [rally('rally_001', 10, 15)] }, {
+      mode: 'all', ...rolls,
+    })[0]?.end).toBe(17);
   });
 
   it('keeps legacy highlight selections compatible with bounce results', () => {

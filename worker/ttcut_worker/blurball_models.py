@@ -18,6 +18,13 @@ class LoadedBlurBall:
     component_version: str = "1.0.0"
 
 
+def configure_stable_visibility_inference() -> None:
+    # A new worker process performs every analysis. Do not let timing-based
+    # cuDNN algorithm selection change threshold-adjacent detections between runs.
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+
+
 def load_blurball(weight_value: str | Path, requested_device: str) -> LoadedBlurBall:
     path = Path(weight_value)
     if not path.is_file():

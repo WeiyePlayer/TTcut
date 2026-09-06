@@ -143,10 +143,12 @@ button:disabled { cursor: not-allowed !important; opacity: 0.42; transform: none
 .calibration-shell { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: #111; box-shadow: var(--shadow); }
 .video-surface { position: relative; width: 100%; aspect-ratio: 16/9; display: grid; place-items: center; overflow: hidden; touch-action: none; cursor: crosshair; }
 .video-surface video { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+.calibration-polygon { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; z-index: 1; }
+.calibration-polygon polygon { fill: rgba(0, 122, 255, .13); stroke: #58a6ff; stroke-width: 2; vector-effect: non-scaling-stroke; }
 .calibration-point {
   position: absolute; width: 30px; height: 30px; margin: -15px 0 0 -15px; border: 2px solid white; border-radius: 50%;
   background: var(--blue); color: white; box-shadow: 0 2px 9px rgba(0,0,0,.35); cursor: grab; font-weight: 720; touch-action: none;
-  transition: box-shadow 160ms ease, transform 100ms ease;
+  transition: box-shadow 160ms ease, transform 100ms ease; z-index: 2;
 }
 .calibration-point:active { cursor: grabbing; transform: scale(1.08); box-shadow: 0 3px 13px rgba(0,0,0,.45); }
 .scrubber-row { height: 52px; padding: 0 16px; display: flex; align-items: center; gap: 12px; color: #ddd; background: #181818; font-size: 11px; }

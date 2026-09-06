@@ -223,7 +223,7 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     await page.getByRole('button', { name: '设置' }).click();
     await expect(page.getByRole('heading', { name: '设置', exact: true })).toBeVisible();
     await expect(page.getByRole('heading', { name: '导出方式', exact: true })).toHaveCount(0);
-    await expect(page.getByText('可用', { exact: true })).toHaveCount(2, { timeout: 60_000 });
+    await expect(page.locator('.component-row .status')).toHaveText(['可用', '可用'], { timeout: 60_000 });
     await expect(page.getByText('GPU 加速', { exact: true })).toBeVisible();
     await page.locator('label[for="settings-language-1"]').click();
     await expect(page.locator('.language-loader')).toBeVisible();
@@ -235,10 +235,9 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     await expect(page.getByRole('heading', { name: '回合后时间' })).toBeVisible();
     await page.locator('label[for="settings-pre-roll-0"]').click();
     await page.locator('label[for="settings-post-roll-0"]').click();
-    const analysisPrecision = page.getByRole('radiogroup', { name: '分析精度' });
-    await expect(analysisPrecision.getByRole('radio', { name: '默认' })).toBeChecked();
-    await page.locator('label[for="settings-blurball-mode-1"]').click();
-    await expect(analysisPrecision.getByRole('radio', { name: '高精' })).toBeChecked();
+    const rallyRecognition = page.getByRole('radiogroup', { name: '回合识别方式' });
+    await expect(rallyRecognition.getByRole('radio', { name: '连续运动' })).toBeChecked();
+    await expect(page.locator('.detector-settings-card')).toHaveCount(0);
 
     await page.getByRole('button', { name: '历史剪辑' }).click();
     await expect(page.getByRole('heading', { name: '还没有历史记录' })).toBeVisible();
@@ -265,26 +264,9 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     await page.getByRole('dialog').getByRole('button', { name: '取消' }).click();
     await expect(page.getByRole('dialog')).toBeHidden();
 
-    const calibrationVideo = page.locator('.video-surface video');
-    await expect(calibrationVideo).toBeVisible({ timeout: 90_000 });
     const automaticCalibrationNotice = page.getByText('自动标定不可靠，请改用手动标定。', { exact: true });
-    await expect(automaticCalibrationNotice).toBeVisible();
-    await expect(automaticCalibrationNotice).toBeHidden({ timeout: 4_000 });
-    await calibrationVideo.evaluate(async (element: HTMLVideoElement) => {
-      if (element.readyState >= 1) return;
-      await new Promise<void>((resolve, reject) => {
-        element.addEventListener('loadedmetadata', () => resolve(), { once: true });
-        element.addEventListener('error', () => reject(new Error('Input preview failed to load.')), { once: true });
-      });
-    });
-    for (const [x, y] of calibrationPoints) await clickSourcePoint(page, x, y);
-    for (let index = 1; index <= 4; index += 1) {
-      await expect(page.getByRole('button', { name: `Calibration point ${index}` })).toBeVisible();
-    }
-    await expect(page.getByRole('button', { name: '开始分析' })).toBeEnabled();
-    await page.getByRole('button', { name: '开始分析' }).click();
-
     await expect(page.getByRole('heading', { name: '选择剪辑模式' })).toBeVisible({ timeout: 7 * 60 * 1_000 });
+    await expect(automaticCalibrationNotice).toHaveCount(0);
     const recognizedRalliesText = page.getByText(/^已识别 \d+ 个有效回合$/, { exact: true });
     await expect(recognizedRalliesText).toBeVisible();
     const recognizedRallies = Number((await recognizedRalliesText.textContent())?.match(/\d+/)?.[0]);
@@ -485,11 +467,17 @@ test('real CUDA analysis, single-rally export, and final preview', async ({}, te
     await expect(page.locator('.timeline-clip')).toHaveCount(recognizedRallies);
     const deletionCandidate = await page.evaluate(() => {
       const viewport = document.querySelector('.timeline-viewport') as HTMLDivElement | null;
+      const track = document.querySelector('.timeline-track-window');
       const duration = Number(document.querySelector('.timeline-playhead')?.getAttribute('aria-valuemax'));
-      if (!viewport || !Number.isFinite(duration)) return null;
-      const oneSecond = Math.max(viewport.clientWidth, viewport.scrollWidth) / duration;
-      const clips = [...document.querySelectorAll<HTMLDivElement>('.timeline-clip')].reverse();
-      const candidate = clips.find((clip) => Number.parseFloat(clip.style.width) >= oneSecond * 1.5);
+      if (!viewport || !track || !Number.isFinite(duration)) return null;
+      const frame = track.getBoundingClientRect();
+      const oneSecond = viewport.scrollWidth / duration;
+      const clips = [...document.querySelectorAll<HTMLDivElement>('.timeline-clip')];
+      const candidate = clips.find((clip) => {
+        const box = clip.getBoundingClientRect();
+        const visibleWidth = Math.min(box.right, frame.right) - Math.max(box.left, frame.left);
+        return visibleWidth >= oneSecond * 1.5;
+      });
       if (!candidate) return null;
       return { clipId: candidate.dataset.clipId };
     });
@@ -842,6 +830,93 @@ test('automatic calibration completes serial multi-task analysis and records zer
   }
 });
 
+test('manual calibration accepts unordered points and redraws the polygon while dragging', async ({}, testInfo) => {
+  for (const filePath of [sourceVideo, pythonPath, blurballWeightsPath, electronPath, path.join(ffmpegRoot, 'ffmpeg.exe'), path.join(ffmpegRoot, 'ffprobe.exe')]) {
+    await requireFile(filePath);
+  }
+
+  const isolatedRoot = path.join(fixtureDir, `manual-polygon-${Date.now()}`);
+  const nativeLog = path.join(isolatedRoot, 'electron-native.log');
+  await mkdir(isolatedRoot, { recursive: true });
+  await mkdir(screenshotDir, { recursive: true });
+  let electronProcess: ChildProcess | null = null;
+  let browser: Browser | null = null;
+  let page: Page | null = null;
+  const nativeStderr: string[] = [];
+  const rendererErrors: string[] = [];
+  try {
+    const port = await freePort();
+    electronProcess = spawn(electronPath, [
+      `--remote-debugging-port=${port}`,
+      '--remote-allow-origins=*',
+      '--no-sandbox',
+      '--disable-gpu',
+      '--enable-logging=file',
+      `--log-file=${nativeLog}`,
+      projectRoot,
+    ], {
+      cwd: projectRoot,
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        PYTHONUTF8: '1',
+        TTCUT_E2E: '1',
+        TTCUT_E2E_USER_DATA: path.join(isolatedRoot, 'user-data'),
+        TTCUT_E2E_COMPONENTS_ROOT: path.join(isolatedRoot, 'components'),
+        TTCUT_E2E_VIDEO: sourceVideo,
+        TTCUT_PYTHON: pythonPath,
+        TTCUT_BLURBALL_WEIGHTS: blurballWeightsPath,
+        TTCUT_FFMPEG: path.join(ffmpegRoot, 'ffmpeg.exe'),
+        TTCUT_FFPROBE: path.join(ffmpegRoot, 'ffprobe.exe'),
+      },
+    });
+    electronProcess.stderr?.setEncoding('utf8');
+    electronProcess.stderr?.on('data', (chunk: string) => nativeStderr.push(chunk));
+    await waitForCdp(port, electronProcess, nativeStderr);
+    browser = await connectCdp(port, electronProcess, nativeStderr);
+    page = await appPage(browser);
+    page.on('pageerror', (error) => rendererErrors.push(error.message));
+    page.on('console', (message) => {
+      if (message.type() === 'error') rendererErrors.push(message.text());
+    });
+    await page.waitForLoadState('domcontentloaded');
+
+    await page.getByRole('button', { name: '设置' }).click();
+    await page.locator('label[for="settings-calibration-0"]').click();
+    await expect(page.getByRole('radio', { name: '手动' })).toBeChecked();
+    await page.getByRole('button', { name: '自动剪辑' }).click();
+    await page.locator('.drop-zone').click();
+    await expect(page.getByRole('heading', { name: '标定球桌' })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText('逐个标记球台四个角点，顺序不限。标满四点后可拖动微调。')).toBeVisible();
+
+    for (const pointIndex of [2, 0, 3, 1]) {
+      const [x, y] = calibrationPoints[pointIndex]!;
+      await clickSourcePoint(page, x, y);
+    }
+    const polygon = page.locator('.calibration-polygon polygon');
+    await expect(polygon).toBeVisible();
+    const pointsBeforeDrag = await polygon.getAttribute('points');
+    const firstPoint = page.getByRole('button', { name: 'Calibration point 1' });
+    const firstPointBox = await firstPoint.boundingBox();
+    if (!firstPointBox) throw new Error('First calibration point has no visible bounding box.');
+    await page.mouse.move(firstPointBox.x + firstPointBox.width / 2, firstPointBox.y + firstPointBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(firstPointBox.x + firstPointBox.width / 2 - 12, firstPointBox.y + firstPointBox.height / 2 - 8);
+    await page.mouse.up();
+    await expect.poll(() => polygon.getAttribute('points')).not.toBe(pointsBeforeDrag);
+    await expect(page.getByRole('button', { name: /^Calibration point / })).toHaveCount(4);
+    await expect(page.getByRole('alert')).toHaveCount(0);
+    expect(rendererErrors).toEqual([]);
+    const screenshotPath = path.join(screenshotDir, 'manual-calibration-polygon.png');
+    await page.screenshot({ path: screenshotPath });
+    await testInfo.attach('manual-calibration-polygon', { path: screenshotPath, contentType: 'image/png' });
+  } finally {
+    if (existsSync(nativeLog)) await testInfo.attach('manual-calibration-electron-native-log', { path: nativeLog, contentType: 'text/plain' });
+    await stopElectron(page, browser, electronProcess);
+  }
+});
+
 test('failed batch calibration can be repaired manually and returned to the running queue', async ({}, testInfo) => {
   test.slow();
   for (const filePath of [sourceVideo, pythonPath, blurballWeightsPath, electronPath, path.join(ffmpegRoot, 'ffmpeg.exe'), path.join(ffmpegRoot, 'ffprobe.exe')]) {
@@ -925,7 +1000,21 @@ test('failed batch calibration can be repaired manually and returned to the runn
 
     await page.getByRole('button', { name: 'calibration-failure.mp4 手动标定' }).click();
     await expect(page.getByRole('heading', { name: '标定球桌' })).toBeVisible();
-    for (const [x, y] of calibrationPoints) await clickSourcePoint(page, x, y);
+    for (const pointIndex of [2, 0, 3, 1]) {
+      const [x, y] = calibrationPoints[pointIndex]!;
+      await clickSourcePoint(page, x, y);
+    }
+    const calibrationPolygon = page.locator('.calibration-polygon polygon');
+    await expect(calibrationPolygon).toBeVisible();
+    const polygonBeforeDrag = await calibrationPolygon.getAttribute('points');
+    const firstPoint = page.getByRole('button', { name: 'Calibration point 1' });
+    const firstPointBox = await firstPoint.boundingBox();
+    if (!firstPointBox) throw new Error('First calibration point has no visible bounding box.');
+    await page.mouse.move(firstPointBox.x + firstPointBox.width / 2, firstPointBox.y + firstPointBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(firstPointBox.x + firstPointBox.width / 2 - 12, firstPointBox.y + firstPointBox.height / 2 - 8);
+    await page.mouse.up();
+    await expect.poll(() => calibrationPolygon.getAttribute('points')).not.toBe(polygonBeforeDrag);
     const finishCalibration = page.getByRole('button', { name: '完成标定' });
     await expect(finishCalibration).toBeEnabled();
     await finishCalibration.click();
