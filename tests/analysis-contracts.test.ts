@@ -362,15 +362,15 @@ describe('automatic table calibration diagnostics', () => {
     })).toThrow();
   });
 
-  it('keeps the native Core ML five-sample diagnostics compatible with Python schema v2', () => {
+  it('accepts native Core ML diagnostics using the same eleven-position consensus algorithm', () => {
     const nativeDiagnostics = {
       schema_version: 2 as const,
       engine: 'coreml' as const,
       compute_units: 'cpuOnly' as const,
       checkpoint_sha256: 'a'.repeat(64),
-      aggregation_rule: 'closest_valid_table_pair_mean' as const,
-      sampling: ['first', '25_percent', '50_percent', '75_percent', 'last'].map((label, sampleIndex) => ({
-        label,
+      aggregation_rule: 'temporal_peak_clusters_geometric_consensus' as const,
+      sampling: Array.from({ length: 11 }, (_, sampleIndex) => ({
+        label: `sample_${String(sampleIndex + 1).padStart(2, '0')}`,
         time: sampleIndex,
         frameIndex: sampleIndex * 60,
         points: Array.from({ length: 13 }, (_, pointIndex) => ({
@@ -386,5 +386,11 @@ describe('automatic table calibration diagnostics', () => {
       schema_version: 2,
       engine: 'coreml',
     });
+    expect(() => tableAnalysisSchema.parse({
+      ...nativeDiagnostics,
+      sampling: nativeDiagnostics.sampling.map((sample, index) => (
+        index === 1 ? { ...sample, label: 'sample_11' } : sample
+      )),
+    })).toThrow();
   });
 });

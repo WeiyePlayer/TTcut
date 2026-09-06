@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { nativeVideoSchema, nativeTableSampleSchema } from './native-contracts';
+import { nativeVideoSchema, nativeTableSamplesSchema } from './native-contracts';
 
 export const DEVICE_VALUES = ['auto', 'cuda', 'cpu'] as const;
 export const PRE_ROLL_VALUES = [1.5, 2.5, 5] as const;
@@ -204,8 +204,8 @@ const nativeTableAnalysisSchema = z.object({
   engine: z.literal('coreml'),
   compute_units: z.literal('cpuOnly'),
   checkpoint_sha256: z.string().regex(/^[a-f0-9]{64}$/),
-  aggregation_rule: z.literal('closest_valid_table_pair_mean'),
-  sampling: z.array(nativeTableSampleSchema).length(5),
+  aggregation_rule: z.literal('temporal_peak_clusters_geometric_consensus'),
+  sampling: nativeTableSamplesSchema,
 }).strict();
 
 export const tableAnalysisSchema = z.union([

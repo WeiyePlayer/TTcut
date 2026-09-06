@@ -1,36 +1,6 @@
 import Foundation
 import TTcutCore
 
-public struct ExportRequest: Sendable {
-  public var result: AnalysisResult
-  public var mode: CutMode
-  public var threshold: Int
-  public var settings: Settings
-  public var clips: [CustomClip]
-  public var outputs: ExportOutputs
-  public var destination: URL
-  public var strategy: ExportStrategy
-  public init(
-    result: AnalysisResult, mode: CutMode, threshold: Int, settings: Settings,
-    clips: [CustomClip] = [], outputs: ExportOutputs = ExportOutputs(), destination: URL,
-    strategy: ExportStrategy = .fastSegmented
-  ) {
-    self.result = result
-    self.mode = mode
-    self.threshold = threshold
-    self.settings = settings
-    self.clips = clips
-    self.outputs = outputs
-    self.destination = destination
-    self.strategy = strategy
-  }
-}
-public struct ExportResult: Sendable {
-  public var folder: URL
-  public var files: [String]
-  public var warnings: [String]
-}
-
 public struct MediaExporter: Sendable {
   public let paths: RuntimePaths
   public init(paths: RuntimePaths) { self.paths = paths }
@@ -272,100 +242,6 @@ public struct MediaExporter: Sendable {
     }
     _ = try await validate(destination, source: video, duration: duration, segments: ranges.count)
   }
-  public func export(
-    _ request: ExportRequest, progress: @escaping @Sendable (Double) -> Void = { _ in }
-  ) async throws -> URL {
-    try await exportResult(request, progress: progress).folder
-  }
-  public func exportResult(
-    _ request: ExportRequest, progress: @escaping @Sendable (Double) -> Void = { _ in }
-  ) async throws -> ExportResult {
-    guard request.result.source.currentStatus == .available else {
-      throw TTError("SOURCE_CHANGED_OR_MISSING")
-    }
-    try request.outputs.validate(custom: request.mode == .custom)
-    let video = request.result.video
-    let selectedClips: [CustomClip]
-    let ranges: [CutRange]
-    if request.mode == .custom {
-      selectedClips = try Clips.validate(
-        request.clips, rallies: request.result.rallies, duration: video.duration, fps: video.fps
-      ).filter(\.selected)
-      ranges = selectedClips.map(\.range)
-    } else {
-      selectedClips = []
-      let rallies = try Segments.selected(
-        request.result.rallies, mode: request.mode, threshold: request.threshold)
-      ranges = Segments.groups(
-        rallies, pre: request.settings.preRoll, post: request.settings.postRoll,
-        duration: video.duration)
-    }
-    guard !ranges.isEmpty else { throw TTError("NO_SELECTED_CLIPS") }
-    try FileManager.default.createDirectory(
-      at: request.destination, withIntermediateDirectories: true)
-    let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
-    let name =
-      request.result.sourceVideo.url.deletingPathExtension().lastPathComponent + "_TTcut_" + stamp
-      + "_"
-      + UUID().uuidString.prefix(6)
-    let work = request.destination.appendingPathComponent(
-      "." + name + ".partial", isDirectory: true)
-    let final = request.destination.appendingPathComponent(name, isDirectory: true)
-    try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
-    defer { try? FileManager.default.removeItem(at: work) }
-    var files: [String] = []
-    var warnings: [String] = []
-    if request.outputs.combined {
-      try await merged(
-        video: video, ranges: ranges, destination: work.appendingPathComponent("TTcut.mp4"),
-        strategy: request.strategy, progress: progress)
-      files.append("TTcut.mp4")
-    }
-    if request.outputs.rallyVideos {
-      for (index, range) in ranges.enumerated() {
-        try Task.checkCancellation()
-        let url = work.appendingPathComponent(
-          String(format: "%03d_回合%03d.mp4", index + 1, selectedClips[index].index))
-        do {
-          try await merged(
-            video: video, ranges: [range], destination: url, strategy: request.strategy
-          ) { value in progress((Double(index) + value) / Double(ranges.count)) }
-          files.append(url.lastPathComponent)
-        } catch is CancellationError { throw CancellationError() } catch {
-          try? FileManager.default.removeItem(at: url)
-          warnings.append("\(url.lastPathComponent): \(error.localizedDescription)")
-        }
-      }
-    }
-    if request.outputs.xml {
-      do {
-        try PremiereXML.build(video: video, clips: selectedClips, name: name).write(
-          to: work.appendingPathComponent("TTcut.xml"), atomically: true, encoding: .utf8)
-        files.append("TTcut.xml")
-      } catch { warnings.append("TTcut.xml: " + error.localizedDescription) }
-    }
-    guard !files.isEmpty else {
-      throw TTError("CUSTOM_ARTIFACT_EXPORT_FAILED", warnings.joined(separator: "\n"))
-    }
-    do {
-      try HistoryStore.atomicWrite(request.result, to: work.appendingPathComponent("analysis.json"))
-    } catch { warnings.append("分析副本写入失败：" + error.localizedDescription) }
-    struct Report: Codable {
-      var files: [String]
-      var warnings: [String]
-    }
-    do {
-      try HistoryStore.atomicWrite(
-        Report(files: files, warnings: warnings),
-        to: work.appendingPathComponent("export-report.json"))
-    } catch { warnings.append("导出报告写入失败：" + error.localizedDescription) }
-    try Task.checkCancellation()
-    guard request.result.source.currentStatus == .available else {
-      throw TTError("SOURCE_CHANGED_OR_MISSING")
-    }
-    try FileManager.default.moveItem(at: work, to: final)
-    return ExportResult(folder: final, files: files, warnings: warnings)
-  }
   public func cover(video: VideoInfo, destination: URL) async throws {
     let tone =
       video.hdr == .sdr
@@ -377,48 +253,5 @@ public struct MediaExporter: Sendable {
         "-v", "error", "-nostdin", "-y", "-ss", "0", "-i", video.path, "-frames:v", "1", "-vf",
         tone + "scale=640:-2", "-update", "1", destination.path,
       ])
-  }
-  public func processing(source: VideoInfo, normalize: Bool, store: HistoryStore) async throws -> (
-    VideoInfo, ProcessingMedia
-  ) {
-    guard source.variableFrameRate, normalize else {
-      return (
-        source,
-        ProcessingMedia(
-          mode: source.variableFrameRate ? .originalVFR : .originalCFR, path: source.path)
-      )
-    }
-    let identity = try SourceIdentity(url: source.url)
-    let key = try HistoryStore.cacheKey(
-      identity: identity, rate: source.frameRate, encoder: source.encoder)
-    let directory = await store.processingRoot.appendingPathComponent(key, isDirectory: true)
-    let final = directory.appendingPathComponent("processing.mp4")
-    do {
-      if FileManager.default.fileExists(atPath: final.path) {
-        let cached = try await validate(
-          final, source: source, duration: source.duration, segments: 1)
-        guard !cached.variableFrameRate else { throw TTError("NORMALIZATION_STILL_VFR") }
-        return (cached, ProcessingMedia(mode: .normalizedCFR, path: final.path, cacheKey: key))
-      }
-      try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-      let partial = directory.appendingPathComponent(UUID().uuidString + ".mp4")
-      defer { try? FileManager.default.removeItem(at: partial) }
-      try await encode(
-        video: source, ranges: [CutRange(0, source.duration)], destination: partial,
-        normalizeFPS: true)
-      _ = try await validate(partial, source: source, duration: source.duration, segments: 1)
-      try Task.checkCancellation()
-      try FileManager.default.moveItem(at: partial, to: final)
-      let info = try await MediaProbe(paths: paths).inspect(final)
-      guard !info.variableFrameRate else { throw TTError("NORMALIZATION_STILL_VFR") }
-      return (info, ProcessingMedia(mode: .normalizedCFR, path: final.path, cacheKey: key))
-    } catch is CancellationError { throw CancellationError() } catch {
-      return (
-        source,
-        ProcessingMedia(
-          mode: .vfrFallback, path: source.path,
-          warning: "CFR 转换失败，使用原始 VFR：" + error.localizedDescription)
-      )
-    }
   }
 }

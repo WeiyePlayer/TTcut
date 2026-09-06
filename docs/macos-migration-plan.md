@@ -20,6 +20,6 @@ Original media owns identity and calibration coordinates. Optional CFR processin
 
 ## Build and verification
 
-See [Electron macOS build instructions](../macos/ELECTRON.md) and the generated Electron verification report. The old `macos/VERIFICATION.md` describes the SwiftUI build and must not be used as evidence for this application.
+See [Electron macOS build instructions](../macos/ELECTRON.md) and the generated Electron verification report. The superseded SwiftUI implementation and its verification files have been removed from this branch.
 
 Deliver local app/DMG/ZIP with SHA256 and source/build metadata. No upload, release publication, Developer ID, notarization or automatic-update acceptance is part of this stage. Real matches, real HDR viewing, sustained 8K performance, real NLE import, macOS 15 runtime execution and other chip generations remain separate acceptance items.

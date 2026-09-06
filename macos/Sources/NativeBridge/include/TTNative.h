@@ -13,6 +13,7 @@ int tt_reader_seek(TTReader *, double seconds);
 void tt_reader_close(TTReader *);
 int tt_prepare_blurball(const TTFrame *, int x, int y, int width, int height, int modelWidth, int modelHeight, float *output);
 int tt_prepare_table(const TTFrame *, float *output);
+int tt_table_peak_candidates(const float *, int width, int height, int imageWidth, int imageHeight, float threshold, TTDetection *out, int capacity);
 int tt_decode_heatmap(const float *, int width, int height, float threshold, int roiX, int roiY, int roiWidth, int roiHeight, TTDetection *out, int capacity);
 #ifdef __cplusplus
 }

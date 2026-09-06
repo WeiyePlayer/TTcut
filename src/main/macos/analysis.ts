@@ -81,7 +81,7 @@ function readCalibration(event: NativeEvent): { calibration: Calibration; table:
   if (!event.calibration || !event.tableSamples) throw new Error('NATIVE_CALIBRATION_RESULT_MISSING');
   return {
     calibration: calibrationSchema.parse({ video_width: event.calibration.width, video_height: event.calibration.height, points: Object.fromEntries(corners.map((name, i) => [name, [event.calibration!.points[i]!.x, event.calibration!.points[i]!.y]])) }),
-    table: tableAnalysisSchema.parse({ schema_version: 2, engine: 'coreml', compute_units: 'cpuOnly', checkpoint_sha256: checkpoint.table, aggregation_rule: 'closest_valid_table_pair_mean', sampling: event.tableSamples }),
+    table: tableAnalysisSchema.parse({ schema_version: 2, engine: 'coreml', compute_units: 'cpuOnly', checkpoint_sha256: checkpoint.table, aggregation_rule: 'temporal_peak_clusters_geometric_consensus', sampling: event.tableSamples }),
   };
 }
 function nativeCalibration(calibration: Calibration) {

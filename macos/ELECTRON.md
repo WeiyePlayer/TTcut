@@ -1,6 +1,6 @@
 # Electron macOS build
 
-The primary Mac application now uses the existing Electron UI. The Xcode SwiftUI app is retained only as a historical reference. Native development uses Swift Package Manager; it does not build the SwiftUI app or Sparkle.
+The Mac application uses the existing Electron UI. Native analysis and media helpers are built with Swift Package Manager; there is no second SwiftUI application or Sparkle runtime.
 
 BlurBall defaults to FP16 with CPU/Neural Engine, four asynchronous predictions and four prefetched windows, including both full and two-stage analysis. Postprocessing consumes predictions in frame order. Table remains FP32 CPU. Existing FP32 Core ML history stays readable. See [acceptance and measured limits](../docs/performance/macos-fp16-adoption-2026-09-05.md).
 
@@ -41,6 +41,6 @@ The UI verifier additionally uses the existing development-only file-dialog fixt
 
 Windows-specific tests and tools retain Windows behavior. macOS execution cannot establish a green Windows-native release. Local signing is ad-hoc; production signing/notarization/updates remain deferred.
 
-The pre-migration asset backup is `/Users/weiye/DOS/TTcut-backups/swiftui-macos-20260904/manifest.json`; source changes are preserved on `backup/swiftui-macos-20260904`. Neither is uploaded automatically.
+The removed pre-Electron implementation remains available in Git history and on `backup/swiftui-macos-20260904`; it is not built, staged or packaged by the current branch.
 
 For an independent archive test, extract the ZIP outside the checkout and pass that app path to `verify-electron-macos.mjs`. `TTCUT_VERIFY_OUTPUT` places all fixtures and test data outside the checkout too. `TTCUT_VERIFY_OFFLINE_SANDBOX=1` adds a process-scoped OS sandbox denying outgoing internet (loopback remains available for debugging), verified by a rejected socket connection. macOS prohibits Chromium sandbox reinitialization inside this outer sandbox, so this diagnostic mode adds `--no-sandbox` only to the test invocation; the normal shipped application retains its default sandbox. Run both modes and report them separately. No host network setting is changed.

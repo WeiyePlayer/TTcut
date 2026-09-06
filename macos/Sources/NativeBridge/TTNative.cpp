@@ -4,6 +4,8 @@
 #include <cmath>
 #include <string>
 #include <memory>
+#include <algorithm>
+#include <vector>
 extern "C" {
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
@@ -156,6 +158,30 @@ int tt_prepare_table(const TTFrame *f, float *out) {
         cv::Mat frame(f->height, f->width, CV_8UC3, const_cast<uint8_t *>(f->bytes), f->stride), rgb, resized;
         cv::cvtColor(frame, rgb, cv::COLOR_BGR2RGB); cv::resize(rgb, resized, cv::Size(1600,896), 0,0,cv::INTER_LINEAR);
         normalize(resized, out); return 0;
+    } catch (const std::exception &e) { return fail(e.what()); }
+}
+int tt_table_peak_candidates(const float *data, int w, int h, int iw, int ih, float threshold, TTDetection *out, int capacity) {
+    if (!data || !out || w <= 0 || h <= 0 || iw <= 0 || ih <= 0 || capacity <= 0 || !std::isfinite(threshold))
+        return fail("invalid table peak request");
+    try {
+        cv::Mat heat(h, w, CV_32F, const_cast<float *>(data)), pooled;
+        cv::dilate(heat, pooled, cv::getStructuringElement(cv::MORPH_RECT, cv::Size(9, 9)));
+        struct Peak { int index; float value; };
+        std::vector<Peak> peaks;
+        for (int y = 0; y < h; ++y) for (int x = 0; x < w; ++x) {
+            const float value = heat.at<float>(y, x);
+            if (std::isfinite(value) && value >= threshold && value == pooled.at<float>(y, x))
+                peaks.push_back({y * w + x, value});
+        }
+        std::sort(peaks.begin(), peaks.end(), [](const Peak &a, const Peak &b) {
+            return a.value != b.value ? a.value > b.value : a.index < b.index;
+        });
+        const int count = std::min(capacity, static_cast<int>(peaks.size()));
+        for (int i = 0; i < count; ++i) {
+            const int x = peaks[i].index % w, y = peaks[i].index / w;
+            out[i] = {(x + 0.5) * iw / w - 0.5, (y + 0.5) * ih / h - 0.5, peaks[i].value};
+        }
+        return count;
     } catch (const std::exception &e) { return fail(e.what()); }
 }
 int tt_decode_heatmap(const float *data, int w, int h, float threshold, int rx, int ry, int rw, int rh, TTDetection *out, int capacity) {

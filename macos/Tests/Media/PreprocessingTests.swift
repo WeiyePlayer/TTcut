@@ -41,4 +41,22 @@ final class PreprocessingTests: XCTestCase {
       XCTAssertEqual(actual.confidence, reference[2], accuracy: 1e-5)
     }
   }
+
+  func testTablePeakCandidatesUseNinePixelSuppressionAndConfidenceOrder() {
+    var heatmap = [Float](repeating: 0, count: 12 * 12)
+    heatmap[2 * 12 + 2] = 0.8
+    heatmap[3 * 12 + 3] = 0.7
+    heatmap[10 * 12 + 10] = 0.9
+    var peaks = [TTDetection](repeating: TTDetection(), count: 12)
+
+    let count = tt_table_peak_candidates(heatmap, 12, 12, 120, 120, 0.15, &peaks, 12)
+
+    XCTAssertEqual(count, 2)
+    XCTAssertEqual(peaks[0].confidence, 0.9, accuracy: 1e-6)
+    XCTAssertEqual(peaks[0].x, 104.5, accuracy: 1e-6)
+    XCTAssertEqual(peaks[0].y, 104.5, accuracy: 1e-6)
+    XCTAssertEqual(peaks[1].confidence, 0.8, accuracy: 1e-6)
+    XCTAssertEqual(peaks[1].x, 24.5, accuracy: 1e-6)
+    XCTAssertEqual(peaks[1].y, 24.5, accuracy: 1e-6)
+  }
 }

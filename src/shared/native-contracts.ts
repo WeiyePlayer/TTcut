@@ -15,10 +15,21 @@ export const nativeVideoSchema = z.object({
   hdr: z.enum(['sdr', 'hdr10', 'hlg', 'dolbyVision', 'hdr10Plus']), masteringDisplay: z.string().optional(), maxCLL: z.string().optional(),
   keyframes: z.array(number), audioBoundaries: z.array(number),
 }).strict();
+const nativeTableSampleLabelSchema = z.string().regex(/^sample_(0[1-9]|1[01])$/);
 export const nativeTableSampleSchema = z.object({
-  label: z.enum(['first', '25_percent', '50_percent', '75_percent', 'last']), time: number.nonnegative(), frameIndex: number.int().nonnegative(),
+  label: nativeTableSampleLabelSchema, time: number.nonnegative(), frameIndex: number.int().nonnegative(),
   points: z.array(z.object({ index: number.int().min(0).max(12), position: nativePointSchema, activation: number, valid: z.boolean() }).strict()).length(13),
 }).strict();
+export const nativeTableSamplesSchema = z.array(nativeTableSampleSchema).length(11).superRefine((samples, context) => {
+  samples.forEach((sample, index) => {
+    const expected = `sample_${String(index + 1).padStart(2, '0')}`;
+    if (sample.label !== expected) context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: [index, 'label'],
+      message: 'Native table samples must use the fixed eleven-position order.',
+    });
+  });
+});
 export const nativeRoiSchema = z.object({ x: number.int().nonnegative(), y: number.int().nonnegative(), width: positive.int(), height: positive.int(), modelWidth: positive.int(), modelHeight: positive.int() }).strict();
 export const nativeVisibilityRallySchema = z.object({
   startFrame: number.int().nonnegative(), endFrame: number.int().nonnegative(),
@@ -31,7 +42,7 @@ export const nativeVisibilityRallySchema = z.object({
 export const nativeEventSchema = z.object({
   schemaVersion: z.literal(1), taskID: z.string().uuid(), type: z.enum(['progress', 'result', 'error']),
   stage: z.string().optional(), current: number.nonnegative().optional(), total: number.nonnegative().optional(),
-  calibration: nativeCalibrationSchema.optional(), tableSamples: z.array(nativeTableSampleSchema).length(5).optional(), roi: nativeRoiSchema.optional(),
+  calibration: nativeCalibrationSchema.optional(), tableSamples: nativeTableSamplesSchema.optional(), roi: nativeRoiSchema.optional(),
   rallies: z.array(z.object({ id: z.string(), index: positive.int(), start: number.nonnegative(), end: positive, bounceCount: positive.int(), startFrame: number.int(), endFrame: number.int() }).strict()).optional(),
   visibilityRallies: z.array(nativeVisibilityRallySchema).optional(),
   bounceTimes: z.array(number.nonnegative()).optional(),

@@ -15,28 +15,8 @@ public enum RallyRecognitionMethod: String, Codable, Sendable {
   case bounceEvents = "bounce_events"
   case continuousVisibility = "continuous_visibility"
 }
-public enum CutMode: String, Codable, CaseIterable, Sendable {
-  case all, highlight, custom, analyzeOnly
-}
 public enum ExportStrategy: String, Codable, Sendable { case fastSegmented, compatible }
 public enum HDRKind: String, Codable, Sendable { case sdr, hdr10, hlg, dolbyVision, hdr10Plus }
-
-public struct Settings: Codable, Equatable, Sendable {
-  public var language = "zh-CN"
-  public var automaticCalibration = true
-  public var preRoll = 2.5
-  public var postRoll = 1.0
-  public var analysisMode: AnalysisMode = .full
-  public var normalizeVFR = false
-  public init() {}
-  public func validated() -> Settings {
-    var copy = self
-    if !["zh-CN", "en"].contains(language) { copy.language = "zh-CN" }
-    if ![1.5, 2.5, 5].contains(preRoll) { copy.preRoll = 2.5 }
-    if ![0.5, 1, 2, 4].contains(postRoll) { copy.postRoll = 1 }
-    return copy
-  }
-}
 
 public struct Point: Codable, Hashable, Sendable {
   public var x: Double
@@ -195,22 +175,6 @@ public struct Rally: Codable, Equatable, Identifiable, Sendable {
   }
 }
 
-public struct ProcessingMedia: Codable, Equatable, Sendable {
-  public enum Mode: String, Codable, Sendable {
-    case originalCFR, originalVFR, normalizedCFR, vfrFallback
-  }
-  public var mode: Mode
-  public var path: String
-  public var cacheKey: String?
-  public var warning: String?
-  public init(mode: Mode, path: String, cacheKey: String? = nil, warning: String? = nil) {
-    self.mode = mode
-    self.path = path
-    self.cacheKey = cacheKey
-    self.warning = warning
-  }
-}
-
 public struct TableKeypoint: Codable, Sendable {
   public var index: Int
   public var position: Point
@@ -235,46 +199,6 @@ public struct TableSample: Codable, Sendable {
     self.points = points
   }
 }
-public struct AnalysisResult: Codable, Identifiable, Sendable {
-  public var schemaVersion = 1
-  public var id: String
-  public var createdAt: Date
-  public var source: SourceIdentity
-  public var sourceVideo: VideoInfo
-  public var video: VideoInfo
-  public var processing: ProcessingMedia
-  public var calibration: Calibration
-  public var mode: AnalysisMode
-  public var rallies: [Rally]
-  public var bounceTimes: [Double]
-  public var tableSamples: [TableSample]
-  public var backend = "coreml"
-  public var modelDigests: [String: String]
-  public var visibleInHistory: Bool
-  public var outputPath: String?
-  public init(
-    id: String = UUID().uuidString, source: SourceIdentity, sourceVideo: VideoInfo,
-    video: VideoInfo, processing: ProcessingMedia,
-    calibration: Calibration, mode: AnalysisMode, rallies: [Rally], bounceTimes: [Double],
-    tableSamples: [TableSample] = [], modelDigests: [String: String] = [:],
-    visibleInHistory: Bool = true
-  ) {
-    self.id = id
-    createdAt = Date()
-    self.source = source
-    self.sourceVideo = sourceVideo
-    self.video = video
-    self.processing = processing
-    self.calibration = calibration
-    self.mode = mode
-    self.rallies = rallies
-    self.bounceTimes = bounceTimes
-    self.tableSamples = tableSamples
-    self.modelDigests = modelDigests
-    self.visibleInHistory = visibleInHistory
-  }
-}
-
 public struct CutRange: Codable, Equatable, Sendable {
   public var start: Double
   public var end: Double
@@ -286,47 +210,6 @@ public struct CutRange: Codable, Equatable, Sendable {
   }
   public var duration: Double { end - start }
 }
-public struct CustomClip: Codable, Equatable, Identifiable, Sendable {
-  public var id: String
-  public var sourceRallyID: String?
-  public var index: Int
-  public var bounceCount: Int?
-  public var defaultStart: Double
-  public var defaultEnd: Double
-  public var start: Double
-  public var end: Double
-  public var selected = true
-  public var isManual: Bool { sourceRallyID == nil }
-  public var range: CutRange { CutRange(start, end, clipIDs: [id]) }
-  public init(
-    id: String, sourceRallyID: String?, index: Int, bounceCount: Int?, start: Double, end: Double
-  ) {
-    self.id = id
-    self.sourceRallyID = sourceRallyID
-    self.index = index
-    self.bounceCount = bounceCount
-    self.start = start
-    self.end = end
-    defaultStart = start
-    defaultEnd = end
-  }
-}
-
-public struct ExportOutputs: Codable, Sendable, Equatable {
-  public var combined = true
-  public var rallyVideos = false
-  public var xml = false
-  public init(combined: Bool = true, rallyVideos: Bool = false, xml: Bool = false) {
-    self.combined = combined
-    self.rallyVideos = rallyVideos
-    self.xml = xml
-  }
-  public func validate(custom: Bool) throws {
-    guard combined || rallyVideos || xml, !(combined && (rallyVideos || xml)), custom || combined
-    else { throw TTError("INVALID_EXPORT_OUTPUTS") }
-  }
-}
-
 public struct AnalysisRequest: Codable, Sendable {
   public var schemaVersion = 1
   public var taskID: String

@@ -138,7 +138,7 @@ final class MediaIntegrationTests: XCTestCase {
     XCTAssertEqual(actual.videoCodec, "hevc")
     XCTAssertEqual(actual.maxCLL, "1000,400")
   }
-  func testFailureIsolationAndPartialArtifactRecovery() async throws {
+  func testMissingAnalysisModelProducesTypedFailureWithoutTouchingSource() async throws {
     let folder = try workspace()
     let source = folder.appendingPathComponent("failure-source.mp4")
     try await generate(source, duration: "2", audio: false)
@@ -146,33 +146,6 @@ final class MediaIntegrationTests: XCTestCase {
     let calibration = Calibration(
       width: 640, height: 360,
       points: [Point(100, 120), Point(540, 120), Point(590, 320), Point(50, 320)])
-    let result = AnalysisResult(
-      source: try SourceIdentity(url: source), sourceVideo: video, video: video,
-      processing: ProcessingMedia(mode: .originalCFR, path: video.path), calibration: calibration,
-      mode: .full, rallies: [], bounceTimes: [])
-    let clips = [
-      CustomClip(id: "manual", sourceRallyID: nil, index: 1, bounceCount: 0, start: 0.25, end: 1.25)
-    ]
-    var broken = paths
-    broken.ffmpeg = folder.appendingPathComponent("missing-ffmpeg")
-    let request = ExportRequest(
-      result: result, mode: .custom, threshold: 5, settings: Settings(), clips: clips,
-      outputs: ExportOutputs(combined: false, rallyVideos: true, xml: true), destination: folder)
-    let partial = try await MediaExporter(paths: broken).exportResult(request)
-    XCTAssertEqual(partial.files, ["TTcut.xml"])
-    XCTAssertEqual(partial.warnings.count, 1)
-    XCTAssertTrue(
-      FileManager.default.fileExists(
-        atPath: partial.folder.appendingPathComponent("TTcut.xml").path))
-    XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
-    let unwritable = folder.appendingPathComponent("not-a-directory")
-    try Data([1]).write(to: unwritable)
-    var badDestination = request
-    badDestination.destination = unwritable
-    do {
-      _ = try await MediaExporter(paths: paths).exportResult(badDestination)
-      XCTFail("File used as output directory")
-    } catch { XCTAssertEqual(try Data(contentsOf: unwritable), Data([1])) }
     var analysis = AnalysisRequest(
       taskID: UUID().uuidString, operation: "analyze", video: video,
       modelsDirectory: folder.appendingPathComponent("missing-models").path)
@@ -181,11 +154,7 @@ final class MediaIntegrationTests: XCTestCase {
       _ = try await AnalysisClient.run(analysis, paths: paths) { _ in }
       XCTFail("Missing model succeeded")
     } catch let error as TTError { XCTAssertFalse(error.code.isEmpty) }
-    try Data([2, 3]).write(to: source)
-    do {
-      _ = try await MediaExporter(paths: paths).exportResult(request)
-      XCTFail("Changed source accepted")
-    } catch let error as TTError { XCTAssertEqual(error.code, "SOURCE_CHANGED_OR_MISSING") }
+    XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
   }
   func testNativeWorkerSyntheticVideoAndProtocol() async throws {
     let folder = try workspace()
@@ -210,7 +179,7 @@ final class MediaIntegrationTests: XCTestCase {
     do {
       let table = try await AnalysisClient.run(request, paths: paths) { _ in }
       try table.calibration?.validate()
-      XCTAssertEqual(table.tableSamples?.count, 5)
+      XCTAssertEqual(table.tableSamples?.count, 11)
     } catch let error as TTError { XCTAssertEqual(error.code, "AUTO_CALIBRATION_FAILED") }
   }
   func testCancellationStopsProcess() async throws {
@@ -230,7 +199,7 @@ final class MediaIntegrationTests: XCTestCase {
       XCTFail("Cancelled FFmpeg succeeded")
     } catch is CancellationError {} catch { XCTFail("\(error)") }
   }
-  func testVFRNormalizationAndProvenance() async throws {
+  func testVFRNormalizationProducesCFRMedia() async throws {
     let folder = try workspace()
     let source = folder.appendingPathComponent("vfr.mp4")
     _ = try await ProcessRunner.run(
@@ -242,17 +211,16 @@ final class MediaIntegrationTests: XCTestCase {
       ])
     let video = try await MediaProbe(paths: paths).inspect(source)
     XCTAssertTrue(video.variableFrameRate)
-    let store = HistoryStore(root: folder.appendingPathComponent("state"))
-    let (normalized, media) = try await MediaExporter(paths: paths).processing(
-      source: video, normalize: true, store: store)
-    XCTAssertEqual(media.mode, .normalizedCFR, media.warning ?? "")
+    let destination = folder.appendingPathComponent("normalized.mp4")
+    let exporter = MediaExporter(paths: paths)
+    try await exporter.encode(
+      video: video, ranges: [CutRange(0, video.duration)], destination: destination,
+      normalizeFPS: true)
+    let normalized = try await exporter.validate(
+      destination, source: video, duration: video.duration, segments: 1)
     XCTAssertFalse(normalized.variableFrameRate)
     XCTAssertNotEqual(normalized.path, source.path)
     XCTAssertEqual(video.path, source.path)
-    let (cached, cachedMedia) = try await MediaExporter(paths: paths).processing(
-      source: video, normalize: true, store: store)
-    XCTAssertEqual(cached.path, normalized.path)
-    XCTAssertEqual(media.cacheKey, cachedMedia.cacheKey)
   }
   func testTenBitSDRMultichannelAndRotatedSAR() async throws {
     let folder = try workspace()
@@ -286,31 +254,5 @@ final class MediaIntegrationTests: XCTestCase {
     XCTAssertEqual(result.bitDepth, 10)
     XCTAssertEqual(result.audioChannels, 6)
     XCTAssertEqual(VideoInfo.ratio(result.sar), 0.75, accuracy: 0.0001)
-  }
-  func testXMLAndManualArtifactExports() async throws {
-    let folder = try workspace()
-    let source = folder.appendingPathComponent("manual.mp4")
-    try await generate(source)
-    let video = try await MediaProbe(paths: paths).inspect(source)
-    let calibration = Calibration(
-      width: 640, height: 360,
-      points: [Point(100, 100), Point(540, 100), Point(590, 320), Point(50, 320)])
-    let value = AnalysisResult(
-      source: try SourceIdentity(url: source), sourceVideo: video, video: video,
-      processing: ProcessingMedia(mode: .originalCFR, path: source.path), calibration: calibration,
-      mode: .full, rallies: [], bounceTimes: [])
-    let clips = [
-      CustomClip(id: "manual", sourceRallyID: nil, index: 1, bounceCount: 0, start: 0.5, end: 1.5)
-    ]
-    let request = ExportRequest(
-      result: value, mode: .custom, threshold: 5, settings: Settings(), clips: clips,
-      outputs: ExportOutputs(combined: false, rallyVideos: true, xml: true), destination: folder)
-    let output = try await MediaExporter(paths: paths).export(request)
-    let xml = try String(contentsOf: output.appendingPathComponent("TTcut.xml"))
-    XCTAssertTrue(xml.contains("<xmeml version=\"4\">"))
-    XCTAssertTrue(xml.contains("<timebase>30</timebase>"))
-    XCTAssertTrue(xml.contains("<in>15</in>"))
-    XCTAssertTrue(
-      FileManager.default.fileExists(atPath: output.appendingPathComponent("001_回合001.mp4").path))
   }
 }

@@ -142,27 +142,36 @@ final class Worker {
     let decoder = try Decoder(request.video)
     let video = request.video
     let count = video.frameCount ?? Int(ceil(video.duration * video.fps))
-    let labels = ["first", "25_percent", "50_percent", "75_percent", "last"]
+    let ratios = [0.05, 0.14, 0.23, 0.32, 0.41, 0.50, 0.59, 0.68, 0.77, 0.86, 0.95]
     var samples: [TableSample] = []
-    for (index, ratio) in [0.0, 0.25, 0.5, 0.75, 1.0].enumerated() {
+    var candidateSamples: [TableCandidateSample] = []
+    var sampledFrameIndices = Set<Int>()
+    var sampledTimestamps = Set<Int64>()
+    progress("table_sampling", 0, ratios.count)
+    progress("table_inference", 0, ratios.count)
+    for (index, ratio) in ratios.enumerated() {
       let target: Double
       if !video.variableFrameRate, count > 0 {
-        target =
-          Double(ratio == 1 ? count - 1 : min(count - 1, Int(ceil(Double(count) * ratio - 1e-9))))
-          / video.fps
+        let frameIndex = Int((Double(count - 1) * ratio).rounded(.toNearestOrEven))
+        target = Double(frameIndex) / video.fps
       } else {
-        target = ratio == 1 ? max(0, video.duration - 1 / video.fps) : video.duration * ratio
+        target = video.duration * ratio
       }
       var frame = try decoder.sample(at: max(0, target))
-      guard
-        !samples.contains(where: {
-          $0.frameIndex == Int(frame.index) || abs($0.time - frame.time) < 1e-9
-        })
-      else { throw TTError("AUTO_CALIBRATION_TOO_FEW_FRAMES") }
+      guard frame.time.isFinite,
+        sampledFrameIndices.insert(Int(frame.index)).inserted,
+        sampledTimestamps.insert(Int64((frame.time * 1_000_000).rounded())).inserted
+      else {
+        throw TTError(
+          "AUTO_CALIBRATION_FAILED",
+          "自动标定需要十一个不同的视频位置，请手动标定 / Manual calibration required")
+      }
+      progress("table_sampling", index + 1, ratios.count)
       var input = [Float](repeating: 0, count: 3 * 1600 * 896)
       guard tt_prepare_table(&frame, &input) == 0 else { throw nativeError() }
       let output = try predictor.predict(input, shape: [1, 3, 896, 1600])
       var points: [TableKeypoint] = []
+      var candidates: [[TablePeakCandidate]] = []
       for channel in 0..<13 {
         let plane = try Inference.plane(output, channel: channel)
         let best = plane.pixels.indices.max { plane.pixels[$0] < plane.pixels[$1] }!
@@ -176,15 +185,25 @@ final class Worker {
             index: channel, position: Point(x, y), activation: activation,
             valid: activation.isFinite && activation >= 0.1 && x >= 0 && x < Double(video.width)
               && y >= 0 && y < Double(video.height)))
+        var peaks = [TTDetection](repeating: TTDetection(), count: 12)
+        let peakCount = tt_table_peak_candidates(
+          plane.pixels, Int32(plane.width), Int32(plane.height), Int32(video.width),
+          Int32(video.height), 0.15, &peaks, Int32(peaks.count))
+        guard peakCount >= 0 else { throw nativeError() }
+        candidates.append(peaks.prefix(Int(peakCount)).map {
+          TablePeakCandidate(point: Point($0.x, $0.y), activation: $0.confidence)
+        })
       }
+      let label = String(format: "sample_%02d", index + 1)
       samples.append(
         TableSample(
-          label: labels[index], time: frame.time, frameIndex: Int(frame.index), points: points))
-      progress("table_inference", index + 1, 5)
+          label: label, time: frame.time, frameIndex: Int(frame.index), points: points))
+      candidateSamples.append(TableCandidateSample(label: label, candidates: candidates))
+      progress("table_inference", index + 1, ratios.count)
     }
-    return (
-      try TableAggregation.calibration(samples, width: video.width, height: video.height), samples
-    )
+    let consensus = try TableAggregation.calibration(
+      candidateSamples, width: video.width, height: video.height)
+    return (consensus.calibration, samples)
   }
   func trajectories(
     calibration: Calibration, predictor: Inference, threshold: Float, intervals: [CutRange]?,

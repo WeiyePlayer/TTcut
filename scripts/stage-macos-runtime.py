@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build and stage just the native helpers and their closed runtime, not the SwiftUI app."""
+"""Build and stage the Electron application's native helpers and their closed runtime."""
 from pathlib import Path
 import subprocess, shutil, json, hashlib, re
 ROOT = Path(__file__).resolve().parents[1]

@@ -2,40 +2,6 @@ import Foundation
 import TTcutCore
 
 public enum MediaPreview {
-  /// A disposable display proxy. It never becomes analysis/export media or a history source.
-  public static func make(
-    video: VideoInfo, paths: RuntimePaths, progress: @escaping @Sendable (Double) -> Void = { _ in }
-  ) async throws -> URL {
-    let identity = try SourceIdentity(url: video.url)
-    let key = try HistoryStore.cacheKey(
-      identity: identity, rate: video.frameRate, encoder: "preview-sdr-v1")
-    let root = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-      .appendingPathComponent("TTcut/preview", isDirectory: true)
-    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-    let final = root.appendingPathComponent(key + ".mp4")
-    if FileManager.default.fileExists(atPath: final.path) { return final }
-    let partial = root.appendingPathComponent(UUID().uuidString + ".partial.mp4")
-    defer { try? FileManager.default.removeItem(at: partial) }
-    try await render(video: video, paths: paths, destination: partial, progress: progress)
-    guard identity.currentStatus == .available else { throw TTError("SOURCE_CHANGED") }
-    try Task.checkCancellation()
-    try FileManager.default.moveItem(at: partial, to: final)
-    // Keep the current proxy and one recent predecessor; no source/history paths participate.
-    let candidates =
-      (try? FileManager.default.contentsOfDirectory(
-        at: root, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
-    let ordered = candidates.filter {
-      $0.pathExtension == "mp4" && $0.deletingPathExtension().lastPathComponent.count == 64
-        && $0 != final
-    }.sorted {
-      ((try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
-        ?? .distantPast)
-        > ((try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
-          ?? .distantPast)
-    }
-    for old in ordered.dropFirst() { try? FileManager.default.removeItem(at: old) }
-    return final
-  }
   /// Caller-owned output, without a dependency on history or shared cache directories.
   public static func render(video: VideoInfo, paths: RuntimePaths, destination: URL,
     progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws {
