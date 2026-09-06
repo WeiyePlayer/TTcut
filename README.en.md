@@ -8,12 +8,12 @@ TTcut is a local automatic table-tennis video cutter for players and enthusiasts
 
 Videos, analysis results, and history stay on the local computer. TTcut requires no account, uploads no video, and collects no telemetry. The Windows online installer needs a connection while installing runtime resources; the Windows full installer and macOS packages already include their runtime resources. Analysis, preview, and cutting can run offline after setup.
 
-> The current stable release is `v1.3.0` for Windows x64 and macOS 15+ on Apple Silicon.
+> Current stable releases: `v1.3.0` for Windows x64 and `v1.3.1` for macOS 15+ on Apple Silicon.
 
 ## Download and installation
 
 1. For Windows x64, download either the full installer or online installer from [TTcut Releases](https://github.com/WeiyePlayer/TTcut/releases). The online installer downloads and verifies the required runtime resources during installation and needs an active connection.
-2. For macOS 15+ on Apple Silicon, download the DMG from the same [TTcut Releases](https://github.com/WeiyePlayer/TTcut/releases) page. The current macOS build is ad-hoc signed and not notarized; if first launch is blocked, allow it in System Settings > Privacy & Security.
+2. For macOS 15+ on Apple Silicon, download the DMG (recommended) or ZIP from the same [TTcut Releases](https://github.com/WeiyePlayer/TTcut/releases) page. The current macOS build is ad-hoc signed and not notarized; if first launch is blocked, allow it in System Settings > Privacy & Security.
 3. Download the Android version from [TTcut-Mobile-Releases](https://github.com/WeiyePlayer/TTcut-Mobile-Releases/releases).
 4. If GitHub downloads are slow, use the Baidu Netdisk mirror for Windows resources: [link](https://pan.baidu.com/s/1LXDzs74xOM1t50-IRM_Vvw?pwd=ttct), extraction code: `ttct`.
 5. On Windows, run the installer, choose the installation root, and decide whether to create a desktop shortcut. Application files are written under `<root>\app`; large runtime resources, downloads, and import staging are stored under `<root>\data\components`. A Start menu shortcut is always created.
@@ -21,14 +21,14 @@ Videos, analysis results, and history stay on the local computer. TTcut requires
 
 TTcut detects an NVIDIA GPU automatically and falls back to CPU if accelerated setup or its self-test fails. Its video-processing capability reads media information, cuts and joins segments, and validates exported files.
 
-## What's new in v1.3.0
+## What's new in macOS v1.3.1
 
-- Windows: Continuous motion is now the default rally-recognition method, with improved handling for short rallies, vertical movement, between-rally passes, and waiting segments.
-- Windows: Automatic calibration samples more points across the video and selects a result using stable candidates and table geometry, improving robustness in complex footage.
-- macOS: the first macOS 15+ Apple Silicon desktop build includes native Core ML analysis and media runtimes. Although the interface offers Continuous motion, the current native analysis result still uses Bounce events.
-- Manual calibration accepts the four table corners in any order and keeps them directly adjustable afterward.
+- Segmented export now seeks to each source range before decoding and lets FFmpeg and the encoders select threading for the host, substantially reducing redundant decoding and export wait time.
+- In a same-video comparison covering the same 14 merged segments, export time fell from approximately 11 minutes 22 seconds to approximately 2 minutes 26 seconds, a 78.66% reduction. Actual gains vary with hardware, codec, and source media.
+- Fixed the macOS Continuous motion option not reaching native analysis. The native Worker now returns Continuous motion rallies when that method is selected.
+- Fixed known issues and clarified the implementation boundary between Electron and native services.
 
-See the [v1.3.0 release notes](docs/release-notes-v1.3.0.en.md) for the complete details.
+See the [macOS v1.3.1 release notes](docs/release-notes-v1.3.1.en.md) for the complete details.
 
 ## Contact the author on WeChat: m2924931661
 
