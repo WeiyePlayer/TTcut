@@ -680,6 +680,24 @@ export const exportRequestSchema = z.object({
   }
 });
 
+export const batchExportRequestSchema = z.object({
+  items: z.array(z.object({
+    analysis_id: z.string().uuid(),
+    selection: z.union([allCutSelectionSchema, legacyHighlightCutSelectionSchema, highlightCutSelectionSchema]),
+  }).strict()).min(1),
+}).strict().refine((request) => new Set(request.items.map((item) => item.analysis_id)).size === request.items.length, {
+  message: 'Batch export analyses must be unique',
+});
+
+export type BatchExportRequest = z.infer<typeof batchExportRequestSchema>;
+export type BatchExportResult = {
+  outputPath: string;
+  mediaUrl: string;
+  width: number;
+  height: number;
+  skippedAnalysisIds: string[];
+};
+
 export const updateStateSchema = z.object({
   status: z.enum(['idle', 'unsupported', 'checking', 'available', 'downloaded', 'up-to-date', 'error']),
   version: z.string().min(1).nullable(),

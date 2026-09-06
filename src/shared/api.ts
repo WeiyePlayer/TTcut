@@ -1,5 +1,7 @@
 import type {
   AnalysisResultV1,
+  BatchExportRequest,
+  BatchExportResult,
   AppSettings,
   BlurBallAnalysisMode,
   RallyRecognitionMethod,
@@ -49,6 +51,7 @@ export type AppEvent =
   | { type: 'analysis-result'; taskId: string; analysisId: string; calibration: Calibration; data: AnalysisResultV1 }
   | { type: 'calibration-result'; taskId: string; calibration: Calibration; tableAnalysis: TableAnalysis }
   | { type: 'export-result'; taskId: string; data: ExportResult }
+  | { type: 'batch-export-result'; taskId: string; data: BatchExportResult }
   | {
     type: 'component-result';
     taskId: string;
@@ -104,6 +107,7 @@ export interface TTcutApi {
     blurballStage2ConfidenceThreshold: number;
   }): Promise<string>;
   startExport(input: ExportRequest): Promise<string>;
+  startBatchExport(input: BatchExportRequest): Promise<string>;
   listHistory(): Promise<HistorySummaryV1[]>;
   openHistory(id: string): Promise<HistoryOpenResultV1>;
   deleteHistory(id: string): Promise<void>;

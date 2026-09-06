@@ -222,7 +222,7 @@ function customArtifactOutputs(request: ExportRequest): {
   };
 }
 
-async function assertExportPreconditions(
+export async function assertExportPreconditions(
   input: string,
   outputDirectory: string,
   taskId: string,
@@ -265,7 +265,11 @@ async function assertExportPreconditions(
   }
 }
 
-async function runFfmpeg(
+export function clearExportProgress(taskId: string): void {
+  lastExportProgress.delete(taskId);
+}
+
+export async function runFfmpeg(
   window: BrowserWindow,
   taskId: string,
   executable: string,

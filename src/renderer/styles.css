@@ -531,16 +531,16 @@ td input { accent-color: var(--blue); }
 .batch-remove { width: 34px; height: 34px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); cursor: pointer; font-size: 22px; }
 .batch-remove:hover { background: #fff0ef; color: #a1261f; }
 .batch-actions { display: flex; gap: 8px; justify-content: flex-end; }
-.batch-shutdown-option {
-  min-height: 34px; padding: 0 12px; display: flex; align-items: center; gap: 7px;
-  border: 1px solid var(--line); border-radius: 7px; background: rgba(255, 255, 255, .97); box-shadow: 0 8px 20px rgba(0, 0, 0, .12);
-  color: var(--text); font-size: 12px; font-weight: 400; cursor: pointer;
-}
-.batch-shutdown-option input { width: 14px; height: 14px; margin: 0; accent-color: var(--blue); cursor: pointer; }
-.batch-shutdown-option:has(input:disabled) { color: var(--muted); cursor: default; }
-.batch-shutdown-option input:disabled { cursor: default; }
 .batch-launcher.shutdown-armed .batch-start { box-shadow: 0 0 0 2px rgba(194, 110, 26, .38), 0 12px 32px rgba(45, 112, 220, .3); }
 .batch-shutdown-indicator { display: inline-block; margin-left: 8px; font-size: 14px; line-height: 1; }
+.batch-launcher { width: max-content; margin: 16px 0 0 auto; }
+.batch-launch-options { visibility: hidden; }
+.batch-launcher::before { content: ''; position: absolute; right: 0; bottom: 100%; width: 100%; height: 8px; }
+.batch-launcher:hover .batch-launch-options, .batch-launcher:focus-within .batch-launch-options { opacity: 1; visibility: visible; pointer-events: auto; transform: translateY(0) scale(1); }
+.batch-launcher:focus-visible { outline: 2px solid var(--blue); outline-offset: 4px; border-radius: 24px; }
+.batch-merged-result { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 16px; }
+.batch-merged-result progress { flex: 1; min-width: 120px; accent-color: var(--blue); }
+.batch-merged-path { width: 100%; overflow-wrap: anywhere; color: var(--muted); }
 .batch-system-notice { width: 100%; margin: 0 0 16px; }
 .multi-calibration-page { width: min(980px, 100%); margin: 0 auto; }
 .multi-calibration-page .multi-header { align-items: center; }
