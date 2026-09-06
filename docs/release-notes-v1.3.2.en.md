@@ -1,8 +1,8 @@
-# TTcut Windows v1.3.1
+# TTcut Windows v1.3.2
 
-[简体中文](release-notes-v1.3.1.md) | **English**
+[简体中文](release-notes-v1.3.2.md) | **English**
 
-`v1.3.1` is a stable TTcut update for Windows x64. It fixes an error that caused the export feature to behave incorrectly.
+`v1.3.2` is a stable TTcut update for Windows x64. It fixes an error that caused the export feature to behave incorrectly.
 
 ## Fixes
 
@@ -11,9 +11,9 @@
 - If fast stream copy fails and falls back to re-encoding, export progress continues within a reserved range. Progress reaches 100% only after output validation succeeds.
 - The app now prevents suspension while long-running work such as analysis or export is active, then releases that state when the task finishes or is cancelled, reducing unexpected mid-task interruptions.
 
-## Scope
+## Version note
 
-- These notes cover the Windows x64 changes. macOS `v1.3.1` uses a separate release branch and runtime implementation.
+- macOS `v1.3.1` was published from its separate branch and is now locked. The Windows release therefore advances directly from `v1.3.0` to `v1.3.2`; no Windows `v1.3.1` was published.
 - This update addresses the confirmed export-progress and long-task suspension paths. It does not establish that every export failure across all sources, codecs, and devices has been eliminated.
 
 ## Verification

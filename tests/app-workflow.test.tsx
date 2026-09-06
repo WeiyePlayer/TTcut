@@ -6,7 +6,7 @@ import type { AppEvent, BootstrapData, SelectedVideo, TTcutApi } from '../src/sh
 import type { VideoMetadata } from '../src/shared/contracts';
 
 const bootstrap: BootstrapData = {
-  version: '1.3.1',
+  version: '1.3.2',
   settings: {
     language: 'zh-CN',
     calibration_method: 'automatic',
