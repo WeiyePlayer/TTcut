@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+import json
 
 import cv2
 import numpy as np
+import pytest
 
 from ttcut_worker import calibration_worker
 from ttcut_worker.calibration import TableCalibration
+from ttcut_worker.errors import AutoCalibrationError
 from ttcut_worker.rallies import group_rallies
 from ttcut_worker.table_analyze import (
     PLANAR_KEYPOINT_INDICES,
@@ -105,6 +108,20 @@ def test_automatic_calibration_selects_the_geometry_supported_corner_peaks():
     assert np.allclose(np.asarray(calibration.points), true_corners)
     assert consensus["semantic_support"] == 11
     assert consensus["score"] >= 5.5
+
+
+def test_automatic_calibration_rejects_background_supported_false_table():
+    # Real multi-table 4K footage: the old frame-relative tolerance accepted a
+    # floor corner and a collapsed far edge, then analyzed the wrong ROI.
+    fixture = json.loads((Path(__file__).parent / "fixtures/img3324-table-peaks.json").read_text())
+    clusters = {
+        int(key): [{"point": np.asarray(row[:2], dtype=np.float32),
+                    "support": row[2], "mean_activation": row[3]}
+                   for row in rows]
+        for key, rows in fixture["clusters"].items()
+    }
+    with pytest.raises(AutoCalibrationError, match="consistent table geometry"):
+        _select_geometric_consensus(clusters, fixture["width"], fixture["height"], fixture["sample_count"])
 
 
 def local_tracknet_request() -> dict:

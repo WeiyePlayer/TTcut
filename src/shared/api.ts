@@ -90,6 +90,7 @@ export interface TTcutApi {
   pathForDroppedFile(file: File): string;
   acceptDroppedVideo(path: string): Promise<SelectedVideo>;
   probeVideo(path: string): Promise<VideoMetadata>;
+  prepareVideoPreview(mediaUrl: string): Promise<string>;
   startAutoCalibration(input: {
     videoPath: string;
     device: 'auto' | 'cuda' | 'cpu';

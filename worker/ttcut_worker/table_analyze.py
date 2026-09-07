@@ -440,8 +440,13 @@ def _score_homography(
 ) -> tuple[float, int, list[dict | None]]:
     world_points = TABLE_KEYPOINTS_CM[list(PLANAR_KEYPOINT_INDICES)]
     projected = cv2.perspectiveTransform(world_points.reshape(-1, 1, 2), homography).reshape(-1, 2)
-    sigma = diagonal * GEOMETRIC_SIGMA_RATIO
-    maximum_distance = diagonal * GEOMETRIC_MAX_DISTANCE_RATIO
+    corners = cv2.perspectiveTransform(TABLE_CORNERS_CM.reshape(-1, 1, 2), homography).reshape(-1, 2)
+    shortest_edge = min(float(np.linalg.norm(corners[(index + 1) % 4] - corners[index])) for index in range(4))
+    # A frame-sized tolerance can be wider than a distant table's entire end
+    # edge. That lets unrelated floor/background peaks support a collapsed
+    # quadrilateral. Require evidence relative to the proposed table as well.
+    sigma = min(diagonal * GEOMETRIC_SIGMA_RATIO, shortest_edge * 0.10)
+    maximum_distance = min(diagonal * GEOMETRIC_MAX_DISTANCE_RATIO, shortest_edge * 0.25)
     score = 0.0
     support = 0
     selected = []

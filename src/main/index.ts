@@ -31,7 +31,8 @@ import { startExport } from './export';
 import { startBatchExport } from './batch-export';
 import { getLogDirectory, logLine } from './logger';
 import { getHistoryStore } from './history';
-import { clearMediaPaths, installMediaProtocol, registerMediaPath } from './media-protocol';
+import { clearMediaPaths, installMediaProtocol, registeredVideoPath, registerMediaPath } from './media-protocol';
+import { disposePreviewMedia, hasPreviewMedia, preparePreviewMedia } from './preview-media';
 import { probeVideo } from './probe';
 import {
   cancelAllTasksAndWait,
@@ -179,6 +180,10 @@ function registerIpc(): void {
   ipcMain.handle(IPC.videoProbe, (_event, value: unknown) => {
     if (typeof value !== 'string') throw new Error('INVALID_INPUT');
     return probeVideo(value);
+  });
+  ipcMain.handle(IPC.videoPreparePreview, async (_event, value: unknown) => {
+    if (typeof value !== 'string') throw new Error('INVALID_INPUT');
+    return registerMediaPath(await preparePreviewMedia(registeredVideoPath(value)));
   });
   ipcMain.handle(IPC.calibrationStart, async (_event, value: unknown) => {
     if (!value || typeof value !== 'object') throw new Error('INVALID_REQUEST');
@@ -431,6 +436,12 @@ app.on('activate', () => {
 });
 
 app.on('before-quit', async (event) => {
+  if (hasPreviewMedia()) {
+    event.preventDefault();
+    await disposePreviewMedia();
+    app.quit();
+    return;
+  }
   if (!exitApproved && hasActiveTasks()) {
     event.preventDefault();
     exitApproved = true;

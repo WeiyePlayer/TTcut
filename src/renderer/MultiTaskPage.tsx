@@ -763,7 +763,7 @@ export function MultiTaskPage({
           <p className="eyebrow">{manualItem.video.name}</p>
           <p>{text.calibrationDescription}</p>
         </div>
-        <CalibrationSurface video={manualItem.video} metadata={manualItem.metadata} points={manualPoints} onPointsChange={setManualPoints} />
+        <CalibrationSurface video={manualItem.video} metadata={manualItem.metadata} points={manualPoints} onPointsChange={setManualPoints} language={language} />
         <div className="point-legend">
           {text.pointLabels.map((label, index) => <span className={manualPoints[pointOrder[index]!] ? 'done' : ''} key={label}><b>{index + 1}</b>{label.replace(/^\d\s/, '')}</span>)}
         </div>

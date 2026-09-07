@@ -417,6 +417,16 @@ export async function startAnalysis(
         throw workerFailure('ANALYSIS_SAVE_FAILED', error instanceof Error ? error.message : String(error));
       }
       historySaved = true;
+      await logLine(taskId, 'INFO', `Analysis saved: ${JSON.stringify({
+        decodedFrames: workerResult.video.frame_count,
+        rallyCount: workerResult.rallies.length,
+        calibration,
+        model: ballModelProfile,
+        modelInput: workerResult.model_provenance?.main_input,
+        analysisRoi: workerResult.model_provenance?.roi,
+        processingMode: processingMedia.mode,
+        recognition: 'rally_recognition' in workerResult ? workerResult.rally_recognition : value.rallyRecognitionMethod,
+      })}`).catch(() => undefined);
       if (controller.cancelRequested || controller.signal.aborted) {
         throw workerFailure('ANALYSIS_CANCELLED', 'Analysis was cancelled.', { cancelled: true });
       }
@@ -453,5 +463,16 @@ export async function startAnalysis(
     }
   })();
   void logLine(taskId, 'INFO', `Analysis started for ${path.basename(sourceMetadata.path)}`);
+  void logLine(taskId, 'INFO', `Analysis input: ${JSON.stringify({
+    codec: sourceMetadata.video_codec, width: sourceMetadata.width, height: sourceMetadata.height,
+    fps: sourceMetadata.fps, frameCount: sourceMetadata.frame_count,
+    variableFrameRate: sourceMetadata.variable_frame_rate,
+    calibrationMethod: value.calibrationChoice.method, analysisMode: effectiveAnalysisMode,
+    rallyRecognitionMethod: value.rallyRecognitionMethod,
+    confidenceThreshold: value.blurballConfidenceThreshold,
+    stage1ConfidenceThreshold: value.blurballStage1ConfidenceThreshold,
+    stage2ConfidenceThreshold: value.blurballStage2ConfidenceThreshold,
+    normalizeVariableFrameRate: value.normalizeVariableFrameRate,
+  })}`).catch(() => undefined);
   return taskId;
 }

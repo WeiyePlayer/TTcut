@@ -10,6 +10,7 @@ import {
 } from '../domain/custom-clips';
 import { CustomTimeline, type TimelineSeekIntent, type TimelineToolMode } from './CustomTimeline';
 import type { Messages } from './i18n';
+import { useCompatiblePreview } from './use-compatible-preview';
 
 const PLAYBACK_CUE_DURATION_MS = 500;
 const PLAYBACK_SCROLL_TIMEOUT_MS = 800;
@@ -173,6 +174,7 @@ export function CustomCutPage({
   const lastPlaybackClipIdRef = useRef<string | null>(null);
   const locatePlaybackClipRef = useRef<(time: number, reason: 'continuous' | 'commit') => void>(() => undefined);
   const currentTimeRef = useRef(0);
+  const preview = useCompatiblePreview(videoRef, video.mediaUrl);
   const isPreviewSeekingRef = useRef(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [playbackCue, setPlaybackCue] = useState<PlaybackCue | null>(null);
@@ -464,9 +466,10 @@ export function CustomCutPage({
           </div>
         </section>
 
-        <div className="custom-workspace-right">
-          <div className="custom-monitor-slot"><div className="custom-monitor">
-            <video ref={videoRef} src={video.mediaUrl} controls={false} preload="metadata" playsInline tabIndex={0} aria-label={translations.togglePlayback} onClick={togglePlayback} onKeyDown={handleVideoKeyDown} onLoadedMetadata={(event) => { lastPlaybackClipIdRef.current = null; isPreviewSeekingRef.current = false; event.currentTarget.currentTime = 0; updatePlaybackTime(0); }} onPlay={startVideoFrameTracking} onPause={stopVideoFrameTracking} onEnded={stopVideoFrameTracking} onTimeUpdate={(event) => { const time = event.currentTarget.currentTime; updatePlaybackTime(time); if (!isPreviewSeekingRef.current) locatePlaybackClip(time, 'continuous'); }} onSeeked={(event) => updatePlaybackTime(event.currentTarget.currentTime)} />
+          <div className="custom-workspace-right">
+            <div className="custom-monitor-slot"><div className="custom-monitor">
+              {preview.status !== 'ready' && <div className="custom-preview-status" role={preview.status === 'failed' ? 'alert' : 'status'}>{preview.status === 'preparing' ? translations.previewPreparing : translations.previewFailed}</div>}
+            <video ref={videoRef} src={preview.url} controls={false} preload={preview.url === video.mediaUrl ? 'metadata' : 'auto'} playsInline tabIndex={0} aria-label={translations.togglePlayback} onClick={togglePlayback} onKeyDown={handleVideoKeyDown} onLoadedMetadata={(event) => { lastPlaybackClipIdRef.current = null; isPreviewSeekingRef.current = false; event.currentTarget.currentTime = 0; updatePlaybackTime(0); }} onPlay={startVideoFrameTracking} onPause={stopVideoFrameTracking} onEnded={stopVideoFrameTracking} onTimeUpdate={(event) => { const time = event.currentTarget.currentTime; updatePlaybackTime(time); if (!isPreviewSeekingRef.current) locatePlaybackClip(time, 'continuous'); }} onSeeked={(event) => updatePlaybackTime(event.currentTarget.currentTime)} />
           </div></div>
 
           <CustomTimeline clips={clips} duration={analysis.video.duration_seconds} fps={analysis.video.fps} currentTime={currentTime} timelineLabel={translations.timeline} resizeStartLabel={translations.resizeStart} resizeEndLabel={translations.resizeEnd} toolMode={toolMode} onSeek={seek} onScrubCancel={() => { isPreviewSeekingRef.current = false; }} onPlayClip={playClip} onAddAt={addManualAt} onDeleteClip={(clipId) => onClipsChange(deleteCustomClip(clips, clipId))} onResize={(clipId, edge, time) => {
@@ -494,7 +497,7 @@ export function CustomCutPage({
                   <span className="export-checkbox-text">{translations.exportPremiereXml}</span>
                 </label>
               </div>
-              <button className="primary floating-launch-start" type="button" disabled={!selectedCount || (!outputs.premiere_xml && !outputs.rally_videos && !mediaAvailable)} onPointerEnter={() => { cancelExportClose(); setExportOptionsOpen(true); }} onFocus={() => { cancelExportClose(); setExportOptionsOpen(true); }} onClick={() => onExport({ combined_video: !outputs.rally_videos && !outputs.premiere_xml, rally_videos: outputs.rally_videos, premiere_xml: outputs.premiere_xml })}>{translations.startCutting}</button>
+              <button className="primary floating-launch-start" type="button" disabled={preview.status === 'preparing' || !selectedCount || (!outputs.premiere_xml && !outputs.rally_videos && !mediaAvailable)} onPointerEnter={() => { cancelExportClose(); setExportOptionsOpen(true); }} onFocus={() => { cancelExportClose(); setExportOptionsOpen(true); }} onClick={() => onExport({ combined_video: !outputs.rally_videos && !outputs.premiere_xml, rally_videos: outputs.rally_videos, premiere_xml: outputs.premiere_xml })}>{translations.startCutting}</button>
             </div>
           </div>
         </div>
