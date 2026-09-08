@@ -448,7 +448,7 @@ export async function prepareProcessingMedia(
       existingDirectoryMoved = false;
     }
     return {
-      metadata,
+      metadata: { ...metadata, path: mediaPath },
       mode: 'normalized_cfr',
       targetFpsRatio,
       encoder,
