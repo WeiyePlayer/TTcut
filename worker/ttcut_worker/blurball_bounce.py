@@ -439,14 +439,14 @@ def _suppress_spatial_duplicate_artifacts(
     return kept
 
 
-def detect_blurball_bounce_frames(
+def detect_blurball_bounce_events(
     points: Sequence[TrajectoryPoint],
     calibration: TableCalibration,
     *,
     minimum_interval_seconds: float = DEFAULT_MINIMUM_BOUNCE_INTERVAL_SECONDS,
     table_length_margin_cm: float = TABLE_LENGTH_MARGIN_CM,
     table_width_margin_cm: float = TABLE_WIDTH_MARGIN_CM,
-) -> list[int]:
+) -> list[_BounceCandidate]:
     """Apply BlurBall's trajectory-change detector with TTcut's existing bounds."""
     for name, value in (
         ("minimum_interval_seconds", minimum_interval_seconds),
@@ -508,7 +508,17 @@ def detect_blurball_bounce_frames(
         ):
             selected.append(candidate)
     selected = _suppress_spatial_duplicate_artifacts(selected)
-    return [
-        candidate.point.frame
-        for candidate in sorted(selected, key=lambda value: (value.point.time, value.point.frame))
-    ]
+    return sorted(selected, key=lambda value: (value.point.time, value.point.frame))
+
+
+def detect_blurball_bounce_frames(
+    points: Sequence[TrajectoryPoint], calibration: TableCalibration, *,
+    minimum_interval_seconds: float = DEFAULT_MINIMUM_BOUNCE_INTERVAL_SECONDS,
+    table_length_margin_cm: float = TABLE_LENGTH_MARGIN_CM,
+    table_width_margin_cm: float = TABLE_WIDTH_MARGIN_CM,
+) -> list[int]:
+    """Compatibility API for legacy analysis and external callers."""
+    return [event.point.frame for event in detect_blurball_bounce_events(
+        points, calibration, minimum_interval_seconds=minimum_interval_seconds,
+        table_length_margin_cm=table_length_margin_cm, table_width_margin_cm=table_width_margin_cm,
+    )]

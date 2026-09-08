@@ -39,6 +39,11 @@ export type TaskController = {
   explicit: boolean;
 };
 
+export type TaskSuspensionBlocker = {
+  start: (type: 'prevent-app-suspension') => number;
+  stop: (id: number) => void;
+};
+
 const controllers = new Map<string, TaskController>();
 const backgroundProcesses = new Map<ChildProcess, Promise<void>>();
 const terminationRequests = new WeakMap<ChildProcess, Promise<void>>();
@@ -52,6 +57,43 @@ export function hasBackgroundProcesses(): boolean { return backgroundProcesses.s
 
 const externalTasks = new Map<string, () => void | Promise<void>>();
 const taskCompletions = new Map<string, { promise: Promise<void>; resolve: () => void }>();
+let suspensionBlocker: TaskSuspensionBlocker | null = null;
+let suspensionBlockerId: number | null = null;
+
+function synchronizeSuspensionBlocker(): void {
+  const active = controllers.size > 0 || externalTasks.size > 0;
+  if (active && suspensionBlocker && suspensionBlockerId === null) {
+    try {
+      suspensionBlockerId = suspensionBlocker.start('prevent-app-suspension');
+    } catch (error) {
+      console.warn('Could not prevent app suspension for the active task.', error);
+    }
+    return;
+  }
+  if (!active && suspensionBlocker && suspensionBlockerId !== null) {
+    const id = suspensionBlockerId;
+    suspensionBlockerId = null;
+    try {
+      suspensionBlocker.stop(id);
+    } catch (error) {
+      console.warn('Could not release the app suspension blocker.', error);
+    }
+  }
+}
+
+export function configureTaskSuspensionBlocker(blocker: TaskSuspensionBlocker | null): void {
+  if (suspensionBlocker && suspensionBlockerId !== null) {
+    const id = suspensionBlockerId;
+    suspensionBlockerId = null;
+    try {
+      suspensionBlocker.stop(id);
+    } catch (error) {
+      console.warn('Could not release the previous app suspension blocker.', error);
+    }
+  }
+  suspensionBlocker = blocker;
+  synchronizeSuspensionBlocker();
+}
 
 function registerCompletion(taskId: string): void {
   let resolve: () => void = () => {};
@@ -84,6 +126,7 @@ export function beginTrackedTask(taskId: string): TaskController {
   };
   controllers.set(taskId, controller);
   registerCompletion(taskId);
+  synchronizeSuspensionBlocker();
   return controller;
 }
 
@@ -94,6 +137,7 @@ export function getTaskController(taskId: string): TaskController | undefined {
 export function endTrackedTask(taskId: string): void {
   controllers.delete(taskId);
   completeTask(taskId);
+  synchronizeSuspensionBlocker();
 }
 
 export function markTaskTerminal(taskId: string): boolean {
@@ -106,10 +150,12 @@ export function markTaskTerminal(taskId: string): boolean {
 export function beginExternalTask(taskId: string, cancel: () => void | Promise<void>): void {
   assertTaskSlotAvailable(taskId);
   externalTasks.set(taskId, cancel);
+  synchronizeSuspensionBlocker();
 }
 
 export function endExternalTask(taskId: string): void {
   externalTasks.delete(taskId);
+  synchronizeSuspensionBlocker();
 }
 
 export function spawnTracked(taskId: string, executable: string, args: readonly string[], options: {
@@ -132,6 +178,7 @@ export function spawnTracked(taskId: string, executable: string, args: readonly 
     };
     controllers.set(taskId, controller);
     registerCompletion(taskId);
+    synchronizeSuspensionBlocker();
   }
   if (controller.cancelRequested) throw new Error('EXPORT_CANCELLED');
   if (controller.currentProcess) throw new Error(`Task ${taskId} already has a child process.`);
@@ -149,6 +196,7 @@ export function spawnTracked(taskId: string, executable: string, args: readonly 
     if (controller && !controller.explicit) {
       controllers.delete(taskId);
       completeTask(taskId);
+      synchronizeSuspensionBlocker();
     }
   });
   return child;
@@ -237,6 +285,7 @@ export async function cancelTask(taskId: string, reason: TaskCancellationReason 
   if (cancelExternal) {
     await cancelExternal();
     externalTasks.delete(taskId);
+    synchronizeSuspensionBlocker();
     return;
   }
   const controller = controllers.get(taskId);
@@ -248,6 +297,7 @@ export async function cancelTask(taskId: string, reason: TaskCancellationReason 
   if (!controller.explicit) {
     controllers.delete(taskId);
     completeTask(taskId);
+    synchronizeSuspensionBlocker();
   }
 }
 

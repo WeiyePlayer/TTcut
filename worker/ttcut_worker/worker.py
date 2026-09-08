@@ -18,6 +18,7 @@ from .calibration import TableCalibration
 from .errors import InvalidRequestError, ModelResourceError, TableModelResourceError, WorkerError
 from .roi import AnalysisRoiConfig, build_analysis_roi, stabilize_visibility_roi
 from .rallies import group_rallies
+from .hybrid_rallies import hybrid_motion_rallies, hybrid_provenance
 from .request import (
     analysis_config,
     rally_recognition_config,
@@ -117,7 +118,7 @@ def analyze(request: dict) -> dict:
     config = analysis_config(request)
     recognition = rally_recognition_config(request)
     recognition_method = recognition["method"]
-    if profile == "blurball_v1" and recognition_method == "continuous_visibility":
+    if profile == "blurball_v1" and recognition_method in {"continuous_visibility", "hybrid_motion_bounce"}:
         analysis_roi = stabilize_visibility_roi(analysis_roi)
         configure_stable_visibility_inference()
     effective_config = (
@@ -231,7 +232,11 @@ def analyze(request: dict) -> dict:
             analysis_height_pixels=analysis_roi.height,
             vertical_exchange_enabled=vertical_exchange_enabled,
         )
-        rallies = (
+        hybrid = None
+        if recognition_method == "hybrid_motion_bounce":
+            hybrid = hybrid_motion_rallies(points, float(info.fps or 0.0), calibration, motion_config=motion_config)
+            bounce_frames = list(hybrid.bounce_frames)
+        rallies = hybrid.rallies if hybrid is not None else (
             tracknet_visibility_rallies(
                 points,
                 float(info.fps or 0.0),
@@ -247,9 +252,11 @@ def analyze(request: dict) -> dict:
             )
         )
     duration = float(info.duration or 0.0)
+    # Preserve exact source timestamps at half-open exclusion boundaries.
+    serialize_time = float if recognition_method == "hybrid_motion_bounce" else lambda value: round(value, 6)
     points_by_frame = {point.frame: point for point in points}
     bounce_times = sorted({
-        round(max(0.0, min(duration, float(point.time))) if duration else max(0.0, float(point.time)), 6)
+        serialize_time(max(0.0, min(duration, float(point.time))) if duration else max(0.0, float(point.time)))
         for frame in bounce_frames
         if (point := points_by_frame.get(frame)) is not None and math.isfinite(point.time)
     }) if bounce_frames is not None else None
@@ -262,10 +269,10 @@ def analyze(request: dict) -> dict:
         item = {
             "id": f"rally_{len(normalized) + 1:03d}",
             "index": len(normalized) + 1,
-            "start_time_seconds": round(start, 6),
-            "end_time_seconds": round(end, 6),
+            "start_time_seconds": serialize_time(start),
+            "end_time_seconds": serialize_time(end),
         }
-        if recognition_method == "bounce_events":
+        if recognition_method in {"bounce_events", "hybrid_motion_bounce"}:
             item["bounce_count"] = rally.bounce_count
         elif rally.lead_in_start_time is not None:
             item["lead_in_start_time_seconds"] = round(max(0.0, min(start, rally.lead_in_start_time)), 6)
@@ -412,6 +419,14 @@ def analyze(request: dict) -> dict:
     }
     if bounce_times is not None:
         result["bounce_times_seconds"] = bounce_times
+    if recognition_method == "hybrid_motion_bounce":
+        result["schema_version"] = 3
+        result["rally_recognition"] = hybrid_provenance(vertical_exchange_enabled=vertical_exchange_enabled)
+        result["excluded_fragments"] = [
+            {**fragment, "end_time_seconds": min(duration, fragment["end_time_seconds"])}
+            for fragment in hybrid.excluded_fragments
+            if fragment["start_time_seconds"] < duration
+        ]
     if table_analysis is None and choice["method"] == "precalibrated":
         table_analysis = choice.get("table_analysis")
     if table_analysis is not None:

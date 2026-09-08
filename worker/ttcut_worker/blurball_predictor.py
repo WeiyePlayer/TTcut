@@ -12,7 +12,7 @@ import torch
 from .blurball_models import LoadedBlurBall
 from .analysis_intervals import interval_index_for_time
 from .errors import DeviceError, VideoError
-from .roi import AnalysisRoi, model_dimensions
+from .roi import AnalysisRoi, DEFAULT_ROI_MODEL_SCALE, model_dimensions
 from .types import TrajectoryPoint
 from .video import FramePacket, StreamingVideoReader, VideoInfo
 
@@ -26,6 +26,16 @@ BLURBALL_BATCH_SIZE = 16
 BLURBALL_CPU_BATCH_SIZE = 4
 _MEAN = np.asarray([0.485, 0.456, 0.406], dtype=np.float32)[:, None, None]
 _STD = np.asarray([0.229, 0.224, 0.225], dtype=np.float32)[:, None, None]
+
+
+def blurball_model_dimensions(roi: AnalysisRoi | None, width: int, height: int) -> tuple[int, int]:
+    dimensions = model_dimensions(roi, width, height)
+    # Shallow, distant tables can otherwise reach the model at about 300x112,
+    # erasing the ball before inference. Preserve more source detail for these
+    # small crops without changing confidence thresholds or normal-sized ROIs.
+    if roi is not None and dimensions[0] < BLURBALL_INPUT_WIDTH and dimensions[1] < BLURBALL_INPUT_HEIGHT / 2:
+        return model_dimensions(roi, width, height, scale=DEFAULT_ROI_MODEL_SCALE * 2)
+    return dimensions
 
 
 @dataclass(frozen=True)
@@ -214,7 +224,7 @@ class BlurBallPredictor:
         roi_height = analysis_roi.height if analysis_roi is not None else reader.info.height
         if roi_width <= 0 or roi_height <= 0:
             raise VideoError("The BlurBall analysis ROI is empty.")
-        input_width, input_height = model_dimensions(
+        input_width, input_height = blurball_model_dimensions(
             analysis_roi,
             reader.info.width,
             reader.info.height,
@@ -370,7 +380,7 @@ class BlurBallPredictor:
         roi_height = analysis_roi.height if analysis_roi is not None else reader.info.height
         if roi_width <= 0 or roi_height <= 0:
             raise VideoError("The BlurBall analysis ROI is empty.")
-        input_width, input_height = model_dimensions(
+        input_width, input_height = blurball_model_dimensions(
             analysis_roi,
             reader.info.width,
             reader.info.height,

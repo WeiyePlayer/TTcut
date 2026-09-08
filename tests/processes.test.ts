@@ -1,10 +1,14 @@
 import { once } from 'node:events';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  activeTaskIds,
+  beginExternalTask,
   beginTrackedTask,
   cancelAllTasks,
   cancelTask,
   classifyProcessExit,
+  configureTaskSuspensionBlocker,
+  endExternalTask,
   endTrackedTask,
   getTaskController,
   markTaskTerminal,
@@ -12,9 +16,24 @@ import {
   spawnTracked,
 } from '../src/main/processes';
 
+const suspensionBlocker = {
+  start: vi.fn(() => 73),
+  stop: vi.fn(),
+};
+
+beforeEach(() => {
+  suspensionBlocker.start.mockClear();
+  suspensionBlocker.stop.mockClear();
+  configureTaskSuspensionBlocker(suspensionBlocker);
+});
+
 afterEach(async () => {
   await cancelAllTasks('app-exit');
-  for (const taskId of ['normal', 'gap', 'cancelled', 'signal']) endTrackedTask(taskId);
+  for (const taskId of activeTaskIds()) {
+    endExternalTask(taskId);
+    endTrackedTask(taskId);
+  }
+  configureTaskSuspensionBlocker(null);
 });
 
 describe('tracked task lifecycle', () => {
@@ -27,6 +46,31 @@ describe('tracked task lifecycle', () => {
       cancelRequested: false,
       currentProcess: null,
     });
+  });
+
+  it('prevents app suspension for the full explicit task instead of each child process', async () => {
+    beginTrackedTask('power');
+    expect(suspensionBlocker.start).toHaveBeenCalledOnce();
+    expect(suspensionBlocker.start).toHaveBeenCalledWith('prevent-app-suspension');
+
+    const child = spawnTracked('power', process.execPath, ['-e', 'process.exit(0)']);
+    await once(child, 'close');
+
+    expect(suspensionBlocker.start).toHaveBeenCalledOnce();
+    expect(suspensionBlocker.stop).not.toHaveBeenCalled();
+
+    endTrackedTask('power');
+    expect(suspensionBlocker.stop).toHaveBeenCalledOnce();
+    expect(suspensionBlocker.stop).toHaveBeenCalledWith(73);
+  });
+
+  it('prevents app suspension while an external task is active', () => {
+    beginExternalTask('external', vi.fn());
+    expect(suspensionBlocker.start).toHaveBeenCalledWith('prevent-app-suspension');
+    expect(suspensionBlocker.stop).not.toHaveBeenCalled();
+
+    endExternalTask('external');
+    expect(suspensionBlocker.stop).toHaveBeenCalledWith(73);
   });
 
   it('records user cancellation while no child process is running', async () => {

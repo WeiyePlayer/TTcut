@@ -19,6 +19,13 @@ import {
   assessExportDuration,
   type ExportTimingAssessment,
 } from '../domain/export-duration';
+import {
+  IN_FLIGHT_EXPORT_PROGRESS_END,
+  mapFfmpegProgress,
+  SEGMENT_ENCODING_PROGRESS_END,
+  STREAM_COPY_ATTEMPT_PROGRESS_END,
+  type FfmpegProgressRange,
+} from '../domain/export-progress';
 import { createCutGroups } from '../domain/segments';
 import {
   InvalidCustomSegmentsError,
@@ -271,7 +278,7 @@ export async function runFfmpeg(
   totalDuration: number,
   stage: string,
   detail?: { segmentIndex?: number; seekStart?: number },
-  progressRange?: { startPercent: number; endPercent: number },
+  progressRange?: FfmpegProgressRange,
 ): Promise<void> {
   await logLine(taskId, 'INFO', `FFmpeg arguments: ${JSON.stringify(args)}`);
   await new Promise<void>((resolve, reject) => {
@@ -289,10 +296,7 @@ export async function runFfmpeg(
         if ((key === 'out_time_us' || key === 'out_time_ms') && raw) {
           const seconds = Number(raw) / 1_000_000;
           if (Number.isFinite(seconds)) {
-            const fraction = totalDuration > 0 ? Math.max(0, Math.min(1, seconds / totalDuration)) : 0;
-            const candidate = progressRange
-              ? Math.max(0, Math.min(99.5, progressRange.startPercent + fraction * (progressRange.endPercent - progressRange.startPercent)))
-              : Math.max(0, Math.min(99.5, fraction * 100));
+            const candidate = mapFfmpegProgress(seconds, totalDuration, progressRange);
             const percent = Math.max(lastExportProgress.get(taskId) ?? 0, candidate);
             lastExportProgress.set(taskId, percent);
             send(window, {
@@ -542,11 +546,18 @@ async function executeFastSegmented(
   const signatures: StreamSignature[] = [];
   const segmentNames: string[] = [];
   const encodedSegmentDurations: number[] = [];
+  const totalSegmentDuration = expectedOutputDuration(groups);
+  let completedSegmentDuration = 0;
   for (const [index, group] of groups.entries()) {
     assertExportNotCancelled(taskId);
     const seekStart = selectSeekStart(group.start, keyframes);
     const segmentName = `segment-${String(index + 1).padStart(6, '0')}.mp4`;
     const segmentPath = path.join(tempDirectory, segmentName);
+    const segmentDuration = group.end - group.start;
+    const progressRange = {
+      startPercent: completedSegmentDuration / totalSegmentDuration * SEGMENT_ENCODING_PROGRESS_END,
+      endPercent: (completedSegmentDuration + segmentDuration) / totalSegmentDuration * SEGMENT_ENCODING_PROGRESS_END,
+    };
     segmentNames.push(segmentName);
     await logLine(
       taskId,
@@ -567,9 +578,10 @@ async function executeFastSegmented(
           analysisVideo,
           components.mediaEncoder,
         ),
-        group.end - group.start,
+        segmentDuration,
         'cutting-and-exporting',
         { segmentIndex: index + 1, seekStart },
+        progressRange,
       );
       const validation = await validateExportOutput(
         segmentPath,
@@ -590,6 +602,7 @@ async function executeFastSegmented(
         throw new Error('EXPORT_SEGMENT_INCOMPATIBLE');
       }
       signatures.push(signature);
+      completedSegmentDuration += segmentDuration;
     } catch (error) {
       throw wrapExportError(error, 'EXPORT_SEGMENT_FAILED');
     }
@@ -613,6 +626,11 @@ async function executeFastSegmented(
       buildConcatArgs(manifest, partial, analysisVideo),
       expectedOutputDuration(groups),
       'concatenating',
+      undefined,
+      {
+        startPercent: SEGMENT_ENCODING_PROGRESS_END,
+        endPercent: IN_FLIGHT_EXPORT_PROGRESS_END,
+      },
     );
   } catch (error) {
     throw wrapExportError(error, 'EXPORT_CONCAT_FAILED');
@@ -628,6 +646,7 @@ async function executeFastSingle(
   group: CutGroup,
   partial: string,
   signal?: AbortSignal,
+  progressRange?: FfmpegProgressRange,
 ): Promise<ExportValidationResult> {
   const keyframes = await probeExportKeyframes(taskId, analysisVideo.path, components.ffprobe, signal);
   assertExportNotCancelled(taskId);
@@ -654,6 +673,7 @@ async function executeFastSingle(
       group.end - group.start,
       'cutting-and-exporting',
       { segmentIndex: 1, seekStart },
+      progressRange,
     );
   } catch (error) {
     throw wrapExportError(error, 'EXPORT_SEGMENT_FAILED');
@@ -721,6 +741,11 @@ async function executeExport(
           buildStreamCopyArgs(analysis.video.path, partial, groups[0]!),
           duration,
           'cutting',
+          undefined,
+          {
+            startPercent: 0,
+            endPercent: STREAM_COPY_ATTEMPT_PROGRESS_END,
+          },
         );
         const validation = await validateExportOutput(
           partial,
@@ -744,6 +769,10 @@ async function executeExport(
           groups[0]!,
           partial,
           signal,
+          {
+            startPercent: STREAM_COPY_ATTEMPT_PROGRESS_END,
+            endPercent: IN_FLIGHT_EXPORT_PROGRESS_END,
+          },
         );
         finalTiming = validation.timing;
       }
@@ -978,6 +1007,7 @@ async function executeCustomArtifactExport(
         await logLine(taskId, 'ERROR', 'Rally segment export skipped: MEDIA_COMPONENT_MISSING');
       } else {
       const totalDuration = segments.reduce((total, segment) => total + segment.end - segment.start, 0);
+      let completedDuration = 0;
       let keyframes: number[] | null = null;
       try {
         await assertExportPreconditions(
@@ -1000,7 +1030,12 @@ async function executeCustomArtifactExport(
         const filename = `${String(position).padStart(3, '0')}_回合${String(segment.rallyIndex).padStart(3, '0')}.mp4`;
         const finalPath = path.join(outputDirectory, filename);
         const partialPath = path.join(outputDirectory, `.${filename}.${taskId}.partial.mp4`);
-        const percent = 5 + Math.round((offset / segments.length) * 90);
+        const segmentDuration = Math.max(0.001, segment.end - segment.start);
+        const progressRange = {
+          startPercent: 5 + completedDuration / totalDuration * 90,
+          endPercent: 5 + (completedDuration + segmentDuration) / totalDuration * 90,
+        };
+        const percent = Math.round(progressRange.startPercent);
         send(window, { type: 'progress', data: { taskId, kind: 'export', stage: 'exporting-rallies', percent, current: position, total: segments.length } });
         try {
           if (process.platform === 'darwin') {
@@ -1019,9 +1054,10 @@ async function executeCustomArtifactExport(
               analysis.video,
               components.mediaEncoder,
             ),
-            Math.max(0.001, segment.end - segment.start),
+            segmentDuration,
             'exporting-rallies',
             { segmentIndex: position, seekStart },
+            progressRange,
           );
           const validation = await validateExportOutput(
             partialPath,
@@ -1046,6 +1082,8 @@ async function executeCustomArtifactExport(
           failedRallies.push(failure);
           await rm(partialPath, { force: true }).catch(() => undefined);
           await logLine(taskId, 'ERROR', `Rally segment ${position} failed: ${failure.message}`);
+        } finally {
+          completedDuration += segmentDuration;
         }
       }
       }

@@ -7,6 +7,7 @@ import {
   Menu,
   dialog,
   ipcMain,
+  powerSaveBlocker,
   protocol,
   shell,
 } from 'electron';
@@ -32,9 +33,16 @@ import { startExport } from './export';
 import { startBatchExport } from './batch-export';
 import { getLogDirectory, logLine } from './logger';
 import { getHistoryStore } from './history';
-import { clearMediaPaths, installMediaProtocol, registerMediaPath } from './media-protocol';
+import { clearMediaPaths, installMediaProtocol, registeredVideoPath, registerMediaPath } from './media-protocol';
+import { disposePreviewMedia, hasPreviewMedia, preparePreviewMedia } from './preview-media';
 import { probeVideo } from './probe';
-import { cancelAllTasksAndWait, cancelTask, hasActiveTasks, hasBackgroundProcesses } from './processes';
+import {
+  cancelAllTasksAndWait,
+  cancelTask,
+  configureTaskSuspensionBlocker,
+  hasActiveTasks,
+  hasBackgroundProcesses,
+} from './processes';
 import { loadSettings, saveSettings } from './settings';
 import { getPlatformCompatibility } from './platform-compatibility';
 import {
@@ -194,6 +202,10 @@ function registerIpc(): void {
     if (typeof value !== 'string') throw new Error('INVALID_INPUT');
     return probeVideo(value);
   });
+  ipcMain.handle(IPC.videoPreparePreview, async (_event, value: unknown) => {
+    if (typeof value !== 'string') throw new Error('INVALID_INPUT');
+    return registerMediaPath(await preparePreviewMedia(registeredVideoPath(value)));
+  });
   ipcMain.handle(IPC.calibrationStart, async (_event, value: unknown) => {
     if (!value || typeof value !== 'object') throw new Error('INVALID_REQUEST');
     const record = value as Record<string, unknown>;
@@ -213,33 +225,14 @@ function registerIpc(): void {
     if (device !== 'auto' && device !== 'cuda' && device !== 'cpu') throw new Error('INVALID_REQUEST');
     const historyVisibility = record.historyVisibility;
     if (historyVisibility !== 'visible' && historyVisibility !== 'deferred') throw new Error('INVALID_REQUEST');
-    const analysisMode = record.analysisMode;
-    if (!BLURBALL_ANALYSIS_MODE_VALUES.includes(analysisMode as typeof BLURBALL_ANALYSIS_MODE_VALUES[number])) throw new Error('INVALID_REQUEST');
-    const rallyRecognitionMethod = record.rallyRecognitionMethod;
-    if (!RALLY_RECOGNITION_METHOD_VALUES.includes(rallyRecognitionMethod as typeof RALLY_RECOGNITION_METHOD_VALUES[number])) throw new Error('INVALID_REQUEST');
     const normalizeVariableFrameRate = record.normalizeVariableFrameRate;
     if (typeof normalizeVariableFrameRate !== 'boolean') throw new Error('INVALID_REQUEST');
-    const validateThreshold = (value: unknown): value is number => typeof value === 'number'
-      && Number.isFinite(value)
-      && value >= BLURBALL_CONFIDENCE_THRESHOLD_MIN
-      && value <= BLURBALL_CONFIDENCE_THRESHOLD_MAX;
-    const blurballConfidenceThreshold = record.blurballConfidenceThreshold;
-    const blurballStage1ConfidenceThreshold = record.blurballStage1ConfidenceThreshold;
-    const blurballStage2ConfidenceThreshold = record.blurballStage2ConfidenceThreshold;
-    if (!validateThreshold(blurballConfidenceThreshold)
-      || !validateThreshold(blurballStage1ConfidenceThreshold)
-      || !validateThreshold(blurballStage2ConfidenceThreshold)) throw new Error('INVALID_REQUEST');
     return startAnalysis(currentWindow(), {
       videoPath: record.videoPath,
       calibrationChoice: calibrationChoiceSchema.parse(record.calibrationChoice),
       device,
       historyVisibility,
-    analysisMode: rallyRecognitionMethod === 'continuous_visibility' ? 'full' : analysisMode as 'full' | 'two_stage',
-    rallyRecognitionMethod: rallyRecognitionMethod as 'bounce_events' | 'continuous_visibility',
-    normalizeVariableFrameRate,
-      blurballConfidenceThreshold,
-      blurballStage1ConfidenceThreshold,
-      blurballStage2ConfidenceThreshold,
+      normalizeVariableFrameRate,
     });
   });
   ipcMain.handle(IPC.exportStart, async (_event, value: unknown) => {
@@ -404,6 +397,7 @@ if (installerMigrationRequest) {
     app.exit(exitCode);
   });
 } else app.whenReady().then(async () => {
+  configureTaskSuspensionBlocker(powerSaveBlocker);
   const compatibility = await getPlatformCompatibility();
   await logLine('app', 'INFO', `Platform compatibility gate disabled: ${JSON.stringify(compatibility)}`)
     .catch(() => undefined);
@@ -432,6 +426,12 @@ app.on('activate', () => {
 });
 
 app.on('before-quit', async (event) => {
+  if (hasPreviewMedia()) {
+    event.preventDefault();
+    await disposePreviewMedia();
+    app.quit();
+    return;
+  }
   if (!hasActiveTasks()) {
     exitApproved = true;
     if (isMac && hasBackgroundProcesses()) { event.preventDefault(); await cancelAllTasksAndWait('app-exit'); app.quit(); return; }

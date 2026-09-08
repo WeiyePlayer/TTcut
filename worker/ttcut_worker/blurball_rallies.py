@@ -44,6 +44,32 @@ BLURBALL_SLOW_TRANSFER_MINIMUM_DISPLACEMENT_RATIO = 0.30
 BLURBALL_SLOW_TRANSFER_MAXIMUM_SPEED_RATIO = 0.85
 BLURBALL_SLOW_TRANSFER_FAST_FLIGHT_SPEED_RATIO = 1.0
 BLURBALL_MOTION_TIMESTAMP_TOLERANCE_SECONDS = 0.001
+OBSERVED_RETURN_MAXIMUM_GAP_SECONDS = 0.5
+OBSERVED_RETURN_MINIMUM_DISPLACEMENT_RATIO = 0.15
+OBSERVED_RETURN_WEAK_DISPLACEMENT_RATIO = 0.08
+OBSERVED_FLIGHT_MINIMUM_POINTS = 4
+OBSERVED_FLIGHT_MINIMUM_SECONDS = 0.1
+OBSERVED_FLIGHT_MAXIMUM_SECONDS = 0.75
+OBSERVED_FLIGHT_MAXIMUM_OBSERVATION_GAP_SECONDS = 0.1
+OBSERVED_FLIGHT_MINIMUM_MOVING_STEPS = 3
+OBSERVED_FLIGHT_MINIMUM_STEP_RATIO = 0.005
+OBSERVED_FLIGHT_MAXIMUM_BACKTRACK_RATIO = 0.15
+
+
+def observed_return_filter_provenance() -> dict[str, float | int]:
+    return {
+        "maximum_gap_seconds": OBSERVED_RETURN_MAXIMUM_GAP_SECONDS,
+        "minimum_displacement_ratio": OBSERVED_RETURN_MINIMUM_DISPLACEMENT_RATIO,
+        "minimum_weak_displacement_ratio": OBSERVED_RETURN_WEAK_DISPLACEMENT_RATIO,
+        "minimum_points": OBSERVED_FLIGHT_MINIMUM_POINTS,
+        "minimum_seconds": OBSERVED_FLIGHT_MINIMUM_SECONDS,
+        "maximum_seconds": OBSERVED_FLIGHT_MAXIMUM_SECONDS,
+        "maximum_observation_gap_seconds": OBSERVED_FLIGHT_MAXIMUM_OBSERVATION_GAP_SECONDS,
+        "minimum_moving_steps": OBSERVED_FLIGHT_MINIMUM_MOVING_STEPS,
+        "minimum_step_ratio": OBSERVED_FLIGHT_MINIMUM_STEP_RATIO,
+        "maximum_backtrack_ratio": OBSERVED_FLIGHT_MAXIMUM_BACKTRACK_RATIO,
+        "minimum_speed_ratio_per_second": BLURBALL_MOTION_MINIMUM_SPEED_RATIO_PER_SECOND,
+    }
 
 
 def blurball_inter_rally_filter_provenance() -> dict[str, object]:
@@ -96,6 +122,7 @@ def blurball_visibility_rallies(
     calibration: TableCalibration,
     *,
     motion_config: VisibilityMotionConfig,
+    preserve_partial_exchanges: bool = False,
 ) -> tuple[VisibilityRallySummary, ...]:
     """Refine visible candidates using sustained motion, pauses and transfers.
 
@@ -123,7 +150,10 @@ def blurball_visibility_rallies(
         segment = ordered[bisect_left(frames, rally.start_frame):bisect_right(frames, rally.end_frame)]
         if _is_inter_rally_fragment(rally, segment, calibration, motion_config):
             continue
-        accepted.extend(_refine_motion_candidate(rally, segment, fps, calibration, motion_config))
+        accepted.extend(_refine_motion_candidate(
+            rally, segment, fps, calibration, motion_config,
+            preserve_partial_exchanges=preserve_partial_exchanges,
+        ))
     refined: list[VisibilityRallySummary] = []
     last_rejected: VisibilityRallySummary | None = None
     for rally in accepted:
@@ -132,7 +162,7 @@ def blurball_visibility_rallies(
         # Confirmation may start after a brief detector dropout. Include only
         # the small observed prefix when checking whether this is a slow pass.
         segment = ordered[bisect_left(frames, rally.start_frame - math.ceil(fps * 0.2)):bisect_right(frames, rally.end_frame)]
-        if _slow_transfer_runs(segment, calibration, motion_config):
+        if not preserve_partial_exchanges and _slow_transfer_runs(segment, calibration, motion_config):
             last_rejected = rally
             continue
         # Only trim automatic padding, never move the observed rally/serve start.
@@ -159,7 +189,10 @@ def blurball_visibility_rallies(
             boundary = min(rally.start_time, pass_ends[previous_pass] + 1 / fps)
             rally = replace(rally, lead_in_start_time=max(rally.lead_in_start_time or 0, boundary))
         rally = _trim_returned_ball_prefix(rally, ordered, motion_config, fps)
-        if not _has_insufficient_flight_motion(rally, ordered, calibration, motion_config):
+        if not _has_insufficient_flight_motion(
+            rally, ordered, calibration, motion_config,
+            preserve_partial_exchanges=preserve_partial_exchanges,
+        ):
             refined.append(rally)
         else:
             last_rejected = rally
@@ -169,6 +202,7 @@ def blurball_visibility_rallies(
 def _has_insufficient_flight_motion(
     rally: VisibilityRallySummary, points: Sequence[TrajectoryPoint],
     calibration: TableCalibration, config: VisibilityMotionConfig,
+    *, preserve_partial_exchanges: bool = False,
 ) -> bool:
     """Reject static jumps and isolated off-table arcs, preserving sparse returns."""
     runs = _contiguous_visible_runs([
@@ -206,8 +240,45 @@ def _has_insufficient_flight_motion(
             and (run[-1].x - run[0].x) * direction > 0
             for run in flights
         ):
+            # Short returns in a foreshortened view may not span the 15%
+            # strong-flight gate. An observed opposite return invalidates the
+            # claim that all motion is one-way, even when that return is short.
+            if preserve_partial_exchanges and any(
+                _is_observed_horizontal_flight(
+                    run, width, minimum_displacement_ratio=OBSERVED_RETURN_WEAK_DISPLACEMENT_RATIO,
+                )
+                and (run[-1].x - run[0].x) * direction < 0
+                and any(0 <= run[0].time - flight[-1].time <= OBSERVED_RETURN_MAXIMUM_GAP_SECONDS
+                        for flight in flights)
+                for run in weak_flights
+            ):
+                return False
             return True
     return False
+
+
+def _is_observed_horizontal_flight(
+    run: Sequence[TrajectoryPoint], width: float, *, minimum_displacement_ratio: float,
+) -> bool:
+    """A distributed short flight, not a gap or one jump to a fixed detection."""
+    if len(run) < OBSERVED_FLIGHT_MINIMUM_POINTS or any(not p.visibility for p in run):
+        return False
+    duration = run[-1].time - run[0].time
+    if not OBSERVED_FLIGHT_MINIMUM_SECONDS - 1e-9 <= duration <= OBSERVED_FLIGHT_MAXIMUM_SECONDS + 1e-9:
+        return False
+    if any(not 0 < b.time - a.time <= OBSERVED_FLIGHT_MAXIMUM_OBSERVATION_GAP_SECONDS + 1e-9
+           for a, b in zip(run, run[1:])):
+        return False
+    displacement = run[-1].x - run[0].x
+    if (abs(displacement) < width * minimum_displacement_ratio
+            or abs(displacement) / duration / width < BLURBALL_MOTION_MINIMUM_SPEED_RATIO_PER_SECOND):
+        return False
+    steps = [b.x - a.x for a, b in zip(run, run[1:])]
+    forward = sum(abs(step) for step in steps if step * displacement > 0)
+    backward = sum(abs(step) for step in steps if step * displacement < 0)
+    return (sum(step * displacement > 0 and abs(step) >= width * OBSERVED_FLIGHT_MINIMUM_STEP_RATIO
+                for step in steps) >= OBSERVED_FLIGHT_MINIMUM_MOVING_STEPS
+            and backward <= forward * OBSERVED_FLIGHT_MAXIMUM_BACKTRACK_RATIO)
 
 
 def _trim_returned_ball_prefix(
@@ -331,6 +402,7 @@ def _slow_transfer_runs(
 
 def _trim_slow_run_tail(
     run: Sequence[TrajectoryPoint], fps: float, config: VisibilityMotionConfig,
+    *, discard_inactive: bool = False,
 ) -> tuple[tuple[TrajectoryPoint, ...], bool]:
     if run[-1].time - run[0].time < 0.5:
         return tuple(run), False
@@ -347,7 +419,12 @@ def _trim_slow_run_tail(
         if speed >= BLURBALL_MOTION_MINIMUM_SPEED_RATIO_PER_SECOND:
             active.extend((index, index + step))
     if not active:
-        return tuple(run), False
+        slow_drift = (
+            discard_inactive and run[-1].time - run[0].time >= 1.0
+            and max(ys) - min(ys) <= config.analysis_height_pixels * .02
+            and max(xs) - min(xs) >= config.analysis_width_pixels * .05
+        )
+        return ((), True) if slow_drift else (tuple(run), False)
     context = round(fps * 0.1)
     start = max(0, min(active) - context)
     end = min(len(run) - 1, max(active) + context)
@@ -366,6 +443,7 @@ def _motion_runs_have_rally_break(
     previous: Sequence[TrajectoryPoint], current: Sequence[TrajectoryPoint],
     points: Sequence[TrajectoryPoint], frames: Sequence[int], width: float,
     height: float | None = None,
+    *, preserve_partial_exchanges: bool = False,
 ) -> bool:
     height = height or width
     elapsed = current[0].time - previous[-1].time
@@ -397,8 +475,11 @@ def _motion_runs_have_rally_break(
         run[-1].time - run[0].time + 1e-9 >= 0.1
         and max(point.y for point in run) - min(point.y for point in run) >= height * 0.15
     )]
+    vertical_support = sum(run[-1].time - run[0].time for run in vertical) / elapsed
     if (not stationary and elapsed <= 3.0 and len(vertical) >= 2
-            and sum(run[-1].time - run[0].time for run in vertical) / elapsed >= 0.15):
+            and (vertical_support >= 0.15 or (
+                preserve_partial_exchanges and len(vertical) >= 3 and vertical_support >= 0.12
+            ))):
         return False
     monotonic_pause = (
         elapsed >= BLURBALL_MOTION_MONOTONIC_PAUSE_SECONDS
@@ -424,16 +505,70 @@ def _has_rhythmic_exchange(runs: Sequence[Sequence[TrajectoryPoint]], width: flo
     return any(first * second < 0 for first, second in zip(directions, directions[1:]))
 
 
+def _observed_exchange_times(points: Sequence[TrajectoryPoint], width: float) -> tuple[float, ...]:
+    """Find opposed fast flights even when a run includes a slow/held tail.
+
+    Each flight needs several actual observations with short supported gaps;
+    displacement across a long occlusion is never treated as a flight.
+    """
+    visible = [point for point in points if point.visibility]
+    flights: list[tuple[float, float, float, float]] = []
+    for start in range(len(visible) - 3):
+        first = visible[start]
+        for end in range(start + 1, len(visible)):
+            last = visible[end]
+            duration = last.time - first.time
+            if duration > 0.5 + 1e-9 or last.time - visible[end - 1].time > 0.1 + 1e-9:
+                break
+            if end - start < 3 or duration < 0.1 - 1e-9:
+                continue
+            displacement = last.x - first.x
+            speed = abs(displacement) / duration / width
+            if abs(displacement) >= width * 0.15 and speed >= 0.6:
+                steps = [b.x - a.x for a, b in zip(visible[start:end], visible[start + 1:end + 1])]
+                forward = sum(abs(step) for step in steps if step * displacement > 0)
+                backward = sum(abs(step) for step in steps if step * displacement < 0)
+                # A jump to a static false detection followed by repeated
+                # coordinates is not a fast flight. Require distributed motion.
+                if (sum(step * displacement > 0 and abs(step) >= width * .015 for step in steps) < 3
+                        or backward > forward * .15):
+                    continue
+                flights.append((first.time, last.time, displacement, speed))
+                break
+    turns = []
+    for index, current in enumerate(flights):
+        for previous_index in range(index - 1, -1, -1):
+            previous = flights[previous_index]
+            if current[0] - previous[0] > 1.0 + 1e-9:
+                break
+            if (0 <= current[0] - previous[1] <= 0.5
+                    and previous[2] * current[2] < 0
+                    and max(previous[3], current[3]) >= 1.0):
+                turn = (previous[1] + current[0]) / 2
+                if not turns or turn - turns[-1] > 0.2:
+                    turns.append(turn)
+                break
+    return tuple(turns)
+
+
 def _refine_motion_candidate(
     rally: VisibilityRallySummary, points: Sequence[TrajectoryPoint], fps: float,
     calibration: TableCalibration, config: VisibilityMotionConfig,
+    *, preserve_partial_exchanges: bool = False,
 ) -> tuple[VisibilityRallySummary, ...]:
     width = config.analysis_width_pixels
     visible = [point for point in points if point.visibility == 1]
     evidence: list[tuple[TrajectoryPoint, ...]] = []
     transfers: list[tuple[TrajectoryPoint, ...]] = []
     for original in _contiguous_visible_runs(visible):
-        run, trimmed_tail = _trim_slow_run_tail(original, fps, config)
+        run, trimmed_tail = _trim_slow_run_tail(
+            original, fps, config, discard_inactive=preserve_partial_exchanges,
+        )
+        if not run:
+            # An observed inactive interval cannot extend motion evidence. It
+            # is a boundary hint, not a declared slow-transfer exclusion.
+            transfers.append(original)
+            continue
         if trimmed_tail:
             transfers.append(tuple(point for point in original if point.frame >= run[-1].frame))
         duration = run[-1].time - run[0].time
@@ -497,6 +632,7 @@ def _refine_motion_candidate(
     for run in evidence:
         if not groups or _motion_runs_have_rally_break(
             groups[-1][-1], run, points, frames, width, config.analysis_height_pixels,
+            preserve_partial_exchanges=preserve_partial_exchanges,
         ):
             groups.append([run])
         else:
@@ -521,7 +657,10 @@ def _refine_motion_candidate(
             for run in nearby_runs
             if run[-1].time - run[0].time + 1e-9 >= 0.1
         )
-        if len(groups) > 1 and not fast_short_flight and not _has_rhythmic_exchange(group, width):
+        partial_exchange = preserve_partial_exchanges and _observed_exchange_times(
+            [point for point in visible if first.time <= point.time <= last.time], width,
+        )
+        if len(groups) > 1 and not fast_short_flight and not _has_rhythmic_exchange(group, width) and not partial_exchange:
             continue
         start = max(rally.start_frame, first.frame - context)
         end = min(rally.end_frame, last.frame + context)

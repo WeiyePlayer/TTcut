@@ -5,20 +5,25 @@ import type { SelectedVideo } from '../shared/api';
 import { formatTimestamp } from '../domain/time';
 import { fittedVideoRectangle } from '../domain/video-input';
 import { orderCalibrationPolygon, type CalibrationPoint } from '../domain/calibration';
+import { useCompatiblePreview } from './use-compatible-preview';
+import { messages, type Language } from './i18n';
 
 type PointName = keyof Calibration['points'];
 
 const pointOrder: PointName[] = ['top_left', 'top_right', 'bottom_right', 'bottom_left'];
 
 export function CalibrationSurface({
-  video, metadata, points, onPointsChange,
+  video, metadata, points, onPointsChange, language = 'zh-CN',
 }: {
   video: SelectedVideo;
   metadata: VideoMetadata;
   points: Partial<Record<PointName, [number, number]>>;
   onPointsChange: (points: Partial<Record<PointName, [number, number]>>) => void;
+  language?: Language;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const preview = useCompatiblePreview(videoRef, video.mediaUrl);
+  const t = messages(language);
   const surfaceRef = useRef<HTMLDivElement>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const dragging = useRef<PointName | null>(null);
@@ -88,6 +93,7 @@ export function CalibrationSurface({
         className="video-surface"
         ref={surfaceRef}
         onPointerDown={(event) => {
+          if (preview.status !== 'ready') return;
           if ((event.target as HTMLElement).closest('.calibration-point')) return;
           setAtPointer(event);
         }}
@@ -96,7 +102,8 @@ export function CalibrationSurface({
         }}
         onPointerUp={() => { dragging.current = null; }}
       >
-        <CompatibleVideo hdr={Boolean(metadata.native_video && metadata.native_video.hdr !== 'sdr')} ref={videoRef} src={video.mediaUrl} preload="metadata" muted playsInline />
+        <CompatibleVideo hdr={Boolean(metadata.native_video && metadata.native_video.hdr !== 'sdr')} ref={videoRef} src={preview.url} preload={preview.url === video.mediaUrl ? 'metadata' : 'auto'} muted playsInline />
+        {preview.status !== 'ready' && <div className="custom-preview-status" role={preview.status === 'failed' ? 'alert' : 'status'}>{preview.status === 'preparing' ? t.previewPreparing : t.previewFailed}</div>}
         {polygon.length === 4 && (
           <svg className="calibration-polygon" aria-hidden="true">
             <polygon points={polygon.map(([x, y]) => `${x},${y}`).join(' ')} />
