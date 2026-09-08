@@ -39,6 +39,18 @@ const base = {
 };
 
 describe('BlurBall analysis request contracts', () => {
+  it('requires the exact fixed BlurBall hybrid configuration in v5', () => {
+    const request = { ...base, schema_version: 5, ball_model_profile: 'blurball_v1',
+      analysis: { mode: 'full', confidence_threshold: 0.3 }, rally_recognition: { method: 'hybrid_motion_bounce' } };
+    expect(analysisRequestSchema.parse(request)).toEqual(request);
+    for (const invalid of [
+      { ...request, ball_model_profile: 'tracknet_v1' },
+      { ...request, analysis: { mode: 'full', confidence_threshold: 0.7 } },
+      { ...request, rally_recognition: { method: 'continuous_visibility' } },
+      { ...request, analysis: { mode: 'two_stage', stage1_confidence_threshold: 0.3, stage2_confidence_threshold: 0.7 } },
+      { ...request, unexpected: true },
+    ]) expect(analysisRequestSchema.safeParse(invalid).success).toBe(false);
+  });
   it('keeps legacy v1 requests valid and defaults their threshold', () => {
     const parsed = analysisRequestSchema.parse({ schema_version: 1, ...base });
     expect(parsed).toMatchObject({ schema_version: 1, blurball_confidence_threshold: 0.7 });

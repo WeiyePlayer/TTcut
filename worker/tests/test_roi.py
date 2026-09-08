@@ -5,6 +5,7 @@ import math
 import pytest
 
 from ttcut_worker.calibration import TableCalibration
+from ttcut_worker.blurball_predictor import blurball_model_dimensions
 from ttcut_worker.errors import AnalysisRoiError
 from ttcut_worker.roi import (
     DEFAULT_HEIGHT_RATIO,
@@ -46,6 +47,18 @@ def test_default_roi_model_dimensions_use_the_adopted_125_percent_scale():
     )
 
     assert model_dimensions(roi, 1920, 1080) == (280, 160)
+    assert blurball_model_dimensions(roi, 1920, 1080) == (280, 160)
+
+
+def test_blurball_preserves_detail_in_shallow_distant_table_crops():
+    roi = AnalysisRoi(
+        x0=1171, y0=700, x1=2934, y1=1319,
+        projected_polygon=((0.0, 0.0),) * 4, top_padding_pixels=0.0,
+        source_width=3840, source_height=2160,
+    )
+    assert model_dimensions(roi, 3840, 2160) == (304, 112)
+    assert blurball_model_dimensions(roi, 3840, 2160) == (600, 224)
+    assert blurball_model_dimensions(None, 3840, 2160) == (512, 288)
 
 
 def test_roi_model_dimensions_can_use_unscaled_tracknet_input():

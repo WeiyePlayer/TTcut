@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+import json
 
 import cv2
 import numpy as np
+import pytest
 
 from ttcut_worker import calibration_worker
 from ttcut_worker.calibration import TableCalibration
+from ttcut_worker.errors import AutoCalibrationError
 from ttcut_worker.rallies import group_rallies
 from ttcut_worker.table_analyze import (
     PLANAR_KEYPOINT_INDICES,
@@ -105,6 +108,66 @@ def test_automatic_calibration_selects_the_geometry_supported_corner_peaks():
     assert np.allclose(np.asarray(calibration.points), true_corners)
     assert consensus["semantic_support"] == 11
     assert consensus["score"] >= 5.5
+
+
+def test_automatic_calibration_rejects_background_supported_false_table():
+    # Real multi-table 4K footage: the old frame-relative tolerance accepted a
+    # floor corner and a collapsed far edge, then analyzed the wrong ROI.
+    fixture = json.loads((Path(__file__).parent / "fixtures/img3324-table-peaks.json").read_text())
+    clusters = {
+        int(key): [{"point": np.asarray(row[:2], dtype=np.float32),
+                    "support": row[2], "mean_activation": row[3]}
+                   for row in rows]
+        for key, rows in fixture["clusters"].items()
+    }
+    with pytest.raises(AutoCalibrationError, match="consistent table geometry"):
+        _select_geometric_consensus(clusters, fixture["width"], fixture["height"], fixture["sample_count"])
+
+
+def hybrid_request():
+    return {**valid_request(), 'schema_version': 5, 'ball_model_profile': 'blurball_v1',
+            'analysis': {'mode': 'full', 'confidence_threshold': .3},
+            'rally_recognition': {'method': 'hybrid_motion_bounce'}}
+
+
+@pytest.mark.parametrize('override', [
+    {'ball_model_profile': 'tracknet_v1'},
+    {'analysis': {'mode': 'full', 'confidence_threshold': .7}},
+    {'rally_recognition': {'method': 'continuous_visibility'}},
+    {'analysis': {'mode': 'two_stage', 'stage1_confidence_threshold': .3, 'stage2_confidence_threshold': .7}},
+])
+def test_v5_rejects_nonfixed_configuration(override):
+    from ttcut_worker.errors import InvalidRequestError
+    with pytest.raises(InvalidRequestError):
+        validate_request({**hybrid_request(), **override})
+
+
+def test_worker_v5_runs_single_low_threshold_pass_and_returns_exact_source_times(monkeypatch):
+    from ttcut_worker.hybrid_rallies import HybridResult
+    from ttcut_worker.types import RallySummary
+    calls = []
+    values = [point(i, i / 30) for i in range(10)]
+    class Predictor:
+        def __init__(self, loaded, confidence_threshold):
+            assert confidence_threshold == .3
+        def predict(self, video_path, progress_callback=None, analysis_roi=None):
+            calls.append(analysis_roi)
+            return values, VideoInfo(Path(video_path), 1280, 720, 30, 10, 10, 1), SimpleNamespace(
+                model_width=512, model_height=288, confidence_threshold=.3, step=3, maximum_displacement_pixels=100)
+    monkeypatch.setenv('TTCUT_BLURBALL_WEIGHTS', 'blurball.pt')
+    monkeypatch.setattr('ttcut_worker.worker.load_blurball', lambda *args: SimpleNamespace(component_version='1'))
+    monkeypatch.setattr('ttcut_worker.worker.BlurBallPredictor', Predictor)
+    monkeypatch.setattr('ttcut_worker.worker.hybrid_motion_rallies', lambda *args, **kwargs: HybridResult(
+        (RallySummary(1, 9, values[1].time, values[9].time, 1),), (1,), ()))
+    result = analyze(validate_request(hybrid_request()))
+    assert len(calls) == 1
+    assert result['schema_version'] == 3
+    assert result['bounce_times_seconds'] == [1 / 30]
+    assert result['rallies'][0]['start_time_seconds'] == 1 / 30
+    assert result['rallies'][0]['bounce_count'] == 1
+    assert result['excluded_fragments'] == []
+    assert result['rally_recognition']['version'] == 3
+    assert result['rally_recognition']['dead_bounce_filter']['reenergization_veto'] is True
 
 
 def local_tracknet_request() -> dict:

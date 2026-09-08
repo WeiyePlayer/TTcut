@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MultiTaskPage } from '../src/renderer/MultiTaskPage';
 import type { AppEvent, SelectedVideo, TTcutApi } from '../src/shared/api';
 import type { AnalysisResultV1, Calibration, TableAnalysis, VideoMetadata } from '../src/shared/contracts';
+import { hybridAnalysisResultV3Schema } from '../src/shared/contracts';
+import hybridProvenance from './fixtures/hybrid-provenance.json';
 
 const videos: SelectedVideo[] = [
   { path: 'C:\\video\\first.mp4', name: 'first.mp4', size: 100, mediaUrl: 'ttcut-media://first' },
@@ -33,12 +35,15 @@ function metadata(path: string): VideoMetadata {
 }
 
 function analysis(path: string): AnalysisResultV1 {
-  return {
-    schema_version: 1,
+  return hybridAnalysisResultV3Schema.parse({
+    schema_version: 3,
+    rally_recognition: hybridProvenance,
+    excluded_fragments: [],
+    bounce_times_seconds: [1, 2, 3, 4, 5],
     video: metadata(path),
     rallies: [{ id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 1, end_time_seconds: 8 }],
     calibration,
-  };
+  });
 }
 
 describe('multi-task clipping', () => {
@@ -177,7 +182,7 @@ describe('multi-task clipping', () => {
     await finishAnalysis(1);
     await waitFor(() => expect(startAnalysis).toHaveBeenCalledTimes(2));
     fireEvent.click(within(screen.getByRole('group', { name: 'first.mp4 的剪辑模式' })).getByRole('button', { name: '精彩回合' }));
-    fireEvent.click(screen.getByRole('radio', { name: '长相持' }));
+    fireEvent.click(screen.getByRole('radio', { name: '7板' }));
     fireEvent.click(screen.getByRole('button', { name: '＋ 添加视频' }));
     await screen.findByText('third.mp4');
     await finishAnalysis(2);
@@ -187,7 +192,7 @@ describe('multi-task clipping', () => {
     await waitFor(() => expect(window.ttcut.startBatchExport).toHaveBeenCalledTimes(1));
     const request = vi.mocked(window.ttcut.startBatchExport).mock.calls[0]![0];
     expect(request.items.map((item) => item.analysis_id[0])).toEqual(['1', '2', '3']);
-    expect(request.items[0]!.selection).toMatchObject({ mode: 'highlight', criterion: { kind: 'duration_tier', tier: 'long_rally' } });
+    expect(request.items[0]!.selection).toMatchObject({ mode: 'highlight', criterion: { kind: 'bounce_count', threshold: 7 } });
     expect(startAnalysis).toHaveBeenCalledTimes(3);
   });
 
@@ -296,7 +301,7 @@ describe('multi-task clipping', () => {
     await waitFor(() => expect(highlight).not.toBeDisabled());
     fireEvent.click(highlight);
     expect(highlight).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.queryByRole('radio', { name: '5板' })).not.toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: '5板' })).toBeChecked();
   });
 
   it('runs ready videos serially with precalibrated analysis and 70/30 progress mapping', async () => {
@@ -313,12 +318,7 @@ describe('multi-task clipping', () => {
       calibrationChoice: { method: 'precalibrated', calibration, table_analysis: tableAnalysis },
       device: 'auto',
       historyVisibility: 'deferred',
-      analysisMode: 'full',
-      rallyRecognitionMethod: 'continuous_visibility',
       normalizeVariableFrameRate: true,
-      blurballConfidenceThreshold: 0.7,
-      blurballStage1ConfidenceThreshold: 0.3,
-      blurballStage2ConfidenceThreshold: 0.7,
     });
 
     act(() => listener?.({
@@ -514,11 +514,6 @@ describe('multi-task clipping', () => {
         initialVideos={videos}
         preRoll={2.5}
         postRoll={1}
-        analysisMode="two_stage"
-        rallyRecognitionMethod="bounce_events"
-        blurballConfidenceThreshold={0.55}
-        blurballStage1ConfidenceThreshold={0.3}
-        blurballStage2ConfidenceThreshold={0.7}
         onOpenAnalysis={vi.fn()}
         onCompletableTasksFinished={onCompletableTasksFinished}
       />,
@@ -709,11 +704,6 @@ describe('multi-task clipping', () => {
         initialVideos={videos}
         preRoll={2.5}
         postRoll={1}
-        analysisMode="two_stage"
-        rallyRecognitionMethod="bounce_events"
-        blurballConfidenceThreshold={0.55}
-        blurballStage1ConfidenceThreshold={0.3}
-        blurballStage2ConfidenceThreshold={0.7}
         onOpenAnalysis={vi.fn()}
       />,
     );
@@ -727,23 +717,14 @@ describe('multi-task clipping', () => {
         initialVideos={videos}
         preRoll={5}
         postRoll={4}
-        analysisMode="full"
-        rallyRecognitionMethod="bounce_events"
-        blurballConfidenceThreshold={0.8}
-        blurballStage1ConfidenceThreshold={0.8}
-        blurballStage2ConfidenceThreshold={0.9}
         onOpenAnalysis={vi.fn()}
       />,
     );
     fireEvent.click(document.querySelector('.batch-start')!);
     await waitFor(() => expect(startAnalysis).toHaveBeenCalledTimes(1));
     expect(startAnalysis.mock.calls[0]?.[0]).not.toHaveProperty('ballModelProfile');
-    expect(startAnalysis.mock.calls[0]?.[0]).toMatchObject({
-      analysisMode: 'two_stage',
-      blurballConfidenceThreshold: 0.55,
-      blurballStage1ConfidenceThreshold: 0.3,
-      blurballStage2ConfidenceThreshold: 0.7,
-    });
+    expect(startAnalysis.mock.calls[0]?.[0]).not.toHaveProperty('analysisMode');
+    expect(startAnalysis.mock.calls[0]?.[0]).not.toHaveProperty('rallyRecognitionMethod');
 
     act(() => listener?.({
       type: 'analysis-result',

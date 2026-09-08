@@ -23,7 +23,7 @@ def validate_request(value: object) -> dict:
         "video_metadata",
         "calibration_choice",
     }
-    if not isinstance(value, dict) or value.get("schema_version") not in {1, 2, 3, 4}:
+    if not isinstance(value, dict) or value.get("schema_version") not in {1, 2, 3, 4, 5}:
         raise InvalidRequestError("Unsupported analysis request schema.")
     version = value["schema_version"]
     threshold_field = "blurball_confidence_threshold"
@@ -95,16 +95,18 @@ def validate_request(value: object) -> dict:
                     raise ValueError("analysis")
                 _validate_threshold(analysis["stage1_confidence_threshold"], "stage1_confidence_threshold")
                 _validate_threshold(analysis["stage2_confidence_threshold"], "stage2_confidence_threshold")
-            if version in {3, 4}:
+            if version in {3, 4, 5}:
                 recognition = value["rally_recognition"]
                 if (
                     not isinstance(recognition, dict)
                     or set(recognition) != {"method"}
-                    or recognition["method"] not in RALLY_RECOGNITION_METHODS
+                    or recognition["method"] not in ({"hybrid_motion_bounce"} if version == 5 else RALLY_RECOGNITION_METHODS)
                 ):
                     raise ValueError("rally_recognition")
             if version == 4 and value["ball_model_profile"] not in {"blurball_v1", "tracknet_v1"}:
                 raise ValueError("ball_model_profile")
+            if version == 5 and (value["ball_model_profile"] != "blurball_v1" or analysis != {"mode": "full", "confidence_threshold": 0.30}):
+                raise ValueError("hybrid analysis configuration")
         choice = value["calibration_choice"]
         if not isinstance(choice, dict) or choice.get("method") not in {"manual", "automatic", "precalibrated"}:
             raise ValueError("calibration_choice")
@@ -170,6 +172,6 @@ def analysis_config(request: dict) -> dict:
 
 def rally_recognition_config(request: dict) -> dict:
     """Return the recognition method while preserving v1/v2 request behavior."""
-    if request.get("schema_version") not in {3, 4}:
+    if request.get("schema_version") not in {3, 4, 5}:
         return {"method": RALLY_RECOGNITION_METHOD_DEFAULT}
     return request["rally_recognition"]

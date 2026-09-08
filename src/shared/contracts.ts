@@ -12,8 +12,8 @@ export const BLURBALL_CONFIDENCE_THRESHOLD_STEP = 0.05;
 export const BLURBALL_ANALYSIS_MODE_VALUES = ['full', 'two_stage'] as const;
 export const BLURBALL_ANALYSIS_MODE_DEFAULT = 'full' as const;
 export const BLURBALL_REFINEMENT_EXPANSION_SECONDS = 0.75;
-export const RALLY_RECOGNITION_METHOD_VALUES = ['bounce_events', 'continuous_visibility'] as const;
-export const RALLY_RECOGNITION_METHOD_DEFAULT = 'continuous_visibility' as const;
+export const RALLY_RECOGNITION_METHOD_VALUES = ['bounce_events', 'continuous_visibility', 'hybrid_motion_bounce'] as const;
+export const RALLY_RECOGNITION_METHOD_DEFAULT = 'hybrid_motion_bounce' as const;
 export const DURATION_HIGHLIGHT_TIER_VALUES = ['short_rally', 'rally', 'long_rally'] as const;
 export const DURATION_HIGHLIGHT_SECONDS = {
   short_rally: 2.7,
@@ -263,7 +263,7 @@ export const blurballAnalysisConfigSchema = z.discriminatedUnion('mode', [
 ]);
 
 export const rallyRecognitionConfigSchema = z.object({
-  method: z.enum(RALLY_RECOGNITION_METHOD_VALUES),
+  method: z.enum(['bounce_events', 'continuous_visibility']),
 }).strict();
 
 export const analysisRequestV2Schema = z.object({
@@ -288,7 +288,15 @@ export const analysisRequestV4Schema = analysisRequestV3Schema.extend({
   ball_model_profile: z.enum(BALL_MODEL_PROFILE_VALUES),
 }).strict();
 
+export const analysisRequestV5Schema = analysisRequestV4Schema.extend({
+  schema_version: z.literal(5),
+  ball_model_profile: z.literal('blurball_v1'),
+  analysis: z.object({ mode: z.literal('full'), confidence_threshold: z.literal(0.30) }).strict(),
+  rally_recognition: z.object({ method: z.literal('hybrid_motion_bounce') }).strict(),
+}).strict();
+
 export const analysisRequestSchema = z.union([
+  analysisRequestV5Schema,
   analysisRequestV1Schema,
   analysisRequestV2Schema,
   analysisRequestV3Schema,
@@ -509,7 +517,128 @@ export const continuousVisibilityAnalysisResultV2Schema = analysisResultBaseSche
   }).strict(),
 }).strict();
 
+const metricSeriesSchema = z.array(finiteNumber.nonnegative().nullable());
+const excludedEvidenceSchema = z.discriminatedUnion('reason', [
+  z.object({
+    reason: z.literal('dead_bounce_cluster'),
+    bounce_times_seconds: z.array(finiteNumber.nonnegative()).min(3),
+    intervals: z.array(finiteNumber.positive()).min(2),
+    rebound_heights: metricSeriesSchema,
+    departure_speeds: metricSeriesSchema,
+    matched_metrics: z.array(z.enum(['intervals', 'rebound_heights', 'departure_speeds'])).min(2),
+  }).strict(),
+  z.object({
+    reason: z.literal('slow_transfer'), duration_seconds: finiteNumber.positive(),
+    span_ratio: finiteNumber.nonnegative(), speed_ratio_per_second: finiteNumber.nonnegative(),
+    bounce_times_seconds: z.array(finiteNumber.nonnegative()),
+  }).strict(),
+  z.object({ reason: z.literal('zero_bounce_rally'), bounce_count: z.literal(0) }).strict(),
+]);
+
+export const excludedFragmentSchema = z.object({
+  start_time_seconds: finiteNumber.nonnegative(), end_time_seconds: finiteNumber.positive(),
+  evidence: z.array(excludedEvidenceSchema).min(1),
+}).strict().refine(f => f.end_time_seconds > f.start_time_seconds);
+
+// Keep v1 history readable without silently relabelling its original rules.
+const hybridRecognitionV1Schema = z.object({
+    method: z.literal('hybrid_motion_bounce'), version: z.literal(1),
+    motion_filter: continuousVisibilityAnalysisResultV2Schema.shape.rally_recognition.shape.motion_filter.unwrap(),
+    fragment_bridge: continuousVisibilityAnalysisResultV2Schema.shape.rally_recognition.shape.fragment_bridge.unwrap(),
+    transfer_filter_version: z.literal(1),
+    slow_transfer_filter: z.object({
+      minimum_seconds: z.literal(0.85), minimum_displacement_ratio: z.literal(0.30),
+      maximum_speed_ratio: z.literal(0.85), fast_flight_speed_ratio: z.literal(1),
+    }).strict(),
+    detection_confidence_threshold: z.literal(0.30),
+    start_visible_seconds: finiteNumber.positive(), end_invisible_seconds: finiteNumber.positive(),
+    dead_bounce_filter: z.object({
+      minimum_bounces: z.literal(3), maximum_gap_seconds: z.literal(1),
+      decay_ratio: z.literal(0.85), minimum_decay_metrics: z.literal(2), reenergization_veto: z.literal(false),
+    }).strict(),
+    transfer_filter: continuousVisibilityAnalysisResultV2Schema.shape.rally_recognition.shape.inter_rally_fragment_filter.unwrap(),
+}).strict();
+
+const hybridRecognitionV2Schema = hybridRecognitionV1Schema.extend({
+  version: z.literal(2),
+  candidate_refinement_version: z.literal(1),
+  transfer_filter_version: z.literal(2),
+  slow_transfer_filter: hybridRecognitionV1Schema.shape.slow_transfer_filter.extend({
+    strike_context_seconds: z.literal(0.25), minimum_strike_table_ratio: z.literal(0.5),
+  }).strict(),
+  dead_bounce_filter: hybridRecognitionV1Schema.shape.dead_bounce_filter.extend({
+    reenergization_veto: z.literal(true),
+    strike_protection: z.object({
+      version: z.literal(1), window_seconds: z.literal(0.20),
+      minimum_excursion_ratio: z.literal(0.04), minimum_speed_ratio: z.literal(0.35),
+      opposed_landing_minimum_speed_ratio: z.literal(0.20), partial_exchange_version: z.literal(1),
+    }).strict(),
+  }).strict(),
+}).strict();
+
+const hybridRecognitionV3Schema = hybridRecognitionV2Schema.extend({
+  version: z.literal(3),
+  candidate_refinement_version: z.literal(2),
+  transfer_filter_version: z.literal(3),
+  observed_return_filter: z.object({
+    maximum_gap_seconds: z.literal(0.5), minimum_displacement_ratio: z.literal(0.15),
+    minimum_weak_displacement_ratio: z.literal(0.08), minimum_points: z.literal(4),
+    minimum_seconds: z.literal(0.1), maximum_seconds: z.literal(0.75),
+    maximum_observation_gap_seconds: z.literal(0.1), minimum_moving_steps: z.literal(3),
+    minimum_step_ratio: z.literal(0.005), maximum_backtrack_ratio: z.literal(0.15),
+    minimum_speed_ratio_per_second: z.literal(0.35),
+  }).strict(),
+  dead_bounce_filter: hybridRecognitionV2Schema.shape.dead_bounce_filter.extend({
+    strike_protection: hybridRecognitionV2Schema.shape.dead_bounce_filter.shape.strike_protection.extend({
+      version: z.literal(2), opposed_landing_minimum_speed_ratio: z.literal(0.10),
+    }).strict(),
+  }).strict(),
+}).strict();
+
+export const hybridAnalysisResultV3Schema = analysisResultBaseSchema.extend({
+  schema_version: z.literal(3),
+  rallies: z.array(bounceRallySchema),
+  bounce_times_seconds: z.array(finiteNumber.nonnegative()),
+  excluded_fragments: z.array(excludedFragmentSchema),
+  rally_recognition: z.discriminatedUnion('version', [
+    hybridRecognitionV1Schema, hybridRecognitionV2Schema, hybridRecognitionV3Schema,
+  ]),
+}).strict().superRefine((result, ctx) => {
+  const invalid = (message: string) => ctx.addIssue({ code: 'custom', message });
+  const model = result.model_provenance;
+  if (model && (model.profile !== 'blurball_v1'
+      || (model.detection && model.detection.confidence_threshold !== 0.30)
+      || (model.analysis && (model.analysis.mode !== 'full' || model.analysis.stages.length !== 1
+        || model.analysis.stages[0]!.name !== 'full' || model.analysis.stages[0]!.confidence_threshold !== 0.30)))) invalid('Hybrid results require fixed full-pass BlurBall provenance');
+  for (const [i, f] of result.excluded_fragments.entries()) {
+    if (f.end_time_seconds > result.video.duration_seconds || (i > 0 && f.start_time_seconds < result.excluded_fragments[i - 1]!.end_time_seconds)) invalid('Excluded fragments must be ordered, non-overlapping and source-bound');
+    for (const evidence of f.evidence) {
+      if (evidence.reason === 'zero_bounce_rally') continue;
+      const times = evidence.bounce_times_seconds;
+      if (times.some((t, j) => t < f.start_time_seconds || t >= f.end_time_seconds || (j > 0 && t <= times[j - 1]!))) invalid('Evidence bounce times must be ordered inside the exclusion');
+      if (evidence.reason === 'dead_bounce_cluster') {
+        if (new Set(evidence.matched_metrics).size < 2) invalid('Two distinct decay metrics are required');
+        for (const name of ['intervals', 'rebound_heights', 'departure_speeds'] as const) {
+          const values = evidence[name];
+          if (values.length !== times.length - 1) invalid('Decay series must align with bounce flights');
+          if (evidence.matched_metrics.includes(name) && values.some((v, j) => v === null || v <= 0 || (j > 0 && (values[j - 1] === null || v > values[j - 1]! * 0.85 + 1e-9)))) invalid('Matched metrics must decay at every comparable step');
+        }
+        if (evidence.intervals.some((v, j) => v > 1 + 1e-9 || Math.abs(v - (times[j + 1]! - times[j]!)) > 1e-9)) invalid('Dead-cluster intervals must match source times and be at most one second');
+      }
+    }
+  }
+  for (const [i, t] of result.bounce_times_seconds.entries()) {
+    if (t > result.video.duration_seconds || (i > 0 && t <= result.bounce_times_seconds[i - 1]!) || result.excluded_fragments.some(f => f.start_time_seconds <= t && t < f.end_time_seconds)) invalid('Bounce times must be ordered, unique, source-bound and valid');
+  }
+  for (const [i, r] of result.rallies.entries()) {
+    if (r.end_time_seconds > result.video.duration_seconds || (i > 0 && r.start_time_seconds <= result.rallies[i - 1]!.end_time_seconds)) invalid('Rallies must be ordered and non-overlapping');
+    if (result.excluded_fragments.some(f => r.start_time_seconds < f.end_time_seconds && r.end_time_seconds >= f.start_time_seconds)) invalid('Rally overlaps an excluded fragment');
+    if (r.bounce_count !== result.bounce_times_seconds.filter(t => r.start_time_seconds <= t && t <= r.end_time_seconds).length) invalid('Rally board count must match valid bounce times');
+  }
+});
+
 export const analysisResultSchema = z.union([
+  hybridAnalysisResultV3Schema,
   legacyAnalysisResultV1Schema,
   bounceAnalysisResultV2Schema,
   continuousVisibilityAnalysisResultV2Schema,
@@ -619,8 +748,6 @@ export const appSettingsSchema = z.object({
   calibration_method: z.enum(['manual', 'automatic']),
   pre_roll_seconds: z.union(PRE_ROLL_VALUES.map((value) => z.literal(value))),
   post_roll_seconds: z.union(POST_ROLL_VALUES.map((value) => z.literal(value))),
-  analysis_mode: z.enum(BLURBALL_ANALYSIS_MODE_VALUES).default(BLURBALL_ANALYSIS_MODE_DEFAULT),
-  rally_recognition_method: z.enum(RALLY_RECOGNITION_METHOD_VALUES).default(RALLY_RECOGNITION_METHOD_DEFAULT),
   normalize_variable_frame_rate: z.boolean().default(false),
 }).strict();
 
@@ -780,14 +907,15 @@ export type AnalysisResult = AnalysisResultV1;
 export type LegacyAnalysisResultV1 = z.infer<typeof legacyAnalysisResultV1Schema>;
 export type BounceAnalysisResultV2 = z.infer<typeof bounceAnalysisResultV2Schema>;
 export type ContinuousVisibilityAnalysisResultV2 = z.infer<typeof continuousVisibilityAnalysisResultV2Schema>;
-export type BounceAnalysisResult = LegacyAnalysisResultV1 | BounceAnalysisResultV2;
+export type HybridAnalysisResultV3 = z.infer<typeof hybridAnalysisResultV3Schema>;
+export type BounceAnalysisResult = LegacyAnalysisResultV1 | BounceAnalysisResultV2 | HybridAnalysisResultV3;
 
 export function rallyRecognitionMethod(result: AnalysisResultV1): RallyRecognitionMethod {
-  return result.schema_version === 2 ? result.rally_recognition.method : 'bounce_events';
+  return result.schema_version !== 1 ? result.rally_recognition.method : 'bounce_events';
 }
 
 export function hasBounceCounts(result: AnalysisResultV1): result is BounceAnalysisResult {
-  return rallyRecognitionMethod(result) === 'bounce_events';
+  return rallyRecognitionMethod(result) !== 'continuous_visibility';
 }
 export type CalibrationResultV1 = z.infer<typeof calibrationResultSchema>;
 export type WorkerEventV1 = z.infer<typeof workerEventSchema>;
