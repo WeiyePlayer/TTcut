@@ -100,12 +100,7 @@ export interface TTcutApi {
     calibrationChoice: CalibrationChoice;
     device: 'auto' | 'cuda' | 'cpu';
     historyVisibility: 'visible' | 'deferred';
-    analysisMode: BlurBallAnalysisMode;
-    rallyRecognitionMethod: RallyRecognitionMethod;
     normalizeVariableFrameRate: boolean;
-    blurballConfidenceThreshold: number;
-    blurballStage1ConfidenceThreshold: number;
-    blurballStage2ConfidenceThreshold: number;
   }): Promise<string>;
   startExport(input: ExportRequest): Promise<string>;
   startBatchExport(input: BatchExportRequest): Promise<string>;

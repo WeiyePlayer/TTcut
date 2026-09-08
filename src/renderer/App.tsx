@@ -1,8 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT,
-  RALLY_RECOGNITION_METHOD_DEFAULT,
-  BLURBALL_STAGE1_CONFIDENCE_THRESHOLD_DEFAULT,
   DURATION_HIGHLIGHT_SECONDS,
   DURATION_HIGHLIGHT_TIER_VALUES,
   rallyRecognitionMethod,
@@ -85,8 +82,6 @@ export function App() {
   const [settings, setSettings] = useState<AppSettings>({
     language: 'zh-CN', calibration_method: 'automatic',
     pre_roll_seconds: 2.5, post_roll_seconds: 1,
-    analysis_mode: 'full',
-    rally_recognition_method: RALLY_RECOGNITION_METHOD_DEFAULT,
     normalize_variable_frame_rate: false,
   });
   const [view, setView] = useState<View>('auto');
@@ -103,9 +98,6 @@ export function App() {
   const [mode, setMode] = useState<'all' | 'highlight' | 'custom'>('all');
   const [bounceThreshold, setBounceThreshold] = useState<3 | 5 | 7>(5);
   const [durationTier, setDurationTier] = useState<DurationHighlightTier>('rally');
-  const blurballConfidenceThreshold = BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT;
-  const blurballStage1ConfidenceThreshold = BLURBALL_STAGE1_CONFIDENCE_THRESHOLD_DEFAULT;
-  const blurballStage2ConfidenceThreshold = BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT;
   const [customDraft, setCustomDraft] = useState<CustomRallyClip[] | null>(null);
   const [customOutputs, setCustomOutputs] = useState<NonNullable<ExportRequest['outputs']>>({
     combined_video: true,
@@ -353,12 +345,7 @@ export function App() {
         calibrationChoice: useManualCalibration ? { method: 'manual', calibration: calibrationValue! } : { method: 'automatic' },
         device: 'auto',
         historyVisibility: 'visible',
-        analysisMode: settings.rally_recognition_method === 'continuous_visibility' ? 'full' : settings.analysis_mode,
-        rallyRecognitionMethod: settings.rally_recognition_method,
         normalizeVariableFrameRate: settings.normalize_variable_frame_rate,
-        blurballConfidenceThreshold,
-        blurballStage1ConfidenceThreshold,
-        blurballStage2ConfidenceThreshold,
       }));
     } catch (caught) {
       if (videoTaskOwnerRef.current === 'single') updateVideoTaskOwner(null);
@@ -642,12 +629,7 @@ export function App() {
               initialVideos={multiVideos}
               preRoll={settings.pre_roll_seconds}
               postRoll={settings.post_roll_seconds}
-              analysisMode={settings.rally_recognition_method === 'continuous_visibility' ? 'full' : settings.analysis_mode}
-              rallyRecognitionMethod={settings.rally_recognition_method}
               normalizeVariableFrameRate={settings.normalize_variable_frame_rate}
-              blurballConfidenceThreshold={blurballConfidenceThreshold}
-              blurballStage1ConfidenceThreshold={blurballStage1ConfidenceThreshold}
-              blurballStage2ConfidenceThreshold={blurballStage2ConfidenceThreshold}
               language={settings.language}
               onTaskStateChange={handleMultiTaskStateChange}
               onOpenAnalysis={(id) => { discardMulti(); void openHistory(id); }}
@@ -693,41 +675,6 @@ export function App() {
                   value={settings.language as Language}
                 />
               </article>
-              <article className="card setting-card">
-                <div><h2>{t.rallyRecognitionMethod}</h2></div>
-                <GlassRadioGroup
-                  ariaLabel={t.rallyRecognitionMethod}
-                  className="compact"
-                  idPrefix="settings-rally-recognition"
-                  name="settings-rally-recognition"
-                  onChange={(rally_recognition_method) => void saveRolls({ rally_recognition_method })}
-                  options={[
-                    { value: 'bounce_events', label: t.bounceEvents },
-                    { value: 'continuous_visibility', label: t.continuousVisibility },
-                  ] as const}
-                  value={settings.rally_recognition_method}
-                />
-              </article>
-              {settings.rally_recognition_method === 'bounce_events' && <article className="card detector-settings-card">
-                <section className="detector-setting">
-                  <div>
-                    <h2>{t.blurballAnalysisMode}</h2>
-                    <p>{t.blurballAnalysisModeDetail}</p>
-                  </div>
-                  <GlassRadioGroup
-                    ariaLabel={t.blurballAnalysisMode}
-                    className="compact"
-                    idPrefix="settings-blurball-mode"
-                    name="settings-blurball-mode"
-                    onChange={(analysis_mode) => void saveRolls({ analysis_mode })}
-                    options={[
-                      { value: 'full', label: t.blurballModeDefault },
-                      { value: 'two_stage', label: t.blurballModeHighPrecision },
-                    ] as const}
-                    value={settings.analysis_mode}
-                  />
-                </section>
-              </article>}
               <article className="card setting-card">
                 <div>
                   <h2>{t.normalizeVariableFrameRate}</h2>

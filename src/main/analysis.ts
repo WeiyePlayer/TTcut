@@ -173,12 +173,7 @@ export async function startAnalysis(
     calibrationChoice: CalibrationChoice;
     device: 'auto' | 'cuda' | 'cpu';
     historyVisibility: 'visible' | 'deferred';
-    analysisMode: BlurBallAnalysisMode;
-    rallyRecognitionMethod: RallyRecognitionMethod;
     normalizeVariableFrameRate: boolean;
-    blurballConfidenceThreshold: number;
-    blurballStage1ConfidenceThreshold: number;
-    blurballStage2ConfidenceThreshold: number;
   },
 ): Promise<string> {
   if (hasActiveTasks()) throw new Error('TASK_BUSY');
@@ -193,7 +188,7 @@ export async function startAnalysis(
   const analysisComponents = await resolveUsableAnalysisComponents(requestedDevice);
   if (!analysisComponents.python) throw new Error('RUNTIME_MISSING');
   const ballModelProfile: BallModelProfile = analysisComponents.tracknetWeights ? 'tracknet_v1' : 'blurball_v1';
-  const effectiveAnalysisMode: BlurBallAnalysisMode = ballModelProfile === 'tracknet_v1' ? 'full' : value.analysisMode;
+  const effectiveAnalysisMode: BlurBallAnalysisMode = 'full';
   const python = analysisComponents.python;
   const mediaComponents = await resolveUsableMediaComponents();
   const encoder = mediaComponents.mediaEncoder === 'unavailable' ? null : mediaComponents.mediaEncoder;
@@ -226,7 +221,7 @@ export async function startAnalysis(
             taskId,
             event,
             'automatic',
-            value.analysisMode,
+            effectiveAnalysisMode,
             value.normalizeVariableFrameRate && sourceMetadata.variable_frame_rate ? 'normalized' : 'source',
           ),
         });
@@ -353,21 +348,15 @@ export async function startAnalysis(
       if (!processing) throw workerFailure('CFR_PROCESSING_MEDIA_MISSING', 'Processing media was not prepared.');
       const processingMedia = processing;
       const request = analysisRequestSchema.parse({
-        schema_version: 4,
+        schema_version: ballModelProfile === 'tracknet_v1' ? 4 : 5,
         task_id: taskId,
         video_path: processingMedia.metadata.path,
         device: requestedDevice,
         video_metadata: workerVideoMetadata(processingMedia.metadata),
         calibration_choice: calibrationChoice,
         ball_model_profile: ballModelProfile,
-        analysis: effectiveAnalysisMode === 'full'
-          ? { mode: 'full', confidence_threshold: value.blurballConfidenceThreshold }
-          : {
-            mode: 'two_stage',
-            stage1_confidence_threshold: value.blurballStage1ConfidenceThreshold,
-            stage2_confidence_threshold: value.blurballStage2ConfidenceThreshold,
-          },
-        rally_recognition: { method: value.rallyRecognitionMethod },
+        analysis: { mode: 'full', confidence_threshold: 0.30 },
+        rally_recognition: { method: ballModelProfile === 'tracknet_v1' ? 'continuous_visibility' : 'hybrid_motion_bounce' },
       });
       const workerResult = await runWorker({
         taskId,
@@ -425,7 +414,7 @@ export async function startAnalysis(
         modelInput: workerResult.model_provenance?.main_input,
         analysisRoi: workerResult.model_provenance?.roi,
         processingMode: processingMedia.mode,
-        recognition: 'rally_recognition' in workerResult ? workerResult.rally_recognition : value.rallyRecognitionMethod,
+        recognition: 'rally_recognition' in workerResult ? workerResult.rally_recognition : 'bounce_events',
       })}`).catch(() => undefined);
       if (controller.cancelRequested || controller.signal.aborted) {
         throw workerFailure('ANALYSIS_CANCELLED', 'Analysis was cancelled.', { cancelled: true });
@@ -468,10 +457,8 @@ export async function startAnalysis(
     fps: sourceMetadata.fps, frameCount: sourceMetadata.frame_count,
     variableFrameRate: sourceMetadata.variable_frame_rate,
     calibrationMethod: value.calibrationChoice.method, analysisMode: effectiveAnalysisMode,
-    rallyRecognitionMethod: value.rallyRecognitionMethod,
-    confidenceThreshold: value.blurballConfidenceThreshold,
-    stage1ConfidenceThreshold: value.blurballStage1ConfidenceThreshold,
-    stage2ConfidenceThreshold: value.blurballStage2ConfidenceThreshold,
+    rallyRecognitionMethod: ballModelProfile === 'tracknet_v1' ? 'continuous_visibility' : 'hybrid_motion_bounce',
+    confidenceThreshold: 0.30,
     normalizeVariableFrameRate: value.normalizeVariableFrameRate,
   })}`).catch(() => undefined);
   return taskId;

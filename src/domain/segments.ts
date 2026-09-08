@@ -44,7 +44,7 @@ export function selectRallies(result: AnalysisResultV1, selection: CutSelectionV
       ? selection.criterion
       : { kind: 'bounce_count' as const, threshold: selection.highlight_threshold };
     const method = rallyRecognitionMethod(result);
-    if (criterion.kind === 'bounce_count' && method !== 'bounce_events') {
+    if (criterion.kind === 'bounce_count' && !hasBounceCounts(result)) {
       throw new SelectionError('INVALID_HIGHLIGHT_CRITERION');
     }
     if (criterion.kind === 'duration_tier' && method !== 'continuous_visibility') {
@@ -90,7 +90,7 @@ export function buildCutGroups(
   const raw: Array<Omit<CutGroup, 'start' | 'end'>> = [];
   for (const rally of ordered) {
     const current = raw.at(-1);
-    if (current && rally.start_time_seconds - current.rawEnd < 5 - EPSILON) {
+    if (current && rally.start_time_seconds - current.rawEnd < (recognitionMethod === 'hybrid_motion_bounce' ? 3 : 5 - EPSILON)) {
       current.rawEnd = Math.max(current.rawEnd, rally.end_time_seconds);
       current.rallyIds.push(rally.id);
     } else {

@@ -28,8 +28,6 @@ describe('settings migration', () => {
     await expect(loadSettings()).resolves.toEqual({
       language: 'en', calibration_method: 'automatic',
       pre_roll_seconds: 5, post_roll_seconds: 0.5,
-      analysis_mode: 'full',
-      rally_recognition_method: 'continuous_visibility',
       normalize_variable_frame_rate: false,
     });
   });
@@ -49,8 +47,6 @@ describe('settings migration', () => {
     const settings = {
       language: 'zh-CN' as const, calibration_method: 'automatic' as const,
       pre_roll_seconds: 2.5 as const, post_roll_seconds: 2 as const,
-      analysis_mode: 'full' as const,
-      rally_recognition_method: 'bounce_events' as const,
       normalize_variable_frame_rate: true,
     };
     await expect(saveSettings(settings)).resolves.toEqual(settings);
@@ -64,48 +60,46 @@ describe('settings migration', () => {
     }), 'utf8');
     await expect(loadSettings()).resolves.toEqual({
       language: 'zh-CN', calibration_method: 'automatic', pre_roll_seconds: 2.5, post_roll_seconds: 2,
-      analysis_mode: 'full',
-      rally_recognition_method: 'continuous_visibility',
       normalize_variable_frame_rate: false,
     });
     expect(JSON.parse(await readFile(path.join(state.userData, 'settings.json'), 'utf8'))).not.toHaveProperty('ball_model_profile');
   });
 
-  it('persists only the selected analysis mode', async () => {
+  it('drops obsolete analysis choices and thresholds on save', async () => {
     await writeFile(path.join(state.userData, 'settings.json'), JSON.stringify({
       language: 'zh-CN', calibration_method: 'automatic', pre_roll_seconds: 2.5, post_roll_seconds: 2,
       analysis_mode: 'two_stage', blurball_confidence_threshold: 0.4,
     }), 'utf8');
-    await expect(loadSettings()).resolves.toMatchObject({ analysis_mode: 'two_stage' });
     const settings = await loadSettings();
+    expect(settings).not.toHaveProperty('analysis_mode');
     await saveSettings(settings);
     const persisted = JSON.parse(await readFile(path.join(state.userData, 'settings.json'), 'utf8')) as Record<string, unknown>;
-    expect(persisted.analysis_mode).toBe('two_stage');
+    expect(persisted).not.toHaveProperty('analysis_mode');
     expect(persisted.normalize_variable_frame_rate).toBe(false);
     expect(persisted).not.toHaveProperty('blurball_confidence_threshold');
   });
 
-  it('defaults missing or invalid rally recognition methods to continuous motion', async () => {
+  it('ignores invalid legacy recognition settings', async () => {
     await writeFile(path.join(state.userData, 'settings.json'), JSON.stringify({
       language: 'zh-CN', calibration_method: 'automatic', pre_roll_seconds: 2.5, post_roll_seconds: 1,
       analysis_mode: 'two_stage', rally_recognition_method: 'unknown',
     }), 'utf8');
-    await expect(loadSettings()).resolves.toMatchObject({
-      rally_recognition_method: 'continuous_visibility', analysis_mode: 'two_stage',
-    });
+    expect(await loadSettings()).not.toHaveProperty('rally_recognition_method');
   });
 
-  it('uses continuous motion on first launch and when parsing settings without a method', async () => {
+  it('does not expose recognition choices in the new settings schema', async () => {
     const settings = await loadSettings();
-    expect(settings.rally_recognition_method).toBe('continuous_visibility');
-    const { rally_recognition_method: _method, ...withoutMethod } = settings;
-    expect(appSettingsSchema.parse(withoutMethod).rally_recognition_method).toBe('continuous_visibility');
+    expect(settings).not.toHaveProperty('rally_recognition_method');
+    expect(appSettingsSchema.safeParse({ ...settings, rally_recognition_method: 'bounce_events' }).success).toBe(false);
   });
 
-  it('preserves an existing bounce-events selection', async () => {
+  it('ignores an existing bounce-events selection', async () => {
     await writeFile(path.join(state.userData, 'settings.json'), JSON.stringify({
       rally_recognition_method: 'bounce_events',
     }), 'utf8');
-    expect((await loadSettings()).rally_recognition_method).toBe('bounce_events');
+    const settings = await loadSettings();
+    expect(settings).not.toHaveProperty('rally_recognition_method');
+    await saveSettings(settings);
+    expect(JSON.parse(await readFile(path.join(state.userData, 'settings.json'), 'utf8'))).not.toHaveProperty('rally_recognition_method');
   });
 });

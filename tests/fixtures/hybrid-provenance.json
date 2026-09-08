@@ -1,0 +1,91 @@
+{
+  "method": "hybrid_motion_bounce",
+  "version": 3,
+  "candidate_refinement_version": 2,
+  "observed_return_filter": {
+    "maximum_gap_seconds": 0.5,
+    "minimum_displacement_ratio": 0.15,
+    "minimum_weak_displacement_ratio": 0.08,
+    "minimum_points": 4,
+    "minimum_seconds": 0.1,
+    "maximum_seconds": 0.75,
+    "maximum_observation_gap_seconds": 0.1,
+    "minimum_moving_steps": 3,
+    "minimum_step_ratio": 0.005,
+    "maximum_backtrack_ratio": 0.15,
+    "minimum_speed_ratio_per_second": 0.35
+  },
+  "detection_confidence_threshold": 0.3,
+  "start_visible_seconds": 0.2,
+  "end_invisible_seconds": 0.5,
+  "motion_filter": {
+    "minimum_horizontal_excursion_ratio": 0.032362459546925564,
+    "maximum_reversal_gap_seconds": 0.35,
+    "minimum_horizontal_to_vertical_range_ratio": 0.7,
+    "maximum_monotonic_vertical_reversals": 1,
+    "minimum_monotonic_horizontal_range_ratio": 0.32362459546925565,
+    "minimum_monotonic_duration_seconds": 0.6,
+    "short_vertical_filter_seconds": 1.2,
+    "maximum_short_vertical_range_ratio": 0.5,
+    "vertical_exchange_enabled": false,
+    "minimum_vertical_to_horizontal_range_ratio": 1.0,
+    "end_on_min_opposing_edge_balance": 0.85,
+    "end_on_min_screen_aspect_ratio": 2.0
+  },
+  "fragment_bridge": {
+    "maximum_gap_seconds": 1.5,
+    "maximum_boundary_displacement_ratio": 0.35,
+    "maximum_boundary_speed_ratio_per_second": 0.26
+  },
+  "transfer_filter_version": 3,
+  "slow_transfer_filter": {
+    "minimum_seconds": 0.85,
+    "minimum_displacement_ratio": 0.3,
+    "maximum_speed_ratio": 0.85,
+    "fast_flight_speed_ratio": 1.0,
+    "strike_context_seconds": 0.25,
+    "minimum_strike_table_ratio": 0.5
+  },
+  "dead_bounce_filter": {
+    "minimum_bounces": 3,
+    "maximum_gap_seconds": 1.0,
+    "decay_ratio": 0.85,
+    "minimum_decay_metrics": 2,
+    "reenergization_veto": true,
+    "strike_protection": {
+      "version": 2,
+      "window_seconds": 0.2,
+      "minimum_excursion_ratio": 0.04,
+      "minimum_speed_ratio": 0.35,
+      "opposed_landing_minimum_speed_ratio": 0.1,
+      "partial_exchange_version": 1
+    }
+  },
+  "transfer_filter": {
+    "side_on_views_only": true,
+    "minimum_candidate_seconds": 1.0,
+    "maximum_candidate_seconds": 6.0,
+    "maximum_expanded_table_ratio": 0.45,
+    "minimum_visible_run_count": 3,
+    "minimum_one_way_range_ratio": 0.55,
+    "maximum_sparse_visibility_ratio": 0.3,
+    "minimum_contiguous_flight_seconds": 0.15,
+    "minimum_coherent_reversal_ratio": 0.2,
+    "minimum_coherent_flight_displacement_ratio": 0.15,
+    "expanded_table_length_margin_cm": 35.0,
+    "expanded_table_width_margin_cm": 25.0,
+    "motion_refinement": {
+      "version": 5,
+      "minimum_motion_run_seconds": 0.15,
+      "minimum_horizontal_range_ratio": 0.05,
+      "minimum_speed_ratio_per_second": 0.35,
+      "reversal_range_ratio": 0.06,
+      "gap_minimum_motion_range_ratio": 0.04,
+      "gap_minimum_motion_support_ratio": 0.35,
+      "short_gap_seconds": 1.25,
+      "long_gap_seconds": 2.25,
+      "stationary_run_seconds": 0.5,
+      "boundary_context_seconds": 0.25
+    }
+  }
+}

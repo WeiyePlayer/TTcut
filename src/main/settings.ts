@@ -1,15 +1,13 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { app } from 'electron';
-import { appSettingsSchema, RALLY_RECOGNITION_METHOD_DEFAULT, type AppSettings } from '../shared/contracts';
+import { appSettingsSchema, type AppSettings } from '../shared/contracts';
 
 const defaults: AppSettings = {
   language: 'zh-CN',
   calibration_method: 'automatic',
   pre_roll_seconds: 2.5,
   post_roll_seconds: 1,
-  analysis_mode: 'full',
-  rally_recognition_method: RALLY_RECOGNITION_METHOD_DEFAULT,
   normalize_variable_frame_rate: false,
 };
 
@@ -39,13 +37,6 @@ export async function loadSettings(): Promise<AppSettings> {
       post_roll_seconds: [0.5, 1, 2, 4].includes(Number(raw.post_roll_seconds))
         ? raw.post_roll_seconds
         : defaults.post_roll_seconds,
-      analysis_mode: raw.analysis_mode === 'two_stage' || raw.analysis_mode === 'full'
-        ? raw.analysis_mode
-        : defaults.analysis_mode,
-      rally_recognition_method: raw.rally_recognition_method === 'continuous_visibility'
-        || raw.rally_recognition_method === 'bounce_events'
-        ? raw.rally_recognition_method
-        : defaults.rally_recognition_method,
       normalize_variable_frame_rate: typeof raw.normalize_variable_frame_rate === 'boolean'
         ? raw.normalize_variable_frame_rate
         : defaults.normalize_variable_frame_rate,

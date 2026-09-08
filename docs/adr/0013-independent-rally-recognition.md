@@ -2,7 +2,7 @@
 
 ## 状态
 
-已接受
+已由 [ADR 0014](0014-hybrid-motion-bounce.md) 替代（新 BlurBall 分析）。历史请求及结果契约仍保留。
 
 ## 背景
 
