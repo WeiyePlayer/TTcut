@@ -13,6 +13,7 @@ export const IPC = {
   videoProbe: 'video:probe',
   previewPrepare: 'preview:prepare',
   previewProgress: 'preview:progress',
+  videoPreparePreview: 'video:prepare-preview',
   calibrationStart: 'calibration:start',
   analysisStart: 'analysis:start',
   exportStart: 'export:start',

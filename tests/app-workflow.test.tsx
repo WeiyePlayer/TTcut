@@ -4,16 +4,16 @@ import { App } from '../src/renderer/App';
 import { SUPPORT_PROMPT_SNOOZE_MS, SUPPORT_PROMPT_SNOOZE_STORAGE_KEY } from '../src/domain/support-prompt';
 import type { AppEvent, BootstrapData, SelectedVideo, TTcutApi } from '../src/shared/api';
 import type { VideoMetadata } from '../src/shared/contracts';
+import { analysisResultSchema } from '../src/shared/contracts';
+import hybridProvenance from './fixtures/hybrid-provenance.json';
 
 const bootstrap: BootstrapData = {
-  version: '1.3.0',
+  version: '1.3.1',
   settings: {
     language: 'zh-CN',
     calibration_method: 'automatic',
     pre_roll_seconds: 2.5,
     post_roll_seconds: 1,
-    analysis_mode: 'full',
-    rally_recognition_method: 'bounce_events',
     normalize_variable_frame_rate: false,
   },
   components: {
@@ -237,8 +237,8 @@ describe('App workflow notices and multi-task entry', () => {
     render(<App />);
 
     fireEvent.click(await screen.findByRole('button', { name: '设置' }));
-    expect(screen.getByRole('heading', { name: '分析精度' })).toBeVisible();
-    expect(screen.getByText('高精模式识别精度很高，花费时间增长。')).toBeVisible();
+    expect(screen.queryByRole('heading', { name: '分析精度' })).toBeNull();
+    expect(screen.queryByRole('radio', { name: '连续运动' })).toBeNull();
     expect(screen.queryByRole('slider')).toBeNull();
     expect(window.ttcut.saveSettings).not.toHaveBeenCalled();
 
@@ -248,12 +248,11 @@ describe('App workflow notices and multi-task entry', () => {
 
     await waitFor(() => expect(window.ttcut.startAnalysis).toHaveBeenCalledWith(expect.objectContaining({
       videoPath: selected.path,
-      analysisMode: 'full',
       normalizeVariableFrameRate: false,
-      blurballConfidenceThreshold: 0.7,
-      blurballStage1ConfidenceThreshold: 0.3,
-      blurballStage2ConfidenceThreshold: 0.7,
     })));
+    for (const key of ['analysisMode', 'rallyRecognitionMethod', 'blurballConfidenceThreshold', 'blurballStage1ConfidenceThreshold', 'blurballStage2ConfidenceThreshold']) {
+      expect(vi.mocked(window.ttcut.startAnalysis).mock.calls[0]?.[0]).not.toHaveProperty(key);
+    }
   });
 
   it('defaults VFR normalization to off, persists the choice, and passes it to analysis', async () => {
@@ -280,50 +279,15 @@ describe('App workflow notices and multi-task entry', () => {
     })));
   });
 
-  it('switches analysis precision without exposing threshold controls', async () => {
+  it('hides legacy precision and recognition choices', async () => {
     render(<App />);
     fireEvent.click(await screen.findByRole('button', { name: '设置' }));
-    fireEvent.click(screen.getByRole('radio', { name: '高精' }));
-
-    await waitFor(() => expect(screen.queryByRole('slider')).toBeNull());
-    expect(window.ttcut.saveSettings).toHaveBeenCalledWith(expect.objectContaining({ analysis_mode: 'two_stage' }));
-
-    fireEvent.click(screen.getByRole('radio', { name: '默认' }));
-    await waitFor(() => expect(screen.queryByRole('slider')).toBeNull());
-  });
-
-  it('uses continuous visibility as a separate setting, hides precision, and preserves it for bounce events', async () => {
-    bootstrap.settings.analysis_mode = 'two_stage';
-    const selected = {
-      path: 'C:\\video\\visible.mp4', name: 'visible.mp4', size: 100, mediaUrl: 'ttcut-media://visible',
-    };
-    selectVideos.mockResolvedValue([selected]);
-    render(<App />);
-    fireEvent.click(await screen.findByRole('button', { name: '设置' }));
-    expect(screen.getByRole('radio', { name: '落台判定' })).toBeChecked();
-    fireEvent.click(screen.getByRole('radio', { name: '连续运动' }));
-
-    await waitFor(() => expect(window.ttcut.saveSettings).toHaveBeenCalledWith(expect.objectContaining({
-      rally_recognition_method: 'continuous_visibility', analysis_mode: 'two_stage',
-    })));
-    expect(screen.queryByRole('heading', { name: '分析精度' })).toBeNull();
-    fireEvent.click(screen.getByRole('radio', { name: '落台判定' }));
-    expect(await screen.findByRole('heading', { name: '分析精度' })).toBeVisible();
-    expect(screen.getByRole('radio', { name: '高精' })).toBeChecked();
-    fireEvent.click(screen.getByRole('radio', { name: '连续运动' }));
-
-    fireEvent.click(screen.getByRole('button', { name: '自动剪辑' }));
-    fireEvent.click(await screen.findByRole('button', { name: '选择或将文件拖到这里' }));
-    fireEvent.click(await screen.findByRole('button', { name: '开始分析' }));
-    await waitFor(() => expect(window.ttcut.startAnalysis).toHaveBeenCalledWith(expect.objectContaining({
-      analysisMode: 'full', rallyRecognitionMethod: 'continuous_visibility',
-    })));
-    bootstrap.settings.analysis_mode = 'full';
-    bootstrap.settings.rally_recognition_method = 'bounce_events';
+    expect(screen.queryByRole('radio', { name: '高精' })).toBeNull();
+    expect(screen.queryByRole('radio', { name: '落台判定' })).toBeNull();
+    expect(screen.queryByRole('radio', { name: '连续运动' })).toBeNull();
   });
 
   it('shows duration tiers and exports a duration criterion for continuous results', async () => {
-    bootstrap.settings.rally_recognition_method = 'continuous_visibility';
     const selected = {
       path: 'C:\\video\\continuous.mp4', name: 'continuous.mp4', size: 100,
       mediaUrl: 'ttcut-media://continuous',
@@ -364,7 +328,6 @@ describe('App workflow notices and multi-task entry', () => {
         mode: 'highlight', criterion: { kind: 'duration_tier', tier: 'long_rally' },
       }),
     })));
-    bootstrap.settings.rally_recognition_method = 'bounce_events';
   });
 
   it('opens each settings website button through the external-link API', async () => {
@@ -484,6 +447,39 @@ describe('App workflow notices and multi-task entry', () => {
     expect(await screen.findByRole('heading', { name: 'Analyzing video' })).toBeVisible();
     expect(window.ttcut.startAnalysis).toHaveBeenCalledTimes(1);
     expect(window.ttcut.cancelTask).not.toHaveBeenCalled();
+  });
+
+  it.each(['hybrid', 'legacy_continuous'] as const)('uses result-specific highlight controls for %s', async (kind) => {
+    const selected = { path: 'C:\\video\\first.mp4', name: 'first.mp4', size: 100, mediaUrl: 'ttcut-media://first' };
+    selectVideos.mockResolvedValue([selected]);
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: '选择或将文件拖到这里' }));
+    fireEvent.click(await screen.findByRole('button', { name: '开始分析' }));
+    await waitFor(() => expect(window.ttcut.startAnalysis).toHaveBeenCalledTimes(1));
+    const base = { video: metadata(selected.path), calibration,
+      rallies: [{ id: 'rally_001', index: 1, start_time_seconds: 1, end_time_seconds: 5 }] };
+    const data = analysisResultSchema.parse(kind === 'hybrid' ? {
+      ...base, schema_version: 3, rally_recognition: hybridProvenance, excluded_fragments: [],
+      bounce_times_seconds: [1, 2, 3, 4], rallies: [{ ...base.rallies[0], bounce_count: 4 }],
+    } : { ...base, schema_version: 2, rally_recognition: {
+      method: 'continuous_visibility', start_visible_seconds: .2, end_invisible_seconds: .5,
+    } });
+    act(() => taskListener?.({ type: 'analysis-result', taskId: 'analysis-task-1',
+      analysisId: '11111111-1111-4111-8111-111111111111', calibration, data }));
+    fireEvent.click(await screen.findByRole('button', { name: /精彩回合/ }));
+    if (kind === 'hybrid') {
+      expect(screen.queryByRole('radio', { name: '短回合' })).toBeNull();
+      fireEvent.click(screen.getByRole('radio', { name: '> 3' }));
+    } else {
+      expect(screen.queryByRole('radio', { name: '> 3' })).toBeNull();
+      fireEvent.click(screen.getByRole('radio', { name: '短回合' }));
+      expect(data).not.toHaveProperty('bounce_times_seconds');
+    }
+    fireEvent.click(screen.getByRole('button', { name: '开始剪辑' }));
+    await waitFor(() => expect(window.ttcut.startExport).toHaveBeenCalledWith(expect.objectContaining({
+      selection: expect.objectContaining({ criterion: kind === 'hybrid'
+        ? { kind: 'bounce_count', threshold: 3 } : { kind: 'duration_tier', tier: 'short_rally' } }),
+    })));
   });
 
   it('returns home when analysis finishes while another page is open', async () => {

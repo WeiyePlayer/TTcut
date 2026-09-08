@@ -112,18 +112,29 @@ function failure(taskId: string, error: unknown, cancelled: boolean, kind: strin
 export async function startMacAnalysis(window: BrowserWindow, value: AnalysisOptions): Promise<string> {
   if (value.device === 'cuda') throw new Error('UNSUPPORTED_ANALYSIS_DEVICE');
   const taskId = randomUUID(); const controller = beginTrackedTask(taskId);
+  void logLine(taskId, 'INFO', `Analysis started for ${path.basename(value.videoPath)}`);
   void (async () => {
     let terminal: AppEvent; let data: AnalysisResultV1 | undefined; let createdCache: string | undefined; let saved = false;
     try {
       const originalIdentity = await identity(value.videoPath);
       const source = await probeMacVideo(value.videoPath, controller.signal);
+      await logLine(taskId, 'INFO', `Analysis input: ${JSON.stringify({
+        codec: source.video_codec, width: source.width, height: source.height,
+        fps: source.fps, frameCount: source.frame_count,
+        variableFrameRate: source.variable_frame_rate,
+        calibrationMethod: value.calibrationChoice.method, analysisMode: 'full',
+        rallyRecognitionMethod: 'continuous_visibility', confidenceThreshold: 0.30,
+        normalizeVariableFrameRate: value.normalizeVariableFrameRate,
+      })}`).catch(() => undefined);
       let calibration: Calibration; let table: TableAnalysis | undefined;
       const progress = (event: NativeEvent) => send(window, { type: 'progress', data: {
-        taskId, kind: 'analysis', stage: event.stage!, percent: overallAnalysisProgress(event.stage!, event.total ? event.current! / event.total * 100 : 0, value.calibrationChoice.method, value.analysisMode,
+        taskId, kind: 'analysis', stage: event.stage!, percent: overallAnalysisProgress(event.stage!, event.total ? event.current! / event.total * 100 : 0, value.calibrationChoice.method, 'full',
           value.normalizeVariableFrameRate && source.variable_frame_rate ? 'normalized' : 'source'),
       } });
-      const continuous = value.rallyRecognitionMethod === 'continuous_visibility';
-      const base = { mode: continuous ? 'full' : value.analysisMode === 'two_stage' ? 'twoStage' : 'full', rallyRecognitionMethod: value.rallyRecognitionMethod, confidence: value.blurballConfidenceThreshold, stage1Confidence: value.blurballStage1ConfidenceThreshold, stage2Confidence: value.blurballStage2ConfidenceThreshold };
+      // The native Core ML worker does not yet implement the Python worker's
+      // hybrid_motion_bounce algorithm. Preserve the established macOS
+      // continuous-visibility path instead of sending an unsupported method.
+      const base = { mode: 'full', rallyRecognitionMethod: 'continuous_visibility', confidence: 0.30, stage1Confidence: 0.30, stage2Confidence: 0.70 };
       if (value.calibrationChoice.method === 'automatic') {
         const result = readCalibration(await callNative('TTcutWorker', { ...base, operation: 'calibrate', video: source.native_video }, { taskId, onProgress: progress }));
         calibration = result.calibration; table = result.table;
@@ -160,19 +171,17 @@ export async function startMacAnalysis(window: BrowserWindow, value: AnalysisOpt
         } finally { await rm(partial, { force: true }); }
       }
       const result = await callNative('TTcutWorker', { ...base, operation: 'analyze', video: video.native_video, calibration: nativeCalibration(calibration) }, { taskId, onProgress: progress });
-      if (!result.roi || (continuous ? !result.visibilityRallies : !result.rallies || !result.bounceTimes)) throw new Error('NATIVE_ANALYSIS_RESULT_MISSING');
+      if (!result.roi || !result.visibilityRallies) throw new Error('NATIVE_ANALYSIS_RESULT_MISSING');
       const roi = result.roi;
       const commonResult = {
         video, source_video: source, processing, calibration,
         ...(table ? { table_analysis: table } : {}),
         inference_runtime: { engine: 'coreml' as const, compute_units: 'cpuAndNeuralEngine' as const, precision: 'float16' as const, prediction_concurrency: 4, checkpoint_sha256: checkpoint.blurball },
         model_provenance: { profile: 'blurball_v1' as const, component_version: null, roi: { x: roi.x, y: roi.y, width: roi.width, height: roi.height }, main_input: { width: roi.modelWidth, height: roi.modelHeight }, aux_input: null,
-          analysis: { schema_version: 2 as const, mode: continuous ? 'full' as const : value.analysisMode, ...(!continuous && value.analysisMode === 'two_stage' ? { interval_expansion_seconds: 0.75 } : {}), stages: continuous || value.analysisMode === 'full'
-            ? [{ name: 'full' as const, confidence_threshold: continuous ? continuousVisibilityProvenance.detection_confidence_threshold : value.blurballConfidenceThreshold, window_size: 3 as const, window_stride: 3 as const, retained_output: 'all_window_frames' as const }]
-            : [{ name: 'candidate' as const, confidence_threshold: value.blurballStage1ConfidenceThreshold, window_size: 3 as const, window_stride: 3 as const, retained_output: 'all_window_frames' as const }, { name: 'refinement' as const, confidence_threshold: value.blurballStage2ConfidenceThreshold, window_size: 3 as const, window_stride: 1 as const, retained_output: 'center_frame' as const }] },
+          analysis: { schema_version: 2 as const, mode: 'full' as const, stages: [{ name: 'full' as const, confidence_threshold: continuousVisibilityProvenance.detection_confidence_threshold, window_size: 3 as const, window_stride: 3 as const, retained_output: 'all_window_frames' as const }] },
         },
       };
-      data = continuous ? analysisResultSchema.parse({
+      data = analysisResultSchema.parse({
         schema_version: 2,
         ...commonResult,
         rallies: result.visibilityRallies!.map((rally, i) => ({
@@ -187,18 +196,22 @@ export async function startMacAnalysis(window: BrowserWindow, value: AnalysisOpt
             vertical_exchange_enabled: isEndOnTableView(calibration),
           },
         },
-      }) : analysisResultSchema.parse({
-        schema_version: 1,
-        ...commonResult,
-        rallies: result.rallies!.map((rally, i) => ({ id: `rally_${String(i + 1).padStart(3, '0')}`, index: i + 1, start_time_seconds: rally.start, end_time_seconds: rally.end, bounce_count: rally.bounceCount })),
-        bounce_times_seconds: [...new Set(result.bounceTimes!)].sort((a, b) => a - b),
       });
       if (controller.signal.aborted) throw new Error('PROCESS_CANCELLED');
       if (await identity(source.path) !== originalIdentity) throw Object.assign(new Error('Source changed during analysis'), { code: 'INPUT_MOVED' });
       const record = await getHistoryStore().upsert(data, calibration, value.historyVisibility === 'visible' || data.rallies.length === 0); saved = true;
+      await logLine(taskId, 'INFO', `Analysis saved: ${JSON.stringify({
+        decodedFrames: video.frame_count, rallyCount: data.rallies.length, calibration,
+        model: 'blurball_v1', modelInput: data.model_provenance?.main_input,
+        analysisRoi: data.model_provenance?.roi, processingMode: processing.mode,
+        recognition: 'rally_recognition' in data ? data.rally_recognition : 'bounce_events',
+      })}`).catch(() => undefined);
       if (controller.signal.aborted) throw new Error('PROCESS_CANCELLED');
       terminal = { type: 'analysis-result', taskId, analysisId: record.id, calibration, data };
-    } catch (error) { terminal = failure(taskId, error, controller.cancelRequested, 'ANALYSIS'); }
+    } catch (error) {
+      await logLine(taskId, 'ERROR', `Analysis failed: ${error instanceof Error ? error.message : String(error)}`).catch(() => undefined);
+      terminal = failure(taskId, error, controller.cancelRequested, 'ANALYSIS');
+    }
     finally {
       try {
       if (!saved && createdCache) {

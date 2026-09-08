@@ -22,10 +22,9 @@ size, and SHA-256 before packaging.
 
 ## BlurBall Analysis Mode
 
-The selected execution route for a new BlurBall analysis. `full` (shown as
-“默认”) runs the existing whole-video pass. `two_stage` (shown as “高精”)
-runs a full-video candidate pass followed by a center-frame refinement pass.
-The label is a product name, not an accuracy guarantee.
+The execution route recorded in analysis provenance. New bundled BlurBall
+analyses always use `full`, a single whole-video pass at confidence 0.30.
+Legacy requests may use `two_stage`; this is no longer a user setting.
 
 ## Candidate Rally
 
@@ -41,16 +40,17 @@ center-frame timestamp belongs to one of these intervals.
 
 ## Final Analysis Result
 
-The Bounce Event Times, Rally records, and Board Counts returned to the UI. In
-two-stage mode all three are computed only from the stage-two trajectory; if
-stage one produces no Candidate Rally, the final result is empty.
+The records returned to the UI. Hybrid schema v3 includes final rallies,
+positive Board Counts, valid Bounce Event Times and Excluded Fragments.
+Historical v1/v2 results keep their original semantics. In legacy two-stage
+mode the returned records come only from the stage-two trajectory.
 
 ## Ball Model Profile
 
-The global ball-recognition route recorded on every new analysis. Bundled
-`blurball_v1` is the default and supports the same managed CPU and CUDA runtimes
-as the bundled `tracknet_v1` compatibility route. A profile is never changed
-silently.
+The ball-recognition route recorded on every new analysis. Bundled
+`blurball_v1` is the default. Explicit local development `tracknet_v1` remains
+on request v4 and continuous visibility; it is not a bundled alternative and
+does not use hybrid filtering or Board Counts. A profile is never changed silently.
 _Avoid_: automatic fallback, accuracy mode
 
 ## Model Input Size
@@ -79,7 +79,8 @@ The editable export interval in the single-video custom workflow. A detected
 Custom Rally Clip retains one source Rally; a Manual Rally Clip has no source
 Rally and begins as a user-created one-second interval. A detected clip's
 default start includes Before-rally time; its default end includes the Rally
-end, one fixed closing second, and After-rally time. Selected Custom Rally
+end and After-rally time. Only historical bounce-event results add one fixed
+closing second; hybrid and continuous results do not. Selected Custom Rally
 Clips never overlap on the single track.
 _Avoid_: Rally, CutGroup
 
@@ -268,15 +269,15 @@ Manifests. Subsequent updates can return to the automatic NSIS flow.
 
 ## 回合识别方式（Rally Recognition Method）
 
-将 Source-frame Trajectory 划分为可剪辑 Rally 的独立设置轴。 `落台判定`
-（`bounce_events`）以 Bounce Event Time 分组；`连续可见`
-（`continuous_visibility`）以可见帧与不可见帧的迟滞状态机分组。分析结果记录
-实际方式，历史展示和导出不得从当前全局设置推断。
+将 Source-frame Trajectory 划分为可剪辑 Rally 的算法标识，不再是设置项。
+Windows/Python 路径的新 BlurBall 固定使用 `hybrid_motion_bounce`；macOS 原生
+worker 在实现该算法前仍固定使用 `continuous_visibility`。历史 `bounce_events`、
+`continuous_visibility` 仍原样读取。展示和导出必须使用结果记录的实际方式。
 _Avoid_: Analysis Mode, highlight tier
 
 ## 落台判定（Bounce Events）
 
-默认的 Rally Recognition Method。其 Rally 带有正整数 Board Count 与
+历史 Rally Recognition Method。其 Rally 带有正整数 Board Count 与
 Bounce Event Times；精彩筛选使用板数阈值 `3 / 5 / 7`。
 
 ## 连续可见（Continuous Visibility）
@@ -291,3 +292,38 @@ Bounce Event Times。
 “精彩回合”的选择准则，不是 Rally Recognition Method 或 Analysis Mode。连续可见
 结果按 `end_time_seconds - start_time_seconds` 严格大于阈值的累计时长档位选择：
 短回合、相持、长相持。
+
+## 融合回合识别（Hybrid Motion Bounce）
+
+Windows/Python 路径中新 BlurBall 的唯一识别方式 `hybrid_motion_bounce`。连续运动
+负责候选定位，落点只辅助筛除无效片段和统计板数，不以漏检作为分割证据。结果
+schema v3 采用严格 `bounce_count > 3 / 5 / 7` 精彩筛选；导出原始间隔严格小于
+3 秒才合并。用户前后余量仍可重新包含无效画面，但不恢复被排除的落点。macOS
+原生 worker 尚未实现本节算法，当前结果仍为 schema v2 `continuous_visibility`。
+
+## 连续运动候选（Motion Candidate）
+
+通过现有可见性迟滞、运动筛选和遮挡桥接的时间区间；不同于旧两阶段的
+Candidate Rally，不触发二次推理，也不保证最终保留。
+
+## 无效片段（Excluded Fragment）
+
+从候选中删除的源时间半开区间 `[start, end)`，终点为最后被删源帧的下一时间戳。
+重叠区间合并，保存各原因及证据；普通 UI 不展示，仅结果和开发验收报告保留。
+
+## 死球弹跳簇（Dead Bounce Cluster）
+
+至少三次检测落点、相邻间隔不超过 1 秒，且间隔、图像空间反弹高度、离开速度中
+至少两项在每一步均下降至少 15% 的最大连续子序列。从第一跳到最后一跳整体删除。
+缺失指标不参与命中；重新加速不否决，不能用球台半区或球网位置判断。
+
+## 传球片段（Slow Transfer）
+
+由既有慢速运动证据识别的移动段，即使没有落点仍可删除；邻近持球、停顿不属于
+该无效片段。新回合不会撤销已经确认的传球筛除。
+
+## 最终回合（Final Rally）
+
+候选减去无效片段后的有效连通区间。分割右侧必须独立满足运动启动条件并回溯到
+该运动段首个真实可见帧。按有效落点重算 Board Count；零板整个区间删除并记录
+`zero_bounce_rally`，不能删除有效回合内部的零落点子窗口。

@@ -1,13 +1,11 @@
 import { CompatibleVideo } from './CompatibleVideo';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
-  BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT,
   RALLY_RECOGNITION_METHOD_DEFAULT,
-  BLURBALL_STAGE1_CONFIDENCE_THRESHOLD_DEFAULT,
+  rallyRecognitionMethod as resultRecognitionMethod,
   DURATION_HIGHLIGHT_TIER_VALUES,
   AnalysisResultV1,
   BatchExportResult,
-  BlurBallAnalysisMode,
   Calibration,
   CutSelectionV1,
   ExportWarning,
@@ -57,12 +55,7 @@ interface MultiTaskPageProps {
   initialVideos: SelectedVideo[];
   preRoll: 1.5 | 2.5 | 5;
   postRoll: 0.5 | 1 | 2 | 4;
-  analysisMode?: BlurBallAnalysisMode;
-  rallyRecognitionMethod?: RallyRecognitionMethod;
   normalizeVariableFrameRate?: boolean;
-  blurballConfidenceThreshold?: number;
-  blurballStage1ConfidenceThreshold?: number;
-  blurballStage2ConfidenceThreshold?: number;
   language?: 'zh-CN' | 'en';
   onOpenAnalysis: (analysisId: string) => void;
   onCompletableTasksFinished?: () => void;
@@ -125,12 +118,7 @@ export function MultiTaskPage({
   initialVideos,
   preRoll,
   postRoll,
-  analysisMode = 'full',
-  rallyRecognitionMethod = RALLY_RECOGNITION_METHOD_DEFAULT,
   normalizeVariableFrameRate = false,
-  blurballConfidenceThreshold = BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT,
-  blurballStage1ConfidenceThreshold = BLURBALL_STAGE1_CONFIDENCE_THRESHOLD_DEFAULT,
-  blurballStage2ConfidenceThreshold = BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT,
   language = 'zh-CN',
   onOpenAnalysis,
   onCompletableTasksFinished = () => undefined,
@@ -169,12 +157,7 @@ export function MultiTaskPage({
   const optionsRef = useRef({
     preRoll,
     postRoll,
-    analysisMode,
-    rallyRecognitionMethod,
     normalizeVariableFrameRate,
-    blurballConfidenceThreshold,
-    blurballStage1ConfidenceThreshold,
-    blurballStage2ConfidenceThreshold,
   });
 
   const isEnglish = language === 'en';
@@ -205,7 +188,6 @@ export function MultiTaskPage({
     mergeCancelled: isEnglish ? 'Merged export cancelled. Analysis results are retained.' : '已取消合并导出，分析结果已保留。',
     mergeSkipped: isEnglish ? 'No matching clips; skipped:' : '没有符合条件的片段，已跳过：',
     retry: isEnglish ? 'Retry merge' : '重试合并',
-    viewAnalysis: isEnglish ? 'View analysis' : '查看分析',
     previewOutput: isEnglish ? 'Preview output' : '预览输出',
     openFolder: isEnglish ? 'Open folder' : '打开文件夹',
     calibrationTitle: isEnglish ? 'Calibrate the table' : '标定球桌',
@@ -252,7 +234,7 @@ export function MultiTaskPage({
 
   const selectionFor = (item: BatchItem): Exclude<CutSelectionV1, { mode: 'custom' }> => item.mode === 'all'
     ? { mode: 'all', pre_roll_seconds: optionsRef.current.preRoll, post_roll_seconds: optionsRef.current.postRoll }
-    : optionsRef.current.rallyRecognitionMethod === 'continuous_visibility'
+    : item.analysis && resultRecognitionMethod(item.analysis) === 'continuous_visibility'
       ? { mode: 'highlight', criterion: { kind: 'duration_tier', tier: item.durationTier }, pre_roll_seconds: optionsRef.current.preRoll, post_roll_seconds: optionsRef.current.postRoll }
       : { mode: 'highlight', criterion: { kind: 'bounce_count', threshold: item.threshold }, pre_roll_seconds: optionsRef.current.preRoll, post_roll_seconds: optionsRef.current.postRoll };
 
@@ -373,7 +355,7 @@ export function MultiTaskPage({
         analysis_id: candidate.analysisId,
         selection,
         destination: 'source',
-        mode_label: modeLabel(candidate, optionsRef.current.rallyRecognitionMethod),
+        mode_label: modeLabel(candidate, candidate.analysis ? resultRecognitionMethod(candidate.analysis) : RALLY_RECOGNITION_METHOD_DEFAULT),
       });
       pendingTaskStartRef.current = startPromise;
       void startPromise.then((taskId) => {
@@ -418,12 +400,7 @@ export function MultiTaskPage({
       calibrationChoice,
       device: 'auto',
       historyVisibility: mergeRunRef.current || candidate.mode === 'analyze-only' ? 'visible' : 'deferred',
-      analysisMode: optionsRef.current.rallyRecognitionMethod === 'continuous_visibility' ? 'full' : optionsRef.current.analysisMode,
-      rallyRecognitionMethod: optionsRef.current.rallyRecognitionMethod,
       normalizeVariableFrameRate: optionsRef.current.normalizeVariableFrameRate,
-      blurballConfidenceThreshold: optionsRef.current.blurballConfidenceThreshold,
-      blurballStage1ConfidenceThreshold: optionsRef.current.blurballStage1ConfidenceThreshold,
-      blurballStage2ConfidenceThreshold: optionsRef.current.blurballStage2ConfidenceThreshold,
     });
     pendingTaskStartRef.current = startPromise;
     void startPromise.then((taskId) => {
@@ -749,7 +726,7 @@ export function MultiTaskPage({
           <p className="eyebrow">{manualItem.video.name}</p>
           <p>{text.calibrationDescription}</p>
         </div>
-        <CalibrationSurface video={manualItem.video} metadata={manualItem.metadata} points={manualPoints} onPointsChange={setManualPoints} />
+        <CalibrationSurface video={manualItem.video} metadata={manualItem.metadata} points={manualPoints} onPointsChange={setManualPoints} language={language} />
         <div className="point-legend">
           {text.pointLabels.map((label, index) => <span className={manualPoints[pointOrder[index]!] ? 'done' : ''} key={label}><b>{index + 1}</b>{label.replace(/^\d\s/, '')}</span>)}
         </div>
@@ -794,7 +771,7 @@ export function MultiTaskPage({
           const rowStatus = done ? 'done' : active ? 'processing' : manualRequired ? 'manual-required' : item.calibrationStatus === 'error' ? 'failed' : item.processingStatus;
           return (
             <article
-              className={`batch-row card ${rowStatus}`}
+              className={`batch-row card ${rowStatus}${mergeWorkflow ? ' merge-workflow' : ''}`}
               key={item.id}
               ref={(element) => { if (element) rowRefs.current.set(item.id, element); else rowRefs.current.delete(item.id); }}
             >
@@ -832,10 +809,6 @@ export function MultiTaskPage({
                 <strong title={item.video.name}>{item.video.name}</strong>
                 <span>{formatTimestamp(item.metadata.duration_seconds)} · {item.metadata.width} × {item.metadata.height} · {item.metadata.fps.toFixed(3)} fps</span>
                 {mergeWorkflow && done && item.mode !== 'analyze-only' && batchExport.status !== 'done' && <span>{text.mergeWaiting}</span>}
-                {mergeWorkflow && item.analysisId && (
-                  <button className="text-button" type="button" disabled={batchTaskActive}
-                    onClick={() => onOpenAnalysis(item.analysisId!)}>{text.viewAnalysis}</button>
-                )}
                 {item.error && !manualRequired && <small>{item.error}</small>}
                 {item.exportWarning && (
                   <div className="batch-export-warning" role="alert">
@@ -881,7 +854,7 @@ export function MultiTaskPage({
                         </button>
                       ))}
                     </div>
-                    {item.mode === 'highlight' && (rallyRecognitionMethod === 'continuous_visibility' ? <GlassRadioGroup
+                    {item.mode === 'highlight' && (item.analysis && resultRecognitionMethod(item.analysis) === 'continuous_visibility' ? <GlassRadioGroup
                       ariaLabel={language === 'zh-CN' ? '时长档位' : 'Duration tier'}
                       className="compact"
                       disabled={exportLocked || (!mergeWorkflow && active)}

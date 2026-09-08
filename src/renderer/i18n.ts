@@ -1,6 +1,8 @@
 export type Language = 'zh-CN' | 'en';
 
 const zh = {
+  previewPreparing: '正在准备兼容预览…',
+  previewFailed: '预览加载失败，请重新打开此视频后重试。',
   autoCut: '自动剪辑', history: '历史剪辑', settings: '设置', back: '返回',
   selectTitle: '选择比赛视频',
   captureGuideTitle: '推荐视频拍摄视角', captureGuideImageAlt: '推荐视频拍摄视角示意图',
@@ -144,6 +146,8 @@ type DeepStrings<T> = { [K in keyof T]: T[K] extends object ? DeepStrings<T[K]> 
 export type Messages = DeepStrings<typeof zh>;
 
 const en: Messages = {
+  previewPreparing: 'Preparing compatible preview…',
+  previewFailed: 'Preview could not be loaded. Reopen this video to try again.',
   autoCut: 'Auto Cut', history: 'History', settings: 'Settings', back: 'Back',
   selectTitle: 'Choose match videos',
   captureGuideTitle: 'Recommended video camera angle', captureGuideImageAlt: 'Recommended video camera angle illustration',

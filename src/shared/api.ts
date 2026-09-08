@@ -3,8 +3,6 @@ import type {
   BatchExportRequest,
   BatchExportResult,
   AppSettings,
-  BlurBallAnalysisMode,
-  RallyRecognitionMethod,
   Calibration,
   CalibrationChoice,
   TableAnalysis,
@@ -95,6 +93,7 @@ export interface TTcutApi {
   pathForDroppedFile(file: File): string;
   acceptDroppedVideo(path: string): Promise<SelectedVideo>;
   probeVideo(path: string): Promise<VideoMetadata>;
+  prepareVideoPreview(mediaUrl: string): Promise<string>;
   startAutoCalibration(input: {
     videoPath: string;
     device: 'auto' | 'cuda' | 'cpu';
@@ -104,12 +103,7 @@ export interface TTcutApi {
     calibrationChoice: CalibrationChoice;
     device: 'auto' | 'cuda' | 'cpu';
     historyVisibility: 'visible' | 'deferred';
-    analysisMode: BlurBallAnalysisMode;
-    rallyRecognitionMethod: RallyRecognitionMethod;
     normalizeVariableFrameRate: boolean;
-    blurballConfidenceThreshold: number;
-    blurballStage1ConfidenceThreshold: number;
-    blurballStage2ConfidenceThreshold: number;
   }): Promise<string>;
   startExport(input: ExportRequest): Promise<string>;
   startBatchExport(input: BatchExportRequest): Promise<string>;

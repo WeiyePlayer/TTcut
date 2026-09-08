@@ -19,6 +19,14 @@ export function clearMediaPaths(): void {
   registered.clear();
 }
 
+export function registeredVideoPath(mediaUrl: string): string {
+  const url = new URL(mediaUrl);
+  if (url.protocol !== 'ttcut-media:' || url.hostname !== 'media') throw new Error('INVALID_INPUT');
+  const media = registered.get(url.pathname.replace(/^\//, ''));
+  if (!media || media.contentType === 'image/jpeg') throw new Error('INVALID_INPUT');
+  return media.filePath;
+}
+
 function parseRange(value: string | null, size: number): { start: number; end: number } | null {
   if (!value) return null;
   const match = /^bytes=(\d*)-(\d*)$/.exec(value.trim());
