@@ -24,7 +24,7 @@
 
 ## Installers
 
-- The draft Release provides both a full installer and an online installer. The online installer downloads and verifies required runtime resources during installation and needs an active connection; use the full installer for a one-step setup.
+- The draft Release provides only the full installer with the required runtime resources for a one-step setup.
 - Installers use the pinned `CN=weiye` self-signed Authenticode certificate, an RFC 3161 timestamp, and signed update manifests. Windows may still show Unknown publisher or SmartScreen on systems that do not trust this certificate.
 
 ## Verification
@@ -32,4 +32,4 @@
 - TypeScript type checking passed. Vitest passed 316 tests across 54 files, with 21 tests across 4 files skipped by their existing conditions. All 185 Python regression tests passed.
 - The production website build and both rendered-page tests passed.
 - The merged-video workflow passed four real FFmpeg mixed-media regression cases covering different frame sizes, orientations, frame rates, VFR sources, and sources with or without audio. The packaged Electron merge, history, and preview flow also passed.
-- Both full and online installers passed pinned-certificate signature checks, signed update-manifest checks, installation-structure checks, and runtime-resource delivery-boundary checks.
+- The full installer passed pinned-certificate signature checks, signed update-manifest checks, installation-structure checks, and runtime-resource delivery-boundary checks.
