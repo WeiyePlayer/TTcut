@@ -6,26 +6,25 @@
 
 TTcut 是一款面向乒乓球爱好者的本地乒乓球视频自动剪辑工具。它从比赛视频中定位乒乓球、按所选回合识别方式整理有效回合，并按所选模式导出剪辑成片。
 
-视频、分析结果和历史记录只保存在本机；软件不要求登录、不上传视频、不采集遥测。Windows 在线安装包在安装运行资源时需要联网；Windows 完整安装包与 macOS 安装包已包含运行资源，安装完成后可以离线分析、预览和剪辑。
+视频、分析结果和历史记录只保存在本机；软件不要求登录、不上传视频、不采集遥测。Windows 完整安装包与 macOS 安装包已包含运行资源，安装完成后可以离线分析、预览和剪辑。
 
-> 当前稳定版本：Windows x64 为 `v1.3.0`，macOS 15+ Apple Silicon 为 `v1.3.1`。
+> 当前稳定版本为 `v1.3.3`：支持 Windows x64 与 macOS 15+ Apple Silicon。
 
 ## 下载与安装
 
-1. Windows x64 从 [TTcut Release](https://github.com/WeiyePlayer/TTcut/releases) 下载完整安装包或在线安装包；在线安装包需要联网下载并校验必需运行资源。
+1. Windows x64 从 [TTcut Release](https://github.com/WeiyePlayer/TTcut/releases) 下载完整安装包。
 2. macOS 15+ Apple Silicon 从同一 [TTcut Release](https://github.com/WeiyePlayer/TTcut/releases) 下载 DMG（推荐）或 ZIP。当前 macOS 构建使用临时签名且未公证，首次打开若被拦截，请在“系统设置 > 隐私与安全性”中确认允许。
 3. Android 从 [TTcut-Mobile-Releases](https://github.com/WeiyePlayer/TTcut-Mobile-Releases/releases) 下载。
 4. Windows 首次启动进入设置，同意后完成分析、视频处理组件安装。
 5. 若 Windows 分析、视频处理组件下载缓慢，可根据电脑硬件情况使用网盘按需下载：[链接](https://pan.baidu.com/s/1LXDzs74xOM1t50-IRM_Vvw?pwd=ttct)，提取码：`ttct`，然后取消软件内下载改为手动导入。
 
-## macOS v1.3.1 更新
+## v1.3.3 更新
 
-- 优化分段导出流程，提前定位输入视频的目标时间点，并让 FFmpeg 与编码器按设备自动调度线程，大幅减少无效解码和导出等待时间。
-- 在同一真实视频、相同 14 个合并片段的对照中，导出时间由约 11 分 22 秒降至约 2 分 26 秒，耗时减少约 78.66%；实际提升会随设备、编码和视频内容变化。
-- 修复 macOS“连续运动”选项未实际接入原生分析的问题；选择该方式后，原生 Worker 现在会生成连续运动回合结果。
-- 修复部分已知问题，并整理 Electron 与原生服务的实现边界。
+- 新增“合并为一个视频”，可将多个视频中的所选回合按任务顺序剪辑为一个成片。
+- Windows 默认回合识别升级为运动轨迹与落点证据融合策略，并针对已验证样本中的漏检、误切和错误拆分进行了优化；macOS 继续使用原生 Core ML 连续运动识别。
+- 修复了兼容预览、处理媒体路径和合并任务列表布局等已确认问题。
 
-详见 [macOS v1.3.1 发布说明](docs/release-notes-v1.3.1.md)。
+详见 [v1.3.3 发布说明](docs/release-notes-v1.3.3.md)。
 
 ## 联系作者加微信 m2924931661
 

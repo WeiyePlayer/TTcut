@@ -25,9 +25,8 @@ if (!process.argv.includes('--app-only')) run(process.execPath, [require.resolve
 const output = path.join(root, 'out/make/macos/arm64'); await mkdir(output, { recursive: true });
 const version = require('../package.json').version;
 const releaseArchives = new Set([
- `TTcut-${version}-macOS-arm64-electron.dmg`,
- `TTcut-${version}-macOS-arm64-electron.zip`,
- 'latest-mac.yml',
+ `TTcut-${version}-arm64-Setup.dmg`,
+ `TTcut-${version}-arm64-Setup.zip`,
 ]);
 const files = [];
 for (const name of await readdir(output)) {
