@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MultiTaskPage } from '../src/renderer/MultiTaskPage';
@@ -147,6 +148,37 @@ describe('multi-task clipping', () => {
     expect(screen.getByText('合并视频已完成')).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: '预览输出' }));
     expect(document.querySelector('.batch-preview video')).toHaveAttribute('src', 'ttcut-media://merged');
+  });
+
+  it('keeps merge controls in the same grid columns after analysis completes', async () => {
+    await prepareMergedBatch();
+    const rowBefore = screen.getByText('first.mp4').closest('.batch-row');
+    expect(rowBefore).not.toBeNull();
+    expect(rowBefore).toHaveClass('merge-workflow');
+    const expectStableSlots = (row: Element) => {
+      const children = Array.from(row.children);
+      expect(children).toHaveLength(4);
+      expect(children[0]).toHaveClass('batch-cover');
+      expect(children[1]).toHaveClass('batch-info');
+      expect(children[2]).toHaveClass('batch-mode');
+      expect(children[3]).toHaveClass('batch-remove');
+    };
+    expectStableSlots(rowBefore!);
+    const styles = readFileSync('src/renderer/styles.css', 'utf8');
+    const baseRule = styles.match(/\.batch-row\s*\{([^}]*)\}/)?.[1] ?? '';
+    const doneRules = [...styles.matchAll(/(?:^|\n)\.batch-row\.done\s*\{([^}]*)\}/g)]
+      .map((match) => match[1] ?? '');
+    expect(baseRule).toContain('grid-template-columns: 200px minmax(180px, 1fr) minmax(180px, 260px) 36px;');
+    expect(doneRules).not.toHaveLength(0);
+    expect(doneRules.every((rule) => !rule.includes('grid-template-columns'))).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: '开始分析剪辑' }));
+    await finishAnalysis(1);
+
+    const rowAfter = screen.getByText('first.mp4').closest('.batch-row');
+    expect(rowAfter).toHaveClass('done', 'merge-workflow');
+    expectStableSlots(rowAfter!);
+    expect(screen.queryByRole('button', { name: '查看分析' })).toBeNull();
   });
 
   it('disables and unchecks merging when every video is analysis only, including an empty list', async () => {

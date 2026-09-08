@@ -188,7 +188,6 @@ export function MultiTaskPage({
     mergeCancelled: isEnglish ? 'Merged export cancelled. Analysis results are retained.' : '已取消合并导出，分析结果已保留。',
     mergeSkipped: isEnglish ? 'No matching clips; skipped:' : '没有符合条件的片段，已跳过：',
     retry: isEnglish ? 'Retry merge' : '重试合并',
-    viewAnalysis: isEnglish ? 'View analysis' : '查看分析',
     previewOutput: isEnglish ? 'Preview output' : '预览输出',
     openFolder: isEnglish ? 'Open folder' : '打开文件夹',
     calibrationTitle: isEnglish ? 'Calibrate the table' : '标定球桌',
@@ -772,7 +771,7 @@ export function MultiTaskPage({
           const rowStatus = done ? 'done' : active ? 'processing' : manualRequired ? 'manual-required' : item.calibrationStatus === 'error' ? 'failed' : item.processingStatus;
           return (
             <article
-              className={`batch-row card ${rowStatus}`}
+              className={`batch-row card ${rowStatus}${mergeWorkflow ? ' merge-workflow' : ''}`}
               key={item.id}
               ref={(element) => { if (element) rowRefs.current.set(item.id, element); else rowRefs.current.delete(item.id); }}
             >
@@ -810,10 +809,6 @@ export function MultiTaskPage({
                 <strong title={item.video.name}>{item.video.name}</strong>
                 <span>{formatTimestamp(item.metadata.duration_seconds)} · {item.metadata.width} × {item.metadata.height} · {item.metadata.fps.toFixed(3)} fps</span>
                 {mergeWorkflow && done && item.mode !== 'analyze-only' && batchExport.status !== 'done' && <span>{text.mergeWaiting}</span>}
-                {mergeWorkflow && item.analysisId && (
-                  <button className="text-button" type="button" disabled={batchTaskActive}
-                    onClick={() => onOpenAnalysis(item.analysisId!)}>{text.viewAnalysis}</button>
-                )}
                 {item.error && !manualRequired && <small>{item.error}</small>}
                 {item.exportWarning && (
                   <div className="batch-export-warning" role="alert">
