@@ -8,7 +8,7 @@ import { analysisResultSchema } from '../src/shared/contracts';
 import hybridProvenance from './fixtures/hybrid-provenance.json';
 
 const bootstrap: BootstrapData = {
-  version: '1.3.2',
+  version: '1.3.3',
   settings: {
     language: 'zh-CN',
     calibration_method: 'automatic',

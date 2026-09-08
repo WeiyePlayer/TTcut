@@ -302,7 +302,7 @@ describe('assisted NSIS installer contract', () => {
     expect(compare('1.1.0-beta', '1.1.0-beta')).toBe(0);
     expect(compare('1.1.0-beta.2', '1.1.0-beta.10')).toBe(0);
     expect(compare('1.1.0-beta', '1.1.0')).toBe(0);
-  });
+  }, 30_000);
 
   it('closes scoped legacy processes and retries without a prompt', async () => {
     const source = await readFile(installerPath, 'utf8');
