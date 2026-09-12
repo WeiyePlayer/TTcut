@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../src/renderer/App';
 import { SUPPORT_PROMPT_SNOOZE_MS, SUPPORT_PROMPT_SNOOZE_STORAGE_KEY } from '../src/domain/support-prompt';
 import type { AppEvent, BootstrapData, SelectedVideo, TTcutApi } from '../src/shared/api';
-import type { VideoMetadata } from '../src/shared/contracts';
+import type { UpdateState, VideoMetadata } from '../src/shared/contracts';
 import { analysisResultSchema } from '../src/shared/contracts';
 import hybridProvenance from './fixtures/hybrid-provenance.json';
 
@@ -82,12 +82,14 @@ const calibration = {
 
 describe('App workflow notices and multi-task entry', () => {
   let taskListener: ((event: AppEvent) => void) | null;
+  let updateListener: ((state: UpdateState) => void) | null;
   let selectVideos: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     bootstrap.settings.language = 'zh-CN';
     window.localStorage.clear();
     taskListener = null;
+    updateListener = null;
     selectVideos = vi.fn().mockResolvedValue([]);
     const api = {
       bootstrap: vi.fn().mockResolvedValue(bootstrap),
@@ -96,7 +98,14 @@ describe('App workflow notices and multi-task entry', () => {
         return () => { taskListener = null; };
       }),
       onCloseRequested: vi.fn(() => () => undefined),
-      onUpdateState: vi.fn(() => () => undefined),
+      onUpdateState: vi.fn((listener: (state: UpdateState) => void) => {
+        updateListener = listener;
+        return () => { updateListener = null; };
+      }),
+      checkForUpdates: vi.fn().mockResolvedValue({ status: 'available', version: '1.4.0', message: null }),
+      downloadUpdate: vi.fn().mockResolvedValue({ status: 'downloading', version: '1.4.0', message: null }),
+      skipUpdate: vi.fn().mockResolvedValue({ status: 'skipped', version: '1.4.0', message: null }),
+      restartToUpdate: vi.fn().mockResolvedValue(undefined),
       getUpdateState: vi.fn().mockResolvedValue({
         status: 'idle',
         version: null,
@@ -148,6 +157,84 @@ describe('App workflow notices and multi-task entry', () => {
     const manualDownload = screen.getByRole('button', { name: 'Download update manually' });
     fireEvent.click(manualDownload);
     expect(window.ttcut.openExternalUrl).toHaveBeenCalledWith('https://github.com/WeiyePlayer/TTcut/releases');
+  });
+
+  it('offers update, later and skip choices without starting a download', async () => {
+    render(<App />);
+    await screen.findByRole('heading', { name: '选择比赛视频' });
+    act(() => updateListener?.({ status: 'available', version: '1.4.0', message: null }));
+    const prompt = screen.getByRole('dialog', { name: '发现新版本' });
+    expect(prompt).toHaveFocus();
+    expect(within(prompt).getByRole('button', { name: '立即更新' })).toBeVisible();
+    expect(within(prompt).getByRole('button', { name: '跳过此版本' })).toBeVisible();
+    expect(window.ttcut.downloadUpdate).not.toHaveBeenCalled();
+    fireEvent.click(within(prompt).getByRole('button', { name: '稍后提醒' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    act(() => updateListener?.({ status: 'available', version: '1.4.0', message: null }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(window.ttcut.skipUpdate).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: '设置' }));
+    fireEvent.click(screen.getByRole('button', { name: '查看更新' }));
+    expect(screen.getByRole('dialog', { name: '发现新版本' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '立即更新' }));
+    await waitFor(() => expect(window.ttcut.downloadUpdate).toHaveBeenCalledWith('1.4.0'));
+    expect(await screen.findByRole('button', { name: '正在下载…' })).toBeDisabled();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(window.ttcut.restartToUpdate).not.toHaveBeenCalled();
+  });
+
+  it('lets a user skip a version and reconsider it in a manual check', async () => {
+    render(<App />);
+    await screen.findByRole('heading', { name: '选择比赛视频' });
+    act(() => updateListener?.({ status: 'available', version: '1.4.0', message: null }));
+    fireEvent.click(screen.getByRole('button', { name: '跳过此版本' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(window.ttcut.skipUpdate).toHaveBeenCalledWith('1.4.0');
+    expect(window.ttcut.downloadUpdate).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '设置' }));
+    expect(screen.getByText('已跳过版本 1.4.0，手动检查更新可重新选择。')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '检查更新' }));
+    expect(await screen.findByRole('dialog', { name: '发现新版本' })).toBeVisible();
+    expect(window.ttcut.checkForUpdates).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the update offer when saving the skip fails', async () => {
+    vi.mocked(window.ttcut.skipUpdate).mockRejectedValueOnce(new Error('read-only'));
+    render(<App />);
+    await screen.findByRole('heading', { name: '选择比赛视频' });
+    act(() => updateListener?.({ status: 'available', version: '1.4.0', message: null }));
+    fireEvent.click(screen.getByRole('button', { name: '跳过此版本' }));
+    expect(await screen.findByText('更新操作失败，请重试。')).toBeVisible();
+    expect(screen.getByRole('dialog', { name: '发现新版本' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '跳过此版本' })).toBeEnabled();
+  });
+
+  it('offers a later restart and installs only after the restart button is clicked', async () => {
+    bootstrap.settings.language = 'en';
+    render(<App />);
+    await screen.findByRole('heading', { name: 'Choose match videos' });
+    act(() => updateListener?.({ status: 'downloaded', version: '1.4.0', message: null }));
+    expect(screen.getByRole('dialog', { name: 'Update downloaded' })).toBeVisible();
+    expect(window.ttcut.restartToUpdate).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Restart later' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Restart now' }));
+    await waitFor(() => expect(window.ttcut.restartToUpdate).toHaveBeenCalledTimes(1));
+  });
+
+  it('shows the English update choices and dismisses with Escape', async () => {
+    bootstrap.settings.language = 'en';
+    render(<App />);
+    await screen.findByRole('heading', { name: 'Choose match videos' });
+    act(() => updateListener?.({ status: 'available', version: '1.4.0', message: null }));
+    const prompt = screen.getByRole('dialog', { name: 'New version available' });
+    expect(within(prompt).getByRole('button', { name: 'Skip this version' })).toBeVisible();
+    expect(within(prompt).getByRole('button', { name: 'Remind me later' })).toBeVisible();
+    fireEvent.keyDown(prompt, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(window.ttcut.downloadUpdate).not.toHaveBeenCalled();
   });
 
   it('does not expose an export strategy setting', async () => {

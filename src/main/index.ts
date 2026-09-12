@@ -323,6 +323,8 @@ function registerIpc(): void {
   ipcMain.handle(IPC.windowMinimize, () => currentWindow().minimize());
   ipcMain.handle(IPC.updateGetState, () => getUpdater().getState());
   ipcMain.handle(IPC.updateCheck, () => getUpdater().check());
+  ipcMain.handle(IPC.updateDownload, (_event, version: unknown) => getUpdater().download(version));
+  ipcMain.handle(IPC.updateSkip, (_event, version: unknown) => getUpdater().skip(version));
   ipcMain.handle(IPC.updateInstall, () => getUpdater().restartToInstall());
   ipcMain.handle(IPC.windowToggleMaximize, () => {
     const window = currentWindow();

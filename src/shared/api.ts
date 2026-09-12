@@ -121,6 +121,8 @@ export interface TTcutApi {
   openExternalUrl(url: string): Promise<void>;
   getUpdateState(): Promise<UpdateState>;
   checkForUpdates(): Promise<UpdateState>;
+  downloadUpdate(version: string): Promise<UpdateState>;
+  skipUpdate(version: string): Promise<UpdateState>;
   restartToUpdate(): Promise<void>;
   onUpdateState(listener: (state: UpdateState) => void): () => void;
   minimize(): Promise<void>;

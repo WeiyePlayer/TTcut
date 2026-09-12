@@ -51,6 +51,8 @@ const api: TTcutApi = {
   openExternalUrl: (url: string) => ipcRenderer.invoke(IPC.externalOpen, url),
   getUpdateState: () => ipcRenderer.invoke(IPC.updateGetState),
   checkForUpdates: () => ipcRenderer.invoke(IPC.updateCheck),
+  downloadUpdate: (version) => ipcRenderer.invoke(IPC.updateDownload, version),
+  skipUpdate: (version) => ipcRenderer.invoke(IPC.updateSkip, version),
   restartToUpdate: () => ipcRenderer.invoke(IPC.updateInstall),
   onUpdateState: (listener) => {
     const wrapped = (_event: Electron.IpcRendererEvent, value: Parameters<typeof listener>[0]) => listener(value);

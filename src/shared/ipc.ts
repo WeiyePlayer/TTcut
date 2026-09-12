@@ -39,6 +39,8 @@ export const IPC = {
   externalOpen: 'external:open',
   updateGetState: 'update:get-state',
   updateCheck: 'update:check',
+  updateDownload: 'update:download',
+  updateSkip: 'update:skip',
   updateInstall: 'update:install',
   updateState: 'update:state',
 } as const;

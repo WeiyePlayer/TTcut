@@ -847,7 +847,7 @@ export type BatchExportResult = {
 };
 
 export const updateStateSchema = z.object({
-  status: z.enum(['idle', 'unsupported', 'checking', 'available', 'downloaded', 'up-to-date', 'error']),
+  status: z.enum(['idle', 'unsupported', 'checking', 'available', 'skipped', 'downloading', 'downloaded', 'up-to-date', 'error']),
   version: z.string().min(1).nullable(),
   message: z.string().nullable(),
 }).strict();
