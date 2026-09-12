@@ -287,6 +287,43 @@ describe('App workflow notices and multi-task entry', () => {
     expect(screen.queryByRole('radio', { name: '连续运动' })).toBeNull();
   });
 
+  it.each([false, true])('recalibrates an empty result on the original video (normalized: %s)', async (normalized) => {
+    const selected = {
+      path: 'C:\\video\\empty.mov', name: 'empty.mov', size: 100,
+      mediaUrl: 'ttcut-media://empty',
+    };
+    selectVideos.mockResolvedValue([selected]);
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: '选择或将文件拖到这里' }));
+    fireEvent.click(await screen.findByRole('button', { name: '开始分析' }));
+    act(() => taskListener?.({
+      type: 'analysis-result', taskId: 'analysis-task-1',
+      analysisId: '11111111-1111-4111-8111-111111111111', calibration,
+      data: {
+        schema_version: 1, rallies: [], calibration,
+        video: metadata(normalized ? 'C:\\cache\\normalized.mp4' : selected.path),
+        source_video: metadata(selected.path),
+        processing: {
+          mode: normalized ? 'normalized_cfr' : 'source_cfr',
+          target_fps_ratio: normalized ? '30/1' : null,
+          encoder: normalized ? 'libopenh264' : null, warning_code: null,
+        },
+      },
+    }));
+    expect(await screen.findByText('没有识别到有效回合')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '重新标定球桌' }));
+    expect(screen.getByRole('button', { name: 'Calibration point 1' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '重置标定' })).toBeVisible();
+    expect(document.querySelector('.video-surface video')).toHaveAttribute('src', selected.mediaUrl);
+    fireEvent.click(screen.getByRole('button', { name: '开始分析' }));
+    await waitFor(() => expect(window.ttcut.startAnalysis).toHaveBeenLastCalledWith(expect.objectContaining({
+      videoPath: selected.path,
+      calibrationChoice: { method: 'manual', calibration },
+    })));
+    expect(window.ttcut.acceptDroppedVideo).not.toHaveBeenCalled();
+    expect(selectVideos).toHaveBeenCalledTimes(1);
+  });
+
   it('shows duration tiers and exports a duration criterion for continuous results', async () => {
     const selected = {
       path: 'C:\\video\\continuous.mp4', name: 'continuous.mp4', size: 100,
@@ -601,6 +638,7 @@ describe('App workflow notices and multi-task entry', () => {
     expect(document.querySelector('.custom-workspace')).not.toBeNull();
     const monitor = document.querySelector('.custom-monitor video') as HTMLVideoElement;
     expect(monitor.controls).toBe(false);
+    Object.defineProperty(monitor, 'readyState', { configurable: true, value: 2 });
     Object.defineProperty(monitor, 'paused', { configurable: true, value: true });
     fireEvent.click(monitor);
     expect(play).toHaveBeenCalledTimes(1);

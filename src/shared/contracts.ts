@@ -393,6 +393,14 @@ const analysisResultBaseSchema = z.object({
     // TrackNet remains readable for legacy history and explicit local development analyses.
     profile: z.enum(LEGACY_RESULT_MODEL_PROFILES),
     component_version: z.string().min(1).nullable(),
+    trajectory: z.object({
+      frame_count: z.number().int().nonnegative(),
+      detected_frames: z.number().int().nonnegative(),
+      missing_frames: z.number().int().nonnegative(),
+    }).strict().refine(
+      (value) => value.detected_frames + value.missing_frames === value.frame_count,
+      { message: 'Trajectory detection counts must match the evaluated frame count' },
+    ).optional(),
     roi: z.object({
       x: z.number().int().nonnegative(),
       y: z.number().int().nonnegative(),

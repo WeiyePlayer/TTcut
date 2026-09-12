@@ -61,6 +61,21 @@ function mockRallyListGeometry() {
 afterEach(() => cleanup());
 
 describe('playback rally location', () => {
+  it.each(['list', 'timeline'])('plays the requested clip after delayed metadata from the %s', async (entry) => {
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue();
+    try {
+      render(<PlaybackHarness />);
+      const monitor = document.querySelector('.custom-monitor video') as HTMLVideoElement;
+      if (entry === 'list') fireEvent.click(document.querySelectorAll('.custom-rally-table tbody tr')[1]!);
+      else fireEvent.pointerDown(document.querySelector('.timeline-clip[data-clip-id="rally_002"]')!, { button: 0 });
+      expect(play).not.toHaveBeenCalled();
+      Object.defineProperties(monitor, { readyState: { value: 2 }, videoWidth: { value: 1280 }, videoHeight: { value: 720 } });
+      await act(async () => { fireEvent.loadedMetadata(monitor); });
+      expect(monitor.currentTime).toBe(4);
+      expect(play).toHaveBeenCalledOnce();
+    } finally { play.mockRestore(); }
+  });
+
   it('matches only selected clips with half-open boundaries', () => {
     expect(findPlaybackTargetClip(playbackClips, 1)).toMatchObject({ clipId: 'rally_001' });
     expect(findPlaybackTargetClip(playbackClips, 1.999)).toMatchObject({ clipId: 'rally_001' });

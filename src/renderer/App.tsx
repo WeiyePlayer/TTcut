@@ -187,7 +187,7 @@ export function App() {
         setAnalysisWarning(event.data.processing?.mode === 'vfr_fallback' && event.data.processing.warning_code
           ? { code: event.data.processing.warning_code, message: event.data.processing.warning_code }
           : null);
-        if (event.data.processing?.mode === 'normalized_cfr' && event.data.video.path !== video?.path) {
+        if (event.data.rallies.length > 0 && event.data.processing?.mode === 'normalized_cfr' && event.data.video.path !== video?.path) {
           void Promise.resolve(window.ttcut.acceptDroppedVideo(event.data.video.path)).then((processed) => {
             if (!processed) return;
             setVideo((current) => current ? { ...processed, name: current.name } : processed);
@@ -371,6 +371,14 @@ export function App() {
       if (videoTaskOwnerRef.current === 'single') updateVideoTaskOwner(null);
       setError({ code: errorCode(caught) }); setStep('error');
     }
+  };
+
+  const recalibrate = () => {
+    setAnalysis(null);
+    setAnalysisId(null);
+    setAnalysisWarning(null);
+    setForceManual(true);
+    setStep('calibrate');
   };
 
   const startCutting = async (preparedSelection?: CutSelectionV1, outputs?: ExportRequest['outputs']) => {
@@ -887,7 +895,7 @@ export function App() {
             )}
 
             {step === 'empty' && (
-              <div className="empty-state"><span>○</span><h1>{t.noRallies}</h1><p>{t.noRalliesDetail}</p><button className="primary" onClick={reset}>{t.chooseAnother}</button></div>
+              <div className="empty-state"><span>○</span><h1>{t.noRallies}</h1><p>{t.noRalliesDetail}</p><div className="footer-actions"><button className="secondary" onClick={reset}>{t.chooseAnother}</button><button className="primary" onClick={recalibrate}>{t.recalibrate}</button></div></div>
             )}
 
             {step === 'mode' && analysis && (

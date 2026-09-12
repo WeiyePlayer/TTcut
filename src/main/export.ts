@@ -827,6 +827,7 @@ async function executeExport(
     if (!finalTiming) throw new Error('EXPORT_INVALID');
     if (await available(output)) throw new Error('OUTPUT_COLLISION');
     await rename(partial, output);
+    await logLine(taskId, 'INFO', 'Export output published; updating history').catch(() => undefined);
     const result = {
       taskId,
       analysisId: record.id,
@@ -838,6 +839,7 @@ async function executeExport(
     send(window, { type: 'progress', data: { taskId, kind: 'export', stage: 'complete', percent: 100 } });
     lastExportProgress.set(taskId, 100);
     await getHistoryStore().markVisible(record.id, 'export', output);
+    await logLine(taskId, 'INFO', 'Export history updated; cleaning temporary segments').catch(() => undefined);
     if (!terminalEvent && markTaskTerminal(taskId)) {
       terminalEvent = { type: 'export-result', taskId, data: result };
     }
@@ -908,7 +910,10 @@ async function executeExport(
     await rm(tempDirectory, { recursive: true, force: true }).catch(() => undefined);
     lastExportProgress.delete(taskId);
     endTrackedTask(taskId);
-    if (terminalEvent) send(window, terminalEvent);
+    if (terminalEvent) {
+      await logLine(taskId, 'INFO', `Export terminal event: ${terminalEvent.type}`).catch(() => undefined);
+      send(window, terminalEvent);
+    }
   }
 }
 

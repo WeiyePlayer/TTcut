@@ -170,6 +170,35 @@ def test_worker_v5_runs_single_low_threshold_pass_and_returns_exact_source_times
     assert result['rally_recognition']['dead_bounce_filter']['reenergization_veto'] is True
 
 
+@pytest.mark.parametrize('visible_frames', [0, 6])
+def test_empty_hybrid_result_reports_ball_detection_coverage(monkeypatch, visible_frames):
+    from ttcut_worker.hybrid_rallies import HybridResult
+    values = [
+        point(i, i / 30) if i < visible_frames
+        else TrajectoryPoint(i, i / 30, 0, 0, 0, 'missing', 0.0)
+        for i in range(10)
+    ]
+
+    class Predictor:
+        def __init__(self, loaded, confidence_threshold):
+            pass
+
+        def predict(self, video_path, progress_callback=None, analysis_roi=None):
+            return values, VideoInfo(Path(video_path), 1280, 720, 30, 10, 10, 1), SimpleNamespace(
+                model_width=512, model_height=288, confidence_threshold=.3, step=3,
+                maximum_displacement_pixels=100)
+
+    monkeypatch.setenv('TTCUT_BLURBALL_WEIGHTS', 'blurball.pt')
+    monkeypatch.setattr('ttcut_worker.worker.load_blurball', lambda *args: SimpleNamespace(component_version='1'))
+    monkeypatch.setattr('ttcut_worker.worker.BlurBallPredictor', Predictor)
+    monkeypatch.setattr('ttcut_worker.worker.hybrid_motion_rallies', lambda *args, **kwargs: HybridResult((), (), ()))
+    result = analyze(validate_request(hybrid_request()))
+    assert result['rallies'] == []
+    assert result['model_provenance']['trajectory'] == {
+        'frame_count': 10, 'detected_frames': visible_frames, 'missing_frames': 10 - visible_frames,
+    }
+
+
 def local_tracknet_request() -> dict:
     request = valid_request()
     request.update({

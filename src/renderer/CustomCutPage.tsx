@@ -354,17 +354,12 @@ export function CustomCutPage({
     if (!player) return;
     const nextTime = Math.max(0, Math.min(analysis.video.duration_seconds, time));
     isPreviewSeekingRef.current = intent === 'preview';
-    player.currentTime = nextTime;
+    preview.seekTo(nextTime, !player.paused);
     updatePlaybackTime(nextTime);
     if (intent === 'commit') locatePlaybackClip(nextTime, 'commit');
-  }, [analysis.video.duration_seconds, locatePlaybackClip, updatePlaybackTime]);
+  }, [analysis.video.duration_seconds, locatePlaybackClip, updatePlaybackTime, preview.seekTo]);
 
-  const togglePlayback = useCallback(() => {
-    const player = videoRef.current;
-    if (!player) return;
-    if (player.paused) void Promise.resolve(player.play()).catch(() => undefined);
-    else player.pause();
-  }, []);
+  const togglePlayback = preview.togglePlayback;
 
   const handleVideoKeyDown = useCallback((event: React.KeyboardEvent<HTMLVideoElement>) => {
     if (event.repeat || (event.code !== 'Space' && event.key !== ' ')) return;
@@ -391,10 +386,9 @@ export function CustomCutPage({
     const player = videoRef.current;
     if (!player) return;
     isPreviewSeekingRef.current = false;
-    player.currentTime = clip.start;
+    preview.seekTo(clip.start, true);
     updatePlaybackTime(clip.start);
     locatePlaybackClip(clip.start, 'commit');
-    void Promise.resolve(player.play()).catch(() => undefined);
   };
 
   const toggleTool = (nextTool: Exclude<TimelineToolMode, null>) => {
@@ -470,7 +464,7 @@ export function CustomCutPage({
         <div className="custom-workspace-right">
           <div className="custom-monitor-slot"><div className="custom-monitor">
             {preview.status !== 'ready' && <div className="custom-preview-status" role={preview.status === 'failed' ? 'alert' : 'status'}>{preview.status === 'preparing' ? translations.previewPreparing : translations.previewFailed}</div>}
-            <CompatibleVideo hdr={Boolean(analysis.video.native_video && analysis.video.native_video.hdr !== 'sdr')} ref={videoRef} src={preview.url} controls={false} preload={preview.url === video.mediaUrl ? 'metadata' : 'auto'} playsInline tabIndex={0} aria-label={translations.togglePlayback} onClick={togglePlayback} onKeyDown={handleVideoKeyDown} onLoadedMetadata={(event) => { lastPlaybackClipIdRef.current = null; isPreviewSeekingRef.current = false; event.currentTarget.currentTime = 0; updatePlaybackTime(0); }} onPlay={startVideoFrameTracking} onPause={stopVideoFrameTracking} onEnded={stopVideoFrameTracking} onTimeUpdate={(event) => { const time = event.currentTarget.currentTime; updatePlaybackTime(time); if (!isPreviewSeekingRef.current) locatePlaybackClip(time, 'continuous'); }} onSeeked={(event) => updatePlaybackTime(event.currentTarget.currentTime)} />
+            <CompatibleVideo hdr={Boolean(analysis.video.native_video && analysis.video.native_video.hdr !== 'sdr')} ref={videoRef} src={preview.url} controls={false} preload={preview.url === video.mediaUrl ? 'metadata' : 'auto'} playsInline tabIndex={0} aria-label={translations.togglePlayback} onClick={togglePlayback} onKeyDown={handleVideoKeyDown} onLoadedMetadata={(event) => { lastPlaybackClipIdRef.current = null; isPreviewSeekingRef.current = false; updatePlaybackTime(event.currentTarget.currentTime); }} onPlay={startVideoFrameTracking} onPause={stopVideoFrameTracking} onEnded={stopVideoFrameTracking} onTimeUpdate={(event) => { const time = event.currentTarget.currentTime; updatePlaybackTime(time); if (!isPreviewSeekingRef.current) locatePlaybackClip(time, 'continuous'); }} onSeeked={(event) => updatePlaybackTime(event.currentTarget.currentTime)} />
           </div></div>
 
           <CustomTimeline clips={clips} duration={analysis.video.duration_seconds} fps={analysis.video.fps} currentTime={currentTime} timelineLabel={translations.timeline} resizeStartLabel={translations.resizeStart} resizeEndLabel={translations.resizeEnd} toolMode={toolMode} onSeek={seek} onScrubCancel={() => { isPreviewSeekingRef.current = false; }} onPlayClip={playClip} onAddAt={addManualAt} onDeleteClip={(clipId) => onClipsChange(deleteCustomClip(clips, clipId))} onResize={(clipId, edge, time) => {

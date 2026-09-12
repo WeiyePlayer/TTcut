@@ -162,6 +162,18 @@ describe('BlurBall analysis request contracts', () => {
       },
     });
     expect(result.model_provenance?.analysis?.mode).toBe('two_stage');
+    const withTrajectory = (trajectory: unknown) => ({
+      ...result, model_provenance: { ...result.model_provenance, trajectory },
+    });
+    for (const trajectory of [
+      { frame_count: 300, detected_frames: 0, missing_frames: 300 },
+      { frame_count: 300, detected_frames: 173, missing_frames: 127 },
+    ]) {
+      expect(analysisResultSchema.parse(withTrajectory(trajectory)).model_provenance?.trajectory).toEqual(trajectory);
+    }
+    expect(analysisResultSchema.safeParse(withTrajectory({
+      frame_count: 300, detected_frames: 173, missing_frames: 300,
+    })).success).toBe(false);
   });
 
   it('models continuous-visibility results without bounce fields', () => {
