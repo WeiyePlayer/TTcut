@@ -38,6 +38,26 @@ const base = {
   },
 };
 
+it('round-trips FP16 CPU/NE provenance while retaining older Core ML history', () => {
+  const result = {
+    schema_version: 1,
+    video: {
+      path: 'match.mp4', duration_seconds: 10, width: 1280, height: 720, fps: 30,
+      variable_frame_rate: false, video_codec: 'h264', audio_codec: null, container: 'mp4',
+    },
+    rallies: [], bounce_times_seconds: [],
+  };
+  const legacy = { engine: 'coreml', compute_units: 'cpuAndGPU', checkpoint_sha256: 'a'.repeat(64) };
+  const current = { ...legacy, compute_units: 'cpuAndNeuralEngine', precision: 'float16', prediction_concurrency: 4 };
+  for (const inference_runtime of [legacy, current]) {
+    const parsed = analysisResultSchema.parse(JSON.parse(JSON.stringify({ ...result, inference_runtime })));
+    expect(parsed.inference_runtime).toEqual(inference_runtime);
+  }
+  expect(analysisResultSchema.safeParse({
+    ...result, inference_runtime: { ...current, prediction_concurrency: 0 },
+  }).success).toBe(false);
+});
+
 describe('BlurBall analysis request contracts', () => {
   it('requires the exact fixed BlurBall hybrid configuration in v5', () => {
     const request = { ...base, schema_version: 5, ball_model_profile: 'blurball_v1',
@@ -142,6 +162,18 @@ describe('BlurBall analysis request contracts', () => {
       },
     });
     expect(result.model_provenance?.analysis?.mode).toBe('two_stage');
+    const withTrajectory = (trajectory: unknown) => ({
+      ...result, model_provenance: { ...result.model_provenance, trajectory },
+    });
+    for (const trajectory of [
+      { frame_count: 300, detected_frames: 0, missing_frames: 300 },
+      { frame_count: 300, detected_frames: 173, missing_frames: 127 },
+    ]) {
+      expect(analysisResultSchema.parse(withTrajectory(trajectory)).model_provenance?.trajectory).toEqual(trajectory);
+    }
+    expect(analysisResultSchema.safeParse(withTrajectory({
+      frame_count: 300, detected_frames: 173, missing_frames: 300,
+    })).success).toBe(false);
   });
 
   it('models continuous-visibility results without bounce fields', () => {
@@ -349,6 +381,38 @@ describe('automatic table calibration diagnostics', () => {
     expect(() => tableAnalysisSchema.parse({
       ...v2Diagnostics,
       sampling: v2Diagnostics.sampling.map((sample, index) => (
+        index === 1 ? { ...sample, label: 'sample_11' } : sample
+      )),
+    })).toThrow();
+  });
+
+  it('accepts native Core ML diagnostics using the same eleven-position consensus algorithm', () => {
+    const nativeDiagnostics = {
+      schema_version: 2 as const,
+      engine: 'coreml' as const,
+      compute_units: 'cpuOnly' as const,
+      checkpoint_sha256: 'a'.repeat(64),
+      aggregation_rule: 'temporal_peak_clusters_geometric_consensus' as const,
+      sampling: Array.from({ length: 11 }, (_, sampleIndex) => ({
+        label: `sample_${String(sampleIndex + 1).padStart(2, '0')}`,
+        time: sampleIndex,
+        frameIndex: sampleIndex * 60,
+        points: Array.from({ length: 13 }, (_, pointIndex) => ({
+          index: pointIndex,
+          position: { x: 100 + pointIndex, y: 200 + pointIndex },
+          activation: 0.7,
+          valid: true,
+        })),
+      })),
+    };
+
+    expect(tableAnalysisSchema.parse(nativeDiagnostics)).toMatchObject({
+      schema_version: 2,
+      engine: 'coreml',
+    });
+    expect(() => tableAnalysisSchema.parse({
+      ...nativeDiagnostics,
+      sampling: nativeDiagnostics.sampling.map((sample, index) => (
         index === 1 ? { ...sample, label: 'sample_11' } : sample
       )),
     })).toThrow();

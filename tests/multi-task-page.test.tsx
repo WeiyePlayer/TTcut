@@ -116,9 +116,8 @@ describe('multi-task clipping', () => {
       analysisId: `${index}${'1'.repeat(7)}-1111-4111-8111-111111111111`, calibration, data: analysis(path) }));
   }
 
-  it('merges in addition order and shuts down only after the merged result arrives', async () => {
+  it('merges in addition order and completes only after the merged result arrives without shutdown', async () => {
     const finished = await prepareMergedBatch();
-    fireEvent.click(screen.getByRole('checkbox', { name: '完成本任务后关机' }));
     fireEvent.click(screen.getByRole('button', { name: '开始分析剪辑' }));
     expect(screen.getByRole('checkbox', { name: '合并为一个视频' })).toBeDisabled();
     await finishAnalysis(1);
@@ -136,14 +135,15 @@ describe('multi-task clipping', () => {
     for (const group of screen.getAllByRole('group')) {
       expect(within(group).getByRole('button', { name: '所有回合' })).toBeDisabled();
     }
-    expect(screen.getByRole('checkbox', { name: '完成本任务后关机' })).not.toBeDisabled();
+    expect(screen.queryByRole('checkbox', { name: '完成本任务后关机' })).not.toBeInTheDocument();
     act(() => listener?.({ type: 'progress', data: { taskId: 'batch-export-1', kind: 'export', stage: 'concatenating', percent: 90 } }));
     expect(screen.getByRole('progressbar')).toHaveAttribute('value', '90');
     act(() => listener?.({ type: 'batch-export-result', taskId: 'batch-export-1', data: {
       outputPath: 'C:\\video\\first_TTcut_合并集锦.mp4', mediaUrl: 'ttcut-media://merged',
       width: 1280, height: 720, skippedAnalysisIds: [],
     } }));
-    await waitFor(() => expect(window.ttcut.shutdownSystem).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole('button', { name: '开始分析剪辑' })).toBeDisabled();
+    expect(window.ttcut.shutdownSystem).not.toHaveBeenCalled();
     expect(finished).toHaveBeenCalledTimes(1);
     expect(screen.getByText('合并视频已完成')).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: '预览输出' }));
@@ -230,7 +230,6 @@ describe('multi-task clipping', () => {
 
   it('blocks merging after a cancelled item and reuses completed analysis on retry', async () => {
     const finished = await prepareMergedBatch();
-    fireEvent.click(screen.getByRole('checkbox', { name: '完成本任务后关机' }));
     fireEvent.click(screen.getByRole('button', { name: '开始分析剪辑' }));
     await waitFor(() => expect(startAnalysis).toHaveBeenCalledTimes(1));
     fireEvent.click(screen.getByRole('button', { name: '取消 first.mp4' }));
@@ -268,7 +267,6 @@ describe('multi-task clipping', () => {
 
   it('does not request shutdown when a merged batch contains an analysis warning', async () => {
     await prepareMergedBatch(vi.fn(), videos.slice(0, 1));
-    fireEvent.click(screen.getByRole('checkbox', { name: '完成本任务后关机' }));
     fireEvent.click(screen.getByRole('button', { name: '开始分析剪辑' }));
     await waitFor(() => expect(startAnalysis).toHaveBeenCalledTimes(1));
     act(() => listener?.({ type: 'analysis-result', taskId: 'analysis-task-1',
@@ -286,7 +284,6 @@ describe('multi-task clipping', () => {
 
   it.each(['EXPORT_FAILED', 'EXPORT_CANCELLED', 'BATCH_EXPORT_EMPTY'])('does not shut down for %s and retries export without analysis', async (code) => {
     const finished = await prepareMergedBatch(vi.fn(), videos.slice(0, 1));
-    fireEvent.click(screen.getByRole('checkbox', { name: '完成本任务后关机' }));
     fireEvent.click(screen.getByRole('button', { name: '开始分析剪辑' }));
     await finishAnalysis(1);
     await waitFor(() => expect(window.ttcut.startBatchExport).toHaveBeenCalledTimes(1));
@@ -494,7 +491,6 @@ describe('multi-task clipping', () => {
       />,
     );
     await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledTimes(1));
-    fireEvent.click(screen.getByRole('checkbox', { name: '完成本任务后关机' }));
     act(() => listener?.({
       type: 'error',
       taskId: 'calibration-task-1',
@@ -539,7 +535,7 @@ describe('multi-task clipping', () => {
     expect(window.ttcut.shutdownSystem).not.toHaveBeenCalled();
   });
 
-  it('shuts down once after every item in an armed batch succeeds', async () => {
+  it('completes analysis-only batches without a shutdown option', async () => {
     const onCompletableTasksFinished = vi.fn();
     render(
       <MultiTaskPage
@@ -558,7 +554,6 @@ describe('multi-task clipping', () => {
     for (const group of screen.getAllByRole('group')) {
       fireEvent.click(within(group).getAllByRole('button')[2]!);
     }
-    fireEvent.click(screen.getByRole('checkbox', { name: '完成本任务后关机' }));
     fireEvent.click(document.querySelector('.batch-start')!);
     await waitFor(() => expect(startAnalysis).toHaveBeenCalledTimes(1));
     act(() => listener?.({
@@ -577,9 +572,9 @@ describe('multi-task clipping', () => {
       data: analysis(videos[1]!.path),
     }));
 
-    await waitFor(() => expect(window.ttcut.shutdownSystem).toHaveBeenCalledTimes(1));
-    expect(onCompletableTasksFinished).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole('checkbox', { name: '完成本任务后关机' })).not.toBeChecked();
+    await waitFor(() => expect(onCompletableTasksFinished).toHaveBeenCalledTimes(1));
+    expect(window.ttcut.shutdownSystem).not.toHaveBeenCalled();
+    expect(screen.queryByRole('checkbox', { name: '完成本任务后关机' })).not.toBeInTheDocument();
   });
 
   it('turns all remaining items into manual calibration when the model is unavailable', async () => {

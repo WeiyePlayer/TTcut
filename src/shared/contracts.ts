@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { nativeVideoSchema, nativeTableSamplesSchema } from './native-contracts';
 
 export const DEVICE_VALUES = ['auto', 'cuda', 'cpu'] as const;
 export const PRE_ROLL_VALUES = [1.5, 2.5, 5] as const;
@@ -198,9 +199,19 @@ const tableAnalysisV2Schema = z.object({
   }).strict(),
 }).strict();
 
-export const tableAnalysisSchema = z.discriminatedUnion('schema_version', [
+const nativeTableAnalysisSchema = z.object({
+  schema_version: z.literal(2),
+  engine: z.literal('coreml'),
+  compute_units: z.literal('cpuOnly'),
+  checkpoint_sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  aggregation_rule: z.literal('temporal_peak_clusters_geometric_consensus'),
+  sampling: nativeTableSamplesSchema,
+}).strict();
+
+export const tableAnalysisSchema = z.union([
   tableAnalysisV1Schema,
   tableAnalysisV2Schema,
+  nativeTableAnalysisSchema,
 ]);
 
 export const calibrationSchema = z.object({
@@ -320,6 +331,7 @@ export const videoMetadataSchema = z.object({
   average_bitrate: z.number().int().positive().nullable().optional(),
   audio_bitrate: z.number().int().positive().nullable().optional(),
   pixel_format: z.string().nullable().optional(),
+  native_video: nativeVideoSchema.optional(),
   audio_sample_rate: z.number().int().positive().nullable().optional(),
   audio_channels: z.number().int().positive().nullable().optional(),
   video_duration_seconds: finiteNumber.positive().nullable().optional(),
@@ -371,15 +383,24 @@ const analysisResultBaseSchema = z.object({
   processing: z.object({
     mode: z.enum(['source_cfr', 'normalized_cfr', 'original_vfr', 'vfr_fallback']),
     target_fps_ratio: z.string().regex(/^\d+\/\d+$/).nullable(),
-    encoder: z.enum(['libopenh264', 'libx264']).nullable(),
+    encoder: z.enum(['libopenh264', 'libx264', 'libx265']).nullable(),
     warning_code: z.string().min(1).nullable(),
   }).strict().optional(),
   calibration: calibrationSchema.optional(),
   table_analysis: tableAnalysisSchema.optional(),
+  inference_runtime: z.object({ engine: z.literal('coreml'), compute_units: z.enum(['cpuOnly', 'cpuAndGPU', 'cpuAndNeuralEngine']), precision: z.enum(['float32', 'float16']).optional(), prediction_concurrency: z.number().int().positive().optional(), checkpoint_sha256: z.string().regex(/^[a-f0-9]{64}$/) }).strict().optional(),
   model_provenance: z.object({
     // TrackNet remains readable for legacy history and explicit local development analyses.
     profile: z.enum(LEGACY_RESULT_MODEL_PROFILES),
     component_version: z.string().min(1).nullable(),
+    trajectory: z.object({
+      frame_count: z.number().int().nonnegative(),
+      detected_frames: z.number().int().nonnegative(),
+      missing_frames: z.number().int().nonnegative(),
+    }).strict().refine(
+      (value) => value.detected_frames + value.missing_frames === value.frame_count,
+      { message: 'Trajectory detection counts must match the evaluated frame count' },
+    ).optional(),
     roi: z.object({
       x: z.number().int().nonnegative(),
       y: z.number().int().nonnegative(),
@@ -826,7 +847,7 @@ export type BatchExportResult = {
 };
 
 export const updateStateSchema = z.object({
-  status: z.enum(['idle', 'unsupported', 'checking', 'available', 'downloaded', 'up-to-date', 'error']),
+  status: z.enum(['idle', 'unsupported', 'checking', 'available', 'skipped', 'downloading', 'downloaded', 'up-to-date', 'error']),
   version: z.string().min(1).nullable(),
   message: z.string().nullable(),
 }).strict();
@@ -836,7 +857,7 @@ export const componentStatusSchema = z.object({
     available: z.boolean(),
     version: z.string().nullable(),
     path: z.string().nullable(),
-    acceleration: z.enum(['cuda', 'cpu', 'unavailable']),
+    acceleration: z.enum(['cuda', 'cpu', 'coreml', 'unavailable']),
     detail: z.string().nullable(),
   }).strict(),
   media: z.object({
@@ -866,7 +887,7 @@ export const componentSetupInfoSchema = z.object({
     filename: z.string().endsWith('.zip'),
     download_size_bytes: z.number().int().positive(),
     license_url: z.string().url(),
-  }).strict(),
+  }).strict().nullable(),
 }).strict();
 
 export const platformCompatibilitySchema = z.object({
@@ -876,6 +897,7 @@ export const platformCompatibilitySchema = z.object({
     'unsupported_platform',
     'unsupported_architecture',
     'unsupported_windows_build',
+    'unsupported_macos_version',
     'windows_server',
     'probe_failed',
   ]),

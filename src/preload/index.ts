@@ -1,9 +1,16 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { TTcutApi, AppEvent } from '../shared/api';
-import type { AppSettings, BlurBallAnalysisMode, CalibrationChoice, ExportRequest, RallyRecognitionMethod } from '../shared/contracts';
+import type { AppSettings, CalibrationChoice, ExportRequest } from '../shared/contracts';
 import { IPC } from '../shared/ipc';
 
 const api: TTcutApi = {
+  platform: process.platform,
+  preparePreview: (mediaUrl, taskId) => ipcRenderer.invoke(IPC.previewPrepare, mediaUrl, taskId),
+  onPreviewProgress: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, value: { taskId: string; percent: number }) => listener(value);
+    ipcRenderer.on(IPC.previewProgress, wrapped);
+    return () => ipcRenderer.removeListener(IPC.previewProgress, wrapped);
+  },
   bootstrap: () => ipcRenderer.invoke(IPC.appBootstrap),
   saveSettings: (settings: AppSettings) => ipcRenderer.invoke(IPC.settingsSave, settings),
   refreshComponents: () => ipcRenderer.invoke(IPC.componentsRefresh),
@@ -21,7 +28,7 @@ const api: TTcutApi = {
   startAutoCalibration: (input: { videoPath: string; device: 'auto' | 'cuda' | 'cpu' }) => (
     ipcRenderer.invoke(IPC.calibrationStart, input)
   ),
-  startAnalysis: (input: { videoPath: string; calibrationChoice: CalibrationChoice; device: 'auto' | 'cuda' | 'cpu'; historyVisibility: 'visible' | 'deferred'; analysisMode: BlurBallAnalysisMode; rallyRecognitionMethod: RallyRecognitionMethod; normalizeVariableFrameRate: boolean; blurballConfidenceThreshold: number; blurballStage1ConfidenceThreshold: number; blurballStage2ConfidenceThreshold: number }) => (
+  startAnalysis: (input: { videoPath: string; calibrationChoice: CalibrationChoice; device: 'auto' | 'cuda' | 'cpu'; historyVisibility: 'visible' | 'deferred'; normalizeVariableFrameRate: boolean }) => (
     ipcRenderer.invoke(IPC.analysisStart, input)
   ),
   startExport: (input: ExportRequest) => ipcRenderer.invoke(IPC.exportStart, input),
@@ -44,6 +51,8 @@ const api: TTcutApi = {
   openExternalUrl: (url: string) => ipcRenderer.invoke(IPC.externalOpen, url),
   getUpdateState: () => ipcRenderer.invoke(IPC.updateGetState),
   checkForUpdates: () => ipcRenderer.invoke(IPC.updateCheck),
+  downloadUpdate: (version) => ipcRenderer.invoke(IPC.updateDownload, version),
+  skipUpdate: (version) => ipcRenderer.invoke(IPC.updateSkip, version),
   restartToUpdate: () => ipcRenderer.invoke(IPC.updateInstall),
   onUpdateState: (listener) => {
     const wrapped = (_event: Electron.IpcRendererEvent, value: Parameters<typeof listener>[0]) => listener(value);

@@ -1,11 +1,11 @@
-const downloadUrl = "https://github.com/WeiyePlayer/TTcut/releases/download/v1.3.2/TTcut-1.3.2-x64-Setup.exe";
+const downloadUrl = "https://github.com/WeiyePlayer/TTcut/releases/download/v1.3.3/TTcut-1.3.3-x64-Setup.exe";
 const repositoryUrl = "https://github.com/WeiyePlayer/TTcut";
 
 const features = [
   {
     number: "01",
     title: "自动标定与识别",
-    description: "TTcut 默认使用连续运动识别回合，也可切换为落台判定，并提供默认与高精两种分析精度。",
+    description: "TTcut 默认融合运动轨迹与落点证据识别回合，也可切换为连续运动或落台判定。",
   },
   {
     number: "02",
@@ -20,7 +20,7 @@ const features = [
   {
     number: "04",
     title: "批量任务与恢复",
-    description: "多个视频可按队列自动标定；任务切换页面后仍会保留，并可在全部成功后自动关闭 Windows。",
+    description: "多个视频可按队列自动标定，并将所选回合合并为一个视频；任务切换页面后仍会保留。",
   },
   {
     number: "05",
@@ -68,7 +68,7 @@ const faqs = [
   },
   {
     question: "Windows 为什么提示未知发布者？",
-    answer: "v1.3.2 使用 CN=weiye 自签名 Authenticode 并带时间戳，但证书不受 Windows 公共信任，因此仍可能触发未知发布者或 SmartScreen。请只从本项目 GitHub Release 下载并核对 SHA-256。",
+    answer: "v1.3.3 使用 CN=weiye 自签名 Authenticode 并带时间戳，但证书不受 Windows 公共信任，因此仍可能触发未知发布者或 SmartScreen。请只从本项目 GitHub Release 下载并核对 SHA-256。",
   },
 ];
 
@@ -87,8 +87,8 @@ export default function Home() {
           <a href="#modes">剪辑模式</a>
           <a href="#faq">常见问题</a>
         </nav>
-        <a className="button button-small" href={downloadUrl} target="_blank" rel="noreferrer" aria-label="下载 TTcut v1.3.2 Windows x64 安装包">
-          下载 <span className="desktop-only">v1.3.2</span><ArrowIcon />
+        <a className="button button-small" href={downloadUrl} target="_blank" rel="noreferrer" aria-label="下载 TTcut v1.3.3 Windows x64 安装包">
+          下载 <span className="desktop-only">v1.3.3</span><ArrowIcon />
         </a>
       </header>
 
@@ -100,7 +100,7 @@ export default function Home() {
             TTcut 默认自动标定球桌并定位有效回合。单个或批量选择视频后，即可分析、挑选并导出成片。
           </p>
           <div className="hero-actions">
-            <a className="button button-primary" href={downloadUrl} target="_blank" rel="noreferrer" aria-label="下载 TTcut v1.3.2 Windows x64 安装包">
+            <a className="button button-primary" href={downloadUrl} target="_blank" rel="noreferrer" aria-label="下载 TTcut v1.3.3 Windows x64 安装包">
               下载 TTcut <ArrowIcon />
             </a>
             <a className="button button-secondary" href={repositoryUrl} target="_blank" rel="noreferrer">前往Github <ArrowIcon /></a>
@@ -257,16 +257,16 @@ export default function Home() {
       </section>
 
       <section className="final-cta section-shell">
-        <p className="eyebrow">TTcut v1.3.2 正式版</p>
+        <p className="eyebrow">TTcut v1.3.3 正式版</p>
         <h2>下一场好球，<br />从这里开始。</h2>
         <p>下载 Windows x64 版本，让比赛视频留在本地，让精彩回合更容易被看见。</p>
-        <a className="button button-light" href={downloadUrl} target="_blank" rel="noreferrer" aria-label="下载 TTcut v1.3.2 Windows x64 安装包">下载 TTcut <ArrowIcon /></a>
+        <a className="button button-light" href={downloadUrl} target="_blank" rel="noreferrer" aria-label="下载 TTcut v1.3.3 Windows x64 安装包">下载 TTcut <ArrowIcon /></a>
       </section>
 
       <footer className="site-footer section-shell">
         <a className="brand" href="#top"><img src="/ttcut-icon.png" alt="" />TTcut</a>
         <p>本地离线乒乓球回合分析与自动剪辑工具。</p>
-        <div><a href={repositoryUrl} target="_blank" rel="noreferrer">GitHub</a><a href={downloadUrl} target="_blank" rel="noreferrer" aria-label="下载 TTcut v1.3.2 Windows x64 安装包">下载</a><a href={`${repositoryUrl}/blob/main/LICENSE`} target="_blank" rel="noreferrer">MIT License</a></div>
+        <div><a href={repositoryUrl} target="_blank" rel="noreferrer">GitHub</a><a href={downloadUrl} target="_blank" rel="noreferrer" aria-label="下载 TTcut v1.3.3 Windows x64 安装包">下载</a><a href={`${repositoryUrl}/blob/main/LICENSE`} target="_blank" rel="noreferrer">MIT License</a></div>
       </footer>
     </main>
   );

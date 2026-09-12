@@ -11,6 +11,8 @@ export const IPC = {
   videosSelect: 'videos:select',
   videoAcceptDrop: 'video:accept-drop',
   videoProbe: 'video:probe',
+  previewPrepare: 'preview:prepare',
+  previewProgress: 'preview:progress',
   videoPreparePreview: 'video:prepare-preview',
   calibrationStart: 'calibration:start',
   analysisStart: 'analysis:start',
@@ -37,6 +39,8 @@ export const IPC = {
   externalOpen: 'external:open',
   updateGetState: 'update:get-state',
   updateCheck: 'update:check',
+  updateDownload: 'update:download',
+  updateSkip: 'update:skip',
   updateInstall: 'update:install',
   updateState: 'update:state',
 } as const;

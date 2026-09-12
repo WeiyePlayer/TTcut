@@ -7,7 +7,7 @@ const CLIP_EDGE_HIT_OUTSET = 8;
 const CLIP_EDGE_HIT_INSET = 4;
 const CLIP_BOUNDARY_MARKER_MIN_WIDTH = 24;
 
-export type TimelineToolMode = 'add' | 'delete' | null;
+export type TimelineToolMode = 'add' | 'delete' | 'zoom' | null;
 export type TimelineSeekIntent = 'preview' | 'commit';
 type Edge = 'start' | 'end';
 
@@ -147,6 +147,7 @@ export function CustomTimeline({
   const pixelsPerSecond = contentWidth / Math.max(duration, 0.001);
   const visibleScrollLeft = clampTimelineScrollLeft(scrollLeft, viewportWidth, contentWidth);
   const selectedClips = useMemo(() => clips.filter((clip) => clip.selected), [clips]);
+  const editingToolActive = toolMode === 'add' || toolMode === 'delete';
 
   useEffect(() => {
     setAddTargetValid(null);
@@ -247,8 +248,8 @@ export function CustomTimeline({
   wheelHandlerRef.current = (event) => {
     const viewport = viewportRef.current;
     if (!viewport) return;
-    if (event.ctrlKey) {
-      // The track is the sole owner of Ctrl+wheel while the pointer is over it.
+    if (toolMode === 'zoom' || event.ctrlKey || event.metaKey) {
+      // The track owns wheel zoom, whether enabled by the tool or a modifier.
       // This prevents Chromium/Electron page zoom from resizing the monitor.
       event.preventDefault();
       event.stopPropagation();
@@ -305,7 +306,7 @@ export function CustomTimeline({
   };
 
   const beginResize = (event: React.PointerEvent<HTMLButtonElement>, clip: CustomRallyClip, edge: Edge) => {
-    if (toolMode) return;
+    if (event.button !== 0 || editingToolActive) return;
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
     draggingRef.current = { pointerId: event.pointerId, clipId: clip.clipId, edge, startX: event.clientX, initialTime: edge === 'start' ? clip.start : clip.end };
@@ -326,7 +327,7 @@ export function CustomTimeline({
   };
 
   const keyboardResize = (event: React.KeyboardEvent<HTMLButtonElement>, clip: CustomRallyClip, edge: Edge) => {
-    if (toolMode || (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight')) return;
+    if (editingToolActive || (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight')) return;
     event.preventDefault();
     const step = event.shiftKey ? 1 : 1 / Math.max(fps, 1);
     const current = edge === 'start' ? clip.start : clip.end;
@@ -334,6 +335,7 @@ export function CustomTimeline({
   };
 
   const beginPlayheadDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
     event.preventDefault();
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -388,7 +390,7 @@ export function CustomTimeline({
     <section ref={surfaceRef} className={`custom-timeline${toolMode ? ` is-${toolMode}-mode` : ''}${toolMode === 'add' && addTargetValid === false ? ' is-add-unavailable' : ''}`} aria-label={timelineLabel}>
       <div ref={viewportRef} className="timeline-viewport" data-zoom={actualZoom} onScroll={(event) => setScrollLeft(clampTimelineScrollLeft(event.currentTarget.scrollLeft, event.currentTarget.clientWidth, event.currentTarget.scrollWidth))}>
         <div className="timeline-content" style={{ width: contentWidth }}>
-          <div className="timeline-ruler" onPointerDown={(event) => seekFromPointer(event.clientX, 'commit')}><canvas ref={canvasRef} style={{ transform: `translateX(${visibleScrollLeft}px)` }} /></div>
+          <div className="timeline-ruler" onPointerDown={(event) => { if (event.button === 0) seekFromPointer(event.clientX, 'commit'); }}><canvas ref={canvasRef} style={{ transform: `translateX(${visibleScrollLeft}px)` }} /></div>
           {resizeFeedback ? <div className="resize-feedback" style={{ left: resizeFeedback.boundaryTime * pixelsPerSecond }} data-clip-id={resizeFeedback.clipId} data-edge={resizeFeedback.edge}>{formatResizeDelta(resizeFeedback.durationDelta)}</div> : null}
           <div className={`timeline-playhead${isScrubbing ? ' dragging' : ''}`} style={{ left: currentTime * pixelsPerSecond }} role="slider" aria-orientation="horizontal" tabIndex={0} aria-label={timelineLabel} aria-valuemin={0} aria-valuemax={duration} aria-valuenow={currentTime} onPointerDown={beginPlayheadDrag} onPointerMove={movePlayhead} onPointerUp={endPlayheadDrag} onPointerCancel={cancelPlayheadDrag} onLostPointerCapture={cancelPlayheadDrag} onKeyDown={keyboardSeek}><i /></div>
         </div>
@@ -412,11 +414,11 @@ export function CustomTimeline({
                 if (toolMode === 'add') { event.preventDefault(); event.stopPropagation(); return; }
                 onPlayClip(clip);
               }}>
-                {!toolMode ? <button type="button" className="clip-handle start" role="slider" aria-orientation="horizontal" aria-label={`${resizeStartLabel} ${clip.rallyIndex}`} aria-valuemin={previous?.end ?? 0} aria-valuemax={clip.end - minimumDuration} aria-valuenow={clip.start} style={{ left: -CLIP_EDGE_HIT_OUTSET, width: edgeHitWidth }} onPointerDown={(event) => beginResize(event, clip, 'start')} onPointerMove={moveResize} onPointerUp={endResize} onPointerCancel={endResize} onLostPointerCapture={endResize} onKeyDown={(event) => keyboardResize(event, clip, 'start')} /> : null}
+                {!editingToolActive ? <button type="button" className="clip-handle start" role="slider" aria-orientation="horizontal" aria-label={`${resizeStartLabel} ${clip.rallyIndex}`} aria-valuemin={previous?.end ?? 0} aria-valuemax={clip.end - minimumDuration} aria-valuenow={clip.start} style={{ left: -CLIP_EDGE_HIT_OUTSET, width: edgeHitWidth }} onPointerDown={(event) => beginResize(event, clip, 'start')} onPointerMove={moveResize} onPointerUp={endResize} onPointerCancel={endResize} onLostPointerCapture={endResize} onKeyDown={(event) => keyboardResize(event, clip, 'start')} /> : null}
                 {!deleteTarget ? <span>{clip.rallyIndex}</span> : null}
                 {deleteTarget ? <i className="timeline-delete-overlay"><TrashIcon /></i> : null}
                 {showBoundaryMarkers ? <><i className="clip-boundary-marker start" aria-hidden="true" /><i className="clip-boundary-marker end" aria-hidden="true" /></> : null}
-                {!toolMode ? <button type="button" className="clip-handle end" role="slider" aria-orientation="horizontal" aria-label={`${resizeEndLabel} ${clip.rallyIndex}`} aria-valuemin={clip.start + minimumDuration} aria-valuemax={following?.start ?? duration} aria-valuenow={clip.end} style={{ right: -CLIP_EDGE_HIT_OUTSET, width: edgeHitWidth }} onPointerDown={(event) => beginResize(event, clip, 'end')} onPointerMove={moveResize} onPointerUp={endResize} onPointerCancel={endResize} onLostPointerCapture={endResize} onKeyDown={(event) => keyboardResize(event, clip, 'end')} /> : null}
+                {!editingToolActive ? <button type="button" className="clip-handle end" role="slider" aria-orientation="horizontal" aria-label={`${resizeEndLabel} ${clip.rallyIndex}`} aria-valuemin={clip.start + minimumDuration} aria-valuemax={following?.start ?? duration} aria-valuenow={clip.end} style={{ right: -CLIP_EDGE_HIT_OUTSET, width: edgeHitWidth }} onPointerDown={(event) => beginResize(event, clip, 'end')} onPointerMove={moveResize} onPointerUp={endResize} onPointerCancel={endResize} onLostPointerCapture={endResize} onKeyDown={(event) => keyboardResize(event, clip, 'end')} /> : null}
               </div>
             );
           })}

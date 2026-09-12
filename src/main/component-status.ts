@@ -37,10 +37,14 @@ function rememberStatus(status: ComponentStatus): Promise<ComponentStatus> {
 }
 
 export async function inspectInstalledComponents(): Promise<ComponentStatus> {
-  return rememberStatus(await inspectComponents());
+  const status = await inspectComponents();
+  return process.platform === 'darwin' ? status : rememberStatus(status);
 }
 
 export async function startupComponentStatus(): Promise<ComponentStatus> {
+  // macOS ships one immutable runtime inside the app bundle, so its current
+  // manifest is authoritative. The persisted component store is Windows-only.
+  if (process.platform === 'darwin') return inspectComponents();
   const previous = await readStatus();
   if (previous) return previous;
   // Migrate existing installations without running Python or FFmpeg on startup.
@@ -66,6 +70,7 @@ export async function startupComponentStatus(): Promise<ComponentStatus> {
 }
 
 export function silentlyInspectComponents(onError: (error: unknown) => void): void {
+  if (process.platform === 'darwin') return;
   if (backgroundCheck) return;
   backgroundCheck = inspectComponents().then(async (status) => {
     for (const component of [status.analysis, status.media]) {

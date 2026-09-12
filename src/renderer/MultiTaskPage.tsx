@@ -1,3 +1,4 @@
+import { CompatibleVideo } from './CompatibleVideo';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   RALLY_RECOGNITION_METHOD_DEFAULT,
@@ -128,11 +129,10 @@ export function MultiTaskPage({
   const [activeItem, setActiveItem] = useState<string | null>(null);
   const [activePhase, setActivePhase] = useState<ActivePhase | null>(null);
   const [running, setRunning] = useState(false);
-  const [preview, setPreview] = useState<{ source: string; name: string; width: number; height: number } | null>(null);
+  const [preview, setPreview] = useState<{ source: string; name: string; width: number; height: number; hdr: boolean } | null>(null);
   const [manualItemId, setManualItemId] = useState<string | null>(null);
   const [manualPoints, setManualPoints] = useState<Partial<Record<PointName, [number, number]>>>({});
   const [systemNotice, setSystemNotice] = useState<string | null>(null);
-  const [shutdownAfterCompletion, setShutdownAfterCompletion] = useState(false);
   const [mergeVideos, setMergeVideos] = useState(false);
   const [batchExport, setBatchExport] = useState<{
     status: 'idle' | 'blocked' | 'exporting' | 'done' | 'failed' | 'cancelled' | 'empty';
@@ -150,7 +150,6 @@ export function MultiTaskPage({
   const runningRef = useRef(false);
   const cancelRequested = useRef(false);
   const autoCalibrationAvailableRef = useRef(true);
-  const shutdownAfterCompletionRef = useRef(false);
   const pendingTaskStartRef = useRef<Promise<string> | null>(null);
   const scheduleRef = useRef<() => void>(() => undefined);
   const rowRefs = useRef(new Map<string, HTMLElement>());
@@ -178,8 +177,6 @@ export function MultiTaskPage({
     start: isEnglish ? 'Start analysis and cutting' : '开始分析剪辑',
     calibrating: isEnglish ? 'Calibrating tables' : '正在自动标定',
     running: isEnglish ? 'Processing serially' : '正在串行处理',
-    shutdownAfterTask: isEnglish ? 'Shut down after this task' : '完成本任务后关机',
-    shutdownFailed: isEnglish ? 'Automatic shutdown failed. Please shut down manually.' : '自动关机失败，请手动关机。',
     merge: isEnglish ? 'Merge into one video' : '合并为一个视频',
     mergeUnavailable: isEnglish ? 'Choose all rallies or highlights for at least one video.' : '至少一个视频选择“所有回合”或“精彩回合”后可用。',
     merging: isEnglish ? 'Exporting merged video' : '正在合并导出',
@@ -242,17 +239,11 @@ export function MultiTaskPage({
       : { mode: 'highlight', criterion: { kind: 'bounce_count', threshold: item.threshold }, pre_roll_seconds: optionsRef.current.preRoll, post_roll_seconds: optionsRef.current.postRoll };
 
   const completeRun = (success: boolean) => {
-    const canShutdown = !mergeRunRef.current || itemsRef.current.every((item) => !item.exportWarning);
     runningRef.current = false;
     mergeRunRef.current = false;
     setRunning(false);
     if (!success) return;
     onCompletableTasksFinished();
-    if (shutdownAfterCompletionRef.current && canShutdown) {
-      shutdownAfterCompletionRef.current = false;
-      setShutdownAfterCompletion(false);
-      void window.ttcut.shutdownSystem().catch(() => setSystemNotice(text.shutdownFailed));
-    }
   };
 
   const beginMergedExport = () => {
@@ -654,11 +645,6 @@ export function MultiTaskPage({
     scheduleRef.current();
   };
 
-  const toggleShutdownAfterCompletion = (enabled: boolean) => {
-    shutdownAfterCompletionRef.current = enabled;
-    setShutdownAfterCompletion(enabled);
-  };
-
   const toggleMerge = (enabled: boolean) => {
     if (runningRef.current || batchExportRef.current) return;
     mergeVideosRef.current = enabled;
@@ -809,6 +795,7 @@ export function MultiTaskPage({
                       : setPreview({
                         source: (item.previewVideo ?? item.video).mediaUrl,
                         name: item.video.name,
+                        hdr: Boolean(item.metadata.native_video && item.metadata.native_video.hdr !== 'sdr'),
                         width: item.metadata.width,
                         height: item.metadata.height,
                       })}
@@ -835,6 +822,7 @@ export function MultiTaskPage({
                   <button className="secondary" type="button" disabled={!item.outputMediaUrl && batchTaskActive} onClick={() => item.outputMediaUrl ? setPreview({
                     source: item.outputMediaUrl,
                     name: item.video.name,
+                    hdr: Boolean(item.metadata.native_video && item.metadata.native_video.hdr !== 'sdr'),
                     width: item.metadata.width,
                     height: item.metadata.height,
                   }) : item.analysisId && onOpenAnalysis(item.analysisId)}>{item.outputPath ? '预览输出' : '查看分析'}</button>
@@ -919,14 +907,14 @@ export function MultiTaskPage({
             <div className="batch-actions">
               <button className="secondary" type="button" onClick={() => setPreview({
                 source: batchExport.result!.mediaUrl, name: text.mergeDone,
-                width: batchExport.result!.width, height: batchExport.result!.height,
+                width: batchExport.result!.width, height: batchExport.result!.height, hdr: false,
               })}>{text.previewOutput}</button>
               <button className="secondary" type="button" onClick={() => void window.ttcut.revealOutput(batchExport.result!.outputPath)}>{text.openFolder}</button>
             </div>
           </>}
         </div>
       )}
-      <div className={`batch-launcher floating-launcher ${shutdownAfterCompletion ? 'shutdown-armed' : ''}`}
+      <div className="batch-launcher floating-launcher"
         tabIndex={0} aria-label={isEnglish ? 'Batch task options' : '多任务选项'}>
         <div className="batch-launch-options custom-export-options floating-launch-options">
           <label className="export-checkbox" title={!hasClippingItems ? text.mergeUnavailable : undefined}>
@@ -934,16 +922,6 @@ export function MultiTaskPage({
               onChange={(event) => toggleMerge(event.target.checked)} />
             <span className="export-checkbox-control" aria-hidden="true"><span className="export-checkbox-gloss" /></span>
             <span className="export-checkbox-text">{text.merge}</span>
-          </label>
-          <label className="export-checkbox">
-            <input
-              type="checkbox"
-              checked={shutdownAfterCompletion}
-              disabled={!batchTaskActive && !canStart}
-              onChange={(event) => toggleShutdownAfterCompletion(event.target.checked)}
-            />
-            <span className="export-checkbox-control" aria-hidden="true"><span className="export-checkbox-gloss" /></span>
-            <span className="export-checkbox-text">{text.shutdownAfterTask}</span>
           </label>
         </div>
         <button
@@ -953,7 +931,6 @@ export function MultiTaskPage({
           onClick={start}
         >
           {exportLocked ? text.merging : activePhase === 'calibration' ? text.calibrating : running ? text.running : text.start}
-          {shutdownAfterCompletion && <span className="batch-shutdown-indicator" aria-hidden="true">⏻</span>}
         </button>
       </div>
       {preview && (
@@ -964,7 +941,7 @@ export function MultiTaskPage({
               <button className="preview-close" type="button" onClick={() => setPreview(null)}>×</button>
             </div>
             <div className="batch-preview-media" style={{ aspectRatio: `${preview.width} / ${preview.height}` }}>
-              <video src={preview.source} controls autoPlay />
+              <CompatibleVideo hdr={preview.hdr} src={preview.source} controls autoPlay />
             </div>
           </div>
         </div>

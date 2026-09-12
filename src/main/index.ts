@@ -1,8 +1,10 @@
+import { prepareMacPreview } from './macos/preview';
 import path from 'node:path';
 import { stat, writeFile } from 'node:fs/promises';
 import {
   app,
   BrowserWindow,
+  Menu,
   dialog,
   ipcMain,
   powerSaveBlocker,
@@ -30,6 +32,7 @@ import { purgeRemovedModelAssets } from './retired-model-assets';
 import { startExport } from './export';
 import { startBatchExport } from './batch-export';
 import { getLogDirectory, logLine } from './logger';
+import { installRuntimeDiagnostics, attachWindowDiagnostics } from './runtime-diagnostics';
 import { getHistoryStore } from './history';
 import { clearMediaPaths, installMediaProtocol, registeredVideoPath, registerMediaPath } from './media-protocol';
 import { disposePreviewMedia, hasPreviewMedia, preparePreviewMedia } from './preview-media';
@@ -39,6 +42,7 @@ import {
   cancelTask,
   configureTaskSuspensionBlocker,
   hasActiveTasks,
+  hasBackgroundProcesses,
 } from './processes';
 import { loadSettings, saveSettings } from './settings';
 import { getPlatformCompatibility } from './platform-compatibility';
@@ -46,7 +50,8 @@ import {
   SUPPORTED_VIDEO_EXTENSIONS,
   videoContainerFromFileName,
 } from '../domain/video-input';
-import { COMPONENT_ASSETS_RELEASE_URL, DONATION_URL, GITHUB_URL, RELEASES_URL, WEBSITE_URL } from '../shared/urls';
+import { COMPONENT_ASSETS_RELEASE_URL } from '../shared/urls';
+import { openExternalUrl } from './external-links';
 import { getUpdater } from './updater';
 import { runInstallerMigrationRequest } from './installer-migration';
 import { requestSystemShutdown } from './system-power';
@@ -63,6 +68,12 @@ if (!installerMigrationRequest) {
 
 let mainWindow: BrowserWindow | null = null;
 let exitApproved = false;
+const isMac = process.platform === 'darwin';
+if (isMac) {
+  const override = app.commandLine.getSwitchValue('user-data-dir');
+  app.setPath('userData', override ? path.resolve(override) : path.join(app.getPath('appData'), 'TTcut-Electron', ...(app.isPackaged ? [] : ['development'])));
+}
+
 
 function e2eHarnessEnabled(): boolean {
   return !app.isPackaged && process.env.TTCUT_E2E === '1';
@@ -72,6 +83,7 @@ if (e2eHarnessEnabled() && process.env.TTCUT_E2E_USER_DATA) {
   app.setPath('userData', path.resolve(process.env.TTCUT_E2E_USER_DATA));
 }
 if (e2eHarnessEnabled()) app.disableHardwareAcceleration();
+if (!installerMigrationRequest) installRuntimeDiagnostics();
 
 function currentWindow(): BrowserWindow {
   if (!mainWindow || mainWindow.isDestroyed()) throw new Error('WINDOW_UNAVAILABLE');
@@ -101,6 +113,7 @@ function registerIpc(): void {
     });
     return {
       version: app.getVersion(),
+      windowState: { visible: mainWindow?.isVisible() ?? false },
       settings,
       components,
       componentSetup: {
@@ -110,20 +123,28 @@ function registerIpc(): void {
       },
       platformCompatibility,
       logsPath: getLogDirectory(),
+      capabilities: { managedComponents: !isMac, nativeWindow: isMac, shutdown: !isMac, automaticUpdates: !isMac },
     };
+  });
+  ipcMain.handle(IPC.previewPrepare, (_event, mediaUrl: unknown, taskId: unknown) => {
+    if (!isMac || typeof mediaUrl !== 'string' || typeof taskId !== 'string' || !/^[a-f0-9-]{36}$/i.test(taskId)) throw new Error('INVALID_REQUEST');
+    return prepareMacPreview(currentWindow(), mediaUrl, taskId);
   });
   ipcMain.handle(IPC.settingsSave, (_event, value: unknown) => saveSettings(appSettingsSchema.parse(value)));
   ipcMain.handle(IPC.componentsRefresh, () => inspectInstalledComponents());
   ipcMain.handle(IPC.componentsOpenDownloads, async () => {
+    if (isMac) throw new Error('MANAGED_COMPONENTS_UNSUPPORTED');
     const catalog = await loadComponentCatalog();
     await shell.openExternal(COMPONENT_ASSETS_RELEASE_URL);
     await shell.openExternal(catalog.ffmpeg.url);
   });
   ipcMain.handle(IPC.componentsOpenX264Download, async () => {
+    if (isMac) throw new Error('MANAGED_COMPONENTS_UNSUPPORTED');
     const catalog = await loadComponentCatalog();
     await shell.openExternal(catalog.ffmpeg_x264.url);
   });
   ipcMain.handle(IPC.componentsImport, async () => {
+    if (isMac) throw new Error('MANAGED_COMPONENTS_UNSUPPORTED');
     if (e2eHarnessEnabled() && process.env.TTCUT_E2E_COMPONENT_IMPORT_FILES) {
       const filePaths = JSON.parse(process.env.TTCUT_E2E_COMPONENT_IMPORT_FILES) as unknown;
       if (!Array.isArray(filePaths) || !filePaths.every((value): value is string => typeof value === 'string')) {
@@ -140,9 +161,11 @@ function registerIpc(): void {
     return startComponentImport(currentWindow(), result.filePaths);
   });
   ipcMain.handle(IPC.componentsInstallAnalysis, async (_event, consent: unknown) => {
+    if (isMac) throw new Error('MANAGED_COMPONENTS_UNSUPPORTED');
     return startAnalysisComponentInstall(currentWindow(), consent);
   });
   ipcMain.handle(IPC.componentsInstallMedia, async (_event, consent: unknown) => {
+    if (isMac) throw new Error('MANAGED_COMPONENTS_UNSUPPORTED');
     return startMediaComponentInstall(currentWindow(), consent);
   });
   ipcMain.handle(IPC.videoSelect, async () => {
@@ -296,27 +319,12 @@ function registerIpc(): void {
       : path.join(app.getAppPath(), '.runtime', 'release-metadata', 'THIRD_PARTY_NOTICES.html');
     return shell.openPath(license);
   });
-  ipcMain.handle(IPC.externalOpen, async (_event, value: unknown) => {
-    if (typeof value !== 'string') throw new Error('INVALID_REQUEST');
-    const catalog = await loadComponentCatalog();
-    const allowed = new Set([
-      COMPONENT_ASSETS_RELEASE_URL,
-      catalog.analysis_runtime.license_url,
-      catalog.ffmpeg.license_url,
-      catalog.ffmpeg.url,
-      catalog.ffmpeg_x264.license_url,
-      catalog.ffmpeg_x264.source_url,
-      WEBSITE_URL,
-      GITHUB_URL,
-      RELEASES_URL,
-      DONATION_URL,
-    ]);
-    if (!allowed.has(value)) throw new Error('EXTERNAL_URL_REJECTED');
-    await shell.openExternal(value);
-  });
+  ipcMain.handle(IPC.externalOpen, (_event, value: unknown) => openExternalUrl(value));
   ipcMain.handle(IPC.windowMinimize, () => currentWindow().minimize());
   ipcMain.handle(IPC.updateGetState, () => getUpdater().getState());
   ipcMain.handle(IPC.updateCheck, () => getUpdater().check());
+  ipcMain.handle(IPC.updateDownload, (_event, version: unknown) => getUpdater().download(version));
+  ipcMain.handle(IPC.updateSkip, (_event, version: unknown) => getUpdater().skip(version));
   ipcMain.handle(IPC.updateInstall, () => getUpdater().restartToInstall());
   ipcMain.handle(IPC.windowToggleMaximize, () => {
     const window = currentWindow();
@@ -334,7 +342,8 @@ function registerIpc(): void {
     if (action === 'exit') {
       exitApproved = true;
       await cancelAllTasksAndWait('app-exit');
-      window.close();
+      if (isMac) app.quit();
+      else window.close();
     }
   });
   ipcMain.handle(IPC.systemShutdown, async () => {
@@ -355,7 +364,8 @@ async function createWindow(): Promise<void> {
     minWidth: 840,
     minHeight: 520,
     show: false,
-    frame: false,
+    frame: isMac,
+    ...(isMac ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 14, y: 12 } } : {}),
     backgroundColor: '#FFFFFF',
     title: 'TTcut',
     webPreferences: {
@@ -366,6 +376,7 @@ async function createWindow(): Promise<void> {
       webSecurity: true,
     },
   });
+  attachWindowDiagnostics(mainWindow);
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   mainWindow.webContents.on('will-navigate', (event, url) => {
     const allowed = MAIN_WINDOW_VITE_DEV_SERVER_URL && url.startsWith(MAIN_WINDOW_VITE_DEV_SERVER_URL);
@@ -373,6 +384,7 @@ async function createWindow(): Promise<void> {
   });
   mainWindow.webContents.session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
   mainWindow.on('close', (event) => {
+    if (isMac && !exitApproved) { event.preventDefault(); mainWindow?.hide(); return; }
     if (!exitApproved && hasActiveTasks()) {
       event.preventDefault();
       mainWindow?.webContents.send(IPC.windowCloseRequested);
@@ -395,17 +407,18 @@ if (installerMigrationRequest) {
   await logLine('app', 'INFO', `Platform compatibility gate disabled: ${JSON.stringify(compatibility)}`)
     .catch(() => undefined);
   try {
-    await recoverComponentInstallState();
+    if (!isMac) await recoverComponentInstallState();
   } catch (error) {
     await logLine('app', 'WARN', `Component recovery could not finish: ${error instanceof Error ? error.stack ?? error.message : String(error)}`)
       .catch(() => undefined);
   }
   try {
-    await purgeRemovedModelAssets(managedComponentsRoot());
+    if (!isMac) await purgeRemovedModelAssets(managedComponentsRoot());
   } catch (error) {
     await logLine('app', 'WARN', `Removed model asset cleanup could not finish: ${error instanceof Error ? error.stack ?? error.message : String(error)}`)
       .catch(() => undefined);
   }
+  if (isMac) Menu.setApplicationMenu(Menu.buildFromTemplate([{ role: 'appMenu' }, { role: 'editMenu' }, { role: 'viewMenu' }, { role: 'windowMenu' }]));
   installMediaProtocol();
   registerIpc();
   await createWindow();
@@ -413,6 +426,7 @@ if (installerMigrationRequest) {
 });
 
 app.on('activate', () => {
+  if (isMac && mainWindow && !mainWindow.isDestroyed()) { mainWindow.show(); mainWindow.focus(); }
   if (BrowserWindow.getAllWindows().length === 0) void createWindow();
 });
 
@@ -423,8 +437,13 @@ app.on('before-quit', async (event) => {
     app.quit();
     return;
   }
+  if (!hasActiveTasks()) {
+    exitApproved = true;
+    if (isMac && hasBackgroundProcesses()) { event.preventDefault(); await cancelAllTasksAndWait('app-exit'); app.quit(); return; }
+  }
   if (!exitApproved && hasActiveTasks()) {
     event.preventDefault();
+    if (isMac) { mainWindow?.show(); mainWindow?.webContents.send(IPC.windowCloseRequested); return; }
     exitApproved = true;
     await cancelAllTasksAndWait('app-exit');
     app.quit();

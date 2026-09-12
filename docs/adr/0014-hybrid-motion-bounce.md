@@ -6,9 +6,11 @@
 
 ## 决策
 
-- 桌面随包 BlurBall 固定完整单阶段、置信阈值 0.30、`hybrid_motion_bounce`。
-  request v5 只接受该组合；显式本地 TrackNet 仍用 v4/continuous_visibility。
-  旧 request v1–v4 继续支持；设置中旧方式/精度字段读取忽略、下次保存移除。
+- Windows/Python 随包 BlurBall 固定完整单阶段、置信阈值 0.30、
+  `hybrid_motion_bounce`。request v5 只接受该组合；显式本地 TrackNet 仍用
+  v4/continuous_visibility。旧 request v1–v4 继续支持；设置中旧方式/精度字段
+  读取忽略、下次保存移除。macOS 原生 worker 尚未实现融合算法，继续固定使用
+  schema v2 `continuous_visibility`；不得把其结果改标为融合结果。
 - 连续运动候选复用既有迟滞、运动筛选、遮挡桥接和慢速传球证据。
   缺失落点不是边界；有连续轨迹并不否决明确无效证据。
 - 死球簇至少 3 跳、间隔 <=1.0 秒。间隔、图像空间反弹高度、离开速度中至少两项，

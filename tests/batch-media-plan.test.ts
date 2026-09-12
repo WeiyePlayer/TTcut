@@ -20,6 +20,11 @@ describe('merged video encoding plan', () => {
     expect(batchOutputProfile({ ...video, nominal_fps_ratio: null, average_fps_ratio: null }, false).fps).toBeCloseTo(29.8, 8);
   });
 
+  it('uses macOS nominal FPS when VFR average differs and the nominal ratio is absent', () => {
+    const output = batchOutputProfile({ ...video, nominal_fps_ratio: null, nominal_fps: 30, average_fps_ratio: '18/1', fps: 18 }, false);
+    expect(output.fps).toBe(30);
+  });
+
   it('quantizes each clip to whole output frames and uses an exactly divisible track timescale', () => {
     const profile = batchOutputProfile(video, false);
     const duration = batchSegmentDuration(group, profile);

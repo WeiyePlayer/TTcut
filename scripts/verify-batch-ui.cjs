@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const asar = require('@electron/asar');
 
 (async () => {
   const project = process.cwd();
@@ -19,14 +20,21 @@ const crypto = require('node:crypto');
   assert(fixture, 'Run the real merged-media integration check first');
   const files = ['red.mp4', 'green.mp4'].map((name) => path.join(output, name));
   await Promise.all(files.map((file) => fs.copyFile(path.join(fixture, path.basename(file)), file)));
-  const ffmpegRoot = path.join(project, '.baseline', 'components', 'ffmpeg-n8.1.2-22-g94138f6973-win64-lgpl-shared-8.1', 'bin');
+  const resources = path.join(project, 'out/TTcut-darwin-arm64/TTcut.app/Contents/Resources');
+  const productionApp = path.join(output, 'app');
+  asar.extractAll(path.join(resources, 'app.asar'), productionApp);
+  await fs.mkdir(path.join(productionApp, '.runtime'), { recursive: true });
+  await fs.symlink(path.join(resources, 'runtime'), path.join(productionApp, '.runtime', 'macos'));
+  // Execute the exact packaged production resources with the development Electron
+  // harness: the signed app disables Node inspect and E2E environment overrides.
+  const ffmpegRoot = path.join(resources, 'runtime', 'bin');
   const electron = await _electron.launch({
-    executablePath: path.join(project, '.baseline', 'electron-dev', '43.1.1', 'electron.exe'),
-    args: ['--no-sandbox', '--disable-gpu', project],
+    executablePath: path.join(project, 'node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'),
+    args: [productionApp],
     env: { ...process.env, TTCUT_E2E: '1', TTCUT_E2E_USER_DATA: userData,
       TTCUT_E2E_COMPONENTS_ROOT: path.join(output, 'components'), TTCUT_E2E_VIDEOS: JSON.stringify(files),
       TTCUT_E2E_REVEAL_MARKER: path.join(output, 'revealed.txt'),
-      TTCUT_FFMPEG: path.join(ffmpegRoot, 'ffmpeg.exe'), TTCUT_FFPROBE: path.join(ffmpegRoot, 'ffprobe.exe') },
+      TTCUT_FFMPEG: path.join(ffmpegRoot, 'ffmpeg'), TTCUT_FFPROBE: path.join(ffmpegRoot, 'ffprobe') },
   });
   let page;
   try {
@@ -36,6 +44,7 @@ const crypto = require('node:crypto');
     page.on('pageerror', (error) => errors.push(error.message));
     await page.waitForFunction(() => Boolean(window.ttcut));
     const bootstrap = await page.evaluate(() => window.ttcut.bootstrap());
+    assert(bootstrap.logsPath.startsWith(userData), 'Packaged app must use isolated test data');
     const metadata = await page.evaluate((paths) => Promise.all(paths.map((file) => window.ttcut.probeVideo(file))), files);
     const records = await Promise.all(metadata.map(async (video) => {
       const info = await fs.stat(video.path);
@@ -97,20 +106,18 @@ const crypto = require('node:crypto');
     await launcher.hover();
     await page.waitForFunction(() => getComputedStyle(document.querySelector('.batch-launch-options')).opacity === '1');
     assert.equal(await page.locator('.batch-launcher .custom-export-options').count(), 1);
-    assert.equal(await options.locator('.export-checkbox').count(), 2);
+    assert.equal(await options.locator('.export-checkbox').count(), 1);
+    assert.equal(await page.getByRole('checkbox', { name: '完成本任务后关机' }).count(), 0);
     assert.equal(await options.evaluate((node) => getComputedStyle(node).borderRadius), '12px');
     assert.equal(await options.locator('.export-checkbox-control').first().evaluate((node) => getComputedStyle(node).width), '16px');
     await setOption('合并为一个视频', true);
-    await setOption('完成本任务后关机', true);
     await page.screenshot({ path: path.join(output, 'options.png'), fullPage: true });
     await page.getByRole('button', { name: '开始分析剪辑' }).click();
     assert.equal(await page.getByRole('checkbox', { name: '合并为一个视频' }).isDisabled(), true);
     await launcher.hover();
-    await setOption('完成本任务后关机', false);
-    await setOption('完成本任务后关机', true);
     assert.equal(await electron.evaluate(() => globalThis.__batchUiCheck.shutdowns), 0);
     await page.getByText('合并视频已完成', { exact: true }).waitFor({ timeout: 60000 });
-    assert.equal(await electron.evaluate(() => globalThis.__batchUiCheck.shutdowns), 1);
+    assert.equal(await electron.evaluate(() => globalThis.__batchUiCheck.shutdowns), 0);
     const exported = await page.locator('.batch-merged-path').innerText();
     assert((await fs.stat(exported)).size > 1024);
     await page.getByRole('button', { name: '预览输出', exact: true }).click();

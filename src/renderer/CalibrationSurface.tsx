@@ -1,3 +1,4 @@
+import { CompatibleVideo } from './CompatibleVideo';
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type { Calibration, VideoMetadata } from '../shared/contracts';
 import type { SelectedVideo } from '../shared/api';
@@ -101,7 +102,7 @@ export function CalibrationSurface({
         }}
         onPointerUp={() => { dragging.current = null; }}
       >
-        <video ref={videoRef} src={preview.url} preload={preview.url === video.mediaUrl ? 'metadata' : 'auto'} muted playsInline />
+        <CompatibleVideo hdr={Boolean(metadata.native_video && metadata.native_video.hdr !== 'sdr')} ref={videoRef} src={preview.url} preload={preview.url === video.mediaUrl ? 'metadata' : 'auto'} muted playsInline />
         {preview.status !== 'ready' && <div className="custom-preview-status" role={preview.status === 'failed' ? 'alert' : 'status'}>{preview.status === 'preparing' ? t.previewPreparing : t.previewFailed}</div>}
         {polygon.length === 4 && (
           <svg className="calibration-polygon" aria-hidden="true">

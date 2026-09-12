@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from contextlib import contextmanager
 
 import numpy as np
+import pytest
 import torch
 
 from ttcut_worker.blurball_bounce import (
@@ -22,6 +24,7 @@ from ttcut_worker.blurball_predictor import (
     _decode_heatmap,
 )
 from ttcut_worker.calibration import TableCalibration
+from ttcut_worker.errors import InferenceError
 from ttcut_worker.types import TrajectoryPoint
 from ttcut_worker.video import FramePacket, VideoInfo
 
@@ -137,6 +140,173 @@ def test_interval_predictor_keeps_only_center_frames_and_resets_gaps(monkeypatch
     assert all(item.source == "blurball" for item in points)
     assert stats.step == 1
     assert model.calls == 1
+
+
+@pytest.mark.parametrize('invalid', [float('nan'), float('inf'), float('-inf')])
+@pytest.mark.parametrize('intervals', [False, True])
+def test_invalid_model_values_fail_instead_of_returning_missing_balls(monkeypatch, invalid, intervals):
+    class Reader:
+        def __init__(self, value):
+            self.info = VideoInfo(Path(value), 96, 64, 30.0, 3, 3, 0.1)
+
+        def __iter__(self):
+            for index in range(3):
+                yield FramePacket(index, index / 30, 'fps_estimation', np.zeros((64, 96, 3), np.uint8))
+
+        def final_info(self):
+            return self.info
+
+    class Model:
+        def __call__(self, tensor):
+            batch, _, height, width = tensor.shape
+            return {0: torch.full((batch, 3, height, width), invalid)}
+
+    monkeypatch.setattr('ttcut_worker.blurball_predictor.StreamingVideoReader', Reader)
+    predictor = BlurBallPredictor(LoadedBlurBall(Model(), torch.device('cpu')))
+    with pytest.raises(InferenceError, match='non-finite'):
+        if intervals:
+            predictor.predict_intervals('fake.mp4', ((0, .1),))
+        else:
+            predictor.predict('fake.mp4')
+
+
+@pytest.mark.parametrize('recovers', [True, False])
+def test_cuda_invalid_half_precision_retries_and_stays_in_float32(monkeypatch, capsys, recovers):
+    mixed = False
+    calls = []
+
+    @contextmanager
+    def autocast(*, device_type, dtype):
+        nonlocal mixed
+        assert device_type == 'cuda' and dtype == torch.float16
+        mixed = True
+        try:
+            yield
+        finally:
+            mixed = False
+
+    class Model:
+        def __call__(self, tensor):
+            calls.append(mixed)
+            output = torch.full((1, 3, 8, 8), float('nan') if mixed or not recovers else -10.0)
+            if not mixed:
+                output[:, :, 4, 4] = 10.0
+            return {0: output}
+
+    # Exercise the CUDA precision policy with deterministic CPU tensors. This
+    # verifies recovery behavior; it does not claim validation on CUDA hardware.
+    monkeypatch.setattr(torch, 'autocast', autocast)
+    monkeypatch.setattr(torch.cuda, 'get_device_name', lambda _device: 'NVIDIA GeForce RTX 3060')
+    predictor = BlurBallPredictor(LoadedBlurBall(Model(), torch.device('cuda')))
+    if recovers:
+        for _ in range(2):
+            heatmaps = predictor._infer_heatmaps(torch.zeros((1, 9, 8, 8)))
+            assert np.isfinite(heatmaps).all()
+            assert heatmaps[0, 0, 4, 4] > .99
+        assert calls == [True, False, False]
+    else:
+        with pytest.raises(InferenceError, match='float32'):
+            predictor._infer_heatmaps(torch.zeros((1, 9, 8, 8)))
+        assert calls == [True, False]
+    assert predictor.batch_size == 4
+    assert 'continuing in float32' in capsys.readouterr().err
+
+
+@pytest.mark.parametrize('gpu_name,expected_batch', [
+    ('NVIDIA GeForce GTX 1660 SUPER', 4), ('GeForce GTX 1660 Ti', 4),
+    ('NVIDIA GeForce GTX 1650', 4), ('NVIDIA GeForce GTX 1630', 4),
+    ('GeForce GTX1660SUPER', 4), ('GeForce GTX 1650 Ti', 4),
+    ('NVIDIA T400', 4), ('NVIDIA T550 Laptop GPU', 4), ('NVIDIA T600', 4),
+    ('NVIDIA T1000 8GB', 4), ('NVIDIA T1200 Laptop GPU', 4),
+    ('Quadro T2000 with Max-Q Design', 4), ('Tesla K40m', 4),
+    ('NVIDIA GeForce RTX 2060', 16), ('NVIDIA GeForce RTX 4060', 16),
+    ('NVIDIA GeForce RTX 4090', 16), ('NVIDIA GeForce RTX 5090', 16),
+    ('NVIDIA RTX A4000', 16), ('Quadro RTX 4000', 16), ('Tesla T4', 16),
+    ('NVIDIA A100-SXM4-40GB', 16), ('NVIDIA H100 80GB HBM3', 16),
+    ('Quadro M2000', 16), ('NVIDIA T4000', 16),
+])
+def test_cuda_precision_policy_keeps_affected_models_on_gpu_in_float32(monkeypatch, gpu_name, expected_batch):
+    monkeypatch.setattr(torch.cuda, 'get_device_name', lambda _device: gpu_name)
+    predictor = BlurBallPredictor(LoadedBlurBall(object(), torch.device('cuda:0')))
+    assert predictor.loaded.device == torch.device('cuda:0')
+    assert predictor.batch_size == expected_batch
+    assert predictor._mixed_precision_enabled == (expected_batch == 16)
+
+
+def test_cuda_float32_batches_are_bounded_and_preserve_frame_order(monkeypatch):
+    monkeypatch.setattr(torch.cuda, 'get_device_name', lambda _device: 'NVIDIA GeForce GTX 1660 SUPER')
+    calls = []
+
+    class Model:
+        def __call__(self, tensor):
+            calls.append(tensor.shape[0])
+            return {0: tensor[:, :3]}
+
+    predictor = BlurBallPredictor(LoadedBlurBall(Model(), torch.device('cuda')))
+    tensor = torch.arange(9, dtype=torch.float32).reshape(9, 1, 1, 1).expand(9, 9, 8, 8)
+    heatmaps = predictor._infer_heatmaps(tensor)
+    assert calls == [4, 4, 1]
+    np.testing.assert_array_equal(heatmaps, tensor[:, :3].sigmoid().numpy())
+
+
+def test_cuda_precision_recovery_does_not_drop_frames_in_the_stream(monkeypatch):
+    mixed = False
+    batches = []
+
+    @contextmanager
+    def autocast(**_kwargs):
+        nonlocal mixed
+        mixed = True
+        try:
+            yield
+        finally:
+            mixed = False
+
+    class Reader:
+        def __init__(self, value):
+            self.info = VideoInfo(Path(value), 96, 64, 30.0, 60, 60, 2.0)
+
+        def __iter__(self):
+            for i in range(60):
+                yield FramePacket(i, i / 30, 'fps_estimation', np.zeros((64, 96, 3), np.uint8))
+
+        def final_info(self):
+            return self.info
+
+    class Model:
+        def __call__(self, tensor):
+            batches.append((mixed, len(tensor)))
+            logits = torch.full((len(tensor), 3, tensor.shape[2], tensor.shape[3]), float('nan') if mixed else -10.0)
+            if not mixed:
+                logits[:, :, tensor.shape[2] // 2, tensor.shape[3] // 2] = 10
+            return {0: logits}
+
+    # Simulate CUDA transfers only; all arithmetic in this regression uses CPU.
+    tensor_to = torch.Tensor.to
+    monkeypatch.setattr(torch.Tensor, 'to', lambda self, device, **kwargs:
+                        self if isinstance(device, torch.device) and device.type == 'cuda'
+                        else tensor_to(self, device, **kwargs))
+    monkeypatch.setattr(torch, 'autocast', autocast)
+    monkeypatch.setattr(torch.cuda, 'get_device_name', lambda _device: 'NVIDIA GeForce RTX 3060')
+    monkeypatch.setattr(torch.cuda, 'reset_peak_memory_stats', lambda *_args: None)
+    monkeypatch.setattr(torch.cuda, 'synchronize', lambda *_args: None)
+    monkeypatch.setattr(torch.cuda, 'max_memory_allocated', lambda *_args: 0)
+    monkeypatch.setattr('ttcut_worker.blurball_predictor.StreamingVideoReader', Reader)
+    predictor = BlurBallPredictor(LoadedBlurBall(Model(), torch.device('cuda')))
+    points, _, stats = predictor.predict('fake.mp4')
+    assert [point.frame for point in points] == list(range(60))
+    assert stats.detected_frames == 60
+    assert stats.missing_frames == 0
+    assert batches == [(True, 16)] + [(False, 4)] * 5
+
+
+def test_invalid_heatmap_is_not_a_legitimate_empty_detection():
+    _, inverse = _affine_transforms(512, 288)
+    heatmap = np.zeros((288, 512), dtype=np.float32)
+    assert _decode_heatmap(heatmap, inverse, 0, 0) == ()
+    heatmap[0, 0] = np.nan
+    with pytest.raises(InferenceError):
+        _decode_heatmap(heatmap, inverse, 0, 0)
 
 
 def test_fixed_blurball_parameters_match_product_contract():

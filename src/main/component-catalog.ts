@@ -102,6 +102,7 @@ export function loadComponentCatalog(): Promise<ComponentCatalog> {
 }
 
 export async function componentSetupInfo(): Promise<ComponentSetupInfo> {
+  if (process.platform === 'darwin') return { analysis_offer: null, media_offer: null, x264_manual_offer: null };
   const catalog = await loadComponentCatalog();
   const cpuAsset = catalog.analysis_runtime.assets.find((asset) => asset.variant === 'cpu');
   const largestCudaAsset = Math.max(

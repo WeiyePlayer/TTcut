@@ -9,7 +9,7 @@ import type { AppEvent } from '../src/shared/api';
 import type { HistoryRecordV1 } from '../src/shared/contracts';
 
 const state = vi.hoisted(() => ({ records: new Map<string, HistoryRecordV1>(), events: [] as AppEvent[] }));
-vi.mock('electron', () => ({ dialog: {} }));
+vi.mock('electron', () => ({ dialog: {}, app: { isPackaged: false, getAppPath: () => process.cwd() } }));
 vi.mock('../src/main/logger', () => ({ logLine: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../src/main/media-protocol', () => ({ registerMediaPath: (value: string) => value }));
 vi.mock('../src/main/history', () => ({ getHistoryStore: () => ({ open: async (id: string) => state.records.get(id) }) }));
@@ -127,6 +127,15 @@ describe.skipIf(!enabled)('real cross-video merged export', () => {
     const metadata = await probeVideo(terminal.data.outputPath);
     expect(metadata).toMatchObject({ width, height, audio_codec: hasAudio ? 'aac' : null });
     expect(metadata.fps).toBeCloseTo(fps, 2);
-    expect(metadata.variable_frame_rate).toBe(false);
+    // Check every frame directly: the native probe samples disjoint windows, whose
+    // gaps can flag even a CFR file as VFR.
+    const frames = JSON.parse((await runProcess(process.env.TTCUT_FFPROBE_INTEGRATION!, [
+      '-v', 'error', '-select_streams', 'v:0', '-show_frames',
+      '-show_entries', 'frame=best_effort_timestamp_time', '-of', 'json', terminal.data.outputPath,
+    ])).stdout).frames as Array<{ best_effort_timestamp_time: string }>;
+    const timestamps = frames.map((frame) => Number(frame.best_effort_timestamp_time));
+    for (let index = 1; index < timestamps.length; index += 1) {
+      expect(Math.abs(timestamps[index]! - timestamps[index - 1]! - 1 / fps)).toBeLessThan(0.00001);
+    }
   }, 90_000);
 });

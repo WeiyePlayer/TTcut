@@ -1,3 +1,4 @@
+import { probeMacVideo } from './macos/client';
 import path from 'node:path';
 import { displayVideoDimensions, videoContainerFromFileName } from '../domain/video-input';
 import { videoMetadataSchema, type VideoMetadata } from '../shared/contracts';
@@ -109,6 +110,7 @@ async function sampledVfr(ffprobe: string, videoPath: string, signal?: AbortSign
 }
 
 export async function probeVideo(videoPath: string, signal?: AbortSignal): Promise<VideoMetadata> {
+  if (process.platform === 'darwin') return probeMacVideo(videoPath, signal);
   const container = videoContainerFromFileName(videoPath);
   if (!container) throw new Error('INVALID_INPUT');
   const components = await resolveUsableMediaComponents();

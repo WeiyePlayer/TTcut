@@ -7,9 +7,10 @@ import { FusesPlugin } from '@electron-forge/plugin-fuses';
 import { FuseV1Options, FuseVersion } from '@electron/fuses';
 import type { SignToolOptions as EsmSignToolOptions } from '@electron/windows-sign/dist/esm/types';
 
+const macBuild = process.platform === 'darwin';
 const publicReleaseCandidate = process.env.TTCUT_PUBLIC_RC === '1';
 const officialRelease = process.env.TTCUT_OFFICIAL_RELEASE === '1';
-const releaseSigningRequired = publicReleaseCandidate || officialRelease;
+const releaseSigningRequired = !macBuild && (publicReleaseCandidate || officialRelease);
 const onlineModelInstaller = process.env.TTCUT_ONLINE_MODEL_INSTALLER === '1';
 const retainedWindowsLocales = new Set(['en-US.pak', 'zh-CN.pak']);
 
@@ -83,11 +84,12 @@ const packagerWindowsSign = signingConfigured ? {
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
-    icon: path.resolve('public/ttcut.ico'),
+    icon: path.resolve(macBuild ? 'macos/Resources/TTcut.icns' : 'public/ttcut.ico'),
+    ...(macBuild ? { appBundleId: 'com.weiye.ttcut.electron.macos', appCategoryType: 'public.app-category.video', extendInfo: { LSMinimumSystemVersion: '15.0' } } : {}),
     executableName: 'TTcut',
     ignore: ignoreUnbuiltSource,
     afterExtract: [retainSupportedWindowsLocales],
-    extraResource: [
+    extraResource: macBuild ? ['.runtime/macos'] : [
       '.runtime/worker',
       '.runtime/release-metadata',
       onlineModelInstaller ? '.runtime/online-installer/resources' : 'resources',

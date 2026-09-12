@@ -12,8 +12,14 @@ function validRate(value: string | null | undefined): boolean {
 /** One output specification for every segment, including silent source videos. */
 export function batchOutputProfile(first: VideoMetadata, hasAudio: boolean): VideoMetadata {
   if (!Number.isFinite(first.fps) || first.fps <= 0) throw new Error('EXPORT_FRAME_RATE_INVALID');
-  const ratio = [first.nominal_fps_ratio, first.average_fps_ratio].find(validRate)
-    ?? `${Math.round(first.fps * 1_000_000)}/1000000`;
+  // Native macOS metadata exposes nominal FPS as a number, without a ratio.
+  const nominal = first.nominal_fps;
+  const average = validRate(first.average_fps_ratio) ? first.average_fps_ratio! : null;
+  const averageRate = average ? Number(average.split('/')[0]) / Number(average.split('/')[1]) : 0;
+  const fallbackRate = nominal && Number.isFinite(nominal) && nominal > 0 ? nominal : first.fps;
+  const ratio = validRate(first.nominal_fps_ratio) ? first.nominal_fps_ratio!
+    : average && Math.abs(averageRate - fallbackRate) < 0.001 ? average
+      : `${Math.round(fallbackRate * 1_000_000)}/1000000`;
   const [numerator, denominator = 1] = ratio.split('/').map(Number);
   const fps = numerator! / denominator;
   if (!Number.isFinite(fps) || fps <= 0) throw new Error('EXPORT_FRAME_RATE_INVALID');

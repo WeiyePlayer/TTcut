@@ -1,0 +1,49 @@
+{
+  "app": "/Users/weiye/DOS/TTcut-windows/TTcut/out/TTcut-darwin-arm64/TTcut.app",
+  "version": "1.2.11",
+  "build": "electron-local-20260905122454693",
+  "sourceCommit": "8f9bb7bddeae3dd942d11d54c2dd80c2470bc645",
+  "sourceDirty": true,
+  "untrackedFiles": [
+    "docs/benchmarks/macos-fp16-adoption-2026-09-05/adoption-verification.json",
+    "docs/benchmarks/macos-fp16-adoption-2026-09-05/bundle-audit.json",
+    "docs/benchmarks/macos-fp16-adoption-2026-09-05/cleanup.json",
+    "docs/benchmarks/macos-fp16-adoption-2026-09-05/full-1-native-result.json",
+    "docs/benchmarks/macos-fp16-adoption-2026-09-05/full-2-native-result.json",
+    "docs/benchmarks/macos-fp16-adoption-2026-09-05/full.json",
+    "docs/benchmarks/macos-fp16-adoption-2026-09-05/preview-manifest.json",
+    "docs/benchmarks/macos-fp16-adoption-2026-09-05/preview.patch",
+    "docs/benchmarks/macos-fp16-adoption-2026-09-05/production-conversion.json",
+    "docs/benchmarks/macos-fp16-adoption-2026-09-05/report.json",
+    "docs/benchmarks/macos-fp16-adoption-2026-09-05/settings.png",
+    "docs/benchmarks/macos-fp16-adoption-2026-09-05/two-stage-native-result.json",
+    "docs/benchmarks/macos-fp16-adoption-2026-09-05/two_stage.json",
+    "docs/benchmarks/macos-m5-1-193-2026-09-05.json",
+    "docs/performance/macos-analysis-investigation-2026-09-05.md",
+    "docs/performance/macos-fp16-adoption-2026-09-05.md",
+    "docs/performance/macos-m5-1-193-precision-pipeline-2026-09-05.md",
+    "macos/Sources/Worker/PredictionJobs.swift",
+    "macos/scripts/experiment_blurball_precision.py",
+    "macos/scripts/experiment_thermal_state.swift",
+    "macos/scripts/inspect_compute_plan.swift",
+    "macos/scripts/prepare_analysis_experiment.py",
+    "macos/scripts/run_analysis_experiment.py"
+  ],
+  "signature": "ad-hoc",
+  "notarized": false,
+  "updater": "disabled",
+  "archives_from_earlier_builds": [
+    {
+      "file": "TTcut-1.2.10-macOS-arm64-electron.dmg",
+      "bytes": 241359292,
+      "sha256": "7d79b576cee26d1c270e78a5f51b5c2ea000a492a7a9b6db368a5e495340c6a1"
+    },
+    {
+      "file": "TTcut-1.2.10-macOS-arm64-electron.zip",
+      "bytes": 239658004,
+      "sha256": "657d9ef13e56c2acd451a8f69b58cf8f5e359632eb858bccee5ba59bbc7639b8"
+    }
+  ],
+  "files": [],
+  "app_only": true
+}

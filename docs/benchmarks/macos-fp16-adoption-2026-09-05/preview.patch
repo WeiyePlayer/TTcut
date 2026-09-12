@@ -1,0 +1,365 @@
+--- a/package.json
++++ b/package.json
+@@ -1,7 +1,7 @@
+ {
+   "name": "ttcut",
+-  "productName": "TTcut",
+-  "version": "1.2.11",
++  "productName": "TTcut FP16 Test",
++  "version": "1.2.11-fp16-test.1",
+   "description": "Local table-tennis rally cutter for Windows",
+   "author": "weiye",
+   "private": true,
+--- a/forge.config.ts
++++ b/forge.config.ts
+@@ -85,7 +85,7 @@
+   packagerConfig: {
+     asar: true,
+     icon: path.resolve(macBuild ? 'macos/Resources/TTcut.icns' : 'public/ttcut.ico'),
+-    ...(macBuild ? { appBundleId: 'com.weiye.ttcut.electron.macos', appCategoryType: 'public.app-category.video', extendInfo: { LSMinimumSystemVersion: '15.0' } } : {}),
++    ...(macBuild ? { name: 'TTcut FP16 Test', appBundleId: 'com.weiye.ttcut.electron.macos.fp16test', appCategoryType: 'public.app-category.video', extendInfo: { LSMinimumSystemVersion: '15.0' } } : {}),
+     executableName: 'TTcut',
+     ignore: ignoreUnbuiltSource,
+     afterExtract: [retainSupportedWindowsLocales],
+--- a/electron-builder.macos.cjs
++++ b/electron-builder.macos.cjs
+@@ -1,8 +1,8 @@
+ module.exports = {
+-  appId: 'com.weiye.ttcut.electron.macos', productName: 'TTcut',
++  appId: 'com.weiye.ttcut.electron.macos.fp16test', productName: 'TTcut FP16 Test',
+   directories: { output: 'out/make/macos/arm64' },
+-  artifactName: 'TTcut-${version}-macOS-arm64-electron.${ext}',
++  artifactName: 'TTcut-FP16-Test-${version}-macOS-arm64.${ext}',
+   publish: null,
+   mac: { icon: 'macos/Resources/TTcut.icns', target: [{ target: 'dmg', arch: ['arm64'] }, { target: 'zip', arch: ['arm64'] }], category: 'public.app-category.video', minimumSystemVersion: '15.0', identity: null },
+-  dmg: { sign: false, title: 'TTcut', contents: [{ x: 130, y: 150 }, { x: 410, y: 150, type: 'link', path: '/Applications' }] },
++  dmg: { sign: false, title: 'TTcut FP16 Test', contents: [{ x: 130, y: 150 }, { x: 410, y: 150, type: 'link', path: '/Applications' }] },
+ };
+--- a/src/main/index.ts
++++ b/src/main/index.ts
+@@ -60,7 +60,7 @@
+ const isMac = process.platform === 'darwin';
+ if (isMac) {
+   const override = app.commandLine.getSwitchValue('user-data-dir');
+-  app.setPath('userData', override ? path.resolve(override) : path.join(app.getPath('appData'), 'TTcut-Electron', ...(app.isPackaged ? [] : ['development'])));
++  app.setPath('userData', override ? path.resolve(override) : path.join(app.getPath('appData'), 'TTcut-Electron-FP16-Test', ...(app.isPackaged ? [] : ['development'])));
+ }
+ 
+ 
+--- a/src/shared/contracts.ts
++++ b/src/shared/contracts.ts
+@@ -380,7 +380,7 @@
+   }).strict().optional(),
+   calibration: calibrationSchema.optional(),
+   table_analysis: tableAnalysisSchema.optional(),
+-  inference_runtime: z.object({ engine: z.literal('coreml'), compute_units: z.enum(['cpuOnly', 'cpuAndGPU']), checkpoint_sha256: z.string().regex(/^[a-f0-9]{64}$/) }).strict().optional(),
++  inference_runtime: z.object({ engine: z.literal('coreml'), compute_units: z.enum(['cpuOnly', 'cpuAndGPU', 'cpuAndNeuralEngine']), precision: z.enum(['float32', 'float16']).optional(), prediction_concurrency: z.number().int().positive().optional(), checkpoint_sha256: z.string().regex(/^[a-f0-9]{64}$/) }).strict().optional(),
+   model_provenance: z.object({
+     // TrackNet remains readable for legacy history and explicit local development analyses.
+     profile: z.enum(LEGACY_RESULT_MODEL_PROFILES),
+--- a/src/main/macos/analysis.ts
++++ b/src/main/macos/analysis.ts
+@@ -105,7 +105,7 @@
+         ...(table ? { table_analysis: table } : {}),
+         rallies: result.rallies.map((rally, i) => ({ id: `rally_${String(i + 1).padStart(3, '0')}`, index: i + 1, start_time_seconds: rally.start, end_time_seconds: rally.end, bounce_count: rally.bounceCount })),
+         bounce_times_seconds: [...new Set(result.bounceTimes)].sort((a, b) => a - b),
+-        inference_runtime: { engine: 'coreml', compute_units: 'cpuAndGPU', checkpoint_sha256: checkpoint.blurball },
++        inference_runtime: { engine: 'coreml', compute_units: 'cpuAndNeuralEngine', precision: 'float16', prediction_concurrency: 4, checkpoint_sha256: checkpoint.blurball },
+         model_provenance: { profile: 'blurball_v1', component_version: null, roi: { x: roi.x, y: roi.y, width: roi.width, height: roi.height }, main_input: { width: roi.modelWidth, height: roi.modelHeight }, aux_input: null,
+           analysis: { schema_version: 2, mode: value.analysisMode, ...(value.analysisMode === 'two_stage' ? { interval_expansion_seconds: 0.75 } : {}), stages: value.analysisMode === 'full'
+             ? [{ name: 'full', confidence_threshold: value.blurballConfidenceThreshold, window_size: 3, window_stride: 3, retained_output: 'all_window_frames' }]
+--- a/src/main/macos/runtime.ts
++++ b/src/main/macos/runtime.ts
+@@ -35,7 +35,7 @@
+ export async function inspectMacComponents(): Promise<ComponentStatus> {
+   const error = await verifyMacRuntime().then(() => null, (error: Error) => error.message);
+   return {
+-    analysis: { available: !error, version: 'Core ML · BlurBall + Table', path: macRuntimeRoot(), acceleration: error ? 'unavailable' : 'coreml', detail: error },
++    analysis: { available: !error, version: 'Core ML · BlurBall FP16 测试版 + Table', path: macRuntimeRoot(), acceleration: error ? 'unavailable' : 'coreml', detail: error },
+     media: { available: !error, version: 'FFmpeg · x264 / x265', path: macRuntimeRoot(), active_encoder: error ? 'unavailable' : 'libx264', x264_available: !error, detail: error },
+   };
+ }
+--- a/scripts/stage-macos-runtime.py
++++ b/scripts/stage-macos-runtime.py
+@@ -32,7 +32,7 @@
+  subprocess.run(['codesign','--remove-signature',str(p)],capture_output=True)
+  for line in run('otool','-L',p).splitlines()[1:]:
+   dep=line.strip().split(' (',1)[0]
+-  if dep.startswith(str(NATIVE/'Vendor/native')): run('install_name_tool','-change',dep,'@rpath/'+Path(dep).name,p)
++  if dep.startswith(str(NATIVE/'Vendor/native')) or dep.startswith('/Users/weiye/DOS/TTcut-windows/TTcut/macos/Vendor/native'): run('install_name_tool','-change',dep,'@rpath/'+Path(dep).name,p)
+   elif dep.startswith('/Users/') or dep.startswith('/opt/homebrew/'): raise RuntimeError(f'External dependency: {dep}')
+  if p.parent.name=='lib': run('install_name_tool','-id','@rpath/'+p.name,p)
+  for rpath in re.findall(r'cmd LC_RPATH\s+cmdsize \d+\s+path (.*?) \(offset',run('otool','-l',p)):
+--- a/scripts/make-macos.mjs
++++ b/scripts/make-macos.mjs
+@@ -11,7 +11,7 @@
+ if (!process.argv.includes('--skip-native')) run('python3', ['scripts/stage-macos-runtime.py']);
+ const { api } = require('@electron-forge/core');
+ await api.package({ dir: root, platform: 'darwin', arch: 'arm64', interactive: false });
+-const app = path.join(root, 'out/TTcut-darwin-arm64/TTcut.app');
++const app = path.join(root, 'out/TTcut FP16 Test-darwin-arm64/TTcut FP16 Test.app');
+ await rename(path.join(app, 'Contents/Resources/macos'), path.join(app, 'Contents/Resources/runtime'));
+ const entitlementPath = path.join(root, '.runtime/electron-entitlements.plist');
+ await writeFile(entitlementPath, '<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>com.apple.security.cs.allow-jit</key><true/><key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/></dict></plist>');
+--- a/macos/Sources/Worker/main.swift
++++ b/macos/Sources/Worker/main.swift
+@@ -5,7 +5,7 @@
+ 
+ func nativeError() -> TTError { TTError("NATIVE_MEDIA_ERROR", String(cString: tt_last_error())) }
+ 
+-struct PreparedFrame {
++struct PreparedFrame: Sendable {
+   var index: Int
+   var time: Double
+   var pixels: [Float]
+@@ -80,6 +80,21 @@
+     ])
+     guard
+       let output = try model.prediction(from: provider).featureValue(for: "heatmaps")?
++        .multiArrayValue
++    else { throw TTError("MODEL_OUTPUT_MISSING") }
++    return output
++  }
++  func predictAsync(_ values: [Float], shape: [Int]) async throws -> MLMultiArray {
++    let array = try MLMultiArray(shape: shape.map(NSNumber.init), dataType: .float32)
++    guard array.count == values.count else { throw TTError("MODEL_INPUT_SHAPE") }
++    values.withUnsafeBufferPointer {
++      array.dataPointer.copyMemory(from: $0.baseAddress!, byteCount: values.count * 4)
++    }
++    let provider = try MLDictionaryFeatureProvider(dictionary: [
++      "frames": MLFeatureValue(multiArray: array)
++    ])
++    guard
++      let output = try await model.prediction(from: provider).featureValue(for: "heatmaps")?
+         .multiArrayValue
+     else { throw TTError("MODEL_OUTPUT_MISSING") }
+     return output
+@@ -173,16 +188,12 @@
+   }
+   func trajectories(
+     calibration: Calibration, predictor: Inference, threshold: Float, intervals: [CutRange]?
+-  ) throws -> [TrajectoryPoint] {
++  ) async throws -> [TrajectoryPoint] {
+     let roi = try AnalysisROI(calibration: calibration)
+-    let decoder = try Decoder(request.video)
+     var points: [TrajectoryPoint] = []
+     var previous: Point?
+-    var currentInterval: Int?
+     let total = request.video.frameCount ?? Int(ceil(request.video.duration * request.video.fps))
+-    func infer(_ frames: [PreparedFrame], channels: [Int], targets: [PreparedFrame]) throws {
+-      let output = try predictor.predict(
+-        frames.flatMap(\.pixels), shape: [1, 9, roi.modelHeight, roi.modelWidth])
++    func consume(_ output: MLMultiArray, channels: [Int], targets: [PreparedFrame]) throws {
+       for (channel, frame) in zip(channels, targets) {
+         let plane = try Inference.plane(output, channel: channel)
+         var detections = [TTDetection](repeating: TTDetection(), count: plane.width * plane.height)
+@@ -209,49 +220,44 @@
+         }
+       }
+     }
+-    if let intervals {
+-      func enqueue(_ a: PreparedFrame, _ b: PreparedFrame, _ c: PreparedFrame) throws {
+-        let index = intervals.firstIndex { b.time >= $0.start && b.time <= $0.end }
+-        if index != currentInterval {
+-          previous = nil
+-          currentInterval = index
++    let source = try PredictionJobs(video: request.video, roi: roi, intervals: intervals)
++    defer { source.close() }
++    typealias Pending = (job: PredictionJob, task: Task<MLMultiArray?, Error>)
++    var pending: [Pending] = []
++    func submit() throws -> Bool {
++      guard let job = try source.next() else { return false }
++      let task = Task.detached(priority: .userInitiated) { () throws -> MLMultiArray? in
++        try Task.checkCancellation()
++        guard !job.channels.isEmpty else { return nil }
++        return try await predictor.predictAsync(job.frames.flatMap(\.pixels), shape: [1,9,roi.modelHeight,roi.modelWidth])
++      }
++      pending.append((job, task))
++      return true
++    }
++    do {
++      for _ in 0..<4 { if try !submit() { break } }
++      while !pending.isEmpty {
++        try Task.checkCancellation()
++        let first = pending.removeFirst()
++        let output = try await first.task.value
++        if first.job.resetPrevious { previous = nil }
++        if let output {
++          try autoreleasepool { try consume(output, channels: first.job.channels, targets: first.job.targets) }
+         }
+-        if index != nil { try infer([a, b, c], channels: [1], targets: [b]) }
+-        if b.index % 30 == 0 { progress("refinement_analysis", b.index + 1, total) }
+-      }
+-      if let first = try decoder.prepare(roi) {
+-        if var center = try decoder.prepare(roi) {
+-          var older = first
+-          try enqueue(first, first, center)
+-          while let next = try decoder.prepare(roi) {
+-            try autoreleasepool { try enqueue(older, center, next) }
+-            older = center
+-            center = next
+-          }
+-          try enqueue(older, center, center)
+-        } else {
+-          try enqueue(first, first, first)
++        let current = first.job.progressIndex + 1
++        if current % 30 == 0 || current >= total {
++          progress(intervals != nil ? "refinement_analysis" : request.mode == .twoStage ? "candidate_analysis" : "analysis", current, total)
+         }
+-      }
+-    } else {
+-      var window: [PreparedFrame] = []
+-      while let frame = try decoder.prepare(roi) {
+-        window.append(frame)
+-        if window.count == 3 {
+-          try autoreleasepool { try infer(window, channels: [0, 1, 2], targets: window) }
+-          window.removeAll(keepingCapacity: true)
+-        }
+-        if frame.index % 30 == 0 { progress(request.mode == .twoStage ? "candidate_analysis" : "analysis", frame.index + 1, total) }
+-      }
+-      if let last = window.last {
+-        let targets = window
+-        while window.count < 3 { window.append(last) }
+-        try infer(window, channels: Array(0..<targets.count), targets: targets)
+-      }
++        _ = try submit()
++      }
++    } catch {
++      pending.forEach { $0.task.cancel() }
++      for item in pending { _ = await item.task.result }
++      throw error
+     }
+     return points
+   }
+-  func run() throws {
++  func run() async throws {
+     guard request.schemaVersion == 1, UUID(uuidString: request.taskID) != nil else {
+       throw TTError("INVALID_REQUEST")
+     }
+@@ -269,8 +275,8 @@
+     }
+     try calibration.validate()
+     let predictor = try Inference(
+-      directory: request.modelsDirectory, name: "BlurBall", units: .cpuAndGPU)
+-    var points = try trajectories(
++      directory: request.modelsDirectory, name: "BlurBall", units: .cpuAndNeuralEngine)
++    var points = try await trajectories(
+       calibration: calibration, predictor: predictor,
+       threshold: Float(request.mode == .twoStage ? request.stage1Confidence : request.confidence),
+       intervals: nil)
+@@ -279,7 +285,7 @@
+     if request.mode == .twoStage {
+       let intervals = Segments.refinement(rallies, duration: request.video.duration)
+       if !intervals.isEmpty {
+-        points = try trajectories(
++        points = try await trajectories(
+           calibration: calibration, predictor: predictor,
+           threshold: Float(request.stage2Confidence), intervals: intervals)
+         frames = try BounceDetector.detect(points, calibration: calibration)
+@@ -306,7 +312,7 @@
+   }
+   let request = try JSONDecoder().decode(AnalysisRequest.self, from: data)
+   taskID = request.taskID
+-  try Worker(request).run()
++  try await Worker(request).run()
+ } catch {
+   var event = WorkerEvent(type: "error", taskID: taskID)
+   event.error = (error as? TTError) ?? TTError("ANALYSIS_FAILED", error.localizedDescription)
+--- /dev/null
++++ b/macos/Sources/Worker/PredictionJobs.swift
+@@ -0,0 +1,95 @@
++import Foundation
++import TTcutCore
++
++struct PredictionJob: Sendable {
++  var frames: [PreparedFrame]
++  var channels: [Int]
++  var targets: [PreparedFrame]
++  var resetPrevious: Bool = false
++  var progressIndex: Int
++}
++
++/// Four queued windows plus four in-flight predictions. The producer owns the
++/// decoder; all queue state is protected by condition. No frame dropping.
++final class PredictionJobs: @unchecked Sendable {
++  private let condition = NSCondition()
++  private let completed = DispatchSemaphore(value: 0)
++  private var jobs: [PredictionJob] = []
++  private var stopped = false
++  private var finished = false
++  private var failure: Error?
++
++  init(video: VideoInfo, roi: AnalysisROI, intervals: [CutRange]?) throws {
++    let decoder = try Decoder(video)
++    DispatchQueue(label: "ttcut.fp16.decode", qos: .userInitiated).async {
++      defer {
++        self.condition.lock()
++        self.finished = true
++        self.condition.broadcast()
++        self.condition.unlock()
++        self.completed.signal()
++      }
++      do {
++        if let intervals {
++          var currentInterval: Int?
++          func enqueue(_ a: PreparedFrame, _ b: PreparedFrame, _ c: PreparedFrame) -> Bool {
++            let index = intervals.firstIndex { b.time >= $0.start && b.time <= $0.end }
++            let reset = index != currentInterval
++            currentInterval = index
++            return self.push(PredictionJob(
++              frames: index == nil ? [] : [a,b,c], channels: index == nil ? [] : [1],
++              targets: index == nil ? [] : [b], resetPrevious: reset, progressIndex: b.index))
++          }
++          if let first = try decoder.prepare(roi) {
++            if var center = try decoder.prepare(roi) {
++              var older = first
++              guard enqueue(first, first, center) else { return }
++              while let next = try autoreleasepool(invoking: { try decoder.prepare(roi) }) {
++                guard enqueue(older, center, next) else { return }
++                older = center
++                center = next
++              }
++              _ = enqueue(older, center, center)
++            } else { _ = enqueue(first, first, first) }
++          }
++        } else {
++          var frames: [PreparedFrame] = []
++          while let frame = try autoreleasepool(invoking: { try decoder.prepare(roi) }) {
++            frames.append(frame)
++            if frames.count == 3 {
++              guard self.push(PredictionJob(frames: frames, channels: [0,1,2], targets: frames, progressIndex: frame.index)) else { return }
++              frames.removeAll(keepingCapacity: true)
++            }
++          }
++          if let last = frames.last {
++            let targets = frames
++            while frames.count < 3 { frames.append(last) }
++            _ = self.push(PredictionJob(frames: frames, channels: Array(0..<targets.count), targets: targets, progressIndex: last.index))
++          }
++        }
++      } catch {
++        self.condition.lock(); self.failure = error; self.condition.unlock()
++      }
++    }
++  }
++
++  private func push(_ job: PredictionJob) -> Bool {
++    condition.lock(); defer { condition.unlock() }
++    while jobs.count >= 4 && !stopped { condition.wait() }
++    guard !stopped else { return false }
++    jobs.append(job); condition.broadcast(); return true
++  }
++
++  func next() throws -> PredictionJob? {
++    condition.lock(); defer { condition.unlock() }
++    while jobs.isEmpty && !finished && !stopped { condition.wait() }
++    if let failure { throw failure }
++    guard !jobs.isEmpty else { return nil }
++    let job = jobs.removeFirst(); condition.broadcast(); return job
++  }
++
++  func close() {
++    condition.lock(); stopped = true; jobs.removeAll(); condition.broadcast(); condition.unlock()
++    completed.wait()
++  }
++}

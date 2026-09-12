@@ -23,6 +23,10 @@ class DeviceError(WorkerError):
     code = "DEVICE_UNAVAILABLE"
 
 
+class InferenceError(WorkerError):
+    code = "INFERENCE_FAILED"
+
+
 class CalibrationError(WorkerError):
     code = "INVALID_CALIBRATION"
 
@@ -42,4 +46,3 @@ class TableModelResourceError(ModelResourceError):
 
 class TimestampError(WorkerError):
     code = "INVALID_TIMESTAMPS"
-

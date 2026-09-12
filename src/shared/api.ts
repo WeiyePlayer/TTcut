@@ -3,8 +3,6 @@ import type {
   BatchExportRequest,
   BatchExportResult,
   AppSettings,
-  BlurBallAnalysisMode,
-  RallyRecognitionMethod,
   Calibration,
   CalibrationChoice,
   TableAnalysis,
@@ -31,6 +29,8 @@ export type SelectedVideo = {
 };
 
 export type BootstrapData = {
+  windowState?: { visible: boolean };
+  capabilities?: { managedComponents: boolean; nativeWindow: boolean; shutdown: boolean; automaticUpdates: boolean };
   version: string;
   settings: AppSettings;
   components: ComponentStatus;
@@ -77,6 +77,9 @@ export type HistoryOpenResultV1 = {
 };
 
 export interface TTcutApi {
+  readonly platform?: string;
+  preparePreview?(mediaUrl: string, taskId: string): Promise<string>;
+  onPreviewProgress?(listener: (value: { taskId: string; percent: number }) => void): () => void;
   bootstrap(): Promise<BootstrapData>;
   saveSettings(settings: AppSettings): Promise<AppSettings>;
   refreshComponents(): Promise<ComponentStatus>;
@@ -118,6 +121,8 @@ export interface TTcutApi {
   openExternalUrl(url: string): Promise<void>;
   getUpdateState(): Promise<UpdateState>;
   checkForUpdates(): Promise<UpdateState>;
+  downloadUpdate(version: string): Promise<UpdateState>;
+  skipUpdate(version: string): Promise<UpdateState>;
   restartToUpdate(): Promise<void>;
   onUpdateState(listener: (state: UpdateState) => void): () => void;
   minimize(): Promise<void>;

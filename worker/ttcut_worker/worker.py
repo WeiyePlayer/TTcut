@@ -278,6 +278,7 @@ def analyze(request: dict) -> dict:
             item["lead_in_start_time_seconds"] = round(max(0.0, min(start, rally.lead_in_start_time)), 6)
         normalized.append(item)
     emit({"type": "progress", "task_id": task_id, "stage": "postprocess", "current": 1, "total": 1, "percent": 100.0})
+    detected_frames = sum(bool(point.visibility) for point in points)
     result = {
         "schema_version": 2,
         "video": {
@@ -381,6 +382,11 @@ def analyze(request: dict) -> dict:
         },
         "model_provenance": {
             "profile": profile,
+            "trajectory": {
+                "frame_count": len(points),
+                "detected_frames": detected_frames,
+                "missing_frames": len(points) - detected_frames,
+            },
             "component_version": loaded.component_version if profile == "blurball_v1" else None,
             "roi": {
                 "x": analysis_roi.x0,

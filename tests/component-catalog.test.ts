@@ -1,3 +1,7 @@
+import { beforeAll as beforeWindowsSuite, afterAll as afterWindowsSuite } from 'vitest';
+const actualPlatform = process.platform;
+beforeWindowsSuite(() => Object.defineProperty(process, 'platform', { value: 'win32' }));
+afterWindowsSuite(() => Object.defineProperty(process, 'platform', { value: actualPlatform }));
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
