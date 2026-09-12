@@ -8,7 +8,7 @@ TTcut is a local automatic table-tennis video cutter for players and enthusiasts
 
 Videos, analysis results, and history stay on the local computer. TTcut requires no account, uploads no video, and collects no telemetry. The Windows full installer and macOS packages include their runtime resources. Analysis, preview, and cutting can run offline after setup.
 
-> The current stable release is `v1.3.3` for Windows x64 and macOS 15+ on Apple Silicon.
+> The current stable Windows release is `v1.3.4`; the current stable macOS 15+ Apple Silicon release is `v1.3.3`.
 
 ## Download and installation
 
@@ -21,13 +21,13 @@ Videos, analysis results, and history stay on the local computer. TTcut requires
 
 TTcut detects an NVIDIA GPU automatically and falls back to CPU if accelerated setup or its self-test fails. Its video-processing capability reads media information, cuts and joins segments, and validates exported files.
 
-## What's new in v1.3.3
+## What's new in v1.3.4
 
-- Added Merge into one video, which cuts selected rallies from multiple videos into one output in task order.
-- Made hybrid motion-and-bounce recognition the Windows default and refined missed, truncated, and incorrectly split rallies in validated samples; macOS continues to use native Core ML continuous-visibility recognition.
-- Fixed confirmed issues in compatible preview, processed-media paths, and the merged-task list layout.
+- Custom cutting now switches between Source playback and Rally playback and adds pointer-centered mouse-wheel timeline zoom.
+- Windows updates now prompt before downloading, with Remind later, Skip this version, and an explicit restart choice after download.
+- Fixed playback targets being lost during media loading or proxy preparation, improved compatible-preview recovery for fully stalled playback, and added GPU-precision fallback, detection statistics, and local crash diagnostics.
 
-See the [v1.3.3 release notes](docs/release-notes-v1.3.3.en.md) for the complete details.
+See the [v1.3.4 release notes](docs/release-notes-v1.3.4.en.md) for the complete details.
 
 ## Contact the author on WeChat: m2924931661
 
