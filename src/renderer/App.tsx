@@ -20,6 +20,7 @@ import type { AppEvent, BootstrapData, PendingComponentImport, SelectedVideo } f
 import { DONATION_URL, GITHUB_URL, RELEASES_URL, WEBSITE_URL } from '../shared/urls';
 import { formatTimestamp } from '../domain/time';
 import { createCustomClipDraft, customExportSegments, setCustomClipSelected, type CustomRallyClip } from '../domain/custom-clips';
+import type { CustomPlaybackMode } from '../domain/custom-playback';
 import { normalizeCalibrationPoints, validateCalibration } from '../domain/calibration';
 import { isSupportedVideoFileName } from '../domain/video-input';
 import { isSupportPromptSuppressed, suppressSupportPromptForThirtyDays } from '../domain/support-prompt';
@@ -29,6 +30,7 @@ import { CalibrationSurface } from './CalibrationSurface';
 import { SupportPrompt } from './SupportPrompt';
 import { CustomCutPage } from './CustomCutPage';
 import { GlassRadioGroup } from './GlassRadioGroup';
+import { UpdatePrompt } from './UpdatePrompt';
 import packageJson from '../../package.json';
 import captureGuideImage from './assets/pingpong-table-with-pose-mannequins.png';
 import ttcutIcon from './assets/ttcut-icon.png';
@@ -68,6 +70,11 @@ function localizedError(code: string, translations: Messages): string {
 }
 
 function updateErrorMessage(code: string | null, language: Language): string {
+  if (code === 'UPDATE_DOWNLOAD_FAILED') {
+    return language === 'zh-CN'
+      ? '更新下载失败，请检查网络后重新检查更新。'
+      : 'Update download failed. Check your network connection, then check for updates again.';
+  }
   if (code === 'UPDATE_VERIFICATION_FAILED') {
     return language === 'zh-CN'
       ? '下载的更新无法验证，请从官方发布页手动下载安装。'
@@ -96,10 +103,14 @@ export function App() {
   const [forceManual, setForceManual] = useState(false);
   const [multiVideos, setMultiVideos] = useState<SelectedVideo[]>([]);
   const [updateState, setUpdateState] = useState<UpdateState>({ status: 'idle', version: null, message: null });
+  const [dismissedUpdate, setDismissedUpdate] = useState<string | null>(null);
+  const [updateActionPending, setUpdateActionPending] = useState(false);
+  const updateActionRef = useRef(false);
   const [mode, setMode] = useState<'all' | 'highlight' | 'custom'>('all');
   const [bounceThreshold, setBounceThreshold] = useState<3 | 5 | 7>(5);
   const [durationTier, setDurationTier] = useState<DurationHighlightTier>('rally');
   const [customDraft, setCustomDraft] = useState<CustomRallyClip[] | null>(null);
+  const [customPlaybackMode, setCustomPlaybackMode] = useState<CustomPlaybackMode>('source');
   const [customOutputs, setCustomOutputs] = useState<NonNullable<ExportRequest['outputs']>>({
     combined_video: true,
     rally_videos: false,
@@ -122,7 +133,6 @@ export function App() {
   const setupTaskRef = useRef<string | null>(null);
   const multiActiveRef = useRef(false);
   const settingsRef = useRef(settings);
-  const promptedUpdateVersion = useRef<string | null>(null);
   const [setupProgress, setSetupProgress] = useState<{ percent: number; stage: string; current?: number; total?: number } | null>(null);
   const [setupOutcome, setSetupOutcome] = useState<'success' | 'pending' | 'cancelled' | 'failed' | null>(null);
   const [setupFailureCode, setSetupFailureCode] = useState<string | null>(null);
@@ -187,7 +197,7 @@ export function App() {
         setAnalysisWarning(event.data.processing?.mode === 'vfr_fallback' && event.data.processing.warning_code
           ? { code: event.data.processing.warning_code, message: event.data.processing.warning_code }
           : null);
-        if (event.data.processing?.mode === 'normalized_cfr' && event.data.video.path !== video?.path) {
+        if (event.data.rallies.length > 0 && event.data.processing?.mode === 'normalized_cfr' && event.data.video.path !== video?.path) {
           void Promise.resolve(window.ttcut.acceptDroppedVideo(event.data.video.path)).then((processed) => {
             if (!processed) return;
             setVideo((current) => current ? { ...processed, name: current.name } : processed);
@@ -269,17 +279,34 @@ export function App() {
     const timeout = window.setTimeout(() => setToast(null), 3_000);
     return () => window.clearTimeout(timeout);
   }, [toast]);
-  useEffect(() => {
-    if (updateState.status !== 'downloaded' || promptedUpdateVersion.current === updateState.version) return;
-    promptedUpdateVersion.current = updateState.version;
-    if (window.confirm(`TTcut ${updateState.version ?? ''} 已下载完成。立即重启安装？\n选择“取消”可稍后重启。`)) {
-      void window.ttcut.restartToUpdate();
+  const updatePromptKey = `${updateState.status}:${updateState.version}`;
+  const runUpdateAction = async (action: 'check' | 'download' | 'skip' | 'restart') => {
+    if (updateActionRef.current) return;
+    updateActionRef.current = true;
+    setUpdateActionPending(true);
+    try {
+      if (action === 'restart') {
+        await window.ttcut.restartToUpdate();
+      } else if (action === 'check') {
+        setDismissedUpdate(null);
+        setUpdateState(await window.ttcut.checkForUpdates());
+      } else if (updateState.version) {
+        setUpdateState(await (action === 'download'
+          ? window.ttcut.downloadUpdate(updateState.version)
+          : window.ttcut.skipUpdate(updateState.version)));
+      }
+    } catch {
+      setToast(settings.language === 'zh-CN' ? '更新操作失败，请重试。' : 'The update action failed. Please try again.');
+    } finally {
+      updateActionRef.current = false;
+      setUpdateActionPending(false);
     }
-  }, [updateState]);
+  };
 
   const reset = useCallback(() => {
     setStep('select'); setVideo(null); setMetadata(null); setPoints({}); setAnalysis(null); setAnalysisId(null); setForceManual(false);
     setAnalysisWarning(null);
+    setCustomPlaybackMode('source');
     setMode('all'); setBounceThreshold(5); setDurationTier('rally'); setCustomDraft(null); setCustomOutputs({ combined_video: true, rally_videos: false, premiere_xml: false }); setProgress({ percent: 0, stage: 'probe' });
     setActiveTask(null); setExportResult(null); setError(null);
     if (videoTaskOwnerRef.current === 'single') updateVideoTaskOwner(null);
@@ -343,6 +370,7 @@ export function App() {
   const openCustomEditor = () => {
     if (!analysis) return;
     setMode('custom');
+    setCustomPlaybackMode('source');
     setCustomDraft(createCustomClipDraft(
       analysis.rallies,
       settings.pre_roll_seconds,
@@ -371,6 +399,14 @@ export function App() {
       if (videoTaskOwnerRef.current === 'single') updateVideoTaskOwner(null);
       setError({ code: errorCode(caught) }); setStep('error');
     }
+  };
+
+  const recalibrate = () => {
+    setAnalysis(null);
+    setAnalysisId(null);
+    setAnalysisWarning(null);
+    setForceManual(true);
+    setStep('calibrate');
   };
 
   const startCutting = async (preparedSelection?: CutSelectionV1, outputs?: ExportRequest['outputs']) => {
@@ -456,6 +492,7 @@ export function App() {
       setBounceThreshold(5);
       setDurationTier('rally');
       setCustomDraft(null);
+      setCustomPlaybackMode('source');
       setCustomOutputs({ combined_video: true, rally_videos: false, premiere_xml: false });
       setExportResult(null);
       setError(null);
@@ -598,6 +635,10 @@ export function App() {
       setView('multi');
       return;
     }
+    if (view !== 'auto' && step === 'custom' && customDraft && video && analysis) {
+      setView('auto');
+      return;
+    }
     if (multiVideos.length > 0) discardMulti();
     reset();
     setView('auto');
@@ -605,6 +646,7 @@ export function App() {
   const returnToSelection = () => {
     if (view === 'auto' && step === 'custom') {
       setCustomDraft(null);
+      setCustomPlaybackMode('source');
       setCustomOutputs({ combined_video: true, rally_videos: false, premiere_xml: false });
       setMode('all');
       setStep('mode');
@@ -674,14 +716,14 @@ export function App() {
                     </div>
                   </div>
                   <button className="secondary donate-button" onClick={() => void window.ttcut.openExternalUrl(DONATION_URL)}>{settings.language === 'zh-CN' ? '打赏作者' : 'Support author'}</button>
-                  <button className="secondary" disabled={updateState.status === 'checking'} onClick={() => updateState.status === 'downloaded' ? void window.ttcut.restartToUpdate() : void window.ttcut.checkForUpdates()}>{updateState.status === 'checking' ? (settings.language === 'zh-CN' ? '正在检查…' : 'Checking…') : updateState.status === 'downloaded' ? (settings.language === 'zh-CN' ? '立即重启' : 'Restart now') : (settings.language === 'zh-CN' ? '检查更新' : 'Check updates')}</button>
+                  <button className="secondary" disabled={updateActionPending || updateState.status === 'checking' || updateState.status === 'downloading'} onClick={() => updateState.status === 'available' ? setDismissedUpdate(null) : void runUpdateAction(updateState.status === 'downloaded' ? 'restart' : 'check')}>{updateState.status === 'checking' ? (settings.language === 'zh-CN' ? '正在检查…' : 'Checking…') : updateState.status === 'downloading' ? (settings.language === 'zh-CN' ? '正在下载…' : 'Downloading…') : updateState.status === 'downloaded' ? (settings.language === 'zh-CN' ? '立即重启' : 'Restart now') : updateState.status === 'available' ? (settings.language === 'zh-CN' ? '查看更新' : 'View update') : (settings.language === 'zh-CN' ? '检查更新' : 'Check updates')}</button>
                   {updateState.status === 'error' && updateState.message === 'UPDATE_VERIFICATION_FAILED' && (
                     <button className="secondary" onClick={() => void window.ttcut.openExternalUrl(RELEASES_URL)}>
                       {settings.language === 'zh-CN' ? '手动下载更新' : 'Download update manually'}
                     </button>
                   )}
                 </div>
-                {updateState.status !== 'idle' && <p className="update-detail">{updateState.status === 'up-to-date' ? (settings.language === 'zh-CN' ? '当前已是最新稳定版。' : 'You are using the latest stable version.') : updateState.status === 'available' ? (settings.language === 'zh-CN' ? '发现新版本，正在后台下载。' : 'A new version is downloading in the background.') : updateState.status === 'error' ? updateErrorMessage(updateState.message, settings.language) : updateState.status === 'unsupported' ? (settings.language === 'zh-CN' ? (isMac ? '本测试版暂不提供自动更新。' : '开发环境或当前平台不支持自动更新。') : (isMac ? 'Automatic updates are unavailable in this test build.' : 'Automatic updates are unavailable in this environment.')) : ''}</p>}
+                {updateState.status !== 'idle' && <p className="update-detail">{updateState.status === 'up-to-date' ? (settings.language === 'zh-CN' ? '当前已是最新稳定版。' : 'You are using the latest stable version.') : updateState.status === 'available' ? (settings.language === 'zh-CN' ? `发现新版本 ${updateState.version}，可选择更新或跳过此版本。` : `Version ${updateState.version} is available. You can update or skip this version.`) : updateState.status === 'skipped' ? (settings.language === 'zh-CN' ? `已跳过版本 ${updateState.version}，手动检查更新可重新选择。` : `Version ${updateState.version} was skipped. Check for updates to choose again.`) : updateState.status === 'downloading' ? (settings.language === 'zh-CN' ? `正在下载 ${updateState.version}，完成后可选择重启安装。` : `Downloading ${updateState.version}. You can choose to restart when it is ready.`) : updateState.status === 'downloaded' ? (settings.language === 'zh-CN' ? `版本 ${updateState.version} 已下载，点击“立即重启”安装。` : `Version ${updateState.version} is ready. Click Restart now to install.`) : updateState.status === 'error' ? updateErrorMessage(updateState.message, settings.language) : updateState.status === 'unsupported' ? (settings.language === 'zh-CN' ? (isMac ? '本测试版暂不提供自动更新。' : '开发环境或当前平台不支持自动更新。') : (isMac ? 'Automatic updates are unavailable in this test build.' : 'Automatic updates are unavailable in this environment.')) : ''}</p>}
               </article>
               <article className="card setting-card">
                 <div><h2>{t.language}</h2></div>
@@ -887,7 +929,7 @@ export function App() {
             )}
 
             {step === 'empty' && (
-              <div className="empty-state"><span>○</span><h1>{t.noRallies}</h1><p>{t.noRalliesDetail}</p><button className="primary" onClick={reset}>{t.chooseAnother}</button></div>
+              <div className="empty-state"><span>○</span><h1>{t.noRallies}</h1><p>{t.noRalliesDetail}</p><div className="footer-actions"><button className="secondary" onClick={reset}>{t.chooseAnother}</button><button className="primary" onClick={recalibrate}>{t.recalibrate}</button></div></div>
             )}
 
             {step === 'mode' && analysis && (
@@ -913,6 +955,8 @@ export function App() {
                 video={video}
                 analysis={analysis}
                 clips={customDraft}
+                playbackMode={customPlaybackMode}
+                onPlaybackModeChange={setCustomPlaybackMode}
                 translations={t}
                 mediaAvailable={Boolean(platformSupported && bootstrap?.components.media.available)}
                 outputs={customOutputs}
@@ -1021,6 +1065,18 @@ export function App() {
         />
       )}
       {toast && <div className="toast" role="status">{toast}</div>}
+      {bootstrap && updateState.version && (updateState.status === 'available' || updateState.status === 'downloaded') && dismissedUpdate !== updatePromptKey && (
+        <UpdatePrompt
+          version={updateState.version}
+          downloaded={updateState.status === 'downloaded'}
+          language={settings.language}
+          busy={updateActionPending}
+          onLater={() => setDismissedUpdate(updatePromptKey)}
+          onDownload={() => void runUpdateAction('download')}
+          onSkip={() => void runUpdateAction('skip')}
+          onRestart={() => void runUpdateAction('restart')}
+        />
+      )}
       {languageTransition && <div className="language-loader"><span /></div>}
       {missingComponents && <div className="modal-backdrop"><div className="modal" role="dialog" aria-modal="true" aria-label={t.componentCheckTitle}><h2>{t.componentCheckTitle}</h2><p>{interpolate(t.missingComponentsMessage, { components: missingComponents.join(settings.language === 'zh-CN' ? '、' : ', ') })}</p><div><button className="primary" onClick={() => setMissingComponents(null)}>{t.confirm}</button></div></div></div>}
       {historyConfirmation && <div className="modal-backdrop"><div className="modal" role="dialog" aria-modal="true"><h2>{historyConfirmation.kind === 'clear' ? t.clearHistoryTitle : t.deleteHistoryTitle}</h2><p>{historyConfirmation.kind === 'clear' ? t.clearHistoryConfirm : t.deleteHistoryConfirm}</p><div><button className="secondary" onClick={() => setHistoryConfirmation(null)}>{t.cancel}</button><button className="primary destructive-confirm" onClick={() => void confirmHistoryAction()}>{t.confirmDelete}</button></div></div></div>}

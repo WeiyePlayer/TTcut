@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../src/renderer/App';
 import { SUPPORT_PROMPT_SNOOZE_MS, SUPPORT_PROMPT_SNOOZE_STORAGE_KEY } from '../src/domain/support-prompt';
 import type { AppEvent, BootstrapData, SelectedVideo, TTcutApi } from '../src/shared/api';
-import type { VideoMetadata } from '../src/shared/contracts';
+import type { UpdateState, VideoMetadata } from '../src/shared/contracts';
 import { analysisResultSchema } from '../src/shared/contracts';
 import hybridProvenance from './fixtures/hybrid-provenance.json';
 
@@ -82,12 +82,14 @@ const calibration = {
 
 describe('App workflow notices and multi-task entry', () => {
   let taskListener: ((event: AppEvent) => void) | null;
+  let updateListener: ((state: UpdateState) => void) | null;
   let selectVideos: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     bootstrap.settings.language = 'zh-CN';
     window.localStorage.clear();
     taskListener = null;
+    updateListener = null;
     selectVideos = vi.fn().mockResolvedValue([]);
     const api = {
       bootstrap: vi.fn().mockResolvedValue(bootstrap),
@@ -96,7 +98,14 @@ describe('App workflow notices and multi-task entry', () => {
         return () => { taskListener = null; };
       }),
       onCloseRequested: vi.fn(() => () => undefined),
-      onUpdateState: vi.fn(() => () => undefined),
+      onUpdateState: vi.fn((listener: (state: UpdateState) => void) => {
+        updateListener = listener;
+        return () => { updateListener = null; };
+      }),
+      checkForUpdates: vi.fn().mockResolvedValue({ status: 'available', version: '1.4.0', message: null }),
+      downloadUpdate: vi.fn().mockResolvedValue({ status: 'downloading', version: '1.4.0', message: null }),
+      skipUpdate: vi.fn().mockResolvedValue({ status: 'skipped', version: '1.4.0', message: null }),
+      restartToUpdate: vi.fn().mockResolvedValue(undefined),
       getUpdateState: vi.fn().mockResolvedValue({
         status: 'idle',
         version: null,
@@ -148,6 +157,84 @@ describe('App workflow notices and multi-task entry', () => {
     const manualDownload = screen.getByRole('button', { name: 'Download update manually' });
     fireEvent.click(manualDownload);
     expect(window.ttcut.openExternalUrl).toHaveBeenCalledWith('https://github.com/WeiyePlayer/TTcut/releases');
+  });
+
+  it('offers update, later and skip choices without starting a download', async () => {
+    render(<App />);
+    await screen.findByRole('heading', { name: '选择比赛视频' });
+    act(() => updateListener?.({ status: 'available', version: '1.4.0', message: null }));
+    const prompt = screen.getByRole('dialog', { name: '发现新版本' });
+    expect(prompt).toHaveFocus();
+    expect(within(prompt).getByRole('button', { name: '立即更新' })).toBeVisible();
+    expect(within(prompt).getByRole('button', { name: '跳过此版本' })).toBeVisible();
+    expect(window.ttcut.downloadUpdate).not.toHaveBeenCalled();
+    fireEvent.click(within(prompt).getByRole('button', { name: '稍后提醒' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    act(() => updateListener?.({ status: 'available', version: '1.4.0', message: null }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(window.ttcut.skipUpdate).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: '设置' }));
+    fireEvent.click(screen.getByRole('button', { name: '查看更新' }));
+    expect(screen.getByRole('dialog', { name: '发现新版本' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '立即更新' }));
+    await waitFor(() => expect(window.ttcut.downloadUpdate).toHaveBeenCalledWith('1.4.0'));
+    expect(await screen.findByRole('button', { name: '正在下载…' })).toBeDisabled();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(window.ttcut.restartToUpdate).not.toHaveBeenCalled();
+  });
+
+  it('lets a user skip a version and reconsider it in a manual check', async () => {
+    render(<App />);
+    await screen.findByRole('heading', { name: '选择比赛视频' });
+    act(() => updateListener?.({ status: 'available', version: '1.4.0', message: null }));
+    fireEvent.click(screen.getByRole('button', { name: '跳过此版本' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(window.ttcut.skipUpdate).toHaveBeenCalledWith('1.4.0');
+    expect(window.ttcut.downloadUpdate).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '设置' }));
+    expect(screen.getByText('已跳过版本 1.4.0，手动检查更新可重新选择。')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '检查更新' }));
+    expect(await screen.findByRole('dialog', { name: '发现新版本' })).toBeVisible();
+    expect(window.ttcut.checkForUpdates).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the update offer when saving the skip fails', async () => {
+    vi.mocked(window.ttcut.skipUpdate).mockRejectedValueOnce(new Error('read-only'));
+    render(<App />);
+    await screen.findByRole('heading', { name: '选择比赛视频' });
+    act(() => updateListener?.({ status: 'available', version: '1.4.0', message: null }));
+    fireEvent.click(screen.getByRole('button', { name: '跳过此版本' }));
+    expect(await screen.findByText('更新操作失败，请重试。')).toBeVisible();
+    expect(screen.getByRole('dialog', { name: '发现新版本' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '跳过此版本' })).toBeEnabled();
+  });
+
+  it('offers a later restart and installs only after the restart button is clicked', async () => {
+    bootstrap.settings.language = 'en';
+    render(<App />);
+    await screen.findByRole('heading', { name: 'Choose match videos' });
+    act(() => updateListener?.({ status: 'downloaded', version: '1.4.0', message: null }));
+    expect(screen.getByRole('dialog', { name: 'Update downloaded' })).toBeVisible();
+    expect(window.ttcut.restartToUpdate).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Restart later' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Restart now' }));
+    await waitFor(() => expect(window.ttcut.restartToUpdate).toHaveBeenCalledTimes(1));
+  });
+
+  it('shows the English update choices and dismisses with Escape', async () => {
+    bootstrap.settings.language = 'en';
+    render(<App />);
+    await screen.findByRole('heading', { name: 'Choose match videos' });
+    act(() => updateListener?.({ status: 'available', version: '1.4.0', message: null }));
+    const prompt = screen.getByRole('dialog', { name: 'New version available' });
+    expect(within(prompt).getByRole('button', { name: 'Skip this version' })).toBeVisible();
+    expect(within(prompt).getByRole('button', { name: 'Remind me later' })).toBeVisible();
+    fireEvent.keyDown(prompt, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(window.ttcut.downloadUpdate).not.toHaveBeenCalled();
   });
 
   it('does not expose an export strategy setting', async () => {
@@ -285,6 +372,43 @@ describe('App workflow notices and multi-task entry', () => {
     expect(screen.queryByRole('radio', { name: '高精' })).toBeNull();
     expect(screen.queryByRole('radio', { name: '落台判定' })).toBeNull();
     expect(screen.queryByRole('radio', { name: '连续运动' })).toBeNull();
+  });
+
+  it.each([false, true])('recalibrates an empty result on the original video (normalized: %s)', async (normalized) => {
+    const selected = {
+      path: 'C:\\video\\empty.mov', name: 'empty.mov', size: 100,
+      mediaUrl: 'ttcut-media://empty',
+    };
+    selectVideos.mockResolvedValue([selected]);
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: '选择或将文件拖到这里' }));
+    fireEvent.click(await screen.findByRole('button', { name: '开始分析' }));
+    act(() => taskListener?.({
+      type: 'analysis-result', taskId: 'analysis-task-1',
+      analysisId: '11111111-1111-4111-8111-111111111111', calibration,
+      data: {
+        schema_version: 1, rallies: [], calibration,
+        video: metadata(normalized ? 'C:\\cache\\normalized.mp4' : selected.path),
+        source_video: metadata(selected.path),
+        processing: {
+          mode: normalized ? 'normalized_cfr' : 'source_cfr',
+          target_fps_ratio: normalized ? '30/1' : null,
+          encoder: normalized ? 'libopenh264' : null, warning_code: null,
+        },
+      },
+    }));
+    expect(await screen.findByText('没有识别到有效回合')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '重新标定球桌' }));
+    expect(screen.getByRole('button', { name: 'Calibration point 1' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '重置标定' })).toBeVisible();
+    expect(document.querySelector('.video-surface video')).toHaveAttribute('src', selected.mediaUrl);
+    fireEvent.click(screen.getByRole('button', { name: '开始分析' }));
+    await waitFor(() => expect(window.ttcut.startAnalysis).toHaveBeenLastCalledWith(expect.objectContaining({
+      videoPath: selected.path,
+      calibrationChoice: { method: 'manual', calibration },
+    })));
+    expect(window.ttcut.acceptDroppedVideo).not.toHaveBeenCalled();
+    expect(selectVideos).toHaveBeenCalledTimes(1);
   });
 
   it('shows duration tiers and exports a duration criterion for continuous results', async () => {
@@ -601,6 +725,7 @@ describe('App workflow notices and multi-task entry', () => {
     expect(document.querySelector('.custom-workspace')).not.toBeNull();
     const monitor = document.querySelector('.custom-monitor video') as HTMLVideoElement;
     expect(monitor.controls).toBe(false);
+    Object.defineProperty(monitor, 'readyState', { configurable: true, value: 2 });
     Object.defineProperty(monitor, 'paused', { configurable: true, value: true });
     fireEvent.click(monitor);
     expect(play).toHaveBeenCalledTimes(1);
@@ -736,6 +861,35 @@ describe('App workflow notices and multi-task entry', () => {
     fireEvent.click(screen.getByRole('button', { name: /Custom/ }));
     expect(Number(screen.getByRole('slider', { name: 'Resize clip end 1' }).getAttribute('aria-valuenow'))).toBe(defaultEnd);
     expect(screen.getAllByRole('checkbox', { name: /Rally/ }).every((input) => (input as HTMLInputElement).checked)).toBe(true);
+  });
+
+  it('retains playback mode within a custom draft and resets it for a new draft', async () => {
+    bootstrap.settings.language = 'en';
+    const selected = { path: 'C:\\video\\first.mp4', name: 'first.mp4', size: 100, mediaUrl: 'ttcut-media://first' };
+    selectVideos.mockResolvedValue([selected]);
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose or drop a file here' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start analysis' }));
+    act(() => taskListener?.({
+      type: 'analysis-result', taskId: 'analysis-task-1', analysisId: '11111111-1111-4111-8111-111111111111', calibration,
+      data: { schema_version: 1, video: metadata(selected.path), calibration, rallies: [
+        { id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 1, end_time_seconds: 2 },
+      ] },
+    }));
+    fireEvent.click(await screen.findByRole('button', { name: /Custom/ }));
+    expect(screen.getByRole('button', { name: 'Source playback' })).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(screen.getByRole('button', { name: 'Source playback' }));
+    expect(screen.getByRole('button', { name: 'Rally playback' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Auto Cut' }));
+    expect(screen.getByRole('button', { name: 'Rally playback' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Start cutting' }));
+    await waitFor(() => expect(window.ttcut.startExport).toHaveBeenCalledTimes(1));
+    act(() => taskListener?.({ type: 'error', taskId: 'export-task-1', code: 'EXPORT_CANCELLED', message: 'EXPORT_CANCELLED' }));
+    expect(await screen.findByRole('button', { name: 'Rally playback' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    fireEvent.click(await screen.findByRole('button', { name: /Custom/ }));
+    expect(screen.getByRole('button', { name: 'Source playback' })).toBeVisible();
   });
 
   it('keeps the export support prompt visible across pages until it is rejected', async () => {

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import math
+import re
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,7 +13,7 @@ import torch
 
 from .blurball_models import LoadedBlurBall
 from .analysis_intervals import interval_index_for_time
-from .errors import DeviceError, VideoError
+from .errors import DeviceError, InferenceError, VideoError
 from .roi import AnalysisRoi, DEFAULT_ROI_MODEL_SCALE, model_dimensions
 from .types import TrajectoryPoint
 from .video import FramePacket, StreamingVideoReader, VideoInfo
@@ -24,6 +26,12 @@ BLURBALL_STEP = 3
 BLURBALL_MAX_DISPLACEMENT_PIXELS = 100.0
 BLURBALL_BATCH_SIZE = 16
 BLURBALL_CPU_BATCH_SIZE = 4
+BLURBALL_CUDA_FP32_BATCH_SIZE = 4
+CUDA_FP32_ONLY_GPU_PATTERN = re.compile(
+    r"\b(?:GTX\s*16(?:30|50|60)(?:\s*(?:Ti|SUPER))?|"
+    r"T(?:400|550|600|1000|1200|2000)|K40m)\b",
+    re.IGNORECASE,
+)
 _MEAN = np.asarray([0.485, 0.456, 0.406], dtype=np.float32)[:, None, None]
 _STD = np.asarray([0.229, 0.224, 0.225], dtype=np.float32)[:, None, None]
 
@@ -142,7 +150,9 @@ def _decode_heatmap(
 ) -> tuple[tuple[float, float, float], ...]:
     import cv2
 
-    if heatmap.ndim != 2 or not np.isfinite(heatmap).all() or float(np.max(heatmap)) <= confidence_threshold:
+    if heatmap.ndim != 2 or not heatmap.size or not np.isfinite(heatmap).all():
+        raise InferenceError("BlurBall produced an invalid detection heatmap.")
+    if float(np.max(heatmap)) <= confidence_threshold:
         return ()
     _, thresholded = cv2.threshold(
         heatmap,
@@ -177,8 +187,16 @@ class BlurBallPredictor:
     ):
         if loaded.device.type not in {"cpu", "cuda"}:
             raise ValueError("BlurBall inference requires a CPU or CUDA device.")
+        gpu_name = torch.cuda.get_device_name(loaded.device) if loaded.device.type == "cuda" else None
+        # These named families have reported AMP NaNs/empty detections. Match
+        # complete model names, not compute capability or prefixes such as T4.
+        # https://github.com/ultralytics/ultralytics/blob/main/ultralytics/utils/checks.py
+        unsafe_fp16 = bool(gpu_name and CUDA_FP32_ONLY_GPU_PATTERN.search(gpu_name))
+        self._mixed_precision_enabled = loaded.device.type == "cuda" and not unsafe_fp16
         if batch_size is None:
-            batch_size = BLURBALL_CPU_BATCH_SIZE if loaded.device.type == "cpu" else BLURBALL_BATCH_SIZE
+            batch_size = BLURBALL_CPU_BATCH_SIZE if loaded.device.type == "cpu" else (
+                BLURBALL_BATCH_SIZE if self._mixed_precision_enabled else BLURBALL_CUDA_FP32_BATCH_SIZE
+            )
         if batch_size <= 0:
             raise ValueError("BlurBall inference requires a positive batch size.")
         if not math.isfinite(confidence_threshold) or not 0 <= confidence_threshold <= 1:
@@ -186,6 +204,42 @@ class BlurBallPredictor:
         self.loaded = loaded
         self.batch_size = batch_size
         self.confidence_threshold = confidence_threshold
+        print(
+            f"BlurBall inference runtime: device={loaded.device}, torch={torch.__version__}, "
+            f"gpu={gpu_name}, batch_size={batch_size}, "
+            f"precision={'float16' if self._mixed_precision_enabled else 'float32'}, "
+            f"confidence_threshold={confidence_threshold}.",
+            file=sys.stderr, flush=True,
+        )
+
+    def _infer_heatmaps(self, tensor: torch.Tensor) -> np.ndarray:
+        # Validate logits before sigmoid: +/-inf would otherwise become valid
+        # looking 0/1 heatmaps, and NaN used to silently become missing balls.
+        for attempt in range(2):
+            if (self.loaded.device.type == "cuda" and not self._mixed_precision_enabled
+                    and tensor.shape[0] > BLURBALL_CUDA_FP32_BATCH_SIZE):
+                return np.concatenate([
+                    self._infer_heatmaps(part)
+                    for part in tensor.split(BLURBALL_CUDA_FP32_BATCH_SIZE)
+                ], axis=0)
+            with torch.inference_mode():
+                if self._mixed_precision_enabled:
+                    with torch.autocast(device_type="cuda", dtype=torch.float16):
+                        logits = self.loaded.model(tensor)[0]
+                else:
+                    logits = self.loaded.model(tensor)[0]
+                if bool(torch.isfinite(logits).all()):
+                    return logits.sigmoid().float().cpu().numpy()
+            if not self._mixed_precision_enabled or attempt:
+                raise InferenceError("BlurBall inference produced non-finite values in float32.")
+            self._mixed_precision_enabled = False
+            self.batch_size = min(self.batch_size, BLURBALL_CUDA_FP32_BATCH_SIZE)
+            print(
+                "BlurBall inference produced non-finite float16 values; retrying this batch "
+                "and continuing in float32.",
+                file=sys.stderr, flush=True,
+            )
+        raise AssertionError("Unreachable inference retry state")
 
     @staticmethod
     def _window(
@@ -259,18 +313,10 @@ class BlurBallPredictor:
                 if is_cuda:
                     torch.cuda.synchronize(self.loaded.device)
                 inference_started = time.perf_counter()
+                heatmaps = self._infer_heatmaps(tensor)
                 if is_cuda:
-                    with torch.inference_mode(), torch.autocast(
-                        device_type="cuda",
-                        dtype=torch.float16,
-                    ):
-                        output = self.loaded.model(tensor)[0].sigmoid()
                     torch.cuda.synchronize(self.loaded.device)
-                else:
-                    with torch.inference_mode():
-                        output = self.loaded.model(tensor)[0].sigmoid()
                 inference_seconds += time.perf_counter() - inference_started
-                heatmaps = output.float().cpu().numpy()
             except RuntimeError as error:
                 if is_cuda and "out of memory" in str(error).lower():
                     torch.cuda.empty_cache()
@@ -416,18 +462,10 @@ class BlurBallPredictor:
                 if is_cuda:
                     torch.cuda.synchronize(self.loaded.device)
                 inference_started = time.perf_counter()
+                heatmaps = self._infer_heatmaps(tensor)
                 if is_cuda:
-                    with torch.inference_mode(), torch.autocast(
-                        device_type="cuda",
-                        dtype=torch.float16,
-                    ):
-                        output = self.loaded.model(tensor)[0].sigmoid()
                     torch.cuda.synchronize(self.loaded.device)
-                else:
-                    with torch.inference_mode():
-                        output = self.loaded.model(tensor)[0].sigmoid()
                 inference_seconds += time.perf_counter() - inference_started
-                heatmaps = output.float().cpu().numpy()
             except RuntimeError as error:
                 if is_cuda and "out of memory" in str(error).lower():
                     torch.cuda.empty_cache()

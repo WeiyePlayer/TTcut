@@ -415,6 +415,7 @@ export async function startAnalysis(
         model: ballModelProfile,
         modelInput: workerResult.model_provenance?.main_input,
         analysisRoi: workerResult.model_provenance?.roi,
+        trajectory: workerResult.model_provenance?.trajectory,
         processingMode: processingMedia.mode,
         recognition: 'rally_recognition' in workerResult ? workerResult.rally_recognition : 'bounce_events',
       })}`).catch(() => undefined);
@@ -455,6 +456,10 @@ export async function startAnalysis(
   })();
   void logLine(taskId, 'INFO', `Analysis started for ${path.basename(sourceMetadata.path)}`);
   void logLine(taskId, 'INFO', `Analysis input: ${JSON.stringify({
+    requestedDevice,
+    pixelFormat: sourceMetadata.pixel_format,
+    colorTransfer: sourceMetadata.color_transfer,
+    colorPrimaries: sourceMetadata.color_primaries,
     codec: sourceMetadata.video_codec, width: sourceMetadata.width, height: sourceMetadata.height,
     fps: sourceMetadata.fps, frameCount: sourceMetadata.frame_count,
     variableFrameRate: sourceMetadata.variable_frame_rate,

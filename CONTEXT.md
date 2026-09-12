@@ -98,6 +98,24 @@ its Playback Target Clip. It does not change clip selection, focus, or the
 Custom Rally Clip itself.
 _Avoid_: persistent active row, selected Rally
 
+## Source Playback
+
+The custom editor's preview mode covering the source video's full timeline,
+including the gaps between selected Custom Rally Clips.
+_Avoid_: export mode, all rallies
+
+## Rally Playback
+
+The custom editor's preview mode covering the selected Custom Rally Clips in
+time order. An empty track has the same playback coverage as Source Playback.
+_Avoid_: highlight mode, export selection
+
+## Temporary Rally Preview
+
+An explicitly requested preview of an unselected Custom Rally Clip during
+Rally Playback, independent of the draft's selection and export contents.
+_Avoid_: selected clip, added rally
+
 ## Manual Rally Clip
 
 A Custom Rally Clip created directly on the timeline rather than from a

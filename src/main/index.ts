@@ -32,6 +32,7 @@ import { purgeRemovedModelAssets } from './retired-model-assets';
 import { startExport } from './export';
 import { startBatchExport } from './batch-export';
 import { getLogDirectory, logLine } from './logger';
+import { installRuntimeDiagnostics, attachWindowDiagnostics } from './runtime-diagnostics';
 import { getHistoryStore } from './history';
 import { clearMediaPaths, installMediaProtocol, registeredVideoPath, registerMediaPath } from './media-protocol';
 import { disposePreviewMedia, hasPreviewMedia, preparePreviewMedia } from './preview-media';
@@ -82,6 +83,7 @@ if (e2eHarnessEnabled() && process.env.TTCUT_E2E_USER_DATA) {
   app.setPath('userData', path.resolve(process.env.TTCUT_E2E_USER_DATA));
 }
 if (e2eHarnessEnabled()) app.disableHardwareAcceleration();
+if (!installerMigrationRequest) installRuntimeDiagnostics();
 
 function currentWindow(): BrowserWindow {
   if (!mainWindow || mainWindow.isDestroyed()) throw new Error('WINDOW_UNAVAILABLE');
@@ -321,6 +323,8 @@ function registerIpc(): void {
   ipcMain.handle(IPC.windowMinimize, () => currentWindow().minimize());
   ipcMain.handle(IPC.updateGetState, () => getUpdater().getState());
   ipcMain.handle(IPC.updateCheck, () => getUpdater().check());
+  ipcMain.handle(IPC.updateDownload, (_event, version: unknown) => getUpdater().download(version));
+  ipcMain.handle(IPC.updateSkip, (_event, version: unknown) => getUpdater().skip(version));
   ipcMain.handle(IPC.updateInstall, () => getUpdater().restartToInstall());
   ipcMain.handle(IPC.windowToggleMaximize, () => {
     const window = currentWindow();
@@ -372,6 +376,7 @@ async function createWindow(): Promise<void> {
       webSecurity: true,
     },
   });
+  attachWindowDiagnostics(mainWindow);
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   mainWindow.webContents.on('will-navigate', (event, url) => {
     const allowed = MAIN_WINDOW_VITE_DEV_SERVER_URL && url.startsWith(MAIN_WINDOW_VITE_DEV_SERVER_URL);

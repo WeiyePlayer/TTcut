@@ -9,9 +9,11 @@ import {
   setCustomClipSelected,
   type CustomRallyClip,
 } from '../domain/custom-clips';
-import { CustomTimeline, type TimelineSeekIntent, type TimelineToolMode } from './CustomTimeline';
+import { CustomTimeline, type TimelineToolMode } from './CustomTimeline';
 import type { Messages } from './i18n';
 import { useCompatiblePreview } from './use-compatible-preview';
+import { useCustomPlayback } from './use-custom-playback';
+import type { CustomPlaybackMode } from '../domain/custom-playback';
 
 const PLAYBACK_CUE_DURATION_MS = 500;
 const PLAYBACK_SCROLL_TIMEOUT_MS = 800;
@@ -76,6 +78,10 @@ function PlusIcon() {
 
 function TrashIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 7h16M10 11v6m4-6v6M9 7l.8-2h4.4l.8 2M6.5 7l.8 12h9.4l.8-12" /></svg>;
+}
+
+function ZoomIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="6" /><path d="m14.5 14.5 5.5 5.5M7 10h6M10 7v6" /></svg>;
 }
 
 function manualClipId(): string | null {
@@ -143,6 +149,8 @@ export function CustomCutPage({
   video,
   analysis,
   clips,
+  playbackMode,
+  onPlaybackModeChange,
   translations,
   mediaAvailable,
   onClipsChange,
@@ -154,6 +162,8 @@ export function CustomCutPage({
   video: SelectedVideo;
   analysis: AnalysisResultV1;
   clips: readonly CustomRallyClip[];
+  playbackMode: CustomPlaybackMode;
+  onPlaybackModeChange: (mode: CustomPlaybackMode) => void;
   translations: Messages;
   mediaAvailable: boolean;
   onClipsChange: (clips: CustomRallyClip[]) => void;
@@ -173,10 +183,9 @@ export function CustomCutPage({
   const playbackFrameRequestRef = useRef<number | null>(null);
   const playbackLocationSequenceRef = useRef(0);
   const lastPlaybackClipIdRef = useRef<string | null>(null);
-  const locatePlaybackClipRef = useRef<(time: number, reason: 'continuous' | 'commit') => void>(() => undefined);
+  const playbackTickRef = useRef<() => void>(() => undefined);
   const currentTimeRef = useRef(0);
   const preview = useCompatiblePreview(videoRef, video.mediaUrl);
-  const isPreviewSeekingRef = useRef(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [playbackCue, setPlaybackCue] = useState<PlaybackCue | null>(null);
   const [toolMode, setToolMode] = useState<TimelineToolMode>(null);
@@ -290,16 +299,15 @@ export function CustomCutPage({
     lastPlaybackClipIdRef.current = target.clipId;
     beginPlaybackLocation(target.clipId);
   }, [beginPlaybackLocation, cancelPlaybackLocation, clips]);
-  locatePlaybackClipRef.current = locatePlaybackClip;
 
   const requestNextVideoFrame = useCallback(() => {
     const player = videoRef.current;
     if (!player || player.paused || player.ended) return;
     const requestVideoFrameCallback = player.requestVideoFrameCallback;
     if (typeof requestVideoFrameCallback !== 'function') return;
-    playbackFrameRequestRef.current = requestVideoFrameCallback.call(player, (_now, metadata) => {
+    playbackFrameRequestRef.current = requestVideoFrameCallback.call(player, () => {
       playbackFrameRequestRef.current = null;
-      if (!isPreviewSeekingRef.current) locatePlaybackClipRef.current(metadata.mediaTime, 'continuous');
+      playbackTickRef.current();
       requestNextVideoFrame();
     });
   }, []);
@@ -321,6 +329,12 @@ export function CustomCutPage({
     currentTimeRef.current = time;
     setCurrentTime(time);
   }, []);
+
+  const playback = useCustomPlayback({
+    videoRef, preview, clips, mode: playbackMode, duration: analysis.video.duration_seconds,
+    onModeChange: onPlaybackModeChange, onTime: updatePlaybackTime, onLocate: locatePlaybackClip,
+  });
+  playbackTickRef.current = () => playback.tick(false);
 
   const cancelExportClose = useCallback(() => {
     if (exportCloseTimerRef.current === null) return;
@@ -349,22 +363,7 @@ export function CustomCutPage({
     if (target?.clipId !== playbackCue.clipId) cancelPlaybackLocation();
   }, [cancelPlaybackLocation, clips, playbackCue]);
 
-  const seek = useCallback((time: number, intent: TimelineSeekIntent) => {
-    const player = videoRef.current;
-    if (!player) return;
-    const nextTime = Math.max(0, Math.min(analysis.video.duration_seconds, time));
-    isPreviewSeekingRef.current = intent === 'preview';
-    player.currentTime = nextTime;
-    updatePlaybackTime(nextTime);
-    if (intent === 'commit') locatePlaybackClip(nextTime, 'commit');
-  }, [analysis.video.duration_seconds, locatePlaybackClip, updatePlaybackTime]);
-
-  const togglePlayback = useCallback(() => {
-    const player = videoRef.current;
-    if (!player) return;
-    if (player.paused) void Promise.resolve(player.play()).catch(() => undefined);
-    else player.pause();
-  }, []);
+  const { seek, togglePlayback, playClip } = playback;
 
   const handleVideoKeyDown = useCallback((event: React.KeyboardEvent<HTMLVideoElement>) => {
     if (event.repeat || (event.code !== 'Space' && event.key !== ' ')) return;
@@ -386,16 +385,6 @@ export function CustomCutPage({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [togglePlayback]);
-
-  const playClip = (clip: CustomRallyClip) => {
-    const player = videoRef.current;
-    if (!player) return;
-    isPreviewSeekingRef.current = false;
-    player.currentTime = clip.start;
-    updatePlaybackTime(clip.start);
-    locatePlaybackClip(clip.start, 'commit');
-    void Promise.resolve(player.play()).catch(() => undefined);
-  };
 
   const toggleTool = (nextTool: Exclude<TimelineToolMode, null>) => {
     setToolMode((active) => active === nextTool ? null : nextTool);
@@ -470,10 +459,10 @@ export function CustomCutPage({
         <div className="custom-workspace-right">
           <div className="custom-monitor-slot"><div className="custom-monitor">
             {preview.status !== 'ready' && <div className="custom-preview-status" role={preview.status === 'failed' ? 'alert' : 'status'}>{preview.status === 'preparing' ? translations.previewPreparing : translations.previewFailed}</div>}
-            <CompatibleVideo hdr={Boolean(analysis.video.native_video && analysis.video.native_video.hdr !== 'sdr')} ref={videoRef} src={preview.url} controls={false} preload={preview.url === video.mediaUrl ? 'metadata' : 'auto'} playsInline tabIndex={0} aria-label={translations.togglePlayback} onClick={togglePlayback} onKeyDown={handleVideoKeyDown} onLoadedMetadata={(event) => { lastPlaybackClipIdRef.current = null; isPreviewSeekingRef.current = false; event.currentTarget.currentTime = 0; updatePlaybackTime(0); }} onPlay={startVideoFrameTracking} onPause={stopVideoFrameTracking} onEnded={stopVideoFrameTracking} onTimeUpdate={(event) => { const time = event.currentTarget.currentTime; updatePlaybackTime(time); if (!isPreviewSeekingRef.current) locatePlaybackClip(time, 'continuous'); }} onSeeked={(event) => updatePlaybackTime(event.currentTarget.currentTime)} />
+            <CompatibleVideo hdr={Boolean(analysis.video.native_video && analysis.video.native_video.hdr !== 'sdr')} ref={videoRef} src={preview.url} controls={false} preload={preview.url === video.mediaUrl ? 'metadata' : 'auto'} playsInline tabIndex={0} aria-label={translations.togglePlayback} onClick={togglePlayback} onKeyDown={handleVideoKeyDown} onLoadedMetadata={() => { lastPlaybackClipIdRef.current = null; playback.tick(); }} onPlay={() => { playback.tick(); startVideoFrameTracking(); }} onPause={stopVideoFrameTracking} onEnded={stopVideoFrameTracking} onTimeUpdate={() => playback.tick()} onSeeked={() => playback.tick()} />
           </div></div>
 
-          <CustomTimeline clips={clips} duration={analysis.video.duration_seconds} fps={analysis.video.fps} currentTime={currentTime} timelineLabel={translations.timeline} resizeStartLabel={translations.resizeStart} resizeEndLabel={translations.resizeEnd} toolMode={toolMode} onSeek={seek} onScrubCancel={() => { isPreviewSeekingRef.current = false; }} onPlayClip={playClip} onAddAt={addManualAt} onDeleteClip={(clipId) => onClipsChange(deleteCustomClip(clips, clipId))} onResize={(clipId, edge, time) => {
+          <CustomTimeline clips={clips} duration={analysis.video.duration_seconds} fps={analysis.video.fps} currentTime={currentTime} timelineLabel={translations.timeline} resizeStartLabel={translations.resizeStart} resizeEndLabel={translations.resizeEnd} toolMode={toolMode} onSeek={seek} onScrubCancel={playback.cancelScrub} onPlayClip={playClip} onAddAt={addManualAt} onDeleteClip={(clipId) => onClipsChange(deleteCustomClip(clips, clipId))} onResize={(clipId, edge, time) => {
             const nextClips = resizeCustomClip(clips, clipId, edge, time, analysis.video.duration_seconds, analysis.video.fps, showBounceCounts ? analysis.bounce_times_seconds : undefined);
             onClipsChange(nextClips);
             const resized = nextClips.find((clip) => clip.clipId === clipId);
@@ -484,6 +473,8 @@ export function CustomCutPage({
             <div className="timeline-tool-buttons" role="group" aria-label={translations.timelineTools}>
               <button className={`timeline-tool${toolMode === 'add' ? ' is-active' : ''}`} type="button" aria-label={translations.addManualRally} title={translations.addManualRally} aria-pressed={toolMode === 'add'} onClick={() => toggleTool('add')}><PlusIcon /></button>
               <button className={`timeline-tool${toolMode === 'delete' ? ' is-active' : ''}`} type="button" aria-label={translations.deleteRally} title={translations.deleteRally} aria-pressed={toolMode === 'delete'} onClick={() => toggleTool('delete')}><TrashIcon /></button>
+              <button className={`timeline-tool${toolMode === 'zoom' ? ' is-active' : ''}`} type="button" aria-label={translations.zoomTimeline} title={translations.zoomTimelineHint} aria-pressed={toolMode === 'zoom'} onClick={() => toggleTool('zoom')}><ZoomIcon /></button>
+              <button className={`timeline-tool playback-mode-toggle${playbackMode === 'rallies' ? ' is-active' : ''}`} type="button" aria-pressed={playbackMode === 'rallies'} title={playbackMode === 'rallies' ? translations.switchToSourcePlayback : translations.switchToRallyPlayback} onClick={playback.switchMode}>{playbackMode === 'rallies' ? translations.rallyPlayback : translations.sourcePlayback}</button>
             </div>
             <div className={`custom-export-launcher floating-launcher${exportOptionsOpen ? ' is-open' : ''}`} onPointerLeave={scheduleExportClose}>
               <div className="custom-export-options floating-launch-options" role="group" aria-label={translations.customExportOptions} onPointerEnter={cancelExportClose} onPointerLeave={scheduleExportClose}>
