@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen } from '@testing-library/react';
 import { useRef } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useCompatiblePreview } from '../src/renderer/use-compatible-preview';
@@ -21,6 +21,24 @@ function setup() {
 }
 
 describe('compatible preview recovery', () => {
+  it('exposes the playing intent during recovery even after the media element pauses', async () => {
+    setup();
+    const video = document.createElement('video');
+    Object.defineProperties(video, { paused: { value: false, writable: true }, readyState: { value: 2 }, videoWidth: { value: 1280 }, videoHeight: { value: 720 } });
+    video.currentTime = 3;
+    vi.mocked(video.pause).mockImplementation(() => { Object.defineProperty(video, 'paused', { value: true }); });
+    const ref = { current: video };
+    const { result } = renderHook(() => useCompatiblePreview(ref, 'ttcut-media://media/source'));
+    await act(async () => { fireEvent.error(video); });
+    expect(video.paused).toBe(true);
+    expect(result.current.getPlaybackIntent()).toEqual({ time: 3, playing: true, pending: true });
+    act(() => result.current.seekTo(9, true));
+    act(() => result.current.togglePlayback());
+    expect(result.current.getPlaybackIntent()).toEqual({ time: 9, playing: false, pending: true });
+    await act(async () => { fireEvent.loadedData(video); });
+    expect(video.currentTime).toBe(9);
+    expect(video.play).not.toHaveBeenCalled();
+  });
   it('defers to the native macOS preview pipeline instead of racing a second transcode', () => {
     const prepareVideoPreview = vi.fn();
     vi.stubGlobal('ttcut', { platform: 'darwin', preparePreview: vi.fn(), prepareVideoPreview });

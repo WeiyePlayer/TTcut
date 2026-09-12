@@ -36,6 +36,15 @@ export function useCompatiblePreview(videoRef: RefObject<HTMLVideoElement | null
     pending.current = { source, time, playing };
     applyPending();
   }, [applyPending, source]);
+  const getPlaybackIntent = useCallback(() => {
+    const video = videoRef.current;
+    const intent = pending.current?.source === source ? pending.current : null;
+    return {
+      time: intent?.time ?? video?.currentTime ?? 0,
+      playing: intent?.playing ?? (video ? !video.paused && !video.ended : false),
+      pending: intent !== null,
+    };
+  }, [source, videoRef]);
   const togglePlayback = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -76,6 +85,7 @@ export function useCompatiblePreview(videoRef: RefObject<HTMLVideoElement | null
       }));
       resumeTime = pending.current?.time ?? (Number.isFinite(video.currentTime) ? video.currentTime : 0);
       resumePlayback = pending.current?.playing ?? !video.paused;
+      pending.current ??= { source, time: resumeTime, playing: resumePlayback };
       preparing.current = true;
       video.pause();
       setState({ source, url: source, status: 'preparing' });
@@ -141,5 +151,5 @@ export function useCompatiblePreview(videoRef: RefObject<HTMLVideoElement | null
       video.removeEventListener('playing', playing);
     };
   }, [source, videoRef, applyPending]);
-  return { ...(state.source === source ? state : { source, url: source, status: 'ready' as const }), seekTo, togglePlayback };
+  return { ...(state.source === source ? state : { source, url: source, status: 'ready' as const }), seekTo, togglePlayback, getPlaybackIntent };
 }

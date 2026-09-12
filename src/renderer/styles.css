@@ -394,6 +394,7 @@ td input { accent-color: var(--blue); }
 .timeline-tool:hover { background: var(--secondary-hover); }
 .timeline-tool.is-active { border-color: var(--blue); background: var(--blue); color: white; box-shadow: 0 3px 10px rgba(58,131,247,.22); }
 .timeline-tool svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.timeline-tool.playback-mode-toggle { width: auto; padding: 0 12px; white-space: nowrap; font-size: 12px; }
 .custom-workspace-right .custom-export-launcher { align-self: end; justify-self: end; }
 
 .success-heading { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }

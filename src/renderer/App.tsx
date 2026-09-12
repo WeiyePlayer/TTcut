@@ -20,6 +20,7 @@ import type { AppEvent, BootstrapData, PendingComponentImport, SelectedVideo } f
 import { DONATION_URL, GITHUB_URL, RELEASES_URL, WEBSITE_URL } from '../shared/urls';
 import { formatTimestamp } from '../domain/time';
 import { createCustomClipDraft, customExportSegments, setCustomClipSelected, type CustomRallyClip } from '../domain/custom-clips';
+import type { CustomPlaybackMode } from '../domain/custom-playback';
 import { normalizeCalibrationPoints, validateCalibration } from '../domain/calibration';
 import { isSupportedVideoFileName } from '../domain/video-input';
 import { isSupportPromptSuppressed, suppressSupportPromptForThirtyDays } from '../domain/support-prompt';
@@ -109,6 +110,7 @@ export function App() {
   const [bounceThreshold, setBounceThreshold] = useState<3 | 5 | 7>(5);
   const [durationTier, setDurationTier] = useState<DurationHighlightTier>('rally');
   const [customDraft, setCustomDraft] = useState<CustomRallyClip[] | null>(null);
+  const [customPlaybackMode, setCustomPlaybackMode] = useState<CustomPlaybackMode>('source');
   const [customOutputs, setCustomOutputs] = useState<NonNullable<ExportRequest['outputs']>>({
     combined_video: true,
     rally_videos: false,
@@ -304,6 +306,7 @@ export function App() {
   const reset = useCallback(() => {
     setStep('select'); setVideo(null); setMetadata(null); setPoints({}); setAnalysis(null); setAnalysisId(null); setForceManual(false);
     setAnalysisWarning(null);
+    setCustomPlaybackMode('source');
     setMode('all'); setBounceThreshold(5); setDurationTier('rally'); setCustomDraft(null); setCustomOutputs({ combined_video: true, rally_videos: false, premiere_xml: false }); setProgress({ percent: 0, stage: 'probe' });
     setActiveTask(null); setExportResult(null); setError(null);
     if (videoTaskOwnerRef.current === 'single') updateVideoTaskOwner(null);
@@ -367,6 +370,7 @@ export function App() {
   const openCustomEditor = () => {
     if (!analysis) return;
     setMode('custom');
+    setCustomPlaybackMode('source');
     setCustomDraft(createCustomClipDraft(
       analysis.rallies,
       settings.pre_roll_seconds,
@@ -488,6 +492,7 @@ export function App() {
       setBounceThreshold(5);
       setDurationTier('rally');
       setCustomDraft(null);
+      setCustomPlaybackMode('source');
       setCustomOutputs({ combined_video: true, rally_videos: false, premiere_xml: false });
       setExportResult(null);
       setError(null);
@@ -630,6 +635,10 @@ export function App() {
       setView('multi');
       return;
     }
+    if (view !== 'auto' && step === 'custom' && customDraft && video && analysis) {
+      setView('auto');
+      return;
+    }
     if (multiVideos.length > 0) discardMulti();
     reset();
     setView('auto');
@@ -637,6 +646,7 @@ export function App() {
   const returnToSelection = () => {
     if (view === 'auto' && step === 'custom') {
       setCustomDraft(null);
+      setCustomPlaybackMode('source');
       setCustomOutputs({ combined_video: true, rally_videos: false, premiere_xml: false });
       setMode('all');
       setStep('mode');
@@ -945,6 +955,8 @@ export function App() {
                 video={video}
                 analysis={analysis}
                 clips={customDraft}
+                playbackMode={customPlaybackMode}
+                onPlaybackModeChange={setCustomPlaybackMode}
                 translations={t}
                 mediaAvailable={Boolean(platformSupported && bootstrap?.components.media.available)}
                 outputs={customOutputs}

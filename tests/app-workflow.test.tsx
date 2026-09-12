@@ -863,6 +863,35 @@ describe('App workflow notices and multi-task entry', () => {
     expect(screen.getAllByRole('checkbox', { name: /Rally/ }).every((input) => (input as HTMLInputElement).checked)).toBe(true);
   });
 
+  it('retains playback mode within a custom draft and resets it for a new draft', async () => {
+    bootstrap.settings.language = 'en';
+    const selected = { path: 'C:\\video\\first.mp4', name: 'first.mp4', size: 100, mediaUrl: 'ttcut-media://first' };
+    selectVideos.mockResolvedValue([selected]);
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose or drop a file here' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start analysis' }));
+    act(() => taskListener?.({
+      type: 'analysis-result', taskId: 'analysis-task-1', analysisId: '11111111-1111-4111-8111-111111111111', calibration,
+      data: { schema_version: 1, video: metadata(selected.path), calibration, rallies: [
+        { id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 1, end_time_seconds: 2 },
+      ] },
+    }));
+    fireEvent.click(await screen.findByRole('button', { name: /Custom/ }));
+    expect(screen.getByRole('button', { name: 'Source playback' })).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(screen.getByRole('button', { name: 'Source playback' }));
+    expect(screen.getByRole('button', { name: 'Rally playback' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Auto Cut' }));
+    expect(screen.getByRole('button', { name: 'Rally playback' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Start cutting' }));
+    await waitFor(() => expect(window.ttcut.startExport).toHaveBeenCalledTimes(1));
+    act(() => taskListener?.({ type: 'error', taskId: 'export-task-1', code: 'EXPORT_CANCELLED', message: 'EXPORT_CANCELLED' }));
+    expect(await screen.findByRole('button', { name: 'Rally playback' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    fireEvent.click(await screen.findByRole('button', { name: /Custom/ }));
+    expect(screen.getByRole('button', { name: 'Source playback' })).toBeVisible();
+  });
+
   it('keeps the export support prompt visible across pages until it is rejected', async () => {
     render(<App />);
     await screen.findByRole('heading', { name: '选择比赛视频' });

@@ -5,6 +5,7 @@ import { calculateRallyPlaybackScrollTop, CustomCutPage, findPlaybackTargetClip 
 import type { AnalysisResultV1, ExportRequest } from '../src/shared/contracts';
 import type { SelectedVideo } from '../src/shared/api';
 import type { CustomRallyClip } from '../src/domain/custom-clips';
+import type { CustomPlaybackMode } from '../src/domain/custom-playback';
 import { messages } from '../src/renderer/i18n';
 
 const analysis: AnalysisResultV1 = {
@@ -28,15 +29,17 @@ const playbackClips: CustomRallyClip[] = [
 ];
 
 function Harness() {
+  const [playbackMode, setPlaybackMode] = useState<CustomPlaybackMode>('source');
   const [clips, setClips] = useState(initialClips);
   const [outputs, setOutputs] = useState<NonNullable<ExportRequest['outputs']>>({ combined_video: true, rally_videos: false, premiere_xml: false });
-  return <CustomCutPage video={video} analysis={analysis} clips={clips} translations={messages('en')} mediaAvailable onClipsChange={setClips} onToggleAll={vi.fn()} outputs={outputs} onOutputsChange={setOutputs} onExport={vi.fn()} />;
+  return <CustomCutPage video={video} analysis={analysis} clips={clips} playbackMode={playbackMode} onPlaybackModeChange={setPlaybackMode} translations={messages('en')} mediaAvailable onClipsChange={setClips} onToggleAll={vi.fn()} outputs={outputs} onOutputsChange={setOutputs} onExport={vi.fn()} />;
 }
 
 function PlaybackHarness({ clips = playbackClips }: { clips?: CustomRallyClip[] }) {
+  const [playbackMode, setPlaybackMode] = useState<CustomPlaybackMode>('source');
   const [currentClips, setCurrentClips] = useState(clips);
   const [outputs, setOutputs] = useState<NonNullable<ExportRequest['outputs']>>({ combined_video: true, rally_videos: false, premiere_xml: false });
-  return <CustomCutPage video={video} analysis={analysis} clips={currentClips} translations={messages('en')} mediaAvailable onClipsChange={setCurrentClips} onToggleAll={vi.fn()} outputs={outputs} onOutputsChange={setOutputs} onExport={vi.fn()} />;
+  return <CustomCutPage video={video} analysis={analysis} clips={currentClips} playbackMode={playbackMode} onPlaybackModeChange={setPlaybackMode} translations={messages('en')} mediaAvailable onClipsChange={setCurrentClips} onToggleAll={vi.fn()} outputs={outputs} onOutputsChange={setOutputs} onExport={vi.fn()} />;
 }
 
 function setVideoTime(videoElement: HTMLVideoElement, time: number) {
@@ -166,6 +169,62 @@ describe('playback rally location', () => {
 });
 
 describe('manual timeline tools', () => {
+  it.each(['.timeline-track-window', '.timeline-ruler'])('zooms with ordinary wheel input over %s only while the zoom tool is active', (target) => {
+    const width = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(100);
+    try {
+      render(<Harness />);
+      const viewport = document.querySelector<HTMLElement>('.timeline-viewport')!;
+      const surface = document.querySelector(target)!;
+      const zoom = screen.getByRole('button', { name: 'Zoom timeline' });
+      expect(zoom.nextElementSibling).toBe(screen.getByRole('button', { name: 'Source playback' }));
+      fireEvent.wheel(surface, { deltaY: -120, clientX: 50 });
+      expect(Number(viewport.dataset.zoom)).toBe(1);
+      fireEvent.click(zoom);
+      expect(zoom).toHaveAttribute('aria-pressed', 'true');
+      const wheel = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -120, clientX: 50 });
+      fireEvent(surface, wheel);
+      expect(wheel.defaultPrevented).toBe(true);
+      expect(Number(viewport.dataset.zoom)).toBeCloseTo(1.18);
+      fireEvent.wheel(surface, { deltaY: 120, clientX: 50 });
+      expect(Number(viewport.dataset.zoom)).toBeCloseTo(1);
+      fireEvent.click(zoom);
+      fireEvent.wheel(surface, { deltaY: -120, clientX: 50 });
+      expect(Number(viewport.dataset.zoom)).toBeCloseTo(1);
+      fireEvent.wheel(surface, { ctrlKey: true, deltaY: -120, clientX: 50 });
+      expect(Number(viewport.dataset.zoom)).toBeGreaterThan(1);
+      fireEvent.wheel(surface, { metaKey: true, deltaY: 120, clientX: 50 });
+      expect(Number(viewport.dataset.zoom)).toBeCloseTo(1);
+    } finally { width.mockRestore(); }
+  });
+
+  it('makes zoom exclusive with editing tools and cancels it without changing playback or boundaries', () => {
+    render(<Harness />);
+    const zoom = screen.getByRole('button', { name: 'Zoom timeline' });
+    const add = screen.getByRole('button', { name: 'Add rally' });
+    const remove = screen.getByRole('button', { name: 'Delete rally' });
+    fireEvent.click(add);
+    fireEvent.click(zoom);
+    expect(add).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('slider', { name: 'Resize clip start 1' })).toBeVisible();
+    fireEvent.click(remove);
+    expect(zoom).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(zoom);
+    expect(remove).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(screen.getByRole('button', { name: 'Source playback' }));
+    expect(zoom).toHaveAttribute('aria-pressed', 'true');
+    const monitor = document.querySelector('.custom-monitor video') as HTMLVideoElement;
+    setVideoTime(monitor, 1.4);
+    for (const target of [document.querySelector('.timeline-ruler')!, screen.getByRole('slider', { name: 'Custom cut timeline' }), screen.getByRole('slider', { name: 'Resize clip start 1' })]) {
+      if (zoom.getAttribute('aria-pressed') === 'false') fireEvent.click(zoom);
+      fireEvent.pointerDown(target, { button: 2, pointerId: 6, clientX: 50 });
+      fireEvent.contextMenu(target);
+      expect(zoom).toHaveAttribute('aria-pressed', 'false');
+      expect(monitor.currentTime).toBe(1.4);
+      expect(screen.getByRole('slider', { name: 'Resize clip start 1' })).toHaveAttribute('aria-valuenow', '3');
+      expect(screen.getByRole('button', { name: 'Rally playback' })).toHaveAttribute('aria-pressed', 'true');
+    }
+  });
+
   it('keeps export options open while the pointer moves from the trigger into the popover', () => {
     vi.useFakeTimers();
     try {
