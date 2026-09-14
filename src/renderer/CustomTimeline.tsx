@@ -6,6 +6,7 @@ const LABEL_SPACING = 150;
 const CLIP_EDGE_HIT_OUTSET = 8;
 const CLIP_EDGE_HIT_INSET = 4;
 const CLIP_BOUNDARY_MARKER_MIN_WIDTH = 24;
+const RESIZE_DIRECTION_THRESHOLD = 3;
 
 export type TimelineToolMode = 'add' | 'delete' | 'zoom' | null;
 export type TimelineSeekIntent = 'preview' | 'commit';
@@ -139,6 +140,7 @@ export function CustomTimeline({
     edge: Edge;
     startX: number;
     initialTime: number;
+    adjacent: { left: CustomRallyClip; right: CustomRallyClip } | null;
   } | null>(null);
 
   const maximumZoom = Math.max(1, duration * 150 / viewportWidth);
@@ -306,16 +308,30 @@ export function CustomTimeline({
   };
 
   const beginResize = (event: React.PointerEvent<HTMLButtonElement>, clip: CustomRallyClip, edge: Edge) => {
-    if (event.button !== 0 || editingToolActive) return;
+    if (event.button !== 0 || editingToolActive || draggingRef.current) return;
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
-    draggingRef.current = { pointerId: event.pointerId, clipId: clip.clipId, edge, startX: event.clientX, initialTime: edge === 'start' ? clip.start : clip.end };
-    setResizeFeedback({ clipId: clip.clipId, edge, boundaryTime: edge === 'start' ? clip.start : clip.end, durationDelta: 0 });
+    const index = selectedClips.findIndex((item) => item.clipId === clip.clipId);
+    const left = edge === 'end' ? clip : selectedClips[index - 1];
+    const right = edge === 'start' ? clip : selectedClips[index + 1];
+    // Shared boundaries must not depend on which overlapping button is on top.
+    const adjacent = left && right && Math.abs(left.end - right.start) <= 1e-6 ? { left, right } : null;
+    draggingRef.current = { pointerId: event.pointerId, clipId: clip.clipId, edge, startX: event.clientX, initialTime: clip[edge], adjacent };
+    setResizeFeedback(adjacent ? null : { clipId: clip.clipId, edge, boundaryTime: clip[edge], durationDelta: 0 });
   };
 
   const moveResize = (event: React.PointerEvent<HTMLButtonElement>) => {
     const dragging = draggingRef.current;
     if (!dragging || dragging.pointerId !== event.pointerId) return;
+    if (dragging.adjacent) {
+      const delta = event.clientX - dragging.startX;
+      if (Math.abs(delta) < RESIZE_DIRECTION_THRESHOLD) return;
+      const clip = delta < 0 ? dragging.adjacent.left : dragging.adjacent.right;
+      dragging.edge = delta < 0 ? 'end' : 'start';
+      dragging.clipId = clip.clipId;
+      dragging.initialTime = clip[dragging.edge];
+      dragging.adjacent = null;
+    }
     const boundaryTime = onResize(dragging.clipId, dragging.edge, dragging.initialTime + (event.clientX - dragging.startX) / pixelsPerSecond);
     setResizeFeedback({ clipId: dragging.clipId, edge: dragging.edge, boundaryTime, durationDelta: dragging.edge === 'start' ? dragging.initialTime - boundaryTime : boundaryTime - dragging.initialTime });
   };
