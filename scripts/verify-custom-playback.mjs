@@ -103,6 +103,11 @@ try {
   await page.keyboard.up('Control');
   await expect.poll(async()=>Number(await viewport.getAttribute('data-zoom'))).toBeGreaterThan(zoomAfterCancel);
   await button.focus();await page.keyboard.press('Space');
+  await expect(button).toHaveAttribute('aria-pressed','false');
+  await expect.poll(async()=> (await frameState()).paused).toBe(false);
+  await page.keyboard.press('Space');
+  await expect.poll(async()=> (await frameState()).paused).toBe(true);
+  await page.keyboard.press('Enter');
   await expect(button).toHaveAttribute('aria-pressed','true');
   await page.keyboard.press('Enter');
   await expect(button).toHaveAttribute('aria-pressed','false');
@@ -120,6 +125,23 @@ try {
  } else {
  await page.locator('.custom-rally-table tbody tr').nth(1).click();
  await advancing('list click before metadata', 15, 18);
+ const focusedRow=page.locator('.custom-rally-table tbody tr').nth(1);
+ await focusedRow.focus();
+ const beforeSpace=await frameState();
+ await page.keyboard.press('Space');
+ await expect.poll(async()=>(await frameState()).paused).toBe(true);
+ const afterSpace=await frameState();
+ expect(afterSpace.time).toBeGreaterThanOrEqual(beforeSpace.time);
+ await page.keyboard.press('Space');
+ await advancing('Space on a focused rally resumes without replaying its start',afterSpace.time,afterSpace.time+2);
+ const checkbox=focusedRow.getByRole('checkbox');
+ await checkbox.focus();await page.keyboard.press('Space');
+ await expect.poll(async()=>(await frameState()).paused).toBe(true);
+ await expect(checkbox).toBeChecked();
+ await page.keyboard.press('Space');
+ await expect.poll(async()=>(await frameState()).paused).toBe(false);
+ await expect(checkbox).toBeChecked();
+ checks.push({name:'Space on a focused checkbox only toggles playback',passed:true});
  await page.locator('.timeline-clip[data-clip-id="clip0"]').click({ position: { x: 15, y: 15 } });
  await advancing('timeline click jumps backwards and plays', 5, 8);
  for (const index of [2,0,2,1]) await page.locator('.custom-rally-table tbody tr').nth(index).click();
@@ -171,6 +193,11 @@ try {
   await expect(page.getByRole('button',{name:'回合播放',exact:true})).toBeVisible();
   await page.getByRole('button',{name:'回合播放',exact:true}).focus();
   await page.keyboard.press('Space');
+  await expect(page.getByRole('button',{name:'回合播放',exact:true})).toBeVisible();
+  await expect.poll(async()=>(await frameState()).paused).toBe(false);
+  await page.keyboard.press('Space');
+  await expect.poll(async()=>(await frameState()).paused).toBe(true);
+  await page.keyboard.press('Enter');
   await expect(page.getByRole('button',{name:'原片播放',exact:true})).toBeVisible();
   await page.keyboard.press('Enter');
   await expect(page.getByRole('button',{name:'回合播放',exact:true})).toBeVisible();

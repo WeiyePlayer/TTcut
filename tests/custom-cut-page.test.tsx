@@ -98,6 +98,54 @@ function mockRallyListGeometry() {
 
 afterEach(() => cleanup());
 
+it.each(['.custom-rally-table tr', '.custom-rally-table input', '.playback-mode-toggle', '.custom-monitor video', '.floating-launch-start', '.custom-multi-select button'])('reserves Space for transport while focused on %s', async (selector) => {
+  render(<Harness />);
+  const monitor = document.querySelector<HTMLVideoElement>('.custom-monitor video')!;
+  let paused = true;
+  Object.defineProperties(monitor, {
+    paused: { configurable: true, get: () => paused }, readyState: { configurable: true, value: 4 },
+    videoWidth: { configurable: true, value: 1280 }, videoHeight: { configurable: true, value: 720 },
+  });
+  const play = vi.spyOn(monitor, 'play').mockImplementation(async () => { paused = false; });
+  const pause = vi.spyOn(monitor, 'pause').mockImplementation(() => { paused = true; });
+  try {
+    await act(async () => { fireEvent.click(document.querySelector('.custom-rally-table tr')!); });
+    monitor.currentTime = 3.5;
+    const target = document.querySelector<HTMLElement>(selector)!;
+    act(() => target.focus());
+    expect(fireEvent.keyDown(target, { key: ' ', code: 'Space' })).toBe(false);
+    expect(paused).toBe(true);
+    expect(monitor.currentTime).toBe(3.5);
+    expect(fireEvent.keyDown(target, { key: ' ', code: 'Space', repeat: true })).toBe(false);
+    expect(fireEvent.keyUp(target, { key: ' ', code: 'Space' })).toBe(false);
+    expect(paused).toBe(true);
+    expect(play).toHaveBeenCalledTimes(1);
+    await act(async () => { fireEvent.keyDown(target, { key: ' ', code: 'Space' }); fireEvent.keyUp(target, { key: ' ', code: 'Space' }); });
+    expect(paused).toBe(false);
+    expect(monitor.currentTime).toBe(3.5);
+    expect(play).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole('checkbox', { name: 'Rally 1' })).toBeChecked();
+    expect(screen.getByRole('button', { name: 'Source playback' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Multi-select options' })).toBeNull();
+  } finally { play.mockRestore(); pause.mockRestore(); }
+});
+
+it('does not intercept composing Space and preserves Enter rally activation', async () => {
+  const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue();
+  try {
+    render(<Harness />);
+    const monitor = document.querySelector<HTMLVideoElement>('.custom-monitor video')!;
+    Object.defineProperties(monitor, { readyState: { value: 4 }, videoWidth: { value: 1280 }, videoHeight: { value: 720 } });
+    expect(fireEvent.keyDown(window, { key: ' ', code: 'Space', isComposing: true })).toBe(true);
+    expect(fireEvent.keyUp(window, { key: ' ', code: 'Space', isComposing: true })).toBe(true);
+    expect(play).not.toHaveBeenCalled();
+    const row = document.querySelector('.custom-rally-table tr')!;
+    await act(async () => { fireEvent.keyDown(row, { key: 'Enter' }); });
+    expect(monitor.currentTime).toBe(3);
+    expect(play).toHaveBeenCalledOnce();
+  } finally { play.mockRestore(); }
+});
+
 it('shows board counts for continuous-visibility results that include bounce metadata', () => {
   render(<ContinuousBoardHarness />);
   expect(screen.getByText('板数 2')).toBeVisible();
