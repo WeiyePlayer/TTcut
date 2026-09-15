@@ -8,7 +8,7 @@ import { analysisResultSchema } from '../src/shared/contracts';
 import hybridProvenance from './fixtures/hybrid-provenance.json';
 
 const bootstrap: BootstrapData = {
-  version: '1.3.3',
+  version: '1.3.5',
   settings: {
     language: 'zh-CN',
     calibration_method: 'automatic',
@@ -798,7 +798,8 @@ describe('App workflow notices and multi-task entry', () => {
     expect(document.querySelector('.resize-feedback')).toHaveAttribute('data-edge', 'start');
     fireEvent.pointerUp(shortStartHandle, { pointerId: 81, clientX: 0 });
     fireEvent.pointerDown(shortEndHandle, { pointerId: 82, clientX: 1 });
-    expect(document.querySelector('.resize-feedback')).toHaveAttribute('data-edge', 'end');
+    // These clips touch: pressing alone must wait for a drag direction.
+    expect(document.querySelector('.resize-feedback')).toBeNull();
     fireEvent.pointerUp(shortEndHandle, { pointerId: 82, clientX: 1 });
     const rallyCheckboxes = screen.getAllByRole('checkbox', { name: /Rally/ });
     expect(rallyCheckboxes).toHaveLength(2);
