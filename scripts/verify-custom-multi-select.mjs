@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import path from 'node:path';
 import { chromium } from 'playwright';
@@ -9,16 +9,20 @@ import { chromium } from 'playwright';
 // Focused renderer acceptance: deterministic board counts, not algorithm accuracy.
 // Uses the unmodified packaged app with isolated history and synthetic media.
 const root = path.resolve(import.meta.dirname, '..');
-const app = path.resolve(process.argv[2] ?? path.join(root, 'out/TTcut-darwin-arm64/TTcut.app'));
+const windows = process.platform === 'win32';
+const app = path.resolve(process.argv[2] ?? path.join(root, windows ? 'out/TTcut-win32-x64' : 'out/TTcut-darwin-arm64/TTcut.app'));
+const ffmpeg = process.env.TTCUT_FFMPEG ?? (windows
+  ? path.join(root, '.baseline/components/ffmpeg-n8.1.2-22-g94138f6973-win64-lgpl-shared-8.1/bin/ffmpeg.exe')
+  : path.join(app, 'Contents/Resources/runtime/bin/ffmpeg'));
 const output = path.join(root, 'output/custom-multi-select');
 await mkdir(output, { recursive: true });
 const run = await mkdtemp(path.join(output, 'run-'));
 const userData = path.join(run, 'user-data');
 const media = path.join(run, 'multi-select-fixture.mp4');
-const generated = spawnSync(path.join(app, 'Contents/Resources/runtime/bin/ffmpeg'), [
+const generated = spawnSync(ffmpeg, [
   '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=15:duration=15',
-  '-c:v', 'libx264', '-pix_fmt', 'yuv420p', media,
-], { encoding: 'utf8' });
+  '-c:v', windows ? 'libopenh264' : 'libx264', '-pix_fmt', 'yuv420p', media,
+], { encoding: 'utf8', windowsHide: true });
 assert.equal(generated.status, 0, generated.stderr);
 const source = await stat(media);
 const id = randomUUID();
@@ -40,6 +44,11 @@ const analysis = {
       minimum_interval_seconds: .315, landing_region: 'expanded_table',
       table_length_margin_cm: 35, table_width_margin_cm: 25 } },
 };
+if (windows) {
+  // Exercise the existing production Windows contract, without another detector.
+  analysis.rally_recognition = JSON.parse(await readFile(path.join(root, 'tests/fixtures/hybrid-provenance.json'), 'utf8'));
+  analysis.excluded_fragments = [];
+}
 await mkdir(path.join(userData, 'history/records'), { recursive: true });
 await writeFile(path.join(userData, 'history/records', `${id}.json`), JSON.stringify({
   schema_version: 1, id, analyzed_at: analyzedAt,
@@ -55,9 +64,12 @@ const server = createServer();
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const port = server.address().port;
 await new Promise(resolve => server.close(resolve));
-const child = spawn(path.join(app, 'Contents/MacOS/TTcut'), [
+const child = spawn(path.join(app, windows ? 'TTcut.exe' : 'Contents/MacOS/TTcut'), [
   `--remote-debugging-port=${port}`, `--user-data-dir=${userData}`,
-], { stdio: ['ignore', 'pipe', 'pipe'] });
+], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
+  env: { ...process.env, ...(windows ? {
+    TTCUT_FFMPEG: ffmpeg, TTCUT_FFPROBE: path.join(path.dirname(ffmpeg), 'ffprobe.exe'),
+  } : {}) } });
 let log = '';
 child.stdout.on('data', data => { log += data; });
 child.stderr.on('data', data => { log += data; });
@@ -174,6 +186,43 @@ try {
       assert.ok(await page.locator(selector).evaluateAll(elements => elements.every(element => getComputedStyle(element).whiteSpace === 'nowrap')));
     }
     await page.screenshot({ path: path.join(run, 'multi-select-en.png') });
+  });
+  await page.getByRole('textbox', { name: 'Bounces at least' }).press('Escape');
+  await check('shared timeline boundary follows mouse direction and playhead does not block track', async () => {
+    const left = page.locator('.timeline-clip').nth(0);
+    const right = page.locator('.timeline-clip').nth(1);
+    const leftEnd = left.locator('.clip-handle.end');
+    const rightStart = right.locator('.clip-handle.start');
+    const end = Number(await leftEnd.getAttribute('aria-valuenow'));
+    const start = Number(await rightStart.getAttribute('aria-valuenow'));
+    assert.ok(Math.abs(end - start) < 1e-6, 'Fixture must contain adjacent selected clips');
+    const box = await right.boundingBox();
+    const y = box.y + box.height / 2;
+    // Put the playhead exactly on the shared boundary using the ruler.
+    const ruler = await page.locator('.timeline-ruler').boundingBox();
+    await page.mouse.click(box.x, ruler.y + 18);
+    assert.ok(await page.evaluate(({ x, y }) => Boolean(document.elementFromPoint(x, y)?.closest('.clip-handle')), { x: box.x, y }));
+    await page.mouse.move(box.x, y);
+    await page.mouse.down();
+    await page.mouse.move(box.x - 20, y, { steps: 5 });
+    assert.equal(await page.locator('.resize-feedback').getAttribute('data-edge'), 'end');
+    assert.equal(await page.locator('.resize-feedback').getAttribute('data-clip-id'), 'rally_001');
+    await page.mouse.up();
+    assert.ok(Number(await leftEnd.getAttribute('aria-valuenow')) < end);
+    assert.equal(Number(await rightStart.getAttribute('aria-valuenow')), start);
+    // Restore adjacency with the real keyboard handle, then drag right.
+    await leftEnd.press('Shift+ArrowRight');
+    assert.equal(Number(await leftEnd.getAttribute('aria-valuenow')), start);
+    await page.mouse.move(box.x, y);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 20, y, { steps: 5 });
+    assert.equal(await page.locator('.resize-feedback').getAttribute('data-edge'), 'start');
+    assert.equal(await page.locator('.resize-feedback').getAttribute('data-clip-id'), 'rally_002');
+    await page.mouse.up();
+    assert.ok(Number(await rightStart.getAttribute('aria-valuenow')) > start);
+    assert.equal(Number(await leftEnd.getAttribute('aria-valuenow')), start);
+    assert.equal(await left.evaluate(element => getComputedStyle(element).borderRadius), '6px');
+    await page.screenshot({ path: path.join(run, 'timeline-resize.png') });
   });
   console.log(`Verification: ${run}`);
 } catch (error) {

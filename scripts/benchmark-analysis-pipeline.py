@@ -64,6 +64,7 @@ def main() -> int:
     parser.add_argument("--device", choices=("cuda", "cpu"), default="cuda")
     parser.add_argument("--weights", type=Path, default=PROJECT_ROOT / "resources" / "models" / "blurball_best.pt")
     parser.add_argument("--batch-size", type=int)
+    parser.add_argument("--temporal-stride", type=int, choices=(1, 2, 3), default=3)
     parser.add_argument("--confidence-threshold", type=float)
     args = parser.parse_args()
     if args.batch_size is not None and args.batch_size <= 0:
@@ -83,7 +84,7 @@ def main() -> int:
         torch.cuda.reset_peak_memory_stats()
     started = time.perf_counter()
     loaded = load_blurball(args.weights, args.device)
-    predictor_kwargs = {"batch_size": args.batch_size}
+    predictor_kwargs = {"batch_size": args.batch_size, "temporal_stride": args.temporal_stride}
     if args.confidence_threshold is not None:
         predictor_kwargs["confidence_threshold"] = args.confidence_threshold
     predictor = BlurBallPredictor(loaded, **predictor_kwargs)
@@ -114,6 +115,7 @@ def main() -> int:
             "batch_size": predictor.batch_size,
             "confidence_threshold": stats.confidence_threshold,
             "sequence_length": 3,
+            "temporal_stride": args.temporal_stride,
             "analysis_roi": asdict(roi),
             "model_size": [stats.model_width, stats.model_height],
         },
