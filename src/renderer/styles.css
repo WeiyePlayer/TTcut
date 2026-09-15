@@ -333,11 +333,27 @@ td input { accent-color: var(--blue); }
   position: absolute; z-index: 2; top: 0; right: 2px; width: 6px; min-height: 20px;
   border-radius: 999px; background: gray; cursor: default; touch-action: none;
 }
-.custom-rally-list .table-tools { justify-content: space-between; }
+.custom-rally-list .table-tools { position: relative; z-index: 4; justify-content: space-between; gap: 4px; padding: 0 8px; }
 .custom-list-selection, .custom-list-actions { display: flex; align-items: center; gap: 8px; }
-.custom-list-selection { color: var(--muted); font-size: 11px; }
+.custom-list-selection { gap: 6px; color: var(--muted); font-size: 11px; white-space: nowrap; }
 .custom-list-selection strong { color: var(--text); font-size: 12px; }
-.custom-list-actions { gap: 4px; }
+.custom-list-actions { gap: 0; }
+.custom-list-actions .text-button { padding: 5px 4px; white-space: nowrap; }
+.custom-multi-select-card {
+  position: absolute; z-index: 5; top: calc(100% + 4px); right: 8px; width: 210px; max-width: calc(100% - 16px);
+  padding: 6px; border: 1px solid var(--line-strong); border-radius: 10px; background: #fff;
+  box-shadow: 0 8px 24px rgba(30,40,55,.14); transform-origin: top;
+  animation: custom-multi-select-slide 160ms ease-out;
+}
+.custom-multi-select-all { width: 100%; padding: 9px 10px; border: 0; border-radius: 6px; background: transparent; text-align: left; font-size: 12px; cursor: pointer; }
+.custom-multi-select-all:hover { background: #f0f5ff; color: var(--blue); }
+.custom-bounce-filter { margin-top: 4px; padding: 10px; border-top: 1px solid var(--line); }
+.custom-bounce-filter label { display: flex; align-items: center; gap: 8px; font-size: 12px; white-space: nowrap; }
+.custom-bounce-filter input { width: 48px; min-width: 0; height: 28px; padding: 3px 5px; border: 1px solid var(--line-strong); border-radius: 5px; background: #fff; color: var(--text); text-align: center; font-size: 12px; }
+.custom-bounce-filter input:disabled { background: var(--secondary); color: var(--muted); }
+.custom-bounce-filter small { display: block; margin-top: 8px; color: var(--muted); font-size: 10px; }
+@keyframes custom-multi-select-slide { from { opacity: 0; transform: translateY(-6px) scaleY(.96); } to { opacity: 1; transform: translateY(0) scaleY(1); } }
+@media (prefers-reduced-motion: reduce) { .custom-multi-select-card { animation: none; } }
 .custom-rally-table { table-layout: fixed; }
 .custom-rally-table td { padding: 0; border-top: 0; vertical-align: middle; }
 .custom-rally-cell { position: relative; }
