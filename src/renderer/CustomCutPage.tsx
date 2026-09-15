@@ -189,7 +189,8 @@ export function CustomCutPage({
   const lastPlaybackClipIdRef = useRef<string | null>(null);
   const playbackTickRef = useRef<() => void>(() => undefined);
   const currentTimeRef = useRef(0);
-  const preview = useCompatiblePreview(videoRef, video.mediaUrl);
+  const previewMetadata = analysis.source_video?.path === video.path ? analysis.source_video : analysis.video;
+  const preview = useCompatiblePreview(videoRef, video.mediaUrl, previewMetadata.video_codec);
   const [currentTime, setCurrentTime] = useState(0);
   const [playbackCue, setPlaybackCue] = useState<PlaybackCue | null>(null);
   const [toolMode, setToolMode] = useState<TimelineToolMode>(null);

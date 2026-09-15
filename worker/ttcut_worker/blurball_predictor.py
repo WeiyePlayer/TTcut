@@ -23,7 +23,6 @@ BLURBALL_INPUT_WIDTH = 512
 BLURBALL_INPUT_HEIGHT = 288
 BLURBALL_CONFIDENCE_THRESHOLD = 0.7
 BLURBALL_STEP = 3
-BLURBALL_TEMPORAL_STRIDE = 3
 BLURBALL_MAX_DISPLACEMENT_PIXELS = 100.0
 BLURBALL_BATCH_SIZE = 16
 BLURBALL_CPU_BATCH_SIZE = 4
@@ -61,10 +60,6 @@ class BlurBallPredictionStats:
     step: int = BLURBALL_STEP
     maximum_displacement_pixels: float = BLURBALL_MAX_DISPLACEMENT_PIXELS
     peak_cuda_memory_bytes: int = 0
-    temporal_stride: int = 1
-    inferred_frames: int = 0
-    interpolated_frames: int = 0
-    inference_windows: int = 0
 
 
 @dataclass(frozen=True)
@@ -189,7 +184,6 @@ class BlurBallPredictor:
         loaded: LoadedBlurBall,
         batch_size: int | None = None,
         confidence_threshold: float = BLURBALL_CONFIDENCE_THRESHOLD,
-        temporal_stride: int = BLURBALL_TEMPORAL_STRIDE,
     ):
         if loaded.device.type not in {"cpu", "cuda"}:
             raise ValueError("BlurBall inference requires a CPU or CUDA device.")
@@ -205,19 +199,16 @@ class BlurBallPredictor:
             )
         if batch_size <= 0:
             raise ValueError("BlurBall inference requires a positive batch size.")
-        if type(temporal_stride) is not int or temporal_stride not in (1, 2, 3):
-            raise ValueError("BlurBall temporal stride must be 1, 2 or 3.")
         if not math.isfinite(confidence_threshold) or not 0 <= confidence_threshold <= 1:
             raise ValueError("BlurBall confidence threshold must be between 0 and 1.")
         self.loaded = loaded
         self.batch_size = batch_size
         self.confidence_threshold = confidence_threshold
-        self.temporal_stride = temporal_stride
         print(
             f"BlurBall inference runtime: device={loaded.device}, torch={torch.__version__}, "
             f"gpu={gpu_name}, batch_size={batch_size}, "
             f"precision={'float16' if self._mixed_precision_enabled else 'float32'}, "
-            f"confidence_threshold={confidence_threshold}, temporal_stride={temporal_stride}.",
+            f"confidence_threshold={confidence_threshold}.",
             file=sys.stderr, flush=True,
         )
 
@@ -306,15 +297,14 @@ class BlurBallPredictor:
         is_cuda = self.loaded.device.type == "cuda"
         if is_cuda:
             torch.cuda.reset_peak_memory_stats(self.loaded.device)
-        tracker = _OnlineTracker(BLURBALL_MAX_DISPLACEMENT_PIXELS * self.temporal_stride)
+        tracker = _OnlineTracker(BLURBALL_MAX_DISPLACEMENT_PIXELS)
         points: list[TrajectoryPoint] = []
         windows: list[_PreparedWindow] = []
         packets: list[FramePacket] = []
         inference_seconds = 0.0
-        inference_windows = 0
 
         def run_batch() -> None:
-            nonlocal inference_seconds, inference_windows
+            nonlocal inference_seconds
             if not windows:
                 return
             inputs = np.stack([window.input for window in windows])
@@ -327,7 +317,6 @@ class BlurBallPredictor:
                 if is_cuda:
                     torch.cuda.synchronize(self.loaded.device)
                 inference_seconds += time.perf_counter() - inference_started
-                inference_windows += len(windows)
             except RuntimeError as error:
                 if is_cuda and "out of memory" in str(error).lower():
                     torch.cuda.empty_cache()
@@ -344,27 +333,20 @@ class BlurBallPredictor:
                     )
                     selected = tracker.update(detections)
                     if selected is None:
-                        points[packet.index] = TrajectoryPoint(
+                        points.append(TrajectoryPoint(
                             packet.index, packet.time, 0, 0, 0, "missing", 0.0, packet.time_source,
-                        )
+                        ))
                     else:
                         x, y, score = selected
-                        points[packet.index] = TrajectoryPoint(
+                        points.append(TrajectoryPoint(
                             packet.index, packet.time, 1, int(round(x)), int(round(y)),
                             "blurball", float(score), packet.time_source,
-                        ).normalized(reader.info.width, reader.info.height)
+                        ).normalized(reader.info.width, reader.info.height))
             windows.clear()
             if progress_callback:
                 progress_callback(len(points), total)
 
         for packet in reader:
-            # Decode all frames to retain source timestamps, but prepare/infer
-            # only F1/F4/F7, F10/F13/F16, ... at stride 3.
-            points.append(TrajectoryPoint(
-                packet.index, packet.time, 0, 0, 0, "missing", 0.0, packet.time_source,
-            ))
-            if packet.index % self.temporal_stride:
-                continue
             packets.append(packet)
             if len(packets) == BLURBALL_STEP:
                 windows.append(self._window(
@@ -389,27 +371,6 @@ class BlurBallPredictor:
         info = reader.final_info()
         if len(points) != info.decoded_frame_count:
             raise VideoError("BlurBall result count does not match decoded frame count.")
-        interpolated = 0
-        if self.temporal_stride > 1:
-            # Only bridge skipped frames bracketed by two actual detections.
-            # Never extrapolate the tail or bridge a failed sampled detection.
-            for left_index in range(0, len(points) - self.temporal_stride, self.temporal_stride):
-                right_index = left_index + self.temporal_stride
-                left, right = points[left_index], points[right_index]
-                if not (left.visibility and right.visibility and left.time < right.time):
-                    continue
-                for index in range(left_index + 1, right_index):
-                    middle = points[index]
-                    if not left.time < middle.time < right.time:
-                        continue
-                    fraction = (middle.time - left.time) / (right.time - left.time)
-                    points[index] = TrajectoryPoint(
-                        middle.frame, middle.time, 1,
-                        round(left.x + fraction * (right.x - left.x)),
-                        round(left.y + fraction * (right.y - left.y)),
-                        "interpolated", min(left.confidence, right.confidence), middle.time_source,
-                    ).normalized(info.width, info.height)
-                    interpolated += 1
         if progress_callback:
             progress_callback(len(points), len(points))
         elapsed = time.perf_counter() - started
@@ -424,11 +385,6 @@ class BlurBallPredictor:
             model_width=input_width,
             model_height=input_height,
             confidence_threshold=self.confidence_threshold,
-            temporal_stride=self.temporal_stride,
-            inferred_frames=(len(points) + self.temporal_stride - 1) // self.temporal_stride,
-            interpolated_frames=interpolated,
-            inference_windows=inference_windows,
-            maximum_displacement_pixels=BLURBALL_MAX_DISPLACEMENT_PIXELS * self.temporal_stride,
             peak_cuda_memory_bytes=(
                 int(torch.cuda.max_memory_allocated(self.loaded.device)) if is_cuda else 0
             ),
@@ -442,7 +398,7 @@ class BlurBallPredictor:
         analysis_roi: AnalysisRoi | None = None,
         confidence_threshold: float | None = None,
     ) -> tuple[list[TrajectoryPoint], VideoInfo, BlurBallPredictionStats]:
-        """Refine every source frame; temporal_stride applies only to predict()."""
+        """Predict one center-frame result per source frame inside disjoint intervals."""
         threshold = self.confidence_threshold if confidence_threshold is None else confidence_threshold
         if not math.isfinite(threshold) or not 0 <= threshold <= 1:
             raise ValueError("BlurBall confidence threshold must be between 0 and 1.")
@@ -602,8 +558,6 @@ class BlurBallPredictor:
             model_height=input_height,
             confidence_threshold=threshold,
             step=1,
-            inferred_frames=len(points),
-            inference_windows=len(points),
             peak_cuda_memory_bytes=(
                 int(torch.cuda.max_memory_allocated(self.loaded.device)) if is_cuda else 0
             ),

@@ -3,9 +3,9 @@ import { useRef } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useCompatiblePreview } from '../src/renderer/use-compatible-preview';
 
-function Harness({ source = 'ttcut-media://media/source' }: { source?: string }) {
+function Harness({ source = 'ttcut-media://media/source', codec }: { source?: string; codec?: string }) {
   const ref = useRef<HTMLVideoElement>(null);
-  const preview = useCompatiblePreview(ref, source);
+  const preview = useCompatiblePreview(ref, source, codec);
   return <><video ref={ref} src={preview.url} /><span>{preview.status}</span><button onClick={() => preview.seekTo(12, true)}>Play clip</button><button onClick={() => preview.seekTo(24, true)}>Next clip</button><button onClick={preview.togglePlayback}>Toggle</button></>;
 }
 
@@ -21,6 +21,36 @@ function setup() {
 }
 
 describe('compatible preview recovery', () => {
+  it('prepares Windows HEVC without relying on decoder events and restores the latest clip', async () => {
+    const prepare = setup();
+    vi.stubGlobal('ttcut', { platform: 'win32', prepareVideoPreview: prepare });
+    let finish!: (url: string) => void;
+    prepare.mockImplementation(() => new Promise<string>((resolve) => { finish = resolve; }));
+    render(<Harness codec="hevc" />);
+    const video = document.querySelector('video')!;
+    await act(async () => {});
+    expect(prepare).toHaveBeenCalledExactlyOnceWith('ttcut-media://media/source');
+    expect(screen.getByText('preparing')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Play clip'));
+    fireEvent.click(screen.getByText('Next clip'));
+    expect(video.play).not.toHaveBeenCalled();
+    await act(async () => { finish('ttcut-media://media/proxy'); });
+    Object.defineProperties(video, { readyState: { value: 2 }, videoWidth: { value: 1280 }, videoHeight: { value: 720 } });
+    await act(async () => { fireEvent.loadedData(video); });
+    expect(video.currentTime).toBe(24);
+    expect(video.play).toHaveBeenCalledOnce();
+    expect(screen.getByText('ready')).toBeInTheDocument();
+  });
+
+  it.each([['win32', 'h264'], ['darwin', 'hevc']])('keeps the normal preview path for %s/%s', async (platform, codec) => {
+    const prepare = setup();
+    vi.stubGlobal('ttcut', { platform, prepareVideoPreview: prepare, preparePreview: vi.fn() });
+    render(<Harness codec={codec} />);
+    await act(async () => {});
+    expect(prepare).not.toHaveBeenCalled();
+    expect(screen.getByText('ready')).toBeInTheDocument();
+  });
+
   it('exposes the playing intent during recovery even after the media element pauses', async () => {
     setup();
     const video = document.createElement('video');
