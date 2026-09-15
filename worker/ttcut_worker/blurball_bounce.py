@@ -455,11 +455,7 @@ def detect_blurball_bounce_events(
     ):
         if not math.isfinite(float(value)) or float(value) < 0:
             raise ValueError(f"{name} must be finite and non-negative")
-    # Resampled coordinates support continuity, not observed landing evidence.
-    ordered = sorted(
-        (point for point in points if point.source != "interpolated"),
-        key=lambda point: (point.frame, point.time),
-    )
+    ordered = sorted(points, key=lambda point: (point.frame, point.time))
     candidates: dict[int, _BounceCandidate] = {}
     for index, landing in enumerate(ordered):
         if landing.visibility != 1 or not math.isfinite(landing.time):
