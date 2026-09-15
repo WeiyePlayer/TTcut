@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { calculateRallyPlaybackScrollTop, CustomCutPage, findPlaybackTargetClip } from '../src/renderer/CustomCutPage';
 import type { AnalysisResultV1, ExportRequest } from '../src/shared/contracts';
 import type { SelectedVideo } from '../src/shared/api';
-import { setCustomClipSelected, type CustomRallyClip } from '../src/domain/custom-clips';
+import type { CustomRallyClip } from '../src/domain/custom-clips';
 import type { CustomPlaybackMode } from '../src/domain/custom-playback';
 import { messages } from '../src/renderer/i18n';
 
@@ -28,25 +28,6 @@ const playbackClips: CustomRallyClip[] = [
   { clipId: 'rally_004', source: 'detected', sourceRallyId: 'rally_004', rallyIndex: 4, bounceCount: 6, defaultStart: 9, defaultEnd: 10, start: 9, end: 10, selected: true },
 ];
 
-const continuousBoardAnalysis: AnalysisResultV1 = {
-  schema_version: 3,
-  video: analysis.video,
-  rallies: [{
-    id: 'rally_001', index: 1, bounce_count: 2,
-    start_time_seconds: 3, end_time_seconds: 4,
-  }],
-  bounce_times_seconds: [3.2, 3.8],
-  rally_recognition: {
-    method: 'continuous_visibility', start_visible_seconds: 0.2, end_invisible_seconds: 0.5,
-    board_count: {
-      detector: 'blurball_trajectory_change', minimum_interval_seconds: 0.315,
-      source_path: 'worker/ttcut_worker/blurball_bounce.py',
-      source_sha256: 'e1e7674cd1209a6f4deffe5ff0e57633e2859605f031b1c012cb2d16c9f49ea8',
-      landing_region: 'expanded_table', table_length_margin_cm: 35, table_width_margin_cm: 25,
-    },
-  },
-};
-
 function Harness() {
   const [playbackMode, setPlaybackMode] = useState<CustomPlaybackMode>('source');
   const [clips, setClips] = useState(initialClips);
@@ -59,22 +40,6 @@ function PlaybackHarness({ clips = playbackClips }: { clips?: CustomRallyClip[] 
   const [currentClips, setCurrentClips] = useState(clips);
   const [outputs, setOutputs] = useState<NonNullable<ExportRequest['outputs']>>({ combined_video: true, rally_videos: false, premiere_xml: false });
   return <CustomCutPage video={video} analysis={analysis} clips={currentClips} playbackMode={playbackMode} onPlaybackModeChange={setPlaybackMode} translations={messages('en')} mediaAvailable onClipsChange={setCurrentClips} onToggleAll={vi.fn()} outputs={outputs} onOutputsChange={setOutputs} onExport={vi.fn()} />;
-}
-
-function ContinuousBoardHarness() {
-  const [clips, setClips] = useState<CustomRallyClip[]>([{ ...initialClips[0]!, bounceCount: 2 }]);
-  const [playbackMode, setPlaybackMode] = useState<CustomPlaybackMode>('source');
-  const [outputs, setOutputs] = useState<NonNullable<ExportRequest['outputs']>>({ combined_video: true, rally_videos: false, premiere_xml: false });
-  return <CustomCutPage video={video} analysis={continuousBoardAnalysis} clips={clips} playbackMode={playbackMode} onPlaybackModeChange={setPlaybackMode} translations={messages('zh-CN')} mediaAvailable onClipsChange={setClips} onToggleAll={vi.fn()} outputs={outputs} onOutputsChange={setOutputs} onExport={vi.fn()} />;
-}
-
-function SelectionHarness({ result = analysis }: { result?: AnalysisResultV1 }) {
-  const [clips, setClips] = useState(playbackClips);
-  const [playbackMode, setPlaybackMode] = useState<CustomPlaybackMode>('source');
-  const [outputs, setOutputs] = useState<NonNullable<ExportRequest['outputs']>>({ combined_video: true, rally_videos: false, premiere_xml: false });
-  return <CustomCutPage video={video} analysis={result} clips={clips} playbackMode={playbackMode} onPlaybackModeChange={setPlaybackMode} translations={messages('zh-CN')} mediaAvailable onClipsChange={setClips} onToggleAll={(selected) => setClips((current) => selected
-    ? current.reduce((next, clip) => setCustomClipSelected(next, clip.clipId, true, result.video.duration_seconds, result.video.fps), current)
-    : current.map((clip) => ({ ...clip, selected: false })))} outputs={outputs} onOutputsChange={setOutputs} onExport={vi.fn()} />;
 }
 
 function setVideoTime(videoElement: HTMLVideoElement, time: number) {
@@ -97,102 +62,6 @@ function mockRallyListGeometry() {
 }
 
 afterEach(() => cleanup());
-
-it('shows board counts for continuous-visibility results that include bounce metadata', () => {
-  render(<ContinuousBoardHarness />);
-  expect(screen.getByText('板数 2')).toBeVisible();
-});
-
-describe('custom multi-select card', () => {
-  it('opens from Multi-select and keeps Select all and Clear all behavior', () => {
-    render(<SelectionHarness />);
-    const trigger = screen.getByRole('button', { name: '多选' });
-    expect(screen.queryByRole('button', { name: '全选' })).toBeNull();
-    fireEvent.click(trigger);
-    expect(trigger).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByRole('dialog', { name: '多选选项' })).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: '全选' }));
-    expect(screen.getAllByRole('checkbox', { name: /回合/ }).every((input) => (input as HTMLInputElement).checked)).toBe(true);
-    expect(screen.queryByRole('dialog', { name: '多选选项' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: '取消全选' }));
-    expect(screen.getAllByRole('checkbox', { name: /回合/ }).every((input) => !(input as HTMLInputElement).checked)).toBe(true);
-  });
-
-  it('applies inclusive board matches on Enter without changing playback or removing clips', () => {
-    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue();
-    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
-    try {
-      render(<SelectionHarness />);
-      const monitor = document.querySelector('.custom-monitor video') as HTMLVideoElement;
-      setVideoTime(monitor, 4.5);
-      fireEvent.click(screen.getByRole('button', { name: '多选' }));
-      const input = screen.getByRole('textbox', { name: '板数大于等于' });
-      fireEvent.change(input, { target: { value: '5' } });
-      expect(screen.getByText('3 / 4')).toBeVisible();
-      fireEvent.keyDown(input, { key: 'Enter' });
-      expect(screen.getAllByRole('checkbox', { name: /回合/ }).map((checkbox) => (checkbox as HTMLInputElement).checked)).toEqual([false, false, true, true]);
-      expect(document.querySelectorAll('.custom-rally-table tbody tr')).toHaveLength(4);
-      expect(monitor.currentTime).toBe(4.5);
-      expect(play).not.toHaveBeenCalled();
-      expect(pause).not.toHaveBeenCalled();
-      expect(screen.queryByRole('dialog', { name: '多选选项' })).toBeNull();
-    } finally { play.mockRestore(); pause.mockRestore(); }
-  });
-
-  it('accepts only 1–10 integers, permits clearing, and ignores empty Enter', () => {
-    render(<SelectionHarness />);
-    fireEvent.click(screen.getByRole('button', { name: '多选' }));
-    const input = screen.getByRole('textbox', { name: '板数大于等于' });
-    fireEvent.keyDown(input, { key: 'Enter' });
-    expect(screen.getByRole('dialog', { name: '多选选项' })).toBeVisible();
-    for (const value of ['0', '11', '-1', '1.5', 'abc', '01']) {
-      fireEvent.change(input, { target: { value } });
-      expect(input).toHaveValue('');
-    }
-    fireEvent.change(input, { target: { value: '1' } });
-    expect(input).toHaveValue('1');
-    fireEvent.change(input, { target: { value: '10' } });
-    expect(input).toHaveValue('10');
-    fireEvent.change(input, { target: { value: '20' } });
-    expect(input).toHaveValue('10');
-    fireEvent.change(input, { target: { value: '' } });
-    expect(input).toHaveValue('');
-    fireEvent.change(input, { target: { value: '10' } });
-    fireEvent.keyDown(input, { key: 'Enter' });
-    expect(screen.getByText('0 / 4')).toBeVisible();
-  });
-
-  it('closes on Escape, an outside click, or focus leaving the card', () => {
-    render(<SelectionHarness />);
-    const trigger = screen.getByRole('button', { name: '多选' });
-    fireEvent.click(trigger);
-    const input = screen.getByRole('textbox', { name: '板数大于等于' });
-    act(() => input.focus());
-    fireEvent.keyDown(input, { key: 'Escape' });
-    expect(trigger).toHaveFocus();
-    expect(trigger).toHaveAttribute('aria-expanded', 'false');
-    fireEvent.click(trigger);
-    fireEvent.pointerDown(document.body);
-    expect(trigger).toHaveAttribute('aria-expanded', 'false');
-    fireEvent.click(trigger);
-    act(() => screen.getByRole('textbox', { name: '板数大于等于' }).focus());
-    act(() => screen.getByRole('button', { name: '取消全选' }).focus());
-    expect(trigger).toHaveAttribute('aria-expanded', 'false');
-  });
-
-  it('disables board filtering for old continuous results without board metadata', () => {
-    const legacy: AnalysisResultV1 = {
-      schema_version: 2, video: analysis.video,
-      rallies: [{ id: 'rally_001', index: 1, start_time_seconds: 3, end_time_seconds: 4 }],
-      rally_recognition: { method: 'continuous_visibility', start_visible_seconds: .2, end_invisible_seconds: .5 },
-    };
-    render(<SelectionHarness result={legacy} />);
-    fireEvent.click(screen.getByRole('button', { name: '多选' }));
-    expect(screen.getByRole('textbox', { name: '板数大于等于' })).toBeDisabled();
-    expect(screen.getByText('重新分析后可按板数筛选')).toBeVisible();
-    expect(screen.getByRole('button', { name: '全选' })).toBeEnabled();
-  });
-});
 
 describe('playback rally location', () => {
   it.each(['list', 'timeline'])('plays the requested clip after delayed metadata from the %s', async (entry) => {

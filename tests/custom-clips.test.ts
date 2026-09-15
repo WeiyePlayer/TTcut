@@ -7,7 +7,6 @@ import {
   deleteCustomClip,
   InvalidCustomSegmentsError,
   resizeCustomClip,
-  selectCustomClipsByBounceCount,
   setCustomClipSelected,
   validateAndBuildCustomCutGroups,
   validateCustomExportSegments,
@@ -41,34 +40,6 @@ function analysis(rallies: BounceRally[] = [rally('rally_001', 1, 10, 12), rally
 }
 
 describe('custom rally clip draft', () => {
-  it('replaces selection with inclusive board-count matches and excludes unavailable counts', () => {
-    const clips = createCustomClipDraft([
-      rally('rally_001', 1, 1, 2), rally('rally_002', 2, 4, 5), rally('rally_003', 3, 7, 8),
-    ], 0, 0, 30, 30);
-    const unknown = { ...clips[0]!, clipId: 'manual_unknown', source: 'manual' as const, sourceRallyId: null, bounceCount: null };
-    const input = [...clips, unknown];
-    const selected = selectCustomClipsByBounceCount(input, 4, 30, 30);
-    expect(selected.map((clip) => clip.selected)).toEqual([false, true, true, false]);
-    expect(input.every((clip) => clip.selected)).toBe(true);
-    expect(selected[2]).toMatchObject({ start: clips[2]!.start, end: clips[2]!.end });
-    expect(selectCustomClipsByBounceCount(input, 10, 30, 30).every((clip) => !clip.selected)).toBe(true);
-  });
-
-  it('reuses conflict-safe re-selection for board-count matches', () => {
-    const initial = createCustomClipDraft([
-      rally('rally_001', 1, 5, 6), rally('rally_002', 2, 10, 11),
-    ], 0, 0, 30, 30);
-    const hidden = setCustomClipSelected(initial, 'rally_002', false, 30, 30);
-    const expanded = resizeCustomClip(hidden, 'rally_001', 'end', 12, 30, 30);
-    const filtered = selectCustomClipsByBounceCount(expanded, 1, 30, 30);
-    expect(filtered.every((clip) => clip.selected)).toBe(true);
-    expect(filtered[0]!.end).toBeLessThanOrEqual(filtered[1]!.start);
-  });
-
-  it.each([0, 11, -1, 1.5, Number.NaN])('rejects an invalid custom board threshold %s', (threshold) => {
-    const clips = createCustomClipDraft([rally('rally_001', 1, 1, 2)], 0, 0, 30, 30);
-    expect(() => selectCustomClipsByBounceCount(clips, threshold, 30, 30)).toThrow('INVALID_BOUNCE_THRESHOLD');
-  });
   it('omits only the fixed second in continuous mode and exports those exact handles', () => {
     const result: AnalysisResultV1 = {
       schema_version: 2,

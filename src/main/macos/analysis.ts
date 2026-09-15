@@ -171,9 +171,8 @@ export async function startMacAnalysis(window: BrowserWindow, value: AnalysisOpt
         } finally { await rm(partial, { force: true }); }
       }
       const result = await callNative('TTcutWorker', { ...base, operation: 'analyze', video: video.native_video, calibration: nativeCalibration(calibration) }, { taskId, onProgress: progress });
-      if (!result.roi || !result.visibilityRallies || !result.bounceTimes) throw new Error('NATIVE_ANALYSIS_RESULT_MISSING');
+      if (!result.roi || !result.visibilityRallies) throw new Error('NATIVE_ANALYSIS_RESULT_MISSING');
       const roi = result.roi;
-      const bounceTimes = [...new Set(result.bounceTimes)].sort((a, b) => a - b);
       const commonResult = {
         video, source_video: source, processing, calibration,
         ...(table ? { table_analysis: table } : {}),
@@ -183,24 +182,15 @@ export async function startMacAnalysis(window: BrowserWindow, value: AnalysisOpt
         },
       };
       data = analysisResultSchema.parse({
-        schema_version: 3,
+        schema_version: 2,
         ...commonResult,
-        bounce_times_seconds: bounceTimes,
         rallies: result.visibilityRallies!.map((rally, i) => ({
           id: `rally_${String(i + 1).padStart(3, '0')}`, index: i + 1,
           start_time_seconds: rally.startTime, end_time_seconds: rally.endTime,
-          bounce_count: bounceTimes.filter((time) => time >= rally.startTime && time <= rally.endTime).length,
           ...(rally.leadInStartTime === undefined ? {} : { lead_in_start_time_seconds: rally.leadInStartTime }),
         })),
         rally_recognition: {
           method: 'continuous_visibility', ...continuousVisibilityProvenance,
-          board_count: {
-            detector: 'blurball_trajectory_change',
-            source_path: 'worker/ttcut_worker/blurball_bounce.py',
-            source_sha256: 'e1e7674cd1209a6f4deffe5ff0e57633e2859605f031b1c012cb2d16c9f49ea8',
-            minimum_interval_seconds: 0.315,
-            landing_region: 'expanded_table', table_length_margin_cm: 35, table_width_margin_cm: 25,
-          },
           motion_filter: {
             ...continuousVisibilityProvenance.motion_filter,
             vertical_exchange_enabled: isEndOnTableView(calibration),
