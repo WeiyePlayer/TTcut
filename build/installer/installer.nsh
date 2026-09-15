@@ -23,6 +23,10 @@ Var TTcutPreservedDataRoot
 Var TTcutDeleteAllData
 Var TTcutDeleteAllCheckbox
 
+!ifndef BUILD_UNINSTALLER
+!include "${PROJECT_DIR}\build\installer\registration.nsh"
+!endif
+
 LangString TTCUT_SETUP_TITLE 1033 "Install TTcut"
 LangString TTCUT_SETUP_TITLE 2052 "安装 TTcut"
 LangString TTCUT_SETUP_DETAIL 1033 "Choose an installation location and shortcut. Analysis and media components will also be stored here."
@@ -511,15 +515,10 @@ FunctionEnd
   ${EndIf}
 
   ; Commit and read back all new registration before touching the legacy app.
-  InitPluginsDir
-  SetOutPath "$PLUGINSDIR"
-  File /oname=commit-install-registration.ps1 "${PROJECT_DIR}\build\installer\commit-install-registration.ps1"
-  nsExec::ExecToStack 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\commit-install-registration.ps1" -InstallRoot "$TTcutRoot" -AppGuid "${APP_GUID}" -Version "${VERSION}" -DesktopShortcut "$TTcutDesktopShortcut" -ReportPath "$TTcutRoot\data\install-registration-report.json"'
-  Pop $6
-  Pop $7
-  ${If} $6 != 0
+  Call TTcutCommitRegistration
+  ${If} $TTcutRegistrationError != ""
     Call TTcutRollbackNewInstall
-    MessageBox MB_ICONSTOP "$(TTCUT_REGISTRATION_FAILED)"
+    MessageBox MB_ICONSTOP|MB_OK "$(TTCUT_REGISTRATION_FAILED)$\r$\n$\r$\n$TTcutRegistrationError$\r$\n$TTcutRegistrationLog" /SD IDOK
     SetErrorLevel 1
     Quit
   ${EndIf}
