@@ -163,9 +163,7 @@ def analyze(request: dict) -> dict:
                 "name": "full",
                 "confidence_threshold": stats.confidence_threshold,
                 "window_size": 3,
-                "window_stride": 3 * getattr(stats, "temporal_stride", 1),
-                "temporal_stride": getattr(stats, "temporal_stride", 1),
-                "interpolated_frames": getattr(stats, "interpolated_frames", 0),
+                "window_stride": 3,
                 "retained_output": "all_window_frames",
             }]
             expansion_seconds = None
@@ -194,9 +192,7 @@ def analyze(request: dict) -> dict:
                 "name": "candidate",
                 "confidence_threshold": stage1_stats.confidence_threshold,
                 "window_size": 3,
-                "window_stride": 3 * getattr(stage1_stats, "temporal_stride", 1),
-                "temporal_stride": getattr(stage1_stats, "temporal_stride", 1),
-                "interpolated_frames": getattr(stage1_stats, "interpolated_frames", 0),
+                "window_stride": 3,
                 "retained_output": "all_window_frames",
             },
             {

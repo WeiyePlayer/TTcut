@@ -61,7 +61,7 @@ try {
   const calibration={video_width:320,video_height:180,points:{top_left:[60,40],top_right:[250,40],bottom_right:[275,145],bottom_left:[40,145]}};
   await check('actual eleven-sample table Core ML consensus invocation',async()=>{const result=await task('startAutoCalibration',{videoPath:media,device:'auto'});assert.ok(result.type==='calibration-result'||result.code==='AUTO_CALIBRATION_FAILED',JSON.stringify(result));if(result.type==='calibration-result'){assert.equal(result.tableAnalysis.aggregation_rule,'temporal_peak_clusters_geometric_consensus');assert.equal(result.tableAnalysis.sampling.length,11);assert.deepEqual(result.tableAnalysis.sampling.map(sample=>sample.label),Array.from({length:11},(_,index)=>`sample_${String(index+1).padStart(2,'0')}`));}assert.ok(await page.evaluate(()=>window.__events.some(e=>e.type==='progress'&&e.data.stage==='table_inference')));});
   const input={videoPath:media,calibrationChoice:{method:'manual',calibration},device:'auto',historyVisibility:'visible',normalizeVariableFrameRate:false};
-  const analysis=await check('actual BlurBall continuous-visibility Core ML analysis',async()=>{const result=await task('startAnalysis',input);assert.equal(result.type,'analysis-result',JSON.stringify(result));assert.equal(result.data.inference_runtime.engine,'coreml');assert.equal(result.data.schema_version,3);assert.equal(result.data.rally_recognition.method,'continuous_visibility');assert.equal(result.data.rally_recognition.detection_confidence_threshold,0.3);assert.equal(result.data.rally_recognition.board_count.detector,'blurball_trajectory_change');assert.equal(result.data.rally_recognition.board_count.source_sha256,'e1e7674cd1209a6f4deffe5ff0e57633e2859605f031b1c012cb2d16c9f49ea8');assert.ok(Array.isArray(result.data.bounce_times_seconds));assert.equal(result.data.model_provenance.analysis.mode,'full');return result;});
+  const analysis=await check('actual BlurBall continuous-visibility Core ML analysis',async()=>{const result=await task('startAnalysis',input);assert.equal(result.type,'analysis-result',JSON.stringify(result));assert.equal(result.data.inference_runtime.engine,'coreml');assert.equal(result.data.schema_version,2);assert.equal(result.data.rally_recognition.method,'continuous_visibility');assert.equal(result.data.rally_recognition.detection_confidence_threshold,0.3);assert.equal(result.data.model_provenance.analysis.mode,'full');assert.equal('bounce_times_seconds' in result.data,false);return result;});
   await check('compatible preview is separate from analysis media',async()=>{const url=await preparePreview(video);assert.notEqual(url,video.mediaUrl);const reopened=await page.evaluate(id=>window.ttcut.openHistory(id),analysis.analysisId);assert.equal(reopened.analysis.video.path,media);});
   const segment={clip_id:'manual_11111111-1111-4111-8111-111111111111',source:'manual',display_index:1,start_time_seconds:0.5,end_time_seconds:1.5};
   const request={analysis_id:analysis.analysisId,destination:'source',selection:{mode:'custom',segments:[segment]}};
@@ -112,8 +112,7 @@ try {
   // Controlled nonempty rallies exercise the review UI; the surrounding schema and
   // provenance come from the real packaged continuous analysis above.
   const recordPath=path.join(userData,'history/records',analysis.analysisId+'.json');
-  const controlledRallies=[{id:'rally_001',index:1,start_time_seconds:0.5,end_time_seconds:2},{id:'rally_002',index:2,start_time_seconds:2.5,end_time_seconds:7.5}].map(rally=>({...rally,bounce_count:analysis.data.bounce_times_seconds.filter(time=>time>=rally.start_time_seconds&&time<=rally.end_time_seconds).length}));
-  const record=JSON.parse(await readFile(recordPath,'utf8'));record.analysis={...analysis.data,rallies:controlledRallies};await writeFile(recordPath,JSON.stringify(record));
+  const record=JSON.parse(await readFile(recordPath,'utf8'));record.analysis={...analysis.data,rallies:[{id:'rally_001',index:1,start_time_seconds:0.5,end_time_seconds:2},{id:'rally_002',index:2,start_time_seconds:2.5,end_time_seconds:7.5}]};await writeFile(recordPath,JSON.stringify(record));
   await check('continuous history review uses duration tiers',async()=>{await page.reload();await page.waitForFunction(()=>Boolean(window.ttcut));await page.getByRole('button',{name:'History',exact:true}).click();await page.locator('.history-card').first().waitFor();
     await page.locator('.history-open').first().click();
     await page.locator('.mode-card').filter({hasText:'All rallies'}).waitFor();
@@ -126,10 +125,8 @@ try {
     await page.waitForTimeout(400);
     await page.screenshot({path:path.join(run,'continuous-duration-review-en.png')});
     await page.locator('.mode-card').filter({hasText:'Custom'}).click();
-    assert.equal(await page.getByText(/^Bounces \d+$/).count(),2);
     await page.getByRole('button',{name:'Clear all',exact:true}).click();
     assert.equal(await page.locator('.custom-rally-list input:checked').count(),0);
-    await page.getByRole('button',{name:'Multi-select',exact:true}).click();
     await page.getByRole('button',{name:'Select all',exact:true}).click();
     assert.equal(await page.locator('.custom-rally-list input:checked').count(),2);
     const timelineBox=await page.locator('.timeline-viewport').boundingBox();await page.mouse.move(timelineBox.x+timelineBox.width/2,timelineBox.y+20);await page.keyboard.down('Meta');await page.mouse.wheel(0,-100);await page.keyboard.up('Meta');

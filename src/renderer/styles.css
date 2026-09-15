@@ -282,7 +282,7 @@ td input { accent-color: var(--blue); }
 .timeline-ruler canvas { position: absolute; left: 0; top: 0; pointer-events: none; }
 .timeline-track-window {
   position: absolute; z-index: 1; top: 34px; right: 0; left: 0; height: 42px;
-  overflow: hidden; border: 1px solid #c9ced6; border-radius: 6px; background: #edf0f4;
+  overflow: hidden; border: 1px solid #c9ced6; border-radius: 999px; background: #edf0f4;
 }
 .custom-timeline.is-add-mode .timeline-track-window { cursor: crosshair; }
 .custom-timeline.is-add-mode.is-add-unavailable .timeline-track-window { cursor: not-allowed; }
@@ -290,7 +290,7 @@ td input { accent-color: var(--blue); }
 .timeline-track { position: absolute; inset: 0 auto auto 0; height: 42px; will-change: transform; }
 .timeline-clip {
   position: absolute; top: 1px; height: 40px; min-width: 1px; display: flex; align-items: center; justify-content: center;
-  overflow: visible; border: 1px solid var(--blue-dark); border-radius: 6px; background: var(--blue); color: white;
+  overflow: visible; border: 1px solid var(--blue-dark); border-radius: 999px; background: var(--blue); color: white;
   cursor: pointer; font-size: 11px; font-weight: 700;
 }
 .timeline-clip > span { position: relative; z-index: 1; overflow: hidden; text-overflow: clip; pointer-events: none; }
@@ -314,15 +314,14 @@ td input { accent-color: var(--blue); }
   pointer-events: none;
 }
 .timeline-playhead {
-  /* Only the ruler captures dragging; the line over the track is decorative. */
-  position: absolute; z-index: 8; top: 0; height: 34px; width: 15px; transform: translateX(-7px);
+  position: absolute; z-index: 8; top: 0; bottom: 2px; width: 15px; transform: translateX(-7px);
   cursor: ew-resize; touch-action: none; outline: none;
 }
 .timeline-playhead::before {
   content: ""; position: absolute; top: 0; left: 2px; width: 11px; height: 13px;
   border-radius: 3px 3px 1px 1px; background: #d52b26;
 }
-.timeline-playhead i { position: absolute; top: 12px; left: 7px; width: 1px; height: 64px; background: #d52b26; pointer-events: none; }
+.timeline-playhead i { position: absolute; top: 12px; left: 7px; width: 1px; bottom: 0; background: #d52b26; pointer-events: none; }
 .timeline-playhead:focus-visible::before { box-shadow: 0 0 0 3px rgba(213,43,38,.24); }
 .timeline-playhead.dragging { cursor: grabbing; }
 .custom-rally-list { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: white; }
@@ -333,27 +332,11 @@ td input { accent-color: var(--blue); }
   position: absolute; z-index: 2; top: 0; right: 2px; width: 6px; min-height: 20px;
   border-radius: 999px; background: gray; cursor: default; touch-action: none;
 }
-.custom-rally-list .table-tools { position: relative; z-index: 4; justify-content: space-between; gap: 4px; padding: 0 8px; }
+.custom-rally-list .table-tools { justify-content: space-between; }
 .custom-list-selection, .custom-list-actions { display: flex; align-items: center; gap: 8px; }
-.custom-list-selection { gap: 6px; color: var(--muted); font-size: 11px; white-space: nowrap; }
+.custom-list-selection { color: var(--muted); font-size: 11px; }
 .custom-list-selection strong { color: var(--text); font-size: 12px; }
-.custom-list-actions { gap: 0; }
-.custom-list-actions .text-button { padding: 5px 4px; white-space: nowrap; }
-.custom-multi-select-card {
-  position: absolute; z-index: 5; top: calc(100% + 4px); right: 8px; width: 210px; max-width: calc(100% - 16px);
-  padding: 6px; border: 1px solid var(--line-strong); border-radius: 10px; background: #fff;
-  box-shadow: 0 8px 24px rgba(30,40,55,.14); transform-origin: top;
-  animation: custom-multi-select-slide 160ms ease-out;
-}
-.custom-multi-select-all { width: 100%; padding: 9px 10px; border: 0; border-radius: 6px; background: transparent; text-align: left; font-size: 12px; cursor: pointer; }
-.custom-multi-select-all:hover { background: #f0f5ff; color: var(--blue); }
-.custom-bounce-filter { margin-top: 4px; padding: 10px; border-top: 1px solid var(--line); }
-.custom-bounce-filter label { display: flex; align-items: center; gap: 8px; font-size: 12px; white-space: nowrap; }
-.custom-bounce-filter input { width: 48px; min-width: 0; height: 28px; padding: 3px 5px; border: 1px solid var(--line-strong); border-radius: 5px; background: #fff; color: var(--text); text-align: center; font-size: 12px; }
-.custom-bounce-filter input:disabled { background: var(--secondary); color: var(--muted); }
-.custom-bounce-filter small { display: block; margin-top: 8px; color: var(--muted); font-size: 10px; }
-@keyframes custom-multi-select-slide { from { opacity: 0; transform: translateY(-6px) scaleY(.96); } to { opacity: 1; transform: translateY(0) scaleY(1); } }
-@media (prefers-reduced-motion: reduce) { .custom-multi-select-card { animation: none; } }
+.custom-list-actions { gap: 4px; }
 .custom-rally-table { table-layout: fixed; }
 .custom-rally-table td { padding: 0; border-top: 0; vertical-align: middle; }
 .custom-rally-cell { position: relative; }

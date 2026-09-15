@@ -99,8 +99,7 @@ def test_cpu_predictor_uses_bounded_batch_and_skips_cuda_calls(monkeypatch):
     assert predictor.batch_size == BLURBALL_CPU_BATCH_SIZE
     assert model.devices == [torch.device("cpu")]
     assert len(points) == 3
-    assert predictor.temporal_stride == 3
-    assert [point.source for point in points] == ["blurball", "missing", "missing"]
+    assert all(point.source == "blurball" for point in points)
     assert stats.peak_cuda_memory_bytes == 0
 
 
@@ -141,75 +140,6 @@ def test_interval_predictor_keeps_only_center_frames_and_resets_gaps(monkeypatch
     assert all(item.source == "blurball" for item in points)
     assert stats.step == 1
     assert model.calls == 1
-
-
-@pytest.mark.parametrize("count", [1, 2, 3, 5, 6, 7, 11, 12, 13])
-@pytest.mark.parametrize("stride", [1, 2, 3])
-def test_temporal_sampling_preserves_vfr_timing_and_output_channels(monkeypatch, count, stride):
-    import ttcut_worker.blurball_predictor as module
-
-    times = [index / 30 + index * index / 1000 for index in range(count)]
-
-    class Reader:
-        def __init__(self, value):
-            self.info = VideoInfo(Path(value), 96, 64, 30, count, count, times[-1] + .04)
-
-        def __iter__(self):
-            for index, timestamp in enumerate(times):
-                yield FramePacket(index, timestamp, "decoder", np.full((64, 96, 3), index, np.uint8))
-
-        def final_info(self):
-            return self.info
-
-    windows = []
-
-    class Model:
-        def __call__(self, tensor):
-            logits = torch.full((len(tensor), 3, 64, 96), -10.0)
-            for batch in range(len(tensor)):
-                indices = [int(tensor[batch, channel * 3, 0, 0]) for channel in range(3)]
-                windows.append(indices)
-                for channel, index in enumerate(indices):
-                    # A failed sampled frame must not be bridged on either side.
-                    if index != 2 * stride:
-                        logits[batch, channel, 20, 10 + index] = 10
-            return {0: logits}
-
-    monkeypatch.setattr(module, "StreamingVideoReader", Reader)
-    monkeypatch.setattr(module, "blurball_model_dimensions", lambda *_args: (96, 64))
-    monkeypatch.setattr(module, "_affine_transforms", lambda *_args: (np.eye(2, 3), np.eye(2, 3)))
-    monkeypatch.setattr(module, "_prepare_frame", lambda frame, *_args: frame.transpose(2, 0, 1).astype(np.float32))
-    predictor = BlurBallPredictor(LoadedBlurBall(Model(), torch.device("cpu")), batch_size=1, temporal_stride=stride)
-    points, info, stats = predictor.predict("fake.mp4")
-    sampled = list(range(0, count, stride))
-    expected = [sampled[index:index + 3] for index in range(0, len(sampled), 3)]
-    assert windows == [window + [window[-1]] * (3 - len(window)) for window in expected]
-    assert [point.frame for point in points] == list(range(count))
-    assert [point.time for point in points] == times
-    assert all(point.time_source == "decoder" for point in points)
-    assert len(points) == info.decoded_frame_count
-    assert stats.inferred_frames == len(sampled)
-    assert stats.inference_windows == len(expected)
-    for index, point in enumerate(points):
-        left = index // stride * stride
-        right = left + stride
-        if index in sampled:
-            assert point.visibility == (index != 2 * stride)
-            if point.visibility:
-                assert point.x == 10 + index
-                assert point.source == "blurball"
-        elif right < count and left != 2 * stride and right != 2 * stride:
-            ratio = (times[index] - times[left]) / (times[right] - times[left])
-            assert point.x == round(10 + left + stride * ratio)
-            assert point.source == "interpolated"
-        else:
-            assert point.source == "missing"
-
-
-@pytest.mark.parametrize("stride", [0, 4, -1, True, 1.5])
-def test_temporal_stride_rejects_unsupported_values(stride):
-    with pytest.raises(ValueError, match="temporal stride"):
-        BlurBallPredictor(LoadedBlurBall(object(), torch.device("cpu")), temporal_stride=stride)
 
 
 @pytest.mark.parametrize('invalid', [float('nan'), float('inf'), float('-inf')])
@@ -319,8 +249,7 @@ def test_cuda_float32_batches_are_bounded_and_preserve_frame_order(monkeypatch):
     np.testing.assert_array_equal(heatmaps, tensor[:, :3].sigmoid().numpy())
 
 
-@pytest.mark.parametrize("stride", [1, 2])
-def test_cuda_precision_recovery_does_not_drop_frames_in_the_stream(monkeypatch, stride):
+def test_cuda_precision_recovery_does_not_drop_frames_in_the_stream(monkeypatch):
     mixed = False
     batches = []
 
@@ -363,13 +292,12 @@ def test_cuda_precision_recovery_does_not_drop_frames_in_the_stream(monkeypatch,
     monkeypatch.setattr(torch.cuda, 'synchronize', lambda *_args: None)
     monkeypatch.setattr(torch.cuda, 'max_memory_allocated', lambda *_args: 0)
     monkeypatch.setattr('ttcut_worker.blurball_predictor.StreamingVideoReader', Reader)
-    predictor = BlurBallPredictor(LoadedBlurBall(Model(), torch.device('cuda')), temporal_stride=stride)
+    predictor = BlurBallPredictor(LoadedBlurBall(Model(), torch.device('cuda')))
     points, _, stats = predictor.predict('fake.mp4')
     assert [point.frame for point in points] == list(range(60))
-    assert stats.detected_frames == (60 if stride == 1 else 59)
-    assert stats.missing_frames == (0 if stride == 1 else 1)
-    assert batches == ([(True, 16)] + [(False, 4)] * 5 if stride == 1
-                       else [(True, 10), (False, 4), (False, 4), (False, 2)])
+    assert stats.detected_frames == 60
+    assert stats.missing_frames == 0
+    assert batches == [(True, 16)] + [(False, 4)] * 5
 
 
 def test_invalid_heatmap_is_not_a_legitimate_empty_detection():
@@ -463,15 +391,6 @@ def test_blurball_local_window_survives_a_distant_observation_gap():
     ]
 
     assert detect_blurball_bounce_frames(trajectory, calibration()) == [1]
-
-
-def test_interpolated_positions_cannot_create_bounce_evidence():
-    from dataclasses import replace
-
-    trajectory = [point(0, 0, 100, 110), point(1, .1, 110, 120), point(2, .2, 120, 116)]
-    assert detect_blurball_bounce_frames(trajectory, calibration()) == [1]
-    trajectory[1] = replace(trajectory[1], source="interpolated")
-    assert detect_blurball_bounce_frames(trajectory, calibration()) == []
 
 
 def test_blurball_short_gap_recovers_a_length_edge_contact():
