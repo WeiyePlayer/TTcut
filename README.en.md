@@ -23,8 +23,9 @@ TTcut detects an NVIDIA GPU automatically and falls back to CPU if accelerated s
 
 ## What's new in v1.3.5
 
-- Custom cutting now has Multi-select for selecting all rallies or filtering by a minimum bounce count. Older analyses without bounce-count metadata explicitly ask for reanalysis.
-- Fixed ambiguous resizing at shared boundaries between adjacent clips, and kept the playhead line from blocking video-track interaction.
+- Space now consistently pauses or resumes playback on the custom-cut page without activating a focused rally, checkbox, or button.
+- Windows HEVC videos prepare a compatible preview up front for more reliable rally seeking and later playback.
+- Installer registration is now written and verified natively, so enterprise PowerShell execution policies no longer block setup.
 
 See the [v1.3.5 release notes](docs/release-notes-v1.3.5.en.md) for the complete details.
 

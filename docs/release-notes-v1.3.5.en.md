@@ -2,29 +2,28 @@
 
 [简体中文](https://github.com/WeiyePlayer/TTcut/blob/v1.3.5/docs/release-notes-v1.3.5.md) | **English**
 
-`v1.3.5` is a stable update for Windows x64. It adds bounce-count multi-selection for custom rallies and improves shared-boundary timeline interaction.
+`v1.3.5` is a stable update for Windows x64 focused on custom-cut playback, HEVC preview reliability, and installer compatibility.
 
-## Custom rally multi-selection
+## Custom-cut playback
 
-- The custom-cut list now has a Multi-select menu for selecting all rallies or entering a minimum bounce count from 1 to 10. Clear all remains directly available.
-- Continuous-motion results now carry separate bounce-detection metadata. Windows custom cutting reuses the existing BlurBall landing results to display and filter bounce counts.
-- When an older analysis has no bounce-count metadata, the filter is disabled with an explicit reanalysis prompt instead of treating missing data as zero.
+- Space now consistently pauses or resumes playback. When focus remains on a rally row, checkbox, playback mode, or another button, Space no longer replays the rally, changes selection, or activates the focused control.
+- Holding Space does not toggle repeatedly, composition input is left alone, and Enter keeps its existing rally and button activation behavior.
 
-## Timeline interaction fixes
+## Windows HEVC compatible preview
 
-- When adjacent clips share a boundary, dragging left resizes the left clip's end and dragging right resizes the right clip's start. The chosen clip stays fixed if the pointer reverses during the same gesture.
-- The playhead captures dragging only over the ruler. Its red line over the track is now visual only and no longer blocks clip clicks or boundary resizing.
-- Resizing shows the actual duration change while continuing to enforce neighboring-clip, minimum-duration, and video-range constraints.
+- HEVC videos on Windows now prepare a compatible preview directly instead of treating metadata or first-frame decoding as sufficient proof that later rally seeks will work.
+- Switching to the compatible preview preserves playback position and intent, reducing black frames or stalled playback after seeking to a custom rally.
 
 ## Installer
 
 - **Windows x64 · v1.3.5**: `TTcut-1.3.5-x64-Setup.exe`, a full installer containing the required runtime resources for a one-step setup.
+- Installer registration is now written and immediately read back by native NSIS code without invoking PowerShell. Enterprise execution policies, language modes, PATH, or .NET state no longer gate registration; failures retain a diagnostic log outside the rollback directory.
 - The installer uses the pinned `CN=weiye` self-signed Authenticode certificate, an RFC 3161 timestamp, and a signed update manifest. Windows may still show Unknown publisher or SmartScreen on systems that do not trust this certificate.
 - This GitHub Release remains a draft and no `v1.3.5` tag is pushed.
 
 ## Verification
 
-- TypeScript type checking passed. Vitest passed 431 tests across 63 files, with 25 tests across 6 files skipped by their existing conditions. All 256 Python regression tests passed.
+- TypeScript type checking passed. Vitest passed 423 tests across 62 files, with 25 tests across 6 files skipped by their existing conditions. All 222 Python regression tests passed.
 - The production website build and both rendered-page tests passed.
-- Six packaged Windows x64 acceptance checks passed for multi-selection, bounce filtering, and adjacent-boundary timeline interaction.
+- Eighteen Windows Electron checks passed with real media, covering Space control, seeking, continuous playback, temporary previews, and result playback.
 - The full installer passed pinned-model, assisted-NSIS, installation-layout, and runtime-delivery checks. The application, uninstaller, and outer Setup carry the pinned certificate and RFC 3161 timestamps; the signed update manifest, SBOM, and SHA-256 checksums were generated.
