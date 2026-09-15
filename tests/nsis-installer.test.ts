@@ -10,7 +10,7 @@ const compareVersionsPath = path.join(process.cwd(), 'build', 'installer', 'comp
 const chooseDefaultRootPath = path.join(process.cwd(), 'build', 'installer', 'choose-default-root.ps1');
 const downloadModelsPath = path.join(process.cwd(), 'build', 'installer', 'download-models.ps1');
 const updateManifestPath = path.join(process.cwd(), 'scripts', 'generate-update-manifest.mjs');
-const commitRegistrationPath = path.join(process.cwd(), 'build', 'installer', 'commit-install-registration.ps1');
+const registrationPath = path.join(process.cwd(), 'build', 'installer', 'registration.nsh');
 const finalizeLegacyPath = path.join(process.cwd(), 'build', 'installer', 'finalize-legacy-install.ps1');
 const legacyRegistryKey = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\TTcut';
 const legacyRollbackTestUnavailable = process.platform !== 'win32'
@@ -98,7 +98,6 @@ describe('assisted NSIS installer contract', () => {
   it('keeps the remaining first-run helpers compatible with Windows 7 PowerShell', async () => {
     const source = await readFile(installerPath, 'utf8');
     const chooseDefaultRoot = await readFile(chooseDefaultRootPath, 'utf8');
-    const commitRegistration = await readFile(commitRegistrationPath, 'utf8');
     const compareVersions = await readFile(compareVersionsPath, 'utf8');
 
     expect(source).toContain(
@@ -109,10 +108,6 @@ describe('assisted NSIS installer contract', () => {
     expect(source).not.toContain('[IO.DriveInfo]::new');
     expect(chooseDefaultRoot).toContain('Get-WmiObject');
     expect(chooseDefaultRoot).not.toContain('Get-CimInstance');
-    expect(commitRegistration).not.toContain('[ordered]');
-    expect(commitRegistration).not.toContain('[Parameter(');
-    expect(commitRegistration).not.toContain('ConvertTo-Json');
-    expect(commitRegistration).toContain('ConvertTo-TTcutJsonString');
     expect(compareVersions).not.toContain('[Parameter(');
     expect(compareVersions).not.toContain('[pscustomobject]');
     expect(compareVersions).toContain('New-Object -TypeName PSObject -Property');
@@ -139,34 +134,15 @@ describe('assisted NSIS installer contract', () => {
     expect(updateManifest).toContain('x64-Online-Setup.exe');
   });
 
-  it.skipIf(powerShell2Unavailable)('writes a valid registration failure report in PowerShell 2', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'ttcut-registration-report-'));
-    const installRoot = path.join(root, 'install');
-    const reportPath = path.join(root, 'report.json');
-    try {
-      const result = spawnSync('powershell.exe', [
-        '-Version', '2', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-        '-File', commitRegistrationPath,
-        '-InstallRoot', installRoot,
-        '-AppGuid', 'invalid-guid',
-        '-Version', '1.1.0',
-        '-DesktopShortcut', '1',
-        '-ReportPath', reportPath,
-      ], { encoding: 'utf8' });
-
-      expect(result.status, result.stderr || result.stdout).toBe(11);
-      expect(JSON.parse(await readFile(reportPath, 'utf8'))).toMatchObject({
-        schema_version: 1,
-        status: 'failed',
-        install_root: installRoot,
-        app_guid: 'invalid-guid',
-        version: '1.1.0',
-        desktop_shortcut: 1,
-        error_code: 'INVALID_APP_GUID',
-      });
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
+  it('registers natively and keeps diagnostics outside the rollback tree', async () => {
+    const source = await readFile(installerPath, 'utf8');
+    const registration = await readFile(registrationPath, 'utf8');
+    expect(source).not.toContain('commit-install-registration.ps1');
+    expect(registration).not.toContain('nsExec::');
+    expect(registration).toContain('SetRegView 64');
+    expect(registration).toContain('ReadReg${Type}');
+    expect(registration).toContain('GetTempFileName $TTcutRegistrationLog "$TEMP"');
+    expect(source).toContain('$TTcutRegistrationError$\\r$\\n$TTcutRegistrationLog');
   });
 
   it('commits and activates the new install before transactionally removing the legacy app', async () => {
@@ -182,7 +158,7 @@ describe('assisted NSIS installer contract', () => {
     expect(source).not.toContain('ExecWait \'"$TTcutLegacyUninstall" --uninstall -s\'');
     const legacyUninstallIndex = source.indexOf('-LegacyUpdateExe "$TTcutLegacyUninstall"');
     const registrationIndex = source.indexOf(
-      '-File "$PLUGINSDIR\\commit-install-registration.ps1"',
+      'Call TTcutCommitRegistration',
     );
     const activationIndex = source.indexOf(
       'Rename "$TTcutRoot\\data\\components.migration" "$TTcutRoot\\data\\components"',
@@ -190,17 +166,7 @@ describe('assisted NSIS installer contract', () => {
     const shortcutIndex = source.lastIndexOf(
       'CreateShortcut "$DESKTOP\\TTcut.lnk"',
     );
-    expect(source).toContain(
-      'File /oname=commit-install-registration.ps1 "${PROJECT_DIR}\\build\\installer\\commit-install-registration.ps1"',
-    );
-    expect(source).toMatch(
-      /InitPluginsDir\s+SetOutPath "\$PLUGINSDIR"\s+File \/oname=commit-install-registration\.ps1/,
-    );
-    expect(source).toContain('-AppGuid "${APP_GUID}"');
-    expect(source).toContain('-Version "${VERSION}"');
-    expect(source).toContain(
-      '-ReportPath "$TTcutRoot\\data\\install-registration-report.json"',
-    );
+    expect(source).toContain('${If} $TTcutRegistrationError != ""');
     expect(registrationIndex).toBeGreaterThan(-1);
     expect(registrationIndex).toBeLessThan(activationIndex);
     expect(activationIndex).toBeLessThan(legacyUninstallIndex);
@@ -326,7 +292,7 @@ describe('assisted NSIS installer contract', () => {
       updateInitializationIndex,
     );
     const registrationHelperIndex = source.indexOf(
-      '-DesktopShortcut "$TTcutDesktopShortcut"',
+      'Call TTcutCommitRegistration',
     );
     expect(updateInitializationIndex).toBeGreaterThan(-1);
     expect(preferenceReadIndex).toBeGreaterThan(updateInitializationIndex);
