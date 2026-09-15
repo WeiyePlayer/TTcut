@@ -189,7 +189,8 @@ export function CustomCutPage({
   const lastPlaybackClipIdRef = useRef<string | null>(null);
   const playbackTickRef = useRef<() => void>(() => undefined);
   const currentTimeRef = useRef(0);
-  const preview = useCompatiblePreview(videoRef, video.mediaUrl);
+  const previewMetadata = analysis.source_video?.path === video.path ? analysis.source_video : analysis.video;
+  const preview = useCompatiblePreview(videoRef, video.mediaUrl, previewMetadata.video_codec);
   const [currentTime, setCurrentTime] = useState(0);
   const [playbackCue, setPlaybackCue] = useState<PlaybackCue | null>(null);
   const [toolMode, setToolMode] = useState<TimelineToolMode>(null);
@@ -391,25 +392,21 @@ export function CustomCutPage({
 
   const { seek, togglePlayback, playClip } = playback;
 
-  const handleVideoKeyDown = useCallback((event: React.KeyboardEvent<HTMLVideoElement>) => {
-    if (event.repeat || (event.code !== 'Space' && event.key !== ' ')) return;
-    event.preventDefault();
-    togglePlayback();
-  }, [togglePlayback]);
-
   useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.repeat || (event.code !== 'Space' && event.key !== ' ')) return;
-      const target = event.target;
-      if (target instanceof Element) {
-        const control = target.closest('input, textarea, select, button, video, [contenteditable="true"]');
-        if (control && !control.matches('[role="slider"]')) return;
-      }
+    const handleSpace = (event: KeyboardEvent) => {
+      if (event.isComposing || (event.code !== 'Space' && event.key !== ' ')) return;
+      // Own Space before row handlers and native button/checkbox activation.
+      // Consume keyup and repeats too: neither should activate a focused tool.
       event.preventDefault();
-      togglePlayback();
+      event.stopPropagation();
+      if (event.type === 'keydown' && !event.repeat) togglePlayback();
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleSpace, true);
+    window.addEventListener('keyup', handleSpace, true);
+    return () => {
+      window.removeEventListener('keydown', handleSpace, true);
+      window.removeEventListener('keyup', handleSpace, true);
+    };
   }, [togglePlayback]);
 
   const toggleTool = (nextTool: Exclude<TimelineToolMode, null>) => {
@@ -487,7 +484,7 @@ export function CustomCutPage({
                   tabIndex={0}
                   onClick={() => playClip(clip)}
                   onKeyDown={(event) => {
-                  if (event.key !== 'Enter' && event.key !== ' ') return;
+                  if (event.key !== 'Enter') return;
                   event.preventDefault();
                   playClip(clip);
                 }}
@@ -516,7 +513,7 @@ export function CustomCutPage({
         <div className="custom-workspace-right">
           <div className="custom-monitor-slot"><div className="custom-monitor">
             {preview.status !== 'ready' && <div className="custom-preview-status" role={preview.status === 'failed' ? 'alert' : 'status'}>{preview.status === 'preparing' ? translations.previewPreparing : translations.previewFailed}</div>}
-            <CompatibleVideo hdr={Boolean(analysis.video.native_video && analysis.video.native_video.hdr !== 'sdr')} ref={videoRef} src={preview.url} controls={false} preload={preview.url === video.mediaUrl ? 'metadata' : 'auto'} playsInline tabIndex={0} aria-label={translations.togglePlayback} onClick={togglePlayback} onKeyDown={handleVideoKeyDown} onLoadedMetadata={() => { lastPlaybackClipIdRef.current = null; playback.tick(); }} onPlay={() => { playback.tick(); startVideoFrameTracking(); }} onPause={stopVideoFrameTracking} onEnded={stopVideoFrameTracking} onTimeUpdate={() => playback.tick()} onSeeked={() => playback.tick()} />
+            <CompatibleVideo hdr={Boolean(analysis.video.native_video && analysis.video.native_video.hdr !== 'sdr')} ref={videoRef} src={preview.url} controls={false} preload={preview.url === video.mediaUrl ? 'metadata' : 'auto'} playsInline tabIndex={0} aria-label={translations.togglePlayback} onClick={togglePlayback} onLoadedMetadata={() => { lastPlaybackClipIdRef.current = null; playback.tick(); }} onPlay={() => { playback.tick(); startVideoFrameTracking(); }} onPause={stopVideoFrameTracking} onEnded={stopVideoFrameTracking} onTimeUpdate={() => playback.tick()} onSeeked={() => playback.tick()} />
           </div></div>
 
           <CustomTimeline clips={clips} duration={analysis.video.duration_seconds} fps={analysis.video.fps} currentTime={currentTime} timelineLabel={translations.timeline} resizeStartLabel={translations.resizeStart} resizeEndLabel={translations.resizeEnd} toolMode={toolMode} onSeek={seek} onScrubCancel={playback.cancelScrub} onPlayClip={playClip} onAddAt={addManualAt} onDeleteClip={(clipId) => onClipsChange(deleteCustomClip(clips, clipId))} onResize={(clipId, edge, time) => {

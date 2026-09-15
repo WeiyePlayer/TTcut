@@ -2,8 +2,12 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 
 type PreviewState = { source: string; url: string; status: 'ready' | 'preparing' | 'failed' };
 
-export function useCompatiblePreview(videoRef: RefObject<HTMLVideoElement | null>, source: string) {
-  const [state, setState] = useState<PreviewState>({ source, url: source, status: 'ready' });
+export function useCompatiblePreview(videoRef: RefObject<HTMLVideoElement | null>, source: string, videoCodec?: string) {
+  // HEVC support varies with the Windows GPU/driver and installed decoder. A
+  // metadata/first-frame success does not prove that a later rally seek works.
+  const requiresProxy = window.ttcut?.platform === 'win32' && videoCodec?.toLowerCase() === 'hevc';
+  const initialStatus = requiresProxy ? 'preparing' : 'ready';
+  const [state, setState] = useState<PreviewState>({ source, url: source, status: initialStatus });
   // Keep user intent separate from the media element: loading a source/proxy
   // resets currentTime and can abort an outstanding play() promise.
   const pending = useRef<{ source: string; time: number; playing: boolean } | null>(null);
@@ -134,7 +138,8 @@ export function useCompatiblePreview(videoRef: RefObject<HTMLVideoElement | null
     video.addEventListener('waiting', playing);
     video.addEventListener('stalled', playing);
     video.addEventListener('playing', playing);
-    if (video.error) fallback();
+    if (requiresProxy) fallback('windows-hevc');
+    else if (video.error) fallback();
     else if (video.readyState >= 1) metadata();
     return () => {
       disposed = true;
@@ -150,6 +155,6 @@ export function useCompatiblePreview(videoRef: RefObject<HTMLVideoElement | null
       video.removeEventListener('stalled', playing);
       video.removeEventListener('playing', playing);
     };
-  }, [source, videoRef, applyPending]);
-  return { ...(state.source === source ? state : { source, url: source, status: 'ready' as const }), seekTo, togglePlayback, getPlaybackIntent };
+  }, [source, videoRef, applyPending, requiresProxy]);
+  return { ...(state.source === source ? state : { source, url: source, status: initialStatus }), seekTo, togglePlayback, getPlaybackIntent };
 }

@@ -1,9 +1,12 @@
 // Real Electron/decoded-frame regression using the actual custom page and media protocol.
-// Usage: node scripts/verify-custom-playback.mjs [source.mp4] [--baseline | --zoom-only]
+// Usage: node scripts/verify-custom-playback.mjs [source] [--baseline | --zoom-only | --original-media]
+// --original-media uses the full untouched source and the production preview service.
+// --reuse-preview=<file> can reuse a previously validated full preview for UI retries.
 import { mkdtemp, realpath, writeFile, readFile, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { execFileSync } from 'node:child_process';
+import { builtinModules } from 'node:module';
 import { build } from 'vite';
 import react from '@vitejs/plugin-react';
 import ts from 'typescript';
@@ -11,11 +14,23 @@ import { _electron as electron, expect } from '@playwright/test';
 const root = path.resolve(import.meta.dirname, '..');
 const baseline = process.argv.includes('--baseline');
 const zoomOnly = process.argv.includes('--zoom-only');
-const source = path.resolve(process.argv.slice(2).find(arg => !['--baseline', '--zoom-only'].includes(arg)) ?? path.join(root, 'artifacts/dynamic-roi/full_frame_trajectory.mp4'));
+const originalMedia = process.argv.includes('--original-media');
+const reusePreview = process.argv.find(arg => arg.startsWith('--reuse-preview='))?.slice('--reuse-preview='.length);
+if (reusePreview && !originalMedia) throw new Error('--reuse-preview requires --original-media');
+const source = path.resolve(process.argv.slice(2).find(arg => !arg.startsWith('--')) ?? path.join(root, 'artifacts/dynamic-roi/full_frame_trajectory.mp4'));
 const run = await realpath(await mkdtemp(path.join(os.tmpdir(), 'ttcut-playback-')));
-await symlink(path.join(root, 'node_modules'), path.join(run, 'node_modules'), 'dir');
-const media = path.join(run, '真实素材 预览.mp4');
-execFileSync(process.env.FFMPEG_PATH ?? 'ffmpeg', ['-v', 'error', '-i', source, '-t', '30', '-an', '-vf', 'scale=640:-2', '-c:v', 'libx264', '-preset', 'ultrafast', media]);
+await symlink(path.join(root, 'node_modules'), path.join(run, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
+const media = originalMedia ? source : path.join(run, '真实素材 预览.mp4');
+if (!originalMedia) execFileSync(process.env.FFMPEG_PATH ?? 'ffmpeg', ['-v', 'error', '-i', source, '-t', '30', '-an', '-vf', 'scale=640:-2', '-c:v', 'libx264', '-preset', 'ultrafast', media]);
+if (originalMedia) {
+ // Only component discovery is substituted: probe, FFmpeg execution, duration
+ // validation, cache publication and media registration use production code.
+ await writeFile(path.join(run, 'backend.ts'), `export * from ${JSON.stringify(path.join(root, 'src/main/preview-media.ts'))};export * from ${JSON.stringify(path.join(root, 'src/main/probe.ts'))};export * from ${JSON.stringify(path.join(root, 'src/main/media-protocol.ts'))};`);
+ await build({ root: run, configFile: false, logLevel: 'error', plugins: [{ name: 'test-media-components', enforce: 'pre', load(id) {
+  if (id.replaceAll('\\', '/').endsWith('/src/main/components.ts')) return `export async function resolveUsableMediaComponents(){return {ffmpeg:process.env.FFMPEG_PATH||'ffmpeg',ffprobe:process.env.FFPROBE_PATH||'ffprobe',mediaEncoder:'libx264'}}`;
+  if (id.replaceAll('\\', '/').endsWith('/src/main/macos/client.ts')) return `export function probeMacVideo(){throw new Error('Windows verification only')}`;
+ } }], build: { outDir: path.join(run, 'backend'), lib: { entry: path.join(run, 'backend.ts'), formats: ['cjs'], fileName: () => 'index.cjs' }, rollupOptions: { external: ['electron', ...builtinModules, ...builtinModules.map(name => 'node:' + name)] } } });
+}
 const original = baseline ? new Map(['src/renderer/CustomCutPage.tsx', 'src/renderer/use-compatible-preview.ts'].map(file => [path.join(root, file), execFileSync('git', ['show', `HEAD:${file}`], { cwd: root, encoding: 'utf8' })])) : new Map();
 await writeFile(path.join(run, 'index.html'), '<html lang="en"><head><meta charset="utf-8"></head><body><div id="root"></div><script type="module" src="/entry.tsx"></script></body></html>');
 await writeFile(path.join(run, 'entry.tsx'), `
@@ -25,7 +40,7 @@ import {CompatibleVideo} from ${JSON.stringify(path.join(root, 'src/renderer/Com
 import {messages} from ${JSON.stringify(path.join(root, 'src/renderer/i18n.ts'))};
 import ${JSON.stringify(path.join(root, 'src/renderer/styles.css'))};
 const video = window.fixture;
-const metadata={path:video.path,duration_seconds:30,width:640,height:360,fps:30,variable_frame_rate:false,video_codec:'h264',audio_codec:null,container:'mp4'};
+const metadata=video.metadata??{path:video.path,duration_seconds:30,width:640,height:360,fps:30,variable_frame_rate:false,video_codec:'h264',audio_codec:null,container:'mp4'};
 const analysis={schema_version:1,video:metadata,rallies:[],bounce_times_seconds:[]};
 function Harness(){const [output,setOutput]=useState(false);window.showOutput=()=>setOutput(true);
 const [clips,setClips]=useState([5,15,25].map((start,index)=>({clipId:'clip'+index,source:'manual',rallyIndex:index+1,bounceCount:0,defaultStart:start,defaultEnd:start+3,start,end:start+3,selected:true})));
@@ -40,23 +55,38 @@ await writeFile(path.join(run, 'media-protocol.cjs'), ts.transpileModule(protoco
 await writeFile(path.join(run, 'preload.cjs'), `const {contextBridge,ipcRenderer}=require('electron');contextBridge.exposeInMainWorld('fixture',JSON.parse(process.argv.find(a=>a.startsWith('--fixture=')).slice(10)));contextBridge.exposeInMainWorld('ttcut',{platform:'win32',prepareVideoPreview:()=>ipcRenderer.invoke('proxy')});`);
 await writeFile(path.join(run, 'main.cjs'), `
 const {app,BrowserWindow,protocol,ipcMain}=require('electron');const path=require('node:path');
+const originalMedia=${originalMedia};
 app.setPath('userData',path.join(__dirname,'user-data'));app.disableHardwareAcceleration();
 protocol.registerSchemesAsPrivileged([{scheme:'ttcut-media',privileges:{standard:true,secure:true,supportFetchAPI:true,stream:true}}]);
 app.whenReady().then(async()=>{
- const {installMediaProtocol,registerMediaPath}=require('./media-protocol.cjs');
+ const backend=originalMedia?require('./backend/index.cjs'):require('./media-protocol.cjs');
+ const {installMediaProtocol,registerMediaPath}=backend;
  const handle=protocol.handle.bind(protocol);let first=true;
  protocol.handle=(scheme,handler)=>handle(scheme,async request=>{if(first){first=false;await new Promise(resolve=>setTimeout(resolve,1800));}return handler(request)});
- installMediaProtocol();const url=registerMediaPath(${JSON.stringify(media)});ipcMain.handle('proxy',()=>url);
- const fixture={path:${JSON.stringify(media)},name:'真实素材.mp4',size:1,mediaUrl:url};
+ installMediaProtocol();
+ const metadata=originalMedia?await backend.probeVideo(${JSON.stringify(media)}):undefined;
+ const url=registerMediaPath(${JSON.stringify(media)},metadata?.container==='mov'?'video/quicktime':'video/mp4');
+ ipcMain.handle('proxy',async()=>{
+  if(!originalMedia)return url;
+  console.log('Preparing full original media:',${JSON.stringify(media)});
+  const output=${JSON.stringify(reusePreview ?? null)}??await backend.preparePreviewMedia(${JSON.stringify(media)});
+  const preview=await backend.probeVideo(output);
+  if(preview.video_codec!=='h264'||preview.pixel_format!=='yuv420p'||Math.abs(preview.duration_seconds-metadata.duration_seconds)>0.25)throw new Error('Invalid full preview');
+  console.log('Validated compatible media:',output);
+  return registerMediaPath(output);
+ });
+ const fixture={path:${JSON.stringify(media)},name:path.basename(${JSON.stringify(media)}),size:1,mediaUrl:url,metadata};
  const win=new BrowserWindow({show:true,width:1180,height:760,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,sandbox:true,additionalArguments:['--fixture='+JSON.stringify(fixture)]}});
  await win.loadFile(path.join(__dirname,'renderer/index.html'));
 });app.on('window-all-closed',()=>app.quit());
 `);
 const instance = await electron.launch({ args: [path.join(run, 'main.cjs')] });
 instance.process().stderr?.on('data', chunk => process.stderr.write(chunk));
+instance.process().stdout?.on('data', chunk => process.stdout.write(chunk));
 const page = await instance.firstWindow().catch(async error => { await instance.close(); throw error; });
 const errors = []; page.on('pageerror', error => errors.push(error.message));
 const checks = [];
+let passed = false;
 page.setDefaultTimeout(10000);
 async function frameState(selector = '.custom-monitor video') { return page.locator(selector).evaluate(video => ({ time: video.currentTime, paused: video.paused, frames: video.getVideoPlaybackQuality().totalVideoFrames, ready: video.readyState, error: video.error?.message })); }
 async function advancing(name, minimum, maximum, selector = '.custom-monitor video') {
@@ -103,6 +133,11 @@ try {
   await page.keyboard.up('Control');
   await expect.poll(async()=>Number(await viewport.getAttribute('data-zoom'))).toBeGreaterThan(zoomAfterCancel);
   await button.focus();await page.keyboard.press('Space');
+  await expect(button).toHaveAttribute('aria-pressed','false');
+  await expect.poll(async()=> (await frameState()).paused).toBe(false);
+  await page.keyboard.press('Space');
+  await expect.poll(async()=> (await frameState()).paused).toBe(true);
+  await page.keyboard.press('Enter');
   await expect(button).toHaveAttribute('aria-pressed','true');
   await page.keyboard.press('Enter');
   await expect(button).toHaveAttribute('aria-pressed','false');
@@ -119,9 +154,46 @@ try {
   checks.push({name:'exclusive editing tools and Chinese/English button placement',passed:true});
  } else {
  await page.locator('.custom-rally-table tbody tr').nth(1).click();
+ if(originalMedia) {
+  // Let full-length software transcoding finish; clicks during preparation
+  // must be remembered without starting the source's HEVC decoder.
+  if(!reusePreview) await expect(page.locator('.custom-preview-status')).toBeVisible();
+  await expect(page.locator('.custom-preview-status')).toHaveCount(0,{timeout:900000});
+ }
  await advancing('list click before metadata', 15, 18);
- await page.locator('.timeline-clip[data-clip-id="clip0"]').click({ position: { x: 15, y: 15 } });
- await advancing('timeline click jumps backwards and plays', 5, 8);
+ const focusedRow=page.locator('.custom-rally-table tbody tr').nth(1);
+ await focusedRow.focus();
+ const beforeSpace=await frameState();
+ await page.keyboard.press('Space');
+ await expect.poll(async()=>(await frameState()).paused).toBe(true);
+ const afterSpace=await frameState();
+ expect(afterSpace.time).toBeGreaterThanOrEqual(beforeSpace.time);
+ await page.keyboard.press('Space');
+ await advancing('Space on a focused rally resumes without replaying its start',afterSpace.time,afterSpace.time+2);
+ const checkbox=focusedRow.getByRole('checkbox');
+ await checkbox.focus();await page.keyboard.press('Space');
+ await expect.poll(async()=>(await frameState()).paused).toBe(true);
+ await expect(checkbox).toBeChecked();
+ await page.keyboard.press('Space');
+ await expect.poll(async()=>(await frameState()).paused).toBe(false);
+ await expect(checkbox).toBeChecked();
+ checks.push({name:'Space on a focused checkbox only toggles playback',passed:true});
+ if(originalMedia) {
+  const monitor=page.locator('.custom-monitor video');
+  await monitor.focus();await page.keyboard.press('Space');
+  await expect.poll(async()=>(await frameState()).paused).toBe(true);
+  const paused=await frameState();
+  await page.keyboard.press('Space');
+  await advancing('Space resumes the selected rally',paused.time,paused.time+3);
+  const duration=await monitor.evaluate(video=>video.duration);
+  await page.evaluate(duration=>window.setDraft(current=>[...current,{...current[0],clipId:'late',rallyIndex:4,start:duration-12,end:duration-9,defaultStart:duration-12,defaultEnd:duration-9}]),duration);
+  await page.locator('.custom-rally-table tbody tr').nth(3).click();
+  await advancing('seek near the end of the full original video',duration-12,duration-9);
+  await page.evaluate(()=>window.setDraft(current=>current.filter(clip=>clip.clipId!=='late')));
+ }
+ if(originalMedia) await page.locator('.custom-rally-table tbody tr').nth(0).click();
+ else await page.locator('.timeline-clip[data-clip-id="clip0"]').click({ position: { x: 15, y: 15 } });
+ await advancing(originalMedia?'list click jumps backwards and plays':'timeline click jumps backwards and plays', 5, 8);
  for (const index of [2,0,2,1]) await page.locator('.custom-rally-table tbody tr').nth(index).click();
  await advancing('rapid clicks preserve latest target', 15, 18);
  await page.screenshot({ path: path.join(run, 'custom.png') });
@@ -171,6 +243,11 @@ try {
   await expect(page.getByRole('button',{name:'回合播放',exact:true})).toBeVisible();
   await page.getByRole('button',{name:'回合播放',exact:true}).focus();
   await page.keyboard.press('Space');
+  await expect(page.getByRole('button',{name:'回合播放',exact:true})).toBeVisible();
+  await expect.poll(async()=>(await frameState()).paused).toBe(false);
+  await page.keyboard.press('Space');
+  await expect.poll(async()=>(await frameState()).paused).toBe(true);
+  await page.keyboard.press('Enter');
   await expect(page.getByRole('button',{name:'原片播放',exact:true})).toBeVisible();
   await page.keyboard.press('Enter');
   await expect(page.getByRole('button',{name:'回合播放',exact:true})).toBeVisible();
@@ -178,15 +255,21 @@ try {
   await page.screenshot({path:path.join(run,'rally-playback-zh.png'),animations:'disabled'});
   checks.push({name:'Chinese and English button layout and keyboard switching',passed:true});
  }
+ if(!originalMedia) {
  await page.evaluate(() => window.showOutput());
  await expect.poll(async () => (await frameState('.output-preview')).ready).toBeGreaterThanOrEqual(2);
  await page.locator('.output-preview').evaluate(video => video.play());
  await advancing('result preview loads and advances', 0, 5, '.output-preview');
  }
+ }
  if (errors.length) throw new Error(errors.join('\n'));
- console.log(JSON.stringify({ passed: true, host: process.platform, baseline, zoomOnly, checks, run }, null, 2));
+ passed = true;
+ console.log(JSON.stringify({ passed: true, host: process.platform, baseline, zoomOnly, originalMedia, reusePreview, source, checks, run }, null, 2));
+} catch (error) {
+ errors.push(String(error));
+ throw error;
 } finally {
- await writeFile(path.join(run, 'report.json'), JSON.stringify({ host: process.platform, baseline, zoomOnly, checks, errors }, null, 2));
+ await writeFile(path.join(run, 'report.json'), JSON.stringify({ passed, host: process.platform, baseline, zoomOnly, originalMedia, reusePreview, source, checks, errors }, null, 2));
  await instance.close();
  console.log('Evidence:', run);
 }

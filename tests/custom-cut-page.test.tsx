@@ -98,6 +98,53 @@ function mockRallyListGeometry() {
 
 afterEach(() => cleanup());
 
+it.each(['.custom-rally-table tr', '.custom-rally-table input', '.playback-mode-toggle', '.custom-monitor video', '.floating-launch-start'])('reserves Space for transport while focused on %s', async (selector) => {
+  render(<Harness />);
+  const monitor = document.querySelector<HTMLVideoElement>('.custom-monitor video')!;
+  let paused = true;
+  Object.defineProperties(monitor, {
+    paused: { configurable: true, get: () => paused }, readyState: { configurable: true, value: 4 },
+    videoWidth: { configurable: true, value: 1280 }, videoHeight: { configurable: true, value: 720 },
+  });
+  const play = vi.spyOn(monitor, 'play').mockImplementation(async () => { paused = false; });
+  const pause = vi.spyOn(monitor, 'pause').mockImplementation(() => { paused = true; });
+  try {
+    await act(async () => { fireEvent.click(document.querySelector('.custom-rally-table tr')!); });
+    monitor.currentTime = 3.5;
+    const target = document.querySelector<HTMLElement>(selector)!;
+    target.focus();
+    expect(fireEvent.keyDown(target, { key: ' ', code: 'Space' })).toBe(false);
+    expect(paused).toBe(true);
+    expect(monitor.currentTime).toBe(3.5);
+    fireEvent.keyDown(target, { key: ' ', code: 'Space', repeat: true });
+    fireEvent.keyUp(target, { key: ' ', code: 'Space' });
+    expect(paused).toBe(true);
+    expect(play).toHaveBeenCalledTimes(1);
+    await act(async () => { fireEvent.keyDown(target, { key: ' ', code: 'Space' }); fireEvent.keyUp(target, { key: ' ', code: 'Space' }); });
+    expect(paused).toBe(false);
+    expect(monitor.currentTime).toBe(3.5);
+    expect(play).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole('checkbox', { name: 'Rally 1' })).toBeChecked();
+    expect(screen.getByRole('button', { name: 'Source playback' })).toBeInTheDocument();
+  } finally { play.mockRestore(); pause.mockRestore(); }
+});
+
+it.each([true, false])('uses the codec of the selected playback file (original=%s)', async (original) => {
+  const prepareVideoPreview = vi.fn(() => new Promise<string>(() => {}));
+  vi.stubGlobal('ttcut', { platform: 'win32', prepareVideoPreview });
+  const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  try {
+    const result = { ...analysis, source_video: { ...analysis.video, path: 'D:/original.MOV', video_codec: 'hevc' } };
+    const selected = { ...video, path: original ? result.source_video.path : result.video.path };
+    render(<CustomCutPage video={selected} analysis={result} clips={initialClips} playbackMode="source" onPlaybackModeChange={vi.fn()} translations={messages('en')} mediaAvailable onClipsChange={vi.fn()} onToggleAll={vi.fn()} outputs={{ combined_video: true, rally_videos: false, premiere_xml: false }} onOutputsChange={vi.fn()} onExport={vi.fn()} />);
+    await act(async () => {});
+    expect(prepareVideoPreview).toHaveBeenCalledTimes(original ? 1 : 0);
+  } finally {
+    cleanup(); pause.mockRestore(); warn.mockRestore(); vi.unstubAllGlobals();
+  }
+});
+
 it('shows board counts for continuous-visibility results that include bounce metadata', () => {
   render(<ContinuousBoardHarness />);
   expect(screen.getByText('板数 2')).toBeVisible();
