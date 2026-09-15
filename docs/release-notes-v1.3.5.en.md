@@ -31,6 +31,9 @@
 
 ## Verification
 
+- macOS republication: type checking, 139 relevant regression tests, 17 macOS boundary tests, and Swift tests with native dependencies enabled passed. Six packaged-app checks covered multi-select and shared timeline boundaries.
+- On the macOS host, 18 real-video playback and four zoom checks passed in a standalone Electron harness. Its bridge advertises `win32`; this is not Windows hardware acceptance.
+- macOS DMG mounting, packaged-app signature integrity, dependency boundaries for 29 arm64 native files, and DMG/ZIP size and SHA-256 verification passed. These checks are not Apple notarization.
 - Windows release verification: TypeScript type checking passed. Vitest passed 423 tests across 62 files, with 25 tests across 6 files skipped by their existing conditions. All 222 Python regression tests passed.
 - The production website build and both rendered-page tests passed.
 - Eighteen Windows Electron checks passed with real media, covering Space control, seeking, continuous playback, temporary previews, and result playback.
