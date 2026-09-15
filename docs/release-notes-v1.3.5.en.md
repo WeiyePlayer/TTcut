@@ -19,7 +19,7 @@
 - **Windows x64 · v1.3.5**: `TTcut-1.3.5-x64-Setup.exe`, a full installer containing the required runtime resources for a one-step setup.
 - Installer registration is now written and immediately read back by native NSIS code without invoking PowerShell. Enterprise execution policies, language modes, PATH, or .NET state no longer gate registration; failures retain a diagnostic log outside the rollback directory.
 - The installer uses the pinned `CN=weiye` self-signed Authenticode certificate, an RFC 3161 timestamp, and a signed update manifest. Windows may still show Unknown publisher or SmartScreen on systems that do not trust this certificate.
-- This GitHub Release remains a draft and no `v1.3.5` tag is pushed.
+- This GitHub Release remains a draft and is not published yet.
 
 ## Verification
 
