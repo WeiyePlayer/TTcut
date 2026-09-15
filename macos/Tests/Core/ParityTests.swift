@@ -15,7 +15,7 @@ final class ParityTests: XCTestCase {
     }
   }
 
-  func testWindowsBoardCountAndROIParity() throws {
+  func testPythonBounceAndROIParity() throws {
     let url = Bundle.module.url(
       forResource: "python-parity", withExtension: "json", subdirectory: "Fixtures")!
     let fixture = try JSONDecoder().decode(Fixture.self, from: Data(contentsOf: url))
@@ -28,8 +28,7 @@ final class ParityTests: XCTestCase {
       ])
     for item in fixture.cases {
       XCTAssertEqual(
-        try BlurBallBoardCountDetector.detect(item.points, calibration: fixture.calibration),
-        item.expected,
+        try BounceDetector.detect(item.points, calibration: fixture.calibration), item.expected,
         item.name)
     }
   }

@@ -315,12 +315,9 @@ final class Worker {
         verticalExchangeEnabled: try VisibilityRallies.isEndOnTableView(calibration.points))
       let rallies = try BlurBallVisibilityRallies.detect(
         points, fps: request.video.fps, calibration: calibration, motionConfig: config)
-      let bounceFrames = try BlurBallBoardCountDetector.detect(points, calibration: calibration)
-      let bounceFrameSet = Set(bounceFrames)
       var event = WorkerEvent(type: "result", taskID: request.taskID)
       event.roi = analysisROI
       event.visibilityRallies = rallies
-      event.bounceTimes = points.filter { bounceFrameSet.contains($0.frame) }.map(\.time).sorted()
       emit(event)
       return
     }

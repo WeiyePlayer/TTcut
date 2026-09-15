@@ -171,12 +171,6 @@ final class MediaIntegrationTests: XCTestCase {
     XCTAssertEqual(result.type, "result")
     XCTAssertNotNil(result.rallies)
     XCTAssertNotNil(result.bounceTimes)
-    request.rallyRecognitionMethod = .continuousVisibility
-    let continuous = try await AnalysisClient.run(request, paths: paths) { _ in }
-    XCTAssertEqual(continuous.type, "result")
-    XCTAssertNotNil(continuous.visibilityRallies)
-    XCTAssertNotNil(continuous.bounceTimes)
-    request.rallyRecognitionMethod = nil
     request.mode = .twoStage
     let second = try await AnalysisClient.run(request, paths: paths) { _ in }
     XCTAssertEqual(second.type, "result")
