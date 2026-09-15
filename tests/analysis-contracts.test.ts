@@ -162,6 +162,15 @@ describe('BlurBall analysis request contracts', () => {
       },
     });
     expect(result.model_provenance?.analysis?.mode).toBe('two_stage');
+    const sampled = structuredClone(result);
+    const candidate = sampled.model_provenance!.analysis!.stages[0]!;
+    candidate.window_stride = 6;
+    candidate.temporal_stride = 2;
+    candidate.interpolated_frames = 42;
+    expect(analysisResultSchema.parse(sampled).model_provenance?.analysis?.stages[0]).toEqual(candidate);
+    candidate.window_stride = 9;
+    candidate.temporal_stride = 3;
+    expect(analysisResultSchema.parse(sampled).model_provenance?.analysis?.stages[0]).toEqual(candidate);
     const withTrajectory = (trajectory: unknown) => ({
       ...result, model_provenance: { ...result.model_provenance, trajectory },
     });

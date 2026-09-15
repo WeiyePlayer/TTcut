@@ -375,7 +375,27 @@ export const continuousVisibilityRallySchema = z.object({
   { message: 'Rally lead-in must not start after the rally' },
 );
 
-export const rallySchema = z.union([bounceRallySchema, continuousVisibilityRallySchema]);
+export const continuousVisibilityBoardCountRallySchema = z.object({
+  id: z.string().regex(/^rally_\d{3,}$/),
+  index: z.number().int().positive(),
+  bounce_count: z.number().int().nonnegative(),
+  start_time_seconds: finiteNumber.nonnegative(),
+  end_time_seconds: finiteNumber.positive(),
+  lead_in_start_time_seconds: finiteNumber.nonnegative().optional(),
+}).strict().refine(
+  (rally) => rally.end_time_seconds > rally.start_time_seconds,
+  { message: 'Rally end time must be after start time' },
+).refine(
+  (rally) => rally.lead_in_start_time_seconds === undefined
+    || rally.lead_in_start_time_seconds <= rally.start_time_seconds,
+  { message: 'Rally lead-in must not start after the rally' },
+);
+
+export const rallySchema = z.union([
+  bounceRallySchema,
+  continuousVisibilityRallySchema,
+  continuousVisibilityBoardCountRallySchema,
+]);
 
 const analysisResultBaseSchema = z.object({
   video: videoMetadataSchema,
@@ -423,7 +443,9 @@ const analysisResultBaseSchema = z.object({
         name: z.enum(['full', 'candidate', 'refinement']),
         confidence_threshold: finiteNumber.min(0).max(1),
         window_size: z.literal(3),
-        window_stride: z.union([z.literal(1), z.literal(3)]),
+        window_stride: z.union([z.literal(1), z.literal(3), z.literal(6), z.literal(9)]),
+        temporal_stride: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(),
+        interpolated_frames: z.number().int().nonnegative().optional(),
         retained_output: z.enum(['all_window_frames', 'center_frame']),
       }).strict()).min(1),
     }).strict().optional(),
@@ -537,6 +559,37 @@ export const continuousVisibilityAnalysisResultV2Schema = analysisResultBaseSche
     }).strict().optional(),
   }).strict(),
 }).strict();
+
+export const continuousVisibilityAnalysisResultV3Schema = continuousVisibilityAnalysisResultV2Schema.extend({
+  schema_version: z.literal(3),
+  rallies: z.array(continuousVisibilityBoardCountRallySchema),
+  bounce_times_seconds: z.array(finiteNumber.nonnegative()),
+  rally_recognition: continuousVisibilityAnalysisResultV2Schema.shape.rally_recognition.extend({
+    board_count: z.object({
+      detector: z.literal('blurball_trajectory_change'),
+      source_path: z.literal('worker/ttcut_worker/blurball_bounce.py'),
+      source_sha256: z.literal('e1e7674cd1209a6f4deffe5ff0e57633e2859605f031b1c012cb2d16c9f49ea8'),
+      minimum_interval_seconds: z.literal(0.315),
+      landing_region: z.literal('expanded_table'),
+      table_length_margin_cm: z.literal(35),
+      table_width_margin_cm: z.literal(25),
+    }).strict(),
+  }).strict(),
+}).strict().superRefine((result, ctx) => {
+  const invalid = (message: string) => ctx.addIssue({ code: 'custom', message });
+  for (const [index, time] of result.bounce_times_seconds.entries()) {
+    if (time > result.video.duration_seconds
+      || (index > 0 && time <= result.bounce_times_seconds[index - 1]!)) {
+      invalid('Bounce times must be ordered, unique and source-bound');
+    }
+  }
+  for (const rally of result.rallies) {
+    const count = result.bounce_times_seconds.filter((time) => (
+      time >= rally.start_time_seconds && time <= rally.end_time_seconds
+    )).length;
+    if (rally.bounce_count !== count) invalid('Rally board count must match bounce times');
+  }
+});
 
 const metricSeriesSchema = z.array(finiteNumber.nonnegative().nullable());
 const excludedEvidenceSchema = z.discriminatedUnion('reason', [
@@ -660,6 +713,7 @@ export const hybridAnalysisResultV3Schema = analysisResultBaseSchema.extend({
 
 export const analysisResultSchema = z.union([
   hybridAnalysisResultV3Schema,
+  continuousVisibilityAnalysisResultV3Schema,
   legacyAnalysisResultV1Schema,
   bounceAnalysisResultV2Schema,
   continuousVisibilityAnalysisResultV2Schema,
@@ -924,20 +978,22 @@ export type VideoMetadata = z.infer<typeof videoMetadataSchema>;
 export type Rally = z.infer<typeof rallySchema>;
 export type BounceRally = z.infer<typeof bounceRallySchema>;
 export type ContinuousVisibilityRally = z.infer<typeof continuousVisibilityRallySchema>;
+export type ContinuousVisibilityBoardCountRally = z.infer<typeof continuousVisibilityBoardCountRallySchema>;
 export type AnalysisResultV1 = z.infer<typeof analysisResultSchema>;
 export type AnalysisResult = AnalysisResultV1;
 export type LegacyAnalysisResultV1 = z.infer<typeof legacyAnalysisResultV1Schema>;
 export type BounceAnalysisResultV2 = z.infer<typeof bounceAnalysisResultV2Schema>;
 export type ContinuousVisibilityAnalysisResultV2 = z.infer<typeof continuousVisibilityAnalysisResultV2Schema>;
+export type ContinuousVisibilityAnalysisResultV3 = z.infer<typeof continuousVisibilityAnalysisResultV3Schema>;
 export type HybridAnalysisResultV3 = z.infer<typeof hybridAnalysisResultV3Schema>;
-export type BounceAnalysisResult = LegacyAnalysisResultV1 | BounceAnalysisResultV2 | HybridAnalysisResultV3;
+export type BounceAnalysisResult = LegacyAnalysisResultV1 | BounceAnalysisResultV2 | HybridAnalysisResultV3 | ContinuousVisibilityAnalysisResultV3;
 
 export function rallyRecognitionMethod(result: AnalysisResultV1): RallyRecognitionMethod {
   return result.schema_version !== 1 ? result.rally_recognition.method : 'bounce_events';
 }
 
 export function hasBounceCounts(result: AnalysisResultV1): result is BounceAnalysisResult {
-  return rallyRecognitionMethod(result) !== 'continuous_visibility';
+  return rallyRecognitionMethod(result) !== 'continuous_visibility' || result.schema_version === 3;
 }
 export type CalibrationResultV1 = z.infer<typeof calibrationResultSchema>;
 export type WorkerEventV1 = z.infer<typeof workerEventSchema>;
