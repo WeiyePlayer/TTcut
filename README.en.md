@@ -8,7 +8,7 @@ TTcut is a local automatic table-tennis video cutter for players and enthusiasts
 
 Videos, analysis results, and history stay on the local computer. TTcut requires no account, uploads no video, and collects no telemetry. The Windows full installer and macOS packages include their runtime resources. Analysis, preview, and cutting can run offline after setup.
 
-> The current stable release is `v1.3.3` for Windows x64 and macOS 15+ on Apple Silicon.
+> The current stable Windows release is `v1.3.5`; the current stable macOS 15+ Apple Silicon release is `v1.3.4`.
 
 ## Download and installation
 
@@ -21,13 +21,13 @@ Videos, analysis results, and history stay on the local computer. TTcut requires
 
 TTcut detects an NVIDIA GPU automatically and falls back to CPU if accelerated setup or its self-test fails. Its video-processing capability reads media information, cuts and joins segments, and validates exported files.
 
-## What's new in v1.3.3
+## What's new in v1.3.5
 
-- Added Merge into one video, which cuts selected rallies from multiple videos into one output in task order.
-- Made hybrid motion-and-bounce recognition the Windows default and refined missed, truncated, and incorrectly split rallies in validated samples; macOS continues to use native Core ML continuous-visibility recognition.
-- Fixed confirmed issues in compatible preview, processed-media paths, and the merged-task list layout.
+- Custom cutting now has Multi-select for selecting all rallies or filtering by a minimum bounce count. Older analyses without bounce-count metadata explicitly ask for reanalysis.
+- Fixed ambiguous resizing at shared boundaries between adjacent clips, and kept the playhead line from blocking video-track interaction.
+- Ball-detection analysis now defaults to temporal stride 3 while preserving per-frame timestamps and using constrained interpolation for intermediate positions. One frozen-video run reduced total time by about 25.3%, but its results differed from the frame-by-frame baseline, so recognition-quality equivalence is not claimed.
 
-See the [v1.3.3 release notes](docs/release-notes-v1.3.3.en.md) for the complete details.
+See the [v1.3.5 release notes](docs/release-notes-v1.3.5.en.md) for the complete details.
 
 ## Contact the author on WeChat: m2924931661
 
@@ -131,7 +131,7 @@ Videos, model weights, and runtime resources required by the real end-to-end wor
 ## Known limitations
 
 - The single-video workflow handles one MP4 or MOV at a time; Batch tasks accepts multiple MP4/MOV files and runs a serial “calibrate first, then process” queue with manual recovery for failed items.
-- With Bounce events, the displayed count is a bounce-event proxy, not a ground-truth paddle-hit count. Continuous motion does not display a count.
+- The displayed bounce count is a landing-event proxy, not a ground-truth paddle-hit count. Continuous-motion highlights still use duration tiers; custom cutting displays and filters bounce counts only when a new analysis includes that metadata.
 - Windows x64 remains the primary build. Removing the Windows build-number gate does not guarantee that older Windows versions, x86 systems, or ARM64 systems can run every required dependency.
 
 More implementation and release documentation is available under [`docs`](docs).
