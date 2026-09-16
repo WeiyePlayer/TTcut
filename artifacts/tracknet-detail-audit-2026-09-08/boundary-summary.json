@@ -1,0 +1,34 @@
+{
+  "matched_iou_30": 182,
+  "boundary_tolerances": {
+    "0.25": {
+      "start": 60,
+      "end": 66,
+      "both": 20
+    },
+    "0.5": {
+      "start": 99,
+      "end": 102,
+      "both": 60
+    },
+    "1.0": {
+      "start": 161,
+      "end": 131,
+      "both": 116
+    }
+  },
+  "start": {
+    "mae": 0.6156929835164835,
+    "median_absolute": 0.416667,
+    "signed_mean": 0.49771984065934066,
+    "early_over_half_second": 7,
+    "late_over_half_second": 76
+  },
+  "end": {
+    "mae": 0.8339989340659341,
+    "median_absolute": 0.4005,
+    "signed_mean": -0.321622021978022,
+    "early_over_half_second": 52,
+    "late_over_half_second": 28
+  }
+}

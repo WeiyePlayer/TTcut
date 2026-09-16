@@ -17,7 +17,9 @@ from .video import FramePacket, StreamingVideoReader, VideoInfo
 
 MODEL_WIDTH = 512
 MODEL_HEIGHT = 288
-TRACKNET_CONFIDENCE_THRESHOLD = 0.35
+# Selected against the three fixed BlurBall history references at ROI scale 1.0.
+# See docs/performance/tracknet-thresholds-2026-09-08.md.
+TRACKNET_CONFIDENCE_THRESHOLD = 0.36
 TRACKNET_ROI_MODEL_SCALE = 1.0
 ProgressCallback = Callable[[int, int], None]
 
@@ -224,6 +226,16 @@ class TrackNetPredictor:
                 raise DeviceError("TrackNet local test inference failed on CUDA.") from exc
             raise
         self._inference_seconds += time.perf_counter() - started
+        return self._points_from_heatmaps(heatmaps, packets, info, analysis_roi)
+
+    def _points_from_heatmaps(
+        self,
+        heatmaps: np.ndarray,
+        packets: list[FramePacket],
+        info: VideoInfo,
+        analysis_roi: AnalysisRoi | None,
+    ) -> list[TrajectoryPoint]:
+        """Decode one window using this predictor's own threshold and track history."""
         if heatmaps.shape[0] != self.loaded.seq_len:
             raise VideoError("TrackNet emitted an invalid output sequence.")
         points: list[TrajectoryPoint] = []

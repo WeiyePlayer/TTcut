@@ -13,6 +13,7 @@ MOTION_CONFIG = VisibilityMotionConfig(analysis_width_pixels=200, analysis_heigh
 
 @dataclass
 class FakeCalibration:
+    points = ((0, 0), (200, 0), (200, 100), (0, 100))
     inside: bool = True
 
     def image_to_table(self, x: float, y: float) -> tuple[float, float]:
@@ -21,6 +22,7 @@ class FakeCalibration:
 
 @dataclass
 class ThresholdCalibration:
+    points = ((0, 0), (200, 0), (200, 100), (0, 100))
     minimum_inside_x: float
 
     def image_to_table(self, x: float, y: float) -> tuple[float, float]:

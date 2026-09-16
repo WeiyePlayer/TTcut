@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Audit a packaged Electron app, including its independent native runtime."""
 from pathlib import Path
-import subprocess, sys, json, re, plistlib, tempfile, shutil
+import subprocess, sys, json, re, plistlib, tempfile, shutil, os
 app=Path(sys.argv[1]).resolve()
 report=Path(sys.argv[2]) if len(sys.argv)>2 else app.parent/'bundle-audit.json'
 def run(*args): return subprocess.check_output(list(map(str,args)),text=True,stderr=subprocess.STDOUT).strip()
 run('codesign','--verify','--deep','--strict',app)
 plist=plistlib.loads((app/'Contents/Info.plist').read_bytes())
-assert plist['LSMinimumSystemVersion']=='15.0'
+expected_minimum=tuple(map(int,os.environ.get('TTCUT_BUNDLE_MINIMUM_OS','15.0').split('.')))
+assert tuple(map(int,plist['LSMinimumSystemVersion'].split('.')))==expected_minimum
 assert not (app/'Contents/Resources/app-update.yml').exists()
 magic=[bytes.fromhex(v) for v in ['cffaedfe','feedfacf','cafebabe','bebafeca']]
 binaries=[]
@@ -27,7 +28,7 @@ for p in app.rglob('*'):
   assert own_install_name or dep.startswith(('@','/System/Library/','/usr/lib/')),(p,dep)
   dependencies.append(dep)
  minimum=re.findall(r'\bminos\s+([\d.]+)',loads)
- assert all(tuple(map(int,v.split('.'))) <= (15,0,0) for v in minimum),(p,minimum)
+ assert all(tuple(map(int,v.split('.'))) <= expected_minimum for v in minimum),(p,minimum)
  for rpath in re.findall(r'cmd LC_RPATH\s+cmdsize \d+\s+path (.*?) \(offset',loads):
   assert not rpath.startswith(('/Users/','/opt/homebrew/')),(p,rpath)
  binaries.append(dict(path=str(p.relative_to(app)),architecture=arches,minimum_os=minimum,dependencies=dependencies))

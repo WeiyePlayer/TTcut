@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { access, mkdir, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { inspectMacComponents, macMediaComponents } from './macos/runtime';
@@ -184,7 +185,9 @@ async function modelResource(filename: string): Promise<string> {
 }
 
 async function localTrackNetWeight(): Promise<string | null> {
-  if (app.isPackaged || process.env.TTCUT_ENABLE_LOCAL_TRACKNET !== '1') return null;
+  const bundled = resource('tracknet-local', 'TrackNet_best.pt');
+  if (app.isPackaged) return await exists(bundled) ? bundled : null;
+  if (process.env.TTCUT_ENABLE_LOCAL_TRACKNET !== '1') return null;
   const configured = process.env.TTCUT_TRACKNET_WEIGHTS?.trim();
   if (!configured) return null;
   const weight = path.resolve(configured);
@@ -211,6 +214,9 @@ async function runtimeCandidates(device: 'auto' | 'cuda' | 'cpu'): Promise<Runti
     process.env.TTCUT_E2E === '1' && process.env.TTCUT_E2E_DISABLE_DEV_COMPONENTS === '1'
   );
   const candidates: RuntimeCandidate[] = [];
+  if (app.isPackaged && process.platform === 'darwin') {
+    candidates.push({ python: resource('tracknet-local', 'bin', 'python'), variant: 'external' });
+  }
   if (process.env.TTCUT_PYTHON) candidates.push({ python: process.env.TTCUT_PYTHON, variant: 'external' });
   for (const variant of requestedVariants(device)) {
     candidates.push({ python: path.join(managedRoot, ...analysisRuntimePython(variant).split('/')), variant });
@@ -273,11 +279,20 @@ export async function resolveComponents(device: 'auto' | 'cuda' | 'cpu' = 'auto'
     worker: resource('worker'),
     blurballWeights: process.env.TTCUT_BLURBALL_WEIGHTS || await modelResource('blurball_best.pt'),
     tracknetWeights: await localTrackNetWeight(),
-    tableAnalyzeWeights: process.env.TTCUT_TABLE_ANALYZE_WEIGHTS || await modelResource('table_analyze.pt'),
+    tableAnalyzeWeights: process.env.TTCUT_TABLE_ANALYZE_WEIGHTS
+      || (app.isPackaged && await exists(resource('tracknet-local', 'table_analyze.pt'))
+        ? resource('tracknet-local', 'table_analyze.pt')
+        : await modelResource('table_analyze.pt')),
     ffmpeg: media?.ffmpeg ?? null,
     ffprobe: media?.ffprobe ?? null,
     mediaEncoder: media?.encoder ?? 'unavailable',
   };
+}
+
+export function hasBundledLocalTrackNetRuntime(): boolean {
+  return app.isPackaged
+    && process.platform === 'darwin'
+    && existsSync(resource('tracknet-local', 'manifest.json'));
 }
 
 export async function activateManagedAnalysisRuntime(variant: AnalysisRuntimeVariant): Promise<void> {
@@ -373,6 +388,24 @@ export async function resolveUsableAnalysisComponents(
   let lastError: unknown = null;
   for (const candidate of candidates) {
     try {
+      if (hasBundledLocalTrackNetRuntime()
+        && path.resolve(candidate.python) === path.resolve(resource('tracknet-local', 'bin', 'python'))) {
+        const result = await runProcess(candidate.python, ['-c', [
+          'import json,sys,torch,cv2,av,numpy',
+          "print(json.dumps({'python':sys.version.split()[0],'torch':torch.__version__,'opencv':cv2.__version__,'av':av.__version__,'numpy':numpy.__version__,'mps':torch.backends.mps.is_available()}))",
+        ].join('\n')], {
+          timeoutMs: 30_000,
+          env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' },
+        });
+        const value = JSON.parse(result.stdout.trim()) as Record<string, unknown>;
+        if (!String(value.python).startsWith('3.11.') || value.torch !== '2.7.0'
+          || value.opencv !== '4.11.0' || value.av !== '18.1.0'
+          || value.numpy !== '1.26.4' || value.mps !== true) {
+          throw new Error('LOCAL_TRACKNET_RUNTIME_VERSION_MISMATCH');
+        }
+        if (device === 'cuda') throw new Error('DEVICE_UNAVAILABLE');
+        return { ...base, python: candidate.python, runtimeVariant: 'external' };
+      }
       const expected = isAnalysisRuntimeVariant(candidate.variant) ? candidate.variant : undefined;
       const validation = await validateAnalysisComponent(candidate.python, expected);
       if (device === 'cuda' && validation.acceleration !== 'cuda') throw new Error('DEVICE_UNAVAILABLE');

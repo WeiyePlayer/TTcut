@@ -12,6 +12,7 @@ const publicReleaseCandidate = process.env.TTCUT_PUBLIC_RC === '1';
 const officialRelease = process.env.TTCUT_OFFICIAL_RELEASE === '1';
 const releaseSigningRequired = !macBuild && (publicReleaseCandidate || officialRelease);
 const onlineModelInstaller = process.env.TTCUT_ONLINE_MODEL_INSTALLER === '1';
+const localTrackNetPackage = macBuild && process.env.TTCUT_LOCAL_TRACKNET_PACKAGE === '1';
 const retainedWindowsLocales = new Set(['en-US.pak', 'zh-CN.pak']);
 
 function ignoreUnbuiltSource(file: string): boolean {
@@ -85,11 +86,14 @@ const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
     icon: path.resolve(macBuild ? 'macos/Resources/TTcut.icns' : 'public/ttcut.ico'),
-    ...(macBuild ? { appBundleId: 'com.weiye.ttcut.electron.macos', appCategoryType: 'public.app-category.video', extendInfo: { LSMinimumSystemVersion: '15.0' } } : {}),
+    ...(macBuild ? { appBundleId: 'com.weiye.ttcut.electron.macos', appCategoryType: 'public.app-category.video', extendInfo: { LSMinimumSystemVersion: localTrackNetPackage ? '26.0' : '15.0' } } : {}),
     executableName: 'TTcut',
     ignore: ignoreUnbuiltSource,
     afterExtract: [retainSupportedWindowsLocales],
-    extraResource: macBuild ? ['.runtime/macos'] : [
+    extraResource: macBuild ? [
+      '.runtime/macos',
+      ...(localTrackNetPackage ? ['.runtime/worker', '.runtime/tracknet-local'] : []),
+    ] : [
       '.runtime/worker',
       '.runtime/release-metadata',
       onlineModelInstaller ? '.runtime/online-installer/resources' : 'resources',

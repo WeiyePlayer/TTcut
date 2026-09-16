@@ -95,7 +95,12 @@ def resolve_device(requested: str):
     if requested == "cuda" and not torch.cuda.is_available():
         raise DeviceError("CUDA was requested but is unavailable.")
     if requested == "auto":
-        requested = "cuda" if torch.cuda.is_available() else "cpu"
+        if torch.cuda.is_available():
+            requested = "cuda"
+        elif getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
+            requested = "mps"
+        else:
+            requested = "cpu"
     return torch.device(requested)
 
 

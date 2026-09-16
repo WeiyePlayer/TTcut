@@ -309,7 +309,7 @@ def test_worker_uses_the_local_tracknet_weight_without_blurball_provenance(monke
     assert captured["loaded"] is fake_loaded
     assert captured["weight_path"] == "D:/local/TrackNet_best.pt"
     assert captured["device"] == "cpu"
-    assert captured["confidence_threshold"] == 0.35
+    assert captured["confidence_threshold"] == 0.36
     assert captured["roi_model_scale"] == 1.0
     assert captured["roi"].source_width == 1280
     provenance = result["model_provenance"]
@@ -319,7 +319,7 @@ def test_worker_uses_the_local_tracknet_weight_without_blurball_provenance(monke
     assert "detection" not in provenance
     assert "analysis" not in provenance
     assert provenance["tracknet"] == {
-        "confidence_threshold": 0.35,
+        "confidence_threshold": 0.36,
         "roi_model_scale": 1.0,
         "inference_seconds": 0.4,
         "predictor_seconds": 0.6,
@@ -342,7 +342,7 @@ def test_worker_applies_the_tracknet_visibility_filter_and_records_its_threshold
                 for frame in range(20)
             ]
             return points, VideoInfo(Path(video_path), 1280, 720, 10.0, 20, 20, 2.0), SimpleNamespace(
-                model_width=248, model_height=136, confidence_threshold=0.35,
+                model_width=248, model_height=136, confidence_threshold=0.36,
                 roi_model_scale=1.0, inference_seconds=0.4, predictor_seconds=0.6,
                 detected_frames=20, missing_frames=0,
             )
@@ -365,7 +365,7 @@ def test_worker_applies_the_tracknet_visibility_filter_and_records_its_threshold
     result = analyze(request)
 
     assert captured == {
-        "confidence_threshold": 0.35,
+        "confidence_threshold": 0.36,
         "roi_model_scale": 1.0,
         "tracknet_filter_called": True,
     }
@@ -373,6 +373,9 @@ def test_worker_applies_the_tracknet_visibility_filter_and_records_its_threshold
         "id": "rally_001", "index": 1, "start_time_seconds": 0.0, "end_time_seconds": 1.9,
     }]
     assert result["rally_recognition"]["tracknet_filter"] == {
+        "motion_policy_version": 2,
+        "supported_bridge_seconds": 4.5,
+        "uncertain_tail_context_seconds": 1.0,
         "minimum_rally_seconds": 0.9,
         "strong_evidence_minimum_rally_seconds": 0.75,
         "strong_evidence_minimum_expanded_table_ratio": 0.8,
@@ -383,7 +386,7 @@ def test_worker_applies_the_tracknet_visibility_filter_and_records_its_threshold
         "expanded_table_width_margin_cm": 25.0,
         "reliable_fragment_bridge_seconds": 1.5,
     }
-    assert result["rally_recognition"]["detection_confidence_threshold"] == 0.35
+    assert result["rally_recognition"]["detection_confidence_threshold"] == 0.36
     assert "bounce_times_seconds" not in result
 
 

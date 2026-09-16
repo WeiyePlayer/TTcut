@@ -475,6 +475,9 @@ export const continuousVisibilityAnalysisResultV2Schema = analysisResultBaseSche
       maximum_boundary_speed_ratio_per_second: finiteNumber.positive(),
     }).strict().optional(),
     tracknet_filter: z.object({
+      motion_policy_version: z.number().int().positive().optional(),
+      supported_bridge_seconds: finiteNumber.positive().optional(),
+      uncertain_tail_context_seconds: finiteNumber.positive().optional(),
       minimum_rally_seconds: finiteNumber.positive(),
       strong_evidence_minimum_rally_seconds: finiteNumber.positive().optional(),
       strong_evidence_minimum_expanded_table_ratio: finiteNumber.min(0).max(1).optional(),

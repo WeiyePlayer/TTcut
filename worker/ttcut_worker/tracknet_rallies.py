@@ -6,9 +6,8 @@ from typing import Sequence
 
 from .calibration import TABLE_LENGTH_CM, TABLE_WIDTH_CM, TableCalibration
 from .types import TrajectoryPoint
+from .tracknet_motion import refine_tracknet_candidates
 from .visibility_rallies import (
-    CONTINUOUS_VISIBILITY_MAX_REVERSAL_GAP_SECONDS,
-    CONTINUOUS_VISIBILITY_MIN_HORIZONTAL_EXCURSION_RATIO,
     VisibilityMotionConfig,
     VisibilityRallySummary,
     _run_reversals,
@@ -16,6 +15,12 @@ from .visibility_rallies import (
 )
 
 
+# Keep the TrackNet policy separate from BlurBall tuning. Geometry and the
+# visibility state machine remain reusable, but their defaults are not policy.
+TRACKNET_START_VISIBLE_SECONDS = 0.20
+TRACKNET_END_INVISIBLE_SECONDS = 0.50
+TRACKNET_MAX_REVERSAL_GAP_SECONDS = 0.35
+TRACKNET_MIN_HORIZONTAL_EXCURSION_RATIO = 20.0 / 618.0
 TRACKNET_MINIMUM_RALLY_SECONDS = 0.90
 TRACKNET_STRONG_EVIDENCE_MINIMUM_RALLY_SECONDS = 0.75
 TRACKNET_STRONG_EVIDENCE_MINIMUM_EXPANDED_TABLE_RATIO = 0.80
@@ -36,15 +41,19 @@ def tracknet_visibility_rallies(
 ) -> tuple[VisibilityRallySummary, ...]:
     """Apply TrackNet-specific reliability checks to the shared visibility state machine."""
 
-    base = continuous_visibility_rallies(points, fps, motion_config=motion_config)
+    base = continuous_visibility_rallies(
+        points, fps, motion_config=motion_config,
+        start_seconds=TRACKNET_START_VISIBLE_SECONDS,
+        end_seconds=TRACKNET_END_INVISIBLE_SECONDS,
+    )
     if not base:
         return ()
     ordered = sorted(points, key=lambda point: point.frame)
     frames = [point.frame for point in ordered]
     reliable: list[VisibilityRallySummary] = []
-    maximum_missing_frames = math.floor(fps * CONTINUOUS_VISIBILITY_MAX_REVERSAL_GAP_SECONDS)
+    maximum_missing_frames = math.floor(fps * TRACKNET_MAX_REVERSAL_GAP_SECONDS)
     horizontal_excursion = (
-        motion_config.analysis_width_pixels * CONTINUOUS_VISIBILITY_MIN_HORIZONTAL_EXCURSION_RATIO
+        motion_config.analysis_width_pixels * TRACKNET_MIN_HORIZONTAL_EXCURSION_RATIO
     )
 
     for rally in base:
@@ -102,4 +111,9 @@ def tracknet_visibility_rallies(
             )
         else:
             merged.append(rally)
-    return tuple(merged)
+    return refine_tracknet_candidates(
+        ordered, merged, fps,
+        width=motion_config.analysis_width_pixels,
+        height=motion_config.analysis_height_pixels,
+        table_bottom=max(point[1] for point in calibration.points),
+    )

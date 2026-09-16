@@ -1,0 +1,123 @@
+[
+  {
+    "path": ".tasks/tracknet-refinement/0-gap-3.jpg",
+    "video": "/Users/weiye/Documents/1-193.mp4",
+    "event": {
+      "index": 3,
+      "start": 28.294,
+      "end": 34.768,
+      "gap": 6.474,
+      "dynamic": true
+    }
+  },
+  {
+    "path": ".tasks/tracknet-refinement/1-gap-36.jpg",
+    "video": "/Users/weiye/Documents/Maharu Yoshimura vs Andrej Gacina - MS Final - WTT Feeder Istanbul 2026.mp4",
+    "event": {
+      "index": 36,
+      "start": 251.43333333333334,
+      "end": 258.8,
+      "gap": 7.366666666666674,
+      "dynamic": true
+    }
+  },
+  {
+    "path": ".tasks/tracknet-refinement/2-gap-1.jpg",
+    "video": "/Users/weiye/Documents/mmexport1785752902707.mp4",
+    "event": {
+      "index": 1,
+      "start": 10.726622222222224,
+      "end": 17.422444444444444,
+      "gap": 6.695822222222221,
+      "dynamic": true
+    }
+  },
+  {
+    "path": ".tasks/tracknet-refinement/2-gap-4.jpg",
+    "video": "/Users/weiye/Documents/mmexport1785752902707.mp4",
+    "event": {
+      "index": 4,
+      "start": 34.24525555555556,
+      "end": 41.307500000000005,
+      "gap": 7.062244444444445,
+      "dynamic": true
+    }
+  },
+  {
+    "path": ".tasks/tracknet-refinement/2-gap-5.jpg",
+    "video": "/Users/weiye/Documents/mmexport1785752902707.mp4",
+    "event": {
+      "index": 5,
+      "start": 48.46968888888889,
+      "end": 54.93231111111111,
+      "gap": 6.4626222222222225,
+      "dynamic": true
+    }
+  },
+  {
+    "path": ".tasks/tracknet-refinement/2-gap-12.jpg",
+    "video": "/Users/weiye/Documents/mmexport1785752902707.mp4",
+    "event": {
+      "index": 12,
+      "start": 121.4906888888889,
+      "end": 125.78800000000001,
+      "gap": 4.297311111111114,
+      "dynamic": true
+    }
+  },
+  {
+    "path": ".tasks/tracknet-refinement/2-gap-29.jpg",
+    "video": "/Users/weiye/Documents/mmexport1785752902707.mp4",
+    "event": {
+      "index": 29,
+      "start": 304.5428777777778,
+      "end": 312.13812222222225,
+      "gap": 7.595244444444461,
+      "dynamic": true
+    }
+  },
+  {
+    "path": ".tasks/tracknet-refinement/2-gap-45.jpg",
+    "video": "/Users/weiye/Documents/mmexport1785752902707.mp4",
+    "event": {
+      "index": 45,
+      "start": 521.2406888888889,
+      "end": 528.0697555555556,
+      "gap": 6.829066666666677,
+      "dynamic": true
+    }
+  },
+  {
+    "path": ".tasks/tracknet-refinement/2-gap-60.jpg",
+    "video": "/Users/weiye/Documents/mmexport1785752902707.mp4",
+    "event": {
+      "index": 60,
+      "start": 718.1841888888889,
+      "end": 722.0151222222222,
+      "gap": 3.8309333333332916,
+      "dynamic": true
+    }
+  },
+  {
+    "path": ".tasks/tracknet-refinement/2-gap-73.jpg",
+    "video": "/Users/weiye/Documents/mmexport1785752902707.mp4",
+    "event": {
+      "index": 73,
+      "start": 849.4354444444444,
+      "end": 856.9307444444446,
+      "gap": 7.495300000000157,
+      "dynamic": true
+    }
+  },
+  {
+    "path": ".tasks/tracknet-refinement/2-gap-80.jpg",
+    "video": "/Users/weiye/Documents/mmexport1785752902707.mp4",
+    "event": {
+      "index": 80,
+      "start": 933.249688888889,
+      "end": 938.8795,
+      "gap": 5.629811111111053,
+      "dynamic": true
+    }
+  }
+]

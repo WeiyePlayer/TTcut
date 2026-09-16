@@ -32,7 +32,14 @@ from .tracknet_predictor import (
     TRACKNET_ROI_MODEL_SCALE,
     TrackNetPredictor,
 )
+from .tracknet_motion import (
+    TRACKNET_MOTION_POLICY_VERSION,
+    TRACKNET_SUPPORTED_BRIDGE_SECONDS,
+    TRACKNET_UNCERTAIN_TAIL_CONTEXT_SECONDS,
+)
 from .tracknet_rallies import (
+    TRACKNET_START_VISIBLE_SECONDS,
+    TRACKNET_END_INVISIBLE_SECONDS,
     TRACKNET_EXPANDED_TABLE_LENGTH_MARGIN_CM,
     TRACKNET_EXPANDED_TABLE_WIDTH_MARGIN_CM,
     TRACKNET_MINIMUM_HORIZONTAL_RUN_REVERSALS,
@@ -307,8 +314,14 @@ def analyze(request: dict) -> dict:
                     if profile == "tracknet_v1"
                     else CONTINUOUS_VISIBILITY_CONFIDENCE_THRESHOLD
                 ),
-                "start_visible_seconds": CONTINUOUS_VISIBILITY_START_SECONDS,
-                "end_invisible_seconds": CONTINUOUS_VISIBILITY_END_SECONDS,
+                "start_visible_seconds": (
+                    TRACKNET_START_VISIBLE_SECONDS if profile == "tracknet_v1"
+                    else CONTINUOUS_VISIBILITY_START_SECONDS
+                ),
+                "end_invisible_seconds": (
+                    TRACKNET_END_INVISIBLE_SECONDS if profile == "tracknet_v1"
+                    else CONTINUOUS_VISIBILITY_END_SECONDS
+                ),
                 "motion_filter": {
                     "minimum_horizontal_excursion_ratio": CONTINUOUS_VISIBILITY_MIN_HORIZONTAL_EXCURSION_RATIO,
                     "maximum_reversal_gap_seconds": CONTINUOUS_VISIBILITY_MAX_REVERSAL_GAP_SECONDS,
@@ -351,6 +364,9 @@ def analyze(request: dict) -> dict:
                     ),
                 },
                 **({"tracknet_filter": {
+                    "motion_policy_version": TRACKNET_MOTION_POLICY_VERSION,
+                    "supported_bridge_seconds": TRACKNET_SUPPORTED_BRIDGE_SECONDS,
+                    "uncertain_tail_context_seconds": TRACKNET_UNCERTAIN_TAIL_CONTEXT_SECONDS,
                     "minimum_rally_seconds": TRACKNET_MINIMUM_RALLY_SECONDS,
                     "strong_evidence_minimum_rally_seconds": (
                         TRACKNET_STRONG_EVIDENCE_MINIMUM_RALLY_SECONDS

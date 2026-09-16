@@ -6,7 +6,7 @@ import json
 import platform
 import sys
 import time
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 
@@ -82,6 +82,8 @@ def matching_summary(
             "predicted_index": predicted_index + 1,
             "target_index": target_index + 1,
             "iou": round(iou, 6),
+            "start_error_seconds": round(predicted[predicted_index][0] - target[target_index][0], 6),
+            "end_error_seconds": round(predicted[predicted_index][1] - target[target_index][1], 6),
         })
     precision = len(matches) / len(predicted) if predicted else 0.0
     recall = len(matches) / len(target) if target else 0.0
@@ -93,6 +95,14 @@ def matching_summary(
         "precision": round(precision, 6),
         "recall": round(recall, 6),
         "f1": round(2 * precision * recall / (precision + recall), 6) if precision + recall else 0.0,
+        "mean_absolute_start_error_seconds": (
+            round(sum(abs(m["start_error_seconds"]) for m in matches) / len(matches), 6)
+            if matches else None
+        ),
+        "mean_absolute_end_error_seconds": (
+            round(sum(abs(m["end_error_seconds"]) for m in matches) / len(matches), 6)
+            if matches else None
+        ),
         "unmatched_predicted_indexes": [
             index + 1 for index in range(len(predicted)) if index not in matched_predicted
         ],
@@ -141,7 +151,7 @@ def main() -> int:
     parser.add_argument("--weights", type=Path, required=True)
     parser.add_argument("--target", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--device", choices=("cuda", "cpu"), default="cuda")
+    parser.add_argument("--device", choices=("cuda", "cpu", "mps"), default="cuda")
     parser.add_argument("--confidence-threshold", type=float, default=TRACKNET_CONFIDENCE_THRESHOLD)
     parser.add_argument("--roi-scale", type=float, default=TRACKNET_ROI_MODEL_SCALE)
     args = parser.parse_args()
@@ -158,7 +168,12 @@ def main() -> int:
         torch.cuda.reset_peak_memory_stats()
     total_started = time.perf_counter()
     load_started = time.perf_counter()
-    loaded = load_tracknet(args.weights, args.device)
+    # MPS is an explicit benchmark backend; it does not alter production device routing.
+    if args.device == "mps" and not torch.backends.mps.is_available():
+        parser.error("MPS was requested but is unavailable.")
+    loaded = load_tracknet(args.weights, "cpu" if args.device == "mps" else args.device)
+    if args.device == "mps":
+        loaded = replace(loaded, model=loaded.model.to("mps"), device=torch.device("mps"))
     model_load_seconds = time.perf_counter() - load_started
     predictor = TrackNetPredictor(
         loaded,
@@ -205,6 +220,8 @@ def main() -> int:
         },
         "environment": {
             "windows": platform.platform(),
+            "platform": platform.platform(),
+            "device": args.device,
             "python": platform.python_version(),
             "pytorch": torch.__version__,
             "cuda_runtime": torch.version.cuda,
@@ -230,6 +247,9 @@ def main() -> int:
         "bounce_rallies": [asdict(rally) for rally in bounce],
         "comparison": {
             "continuous_visibility": matching_summary(visibility_intervals, target_rallies),
+            "continuous_visibility_iou_50": matching_summary(
+                visibility_intervals, target_rallies, minimum_iou=0.5,
+            ),
             "continuous_visibility_temporal_overlap": overlap_matching_summary(
                 visibility_intervals, target_rallies,
             ),

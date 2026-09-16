@@ -25,7 +25,7 @@ import {
   hasActiveTasks,
   spawnTracked,
 } from './processes';
-import { resolveUsableAnalysisComponents, resolveUsableMediaComponents } from './components';
+import { hasBundledLocalTrackNetRuntime, resolveUsableAnalysisComponents, resolveUsableMediaComponents } from './components';
 import { logLine } from './logger';
 import { getHistoryStore } from './history';
 import { probeVideo } from './probe';
@@ -69,6 +69,7 @@ function workerEnvironment(
     ...analysisProcessEnvironment(process.env),
     PYTHONPATH: components.worker,
     PYTHONUTF8: '1',
+    PYTHONDONTWRITEBYTECODE: '1',
     ...(includeBlurball ? { TTCUT_BLURBALL_WEIGHTS: components.blurballWeights } : {}),
     ...(includeTrackNet && components.tracknetWeights ? { TTCUT_TRACKNET_WEIGHTS: components.tracknetWeights } : {}),
     TTCUT_TABLE_ANALYZE_WEIGHTS: components.tableAnalyzeWeights,
@@ -177,7 +178,7 @@ export async function startAnalysis(
     normalizeVariableFrameRate: boolean;
   },
 ): Promise<string> {
-  if (process.platform === 'darwin') return startMacAnalysis(window, value);
+  if (process.platform === 'darwin' && !hasBundledLocalTrackNetRuntime()) return startMacAnalysis(window, value);
   if (hasActiveTasks()) throw new Error('TASK_BUSY');
   let sourceMetadata = await probeVideo(value.videoPath);
   if ((value.calibrationChoice.method === 'manual' || value.calibrationChoice.method === 'precalibrated')

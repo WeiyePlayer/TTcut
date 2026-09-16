@@ -141,7 +141,7 @@ describe('packaged model lookup', () => {
 });
 
 describe('local TrackNet test weight lookup', () => {
-  it('requires an explicit development opt-in and never resolves a weight for packaged builds', async () => {
+  it('requires an explicit development opt-in and ignores arbitrary packaged weight paths', async () => {
     const weight = path.join(root, 'TrackNet_best.pt');
     const originalResourcesPath = process.resourcesPath;
     await writeFile(weight, 'local-test-only');
