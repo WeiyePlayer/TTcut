@@ -1,11 +1,12 @@
 import { CompatibleVideo } from './CompatibleVideo';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { SelectedVideo } from '../shared/api';
 import { hasBounceCounts, type AnalysisResultV1, type ExportRequest } from '../shared/contracts';
 import {
   createManualCustomClip,
   deleteCustomClip,
   resizeCustomClip,
+  selectCustomClipsByBounceCount,
   setCustomClipSelected,
   type CustomRallyClip,
 } from '../domain/custom-clips';
@@ -176,6 +177,9 @@ export function CustomCutPage({
   const rallyScrollRef = useRef<HTMLDivElement>(null);
   const rallyTableRef = useRef<HTMLTableElement>(null);
   const rallyRowRefs = useRef(new Map<string, HTMLTableRowElement>());
+  const multiSelectRef = useRef<HTMLDivElement>(null);
+  const multiSelectButtonRef = useRef<HTMLButtonElement>(null);
+  const multiSelectId = useId();
   const exportCloseTimerRef = useRef<number | null>(null);
   const playbackCueTimerRef = useRef<number | null>(null);
   const playbackScrollFrameRef = useRef<number | null>(null);
@@ -191,8 +195,30 @@ export function CustomCutPage({
   const [playbackCue, setPlaybackCue] = useState<PlaybackCue | null>(null);
   const [toolMode, setToolMode] = useState<TimelineToolMode>(null);
   const [exportOptionsOpen, setExportOptionsOpen] = useState(false);
+  const [multiSelectOpen, setMultiSelectOpen] = useState(false);
+  const [bounceFilterValue, setBounceFilterValue] = useState('');
   const selectedCount = clips.filter((clip) => clip.selected).length;
   const showBounceCounts = hasBounceCounts(analysis);
+
+  useEffect(() => {
+    if (!multiSelectOpen) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (event.target instanceof Node && !multiSelectRef.current?.contains(event.target)) {
+        setMultiSelectOpen(false);
+      }
+    };
+    document.addEventListener('pointerdown', closeOutside);
+    return () => document.removeEventListener('pointerdown', closeOutside);
+  }, [multiSelectOpen]);
+
+  const applyBounceFilter = () => {
+    if (!showBounceCounts || !/^(?:[1-9]|10)$/.test(bounceFilterValue)) return;
+    onClipsChange(selectCustomClipsByBounceCount(
+      clips, Number(bounceFilterValue), analysis.video.duration_seconds, analysis.video.fps,
+    ));
+    setMultiSelectOpen(false);
+    multiSelectButtonRef.current?.focus();
+  };
 
   const clearPlaybackScrollWait = useCallback(() => {
     if (playbackScrollFrameRef.current !== null) {
@@ -414,7 +440,38 @@ export function CustomCutPage({
         <section className="custom-rally-list" aria-label={translations.rally}>
           <div className="table-tools">
             <div className="custom-list-selection"><strong>{selectedCount} / {clips.length}</strong><span>{translations.rally}</span></div>
-            <div className="custom-list-actions"><button className="text-button" type="button" onClick={() => onToggleAll(true)}>{translations.selectAll}</button><button className="text-button" type="button" onClick={() => onToggleAll(false)}>{translations.clearAll}</button></div>
+            <div className="custom-list-actions">
+              <div ref={multiSelectRef} className="custom-multi-select" onBlur={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setMultiSelectOpen(false);
+              }} onKeyDown={(event) => {
+                if (event.key !== 'Escape') return;
+                event.preventDefault();
+                event.stopPropagation();
+                setMultiSelectOpen(false);
+                multiSelectButtonRef.current?.focus();
+              }}>
+                <button ref={multiSelectButtonRef} className="text-button" type="button" aria-haspopup="dialog" aria-expanded={multiSelectOpen} aria-controls={multiSelectOpen ? multiSelectId : undefined} onClick={() => setMultiSelectOpen((open) => !open)}>{translations.multiSelect}</button>
+                {multiSelectOpen && <div id={multiSelectId} className="custom-multi-select-card" role="dialog" aria-label={translations.multiSelectOptions}>
+                  <button className="custom-multi-select-all" type="button" onClick={() => {
+                    onToggleAll(true);
+                    setMultiSelectOpen(false);
+                    multiSelectButtonRef.current?.focus();
+                  }}>{translations.selectAll}</button>
+                  <form className="custom-bounce-filter" onSubmit={(event) => { event.preventDefault(); applyBounceFilter(); }}>
+                    <label><span>{translations.threshold}</span><span aria-hidden="true">≥</span><input type="text" inputMode="numeric" pattern="([1-9]|10)" maxLength={2} required aria-label={translations.bounceFilterInput} aria-describedby={`${multiSelectId}-hint`} placeholder="1–10" value={bounceFilterValue} disabled={!showBounceCounts} onChange={(event) => {
+                      const value = event.currentTarget.value;
+                      if (/^(?:[1-9]|10)?$/.test(value)) setBounceFilterValue(value);
+                    }} onKeyDown={(event) => {
+                      if (event.key !== 'Enter' || event.nativeEvent.isComposing) return;
+                      event.preventDefault();
+                      applyBounceFilter();
+                    }} /></label>
+                    <small id={`${multiSelectId}-hint`}>{showBounceCounts ? translations.bounceFilterHint : translations.bounceFilterUnavailable}</small>
+                  </form>
+                </div>}
+              </div>
+              <button className="text-button" type="button" onClick={() => { setMultiSelectOpen(false); onToggleAll(false); }}>{translations.clearAll}</button>
+            </div>
           </div>
           <div className="custom-rally-scroll-shell">
             <div ref={rallyScrollRef} id="custom-rally-scroll" className="table-scroll">
