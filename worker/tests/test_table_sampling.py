@@ -16,6 +16,7 @@ class FakeCapture:
         *,
         expose_frame_count: bool = True,
         time_seek_preroll_frames: int = 0,
+        time_seek_overshoot_frames: int = 0,
     ):
         self.frames = [
             np.full((3, 4, 3), frame_index, dtype=np.int32)
@@ -24,6 +25,7 @@ class FakeCapture:
         self.fps = fps
         self.expose_frame_count = expose_frame_count
         self.time_seek_preroll_frames = time_seek_preroll_frames
+        self.time_seek_overshoot_frames = time_seek_overshoot_frames
         self.position = 0
         self.last_read_index = -1
         self.read_indices: list[int] = []
@@ -60,7 +62,10 @@ class FakeCapture:
             target = math.ceil(value / 1000.0 * self.fps - 1e-9)
             self.position = max(
                 0,
-                min(len(self.frames) - 1, target - self.time_seek_preroll_frames),
+                min(
+                    len(self.frames) - 1,
+                    target - self.time_seek_preroll_frames + self.time_seek_overshoot_frames,
+                ),
             )
             return True
         return False
@@ -149,4 +154,24 @@ def test_time_seek_decodes_forward_from_keyframe_preroll(monkeypatch):
         3, 4, 5, 12, 13, 14, 21, 22, 23, 30, 31, 32, 39, 40, 41, 48, 49, 50,
         57, 58, 59, 66, 67, 68, 75, 76, 77, 84, 85, 86, 93, 94, 95,
     ]
+    assert info["decoded_frame_count"] == len(capture.read_indices)
+
+
+def test_time_seek_retries_from_earlier_position_after_overshoot(monkeypatch):
+    capture = FakeCapture(
+        100,
+        10.0,
+        expose_frame_count=False,
+        time_seek_overshoot_frames=4,
+    )
+    monkeypatch.setattr(cv2, "VideoCapture", lambda _path: capture)
+
+    samples, info = _decode_sample_frames(
+        "match.mp4",
+        video_metadata(frame_count=None, duration_seconds=10.0, fps=10.0),
+        lambda *_args: None,
+    )
+
+    assert [sample[0] for sample in samples] == [5, 14, 23, 32, 41, 50, 59, 68, 77, 86, 95]
+    assert len(capture.seek_operations) > len(samples)
     assert info["decoded_frame_count"] == len(capture.read_indices)

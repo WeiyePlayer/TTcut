@@ -86,9 +86,17 @@ export function outputPixelFormat(metadata: VideoMetadata, encoder: MediaEncoder
     'nv12', 'nv16', 'nv21', 'yuv420p10le', 'yuv422p10le', 'yuv444p10le',
     'nv20le', 'gray', 'gray10le',
   ]);
-  return encoder === 'libx264' && metadata.pixel_format && x264PixelFormats.has(metadata.pixel_format)
-    ? metadata.pixel_format
-    : 'yuv420p';
+  if (encoder !== 'libx264' || !metadata.pixel_format || !x264PixelFormats.has(metadata.pixel_format)) {
+    return 'yuv420p';
+  }
+  // The legacy yuvj formats force full-range signaling in libx264. Some
+  // cameras nevertheless label a yuvj source as limited-range; carrying both
+  // values into the output makes FFmpeg encode `pc` while validation expects
+  // `tv`. Use the corresponding non-JPEG format for a limited-range target.
+  if (['tv', 'limited', 'mpeg'].includes(metadata.color_range ?? '')) {
+    return metadata.pixel_format.replace(/^yuvj/, 'yuv');
+  }
+  return metadata.pixel_format;
 }
 
 const FILTER_COLOR_RANGES: Readonly<Record<string, string>> = {

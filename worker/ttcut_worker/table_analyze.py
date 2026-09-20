@@ -68,6 +68,7 @@ STD = np.asarray([0.229, 0.224, 0.225], dtype=np.float32)
 
 ProgressCallback = Callable[[str, int, int], None]
 MAX_SEEK_FORWARD_SECONDS = 10.0
+SEEK_PREROLL_SECONDS = (0.0, 0.5, 2.0, 5.0)
 
 
 def _capture_position(
@@ -91,43 +92,61 @@ def _seek_and_decode(
 ) -> tuple[int, float, np.ndarray, int, str, float]:
     seek_method = "frame" if target_frame_index is not None else "time"
     seek_property = cv2.CAP_PROP_POS_FRAMES if seek_method == "frame" else cv2.CAP_PROP_POS_MSEC
-    seek_value = (
-        float(target_frame_index)
-        if target_frame_index is not None
-        else target_time_seconds * 1000.0
-    )
-    if not capture.set(seek_property, seek_value):
-        raise AutoCalibrationError(f"Could not seek to automatic calibration sample by {seek_method}.")
-
-    decoded = 0
     max_forward_frames = max(1, int(math.ceil(fps * MAX_SEEK_FORWARD_SECONDS)))
-    while decoded < max_forward_frames:
-        ok, frame = capture.read()
-        if not ok or frame is None:
-            raise AutoCalibrationError("Could not decode an automatic calibration sample.")
-        decoded += 1
-        frame_index, timestamp = _capture_position(capture, fps)
-        if target_frame_index is not None:
-            if frame_index < target_frame_index:
-                continue
-            if frame_index > target_frame_index:
-                raise AutoCalibrationError(
-                    f"Automatic calibration seek overshot frame {target_frame_index} with {frame_index}."
-                )
-            position_error = abs(frame_index - target_frame_index) / fps
-            return frame_index, timestamp, frame, decoded, seek_method, position_error
+    position_tolerance = max(2.0 / fps, 0.05)
+    decoded_total = 0
+    attempted_values: set[float] = set()
+    last_position: tuple[int, float] | None = None
 
-        half_frame = 0.5 / fps
-        if timestamp + half_frame < target_time_seconds:
+    # OpenCV/FFmpeg seeks may land after the requested PTS on HEVC/VFR media.
+    # Retry from progressively earlier positions and decode forward instead of
+    # failing the entire analysis on the first overshoot.
+    for preroll_seconds in SEEK_PREROLL_SECONDS:
+        seek_value = (
+            float(max(0, target_frame_index - int(math.ceil(preroll_seconds * fps))))
+            if target_frame_index is not None
+            else max(0.0, target_time_seconds - preroll_seconds) * 1000.0
+        )
+        if seek_value in attempted_values:
             continue
-        position_error = abs(timestamp - target_time_seconds)
-        if position_error > max(2.0 / fps, 0.05):
-            raise AutoCalibrationError(
-                "Automatic calibration time seek exceeded the allowed position error."
-            )
-        return frame_index, timestamp, frame, decoded, seek_method, position_error
+        attempted_values.add(seek_value)
+        if not capture.set(seek_property, seek_value):
+            continue
 
-    raise AutoCalibrationError("Automatic calibration seek exceeded the bounded forward decode window.")
+        decoded = 0
+        while decoded < max_forward_frames:
+            ok, frame = capture.read()
+            if not ok or frame is None:
+                break
+            decoded += 1
+            decoded_total += 1
+            frame_index, timestamp = _capture_position(capture, fps)
+            last_position = (frame_index, timestamp)
+            if target_frame_index is not None:
+                if frame_index < target_frame_index:
+                    continue
+                position_error = abs(frame_index - target_frame_index) / fps
+                if position_error <= position_tolerance:
+                    return frame_index, timestamp, frame, decoded_total, seek_method, position_error
+                break
+
+            half_frame = 0.5 / fps
+            if timestamp + half_frame < target_time_seconds:
+                continue
+            position_error = abs(timestamp - target_time_seconds)
+            if position_error <= position_tolerance:
+                return frame_index, timestamp, frame, decoded_total, seek_method, position_error
+            break
+
+    target = f"frame {target_frame_index}" if target_frame_index is not None else f"time {target_time_seconds:.6f}s"
+    actual = (
+        f"frame {last_position[0]} at {last_position[1]:.6f}s"
+        if last_position is not None
+        else "no decoded frame"
+    )
+    raise AutoCalibrationError(
+        f"Automatic calibration could not reach {target} after bounded pre-roll retries; last position: {actual}."
+    )
 
 
 def _decode_sample_frames(

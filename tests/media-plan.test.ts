@@ -123,6 +123,10 @@ describe('media export planning', () => {
   it('keeps supported source pixel formats for x264 and falls back for unknown formats', () => {
     const tenBit = buildReencodeArgs(metadata.path, 'x264-10bit.mp4', [oneGroup], { ...metadata, pixel_format: 'yuv420p10le' }, 'libx264');
     expect(tenBit[tenBit.indexOf('-pix_fmt') + 1]).toBe('yuv420p10le');
+    const limitedJpeg = buildReencodeArgs(metadata.path, 'x264-limited.mp4', [oneGroup], { ...metadata, pixel_format: 'yuvj420p', color_range: 'tv' }, 'libx264');
+    expect(limitedJpeg[limitedJpeg.indexOf('-pix_fmt') + 1]).toBe('yuv420p');
+    const fullRangeJpeg = buildReencodeArgs(metadata.path, 'x264-full.mp4', [oneGroup], { ...metadata, pixel_format: 'yuvj420p', color_range: 'pc' }, 'libx264');
+    expect(fullRangeJpeg[fullRangeJpeg.indexOf('-pix_fmt') + 1]).toBe('yuvj420p');
     const unknown = buildReencodeArgs(metadata.path, 'x264-unknown.mp4', [oneGroup], { ...metadata, pixel_format: 'gbrp' }, 'libx264');
     expect(unknown[unknown.indexOf('-pix_fmt') + 1]).toBe('yuv420p');
   });
