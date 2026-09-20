@@ -14,8 +14,12 @@ DESTINATION = ROOT / ".runtime" / "windows"
 DEFAULT_PYTHON_SOURCE = (
     ROOT / ".baseline" / "runtime-build" / "ttcut-analysis-3.12.13-2.12.1-cpu"
 )
-DEFAULT_FFMPEG_SOURCE = Path(
-    r"E:\TTcut\data\components\ffmpeg-x264-N-125716-g1b1f602699\bin"
+DEFAULT_FFMPEG_SOURCE = (
+    ROOT
+    / ".baseline"
+    / "x264-plan-inspection"
+    / "ffmpeg-N-125716-g1b1f602699-win64-gpl"
+    / "bin"
 )
 RUNTIME_ID = "python-3.12.13-ort-dml-1.24.3-r1"
 
