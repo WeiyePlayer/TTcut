@@ -449,7 +449,6 @@ export function MultiTaskPage({
   }, [items]);
 
   useEffect(() => window.ttcut.onTaskEvent((event: AppEvent) => {
-    if (event.type === 'component-result') return;
     const eventTaskId = event.type === 'progress' ? event.data.taskId : event.taskId;
     if (batchExportRef.current?.taskId === eventTaskId) {
       if (event.type === 'progress') {

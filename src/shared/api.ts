@@ -7,7 +7,6 @@ import type {
   CalibrationChoice,
   TableAnalysis,
   ComponentStatus,
-  ComponentSetupInfo,
   CutSelectionV1,
   ExportResult,
   ExportTimingInfo,
@@ -34,16 +33,8 @@ export type BootstrapData = {
   version: string;
   settings: AppSettings;
   components: ComponentStatus;
-  componentSetup: ComponentSetupInfo;
   platformCompatibility: PlatformCompatibility;
   logsPath: string;
-};
-
-export type PendingComponentImport = {
-  variant: 'cpu' | 'cu126' | 'cu132';
-  receivedParts: number;
-  totalParts: number;
-  missingAssets: string[];
 };
 
 export type AppEvent =
@@ -52,13 +43,6 @@ export type AppEvent =
   | { type: 'calibration-result'; taskId: string; calibration: Calibration; tableAnalysis: TableAnalysis }
   | { type: 'export-result'; taskId: string; data: ExportResult }
   | { type: 'batch-export-result'; taskId: string; data: BatchExportResult }
-  | {
-    type: 'component-result';
-    taskId: string;
-    data: ComponentStatus;
-    imported: Array<'analysis' | 'media'>;
-    pendingImports: PendingComponentImport[];
-  }
   | {
     type: 'error';
     taskId: string;
@@ -83,11 +67,6 @@ export interface TTcutApi {
   bootstrap(): Promise<BootstrapData>;
   saveSettings(settings: AppSettings): Promise<AppSettings>;
   refreshComponents(): Promise<ComponentStatus>;
-  importComponents(): Promise<string | null>;
-  openComponentDownloads(): Promise<void>;
-  openX264Download(): Promise<void>;
-  installAnalysisComponent(consent: true): Promise<string>;
-  installMediaComponent(consent: true): Promise<string>;
   selectVideo(): Promise<SelectedVideo | null>;
   selectVideos(): Promise<SelectedVideo[]>;
   pathForDroppedFile(file: File): string;
@@ -96,12 +75,12 @@ export interface TTcutApi {
   prepareVideoPreview(mediaUrl: string): Promise<string>;
   startAutoCalibration(input: {
     videoPath: string;
-    device: 'auto' | 'cuda' | 'cpu';
+    device: 'auto' | 'directml' | 'cuda' | 'cpu';
   }): Promise<string>;
   startAnalysis(input: {
     videoPath: string;
     calibrationChoice: CalibrationChoice;
-    device: 'auto' | 'cuda' | 'cpu';
+    device: 'auto' | 'directml' | 'cuda' | 'cpu';
     historyVisibility: 'visible' | 'deferred';
     normalizeVariableFrameRate: boolean;
   }): Promise<string>;

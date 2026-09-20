@@ -33,17 +33,6 @@ const bootstrap: BootstrapData = {
       detail: null,
     },
   },
-  componentSetup: {
-    analysis_offer: null,
-    media_offer: null,
-    x264_manual_offer: {
-      id: 'media-x264',
-      version: 'N-125716-g1b1f602699',
-      filename: 'ffmpeg-x264.zip',
-      download_size_bytes: 1,
-      license_url: 'https://example.com/license',
-    },
-  },
   platformCompatibility: {
     status: 'supported',
     reason: 'supported',

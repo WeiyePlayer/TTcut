@@ -319,7 +319,7 @@ export function buildReencodeArgs(
   output: string,
   groups: readonly CutGroup[],
   metadata: VideoMetadata,
-  encoder: MediaEncoder = 'libopenh264',
+  encoder: MediaEncoder = 'libx264',
 ): string[] {
   const hasAudio = metadata.audio_codec !== null;
   const filter = buildTrimFilter(groups, hasAudio, metadata);
@@ -391,7 +391,7 @@ export function buildSegmentReencodeArgs(
   group: CutGroup,
   seekStart: number,
   metadata: VideoMetadata,
-  encoder: MediaEncoder = 'libopenh264',
+  encoder: MediaEncoder = 'libx264',
 ): string[] {
   const safeSeekStart = Math.max(0, Math.min(seekStart, group.start));
   const relativeStart = group.start - safeSeekStart;

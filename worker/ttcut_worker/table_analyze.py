@@ -8,19 +8,14 @@ from typing import Callable
 
 import cv2
 import numpy as np
-import torch
-import torch.nn.functional as F
 
 from .calibration import TableCalibration
 from .errors import (
     AutoCalibrationError,
     CalibrationError,
-    DeviceError,
     TableModelResourceError,
-    WorkerError,
 )
-from .device import resolve_device
-from .table_model import FixedTableModel
+from .onnx_models import _ort, load_table_session, model_sha256
 
 
 SAMPLE_RATIOS = (0.05, 0.14, 0.23, 0.32, 0.41, 0.50, 0.59, 0.68, 0.77, 0.86, 0.95)
@@ -244,46 +239,36 @@ def _load_model(weight_path: str | Path, requested_device: str):
     if not path.is_file():
         raise TableModelResourceError(f"Bundled table analysis model is missing: {path}")
     try:
-        checkpoint = torch.load(str(path), map_location="cpu", weights_only=True)
-        state = checkpoint.get("model_state_dict")
-        if not isinstance(state, dict):
-            raise ValueError("checkpoint model_state_dict is missing")
-        identifier = str(checkpoint.get("identifier") or "table_analyze")
-        device = resolve_device(requested_device)
-        model = FixedTableModel()
-        model.load_state_dict(state, strict=True)
-        return model.to(device).eval(), device, identifier
-    except WorkerError:
-        raise
-    except torch.cuda.OutOfMemoryError as exc:
-        raise DeviceError("CUDA ran out of memory while loading the table analysis model.") from exc
+        session, _ = load_table_session(path)
+        return session, "cpu", "table_analyze_onnx", model_sha256(path), _ort().__version__
     except Exception as exc:
         raise TableModelResourceError(f"Bundled table analysis model is invalid: {path}") from exc
 
 
-def _preprocess(image_bgr: np.ndarray, device) -> torch.Tensor:
+def _preprocess(image_bgr: np.ndarray) -> np.ndarray:
     image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
     image_rgb = cv2.resize(image_rgb, MODEL_SIZE, interpolation=cv2.INTER_LINEAR)
     image = image_rgb.astype(np.float32) / 255.0
     image = (image - MEAN) / STD
     image = np.ascontiguousarray(image.transpose(2, 0, 1))
-    return torch.from_numpy(image).unsqueeze(0).to(device)
+    return np.expand_dims(image, axis=0)
 
 
 def _extract_raw_keypoints(
-    heatmaps: torch.Tensor,
+    heatmaps: np.ndarray,
     image_width: int,
     image_height: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     _, channels, heatmap_height, heatmap_width = heatmaps.shape
-    activations, indices = heatmaps.reshape(1, channels, -1).max(dim=2)
+    flattened = heatmaps.reshape(1, channels, -1)
+    activations = flattened.max(axis=2)
+    indices = flattened.argmax(axis=2)
     x = indices % heatmap_width
     y = indices // heatmap_width
-    positions = torch.empty((channels, 2), device=heatmaps.device, dtype=torch.float32)
-    positions[:, 0] = (x[0].float() + 0.5) * image_width / heatmap_width - 0.5
-    positions[:, 1] = (y[0].float() + 0.5) * image_height / heatmap_height - 0.5
-    positions = positions.cpu().numpy()
-    activations = activations[0].cpu().numpy()
+    positions = np.empty((channels, 2), dtype=np.float32)
+    positions[:, 0] = (x[0].astype(np.float32) + 0.5) * image_width / heatmap_width - 0.5
+    positions[:, 1] = (y[0].astype(np.float32) + 0.5) * image_height / heatmap_height - 0.5
+    activations = activations[0]
     valid = activations >= KEYPOINT_THRESHOLD
     valid &= np.isfinite(activations)
     valid &= np.isfinite(positions).all(axis=1)
@@ -295,43 +280,42 @@ def _extract_raw_keypoints(
 
 
 def _extract_peak_candidates(
-    heatmaps: torch.Tensor,
+    heatmaps: np.ndarray,
     image_width: int,
     image_height: int,
 ) -> tuple[np.ndarray, np.ndarray]:
     maps = heatmaps[0]
     _, heatmap_height, heatmap_width = maps.shape
-    pooled = F.max_pool2d(maps.unsqueeze(0), kernel_size=9, stride=1, padding=4)[0]
-    local_maxima = torch.where(maps == pooled, maps, torch.full_like(maps, -torch.inf))
-    values, indices = torch.topk(
-        local_maxima.flatten(1),
-        k=min(PEAK_CANDIDATE_COUNT, heatmap_height * heatmap_width),
-        dim=1,
-    )
+    kernel = np.ones((9, 9), dtype=np.uint8)
+    pooled = np.stack([cv2.dilate(channel, kernel) for channel in maps])
+    local_maxima = np.where(maps == pooled, maps, -np.inf).reshape(maps.shape[0], -1)
+    count = min(PEAK_CANDIDATE_COUNT, heatmap_height * heatmap_width)
+    indices = np.argpartition(local_maxima, -count, axis=1)[:, -count:]
+    values = np.take_along_axis(local_maxima, indices, axis=1)
+    order = np.argsort(-values, axis=1, kind="stable")
+    indices = np.take_along_axis(indices, order, axis=1)
+    values = np.take_along_axis(values, order, axis=1)
     x = indices % heatmap_width
     y = indices // heatmap_width
-    positions = torch.stack((
-        (x.float() + 0.5) * image_width / heatmap_width - 0.5,
-        (y.float() + 0.5) * image_height / heatmap_height - 0.5,
-    ), dim=2)
-    return positions.cpu().numpy(), values.cpu().numpy()
+    positions = np.stack((
+        (x.astype(np.float32) + 0.5) * image_width / heatmap_width - 0.5,
+        (y.astype(np.float32) + 0.5) * image_height / heatmap_height - 0.5,
+    ), axis=2)
+    return positions, values
 
 
 def _predict_samples(model, device, samples, width: int, height: int, progress_callback: ProgressCallback):
     predictions = []
     progress_callback("table_inference", 0, len(samples))
     for sample_index, (frame_index, timestamp, frame, sample_info) in enumerate(samples, start=1):
-        tensor = _preprocess(frame, device)
+        tensor = _preprocess(frame)
         started = time.perf_counter()
         try:
-            with torch.inference_mode():
-                heatmaps = model(tensor)
-                if device.type == "cuda":
-                    torch.cuda.synchronize(device)
-                points, activations, valid = _extract_raw_keypoints(heatmaps, width, height)
-                peak_points, peak_activations = _extract_peak_candidates(heatmaps, width, height)
-        except torch.cuda.OutOfMemoryError as exc:
-            raise DeviceError("CUDA ran out of memory during automatic table calibration.") from exc
+            heatmaps = model.run(["logits"], {"input": tensor})[0]
+            points, activations, valid = _extract_raw_keypoints(heatmaps, width, height)
+            peak_points, peak_activations = _extract_peak_candidates(heatmaps, width, height)
+        except Exception as exc:
+            raise TableModelResourceError("Table ONNX inference failed.") from exc
         predictions.append({
             "frame_index": frame_index,
             "time_seconds": timestamp,
@@ -586,7 +570,7 @@ def analyze_table(
     samples, video_info = _decode_sample_frames(video_path, video_metadata, progress_callback)
     progress_callback("table_model", 0, 1)
     model_started = time.perf_counter()
-    model, device, identifier = _load_model(weight_path, requested_device)
+    model, device, identifier, model_hash, runtime_version = _load_model(weight_path, requested_device)
     model_load_seconds = time.perf_counter() - model_started
     progress_callback("table_model", 1, 1)
     try:
@@ -614,19 +598,20 @@ def analyze_table(
         raise
     except CalibrationError as exc:
         raise AutoCalibrationError(f"Automatic calibration produced invalid table corners: {exc}") from exc
-    except DeviceError:
-        raise
     except Exception as exc:
         raise AutoCalibrationError("Automatic table calibration failed.") from exc
 
     return calibration, {
-        "schema_version": 2,
+        "schema_version": 3,
         "model": {
             "id": "table_analyze",
-            "filename": "table_analyze.pt",
+            "filename": "table_analyze.onnx",
             "checkpoint_identifier": identifier,
         },
-        "device": device.type,
+        "device": device,
+        "provider": "cpu",
+        "model_sha256": model_hash,
+        "runtime_version": runtime_version,
         "model_load_seconds": model_load_seconds,
         "video_info": video_info,
         "sampling": [_serializable_prediction(prediction) for prediction in predictions],

@@ -27,6 +27,10 @@ class InferenceError(WorkerError):
     code = "INFERENCE_FAILED"
 
 
+class DirectMLFallbackRequired(InferenceError):
+    code = "DIRECTML_FALLBACK_REQUIRED"
+
+
 class CalibrationError(WorkerError):
     code = "INVALID_CALIBRATION"
 

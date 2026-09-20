@@ -15,9 +15,15 @@ await rm(destination, { recursive: true, force: true });
 await mkdir(destination, { recursive: true });
 await cp(path.join(source, 'ttcut_worker'), path.join(destination, 'ttcut_worker'), {
   recursive: true,
-  filter: (entry) => !entry.includes('__pycache__') && !entry.endsWith('.pyc'),
+  filter: (entry) => {
+    const name = path.basename(entry);
+    return !entry.includes('__pycache__')
+      && !entry.endsWith('.pyc')
+      && !['blurball_model.py', 'blurball_models.py', 'table_model.py', 'device.py'].includes(name)
+      && !/^tracknet_.*\.py$/i.test(name);
+  },
 });
-for (const name of ['requirements-cpu.txt', 'requirements-cu126.txt', 'requirements-cu132.txt', 'runtime-wheel-lock.json', 'SOURCE_MANIFEST.md', 'LICENSE.tracknet.txt']) {
+for (const name of ['requirements-onnx.txt', 'SOURCE_MANIFEST.md']) {
   await cp(path.join(source, name), path.join(destination, name));
 }
 

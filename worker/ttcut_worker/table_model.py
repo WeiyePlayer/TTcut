@@ -13,6 +13,26 @@ TOME_CONFIGS = (
 )
 
 
+def scatter_mean_include_self(target, destinations, values):
+    """ONNX-exportable equivalent of scatter_reduce(..., reduce="mean")."""
+    batch, _, channels = target.shape
+    removed = values.shape[1]
+    target = target.scatter_add(-2, destinations.expand(batch, removed, channels), values)
+    contributor_counts = torch.ones(
+        batch,
+        target.shape[1],
+        1,
+        device=target.device,
+        dtype=target.dtype,
+    )
+    contributor_counts = contributor_counts.scatter_add(
+        -2,
+        destinations.expand(batch, removed, 1),
+        torch.ones(batch, removed, 1, device=target.device, dtype=target.dtype),
+    )
+    return target / contributor_counts
+
+
 def nlc_to_nchw(tensor, shape):
     height, width = shape
     batch, tokens, channels = tensor.shape
@@ -100,12 +120,10 @@ def bipartite_soft_matching_random2d(metric, width, height, stride_x, stride_y, 
             -2,
             merged_indices.expand(current_batch, removed, channels),
         )
-        target = target.scatter_reduce(
-            -2,
-            destination_indices.expand(current_batch, removed, channels),
-            merged,
-            reduce="mean",
-        )
+        # ONNX has no ScatterReduce mean operator. Express the default
+        # include-self mean as a sum divided by the number of contributors so
+        # the production graph remains numerically equivalent and exportable.
+        target = scatter_mean_include_self(target, destination_indices, merged)
         return torch.cat([unmerged, target], dim=1)
 
     def unmerge(value):

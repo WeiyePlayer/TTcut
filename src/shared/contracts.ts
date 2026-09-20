@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { nativeVideoSchema, nativeTableSamplesSchema } from './native-contracts';
 
-export const DEVICE_VALUES = ['auto', 'cuda', 'cpu'] as const;
+export const DEVICE_VALUES = ['auto', 'directml', 'cuda', 'cpu'] as const;
 export const PRE_ROLL_VALUES = [1.5, 2.5, 5] as const;
 export const POST_ROLL_VALUES = [0.5, 1, 2, 4] as const;
 export const HIGHLIGHT_VALUES = [3, 5, 7] as const;
@@ -199,6 +199,19 @@ const tableAnalysisV2Schema = z.object({
   }).strict(),
 }).strict();
 
+const tableAnalysisV3Schema = tableAnalysisV2Schema.extend({
+  schema_version: z.literal(3),
+  model: z.object({
+    id: z.literal('table_analyze'),
+    filename: z.literal('table_analyze.onnx'),
+    checkpoint_identifier: z.string().min(1),
+  }).strict(),
+  device: z.literal('cpu'),
+  provider: z.literal('cpu'),
+  model_sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  runtime_version: z.string().min(1),
+}).strict();
+
 const nativeTableAnalysisSchema = z.object({
   schema_version: z.literal(2),
   engine: z.literal('coreml'),
@@ -211,6 +224,7 @@ const nativeTableAnalysisSchema = z.object({
 export const tableAnalysisSchema = z.union([
   tableAnalysisV1Schema,
   tableAnalysisV2Schema,
+  tableAnalysisV3Schema,
   nativeTableAnalysisSchema,
 ]);
 
@@ -413,6 +427,14 @@ const analysisResultBaseSchema = z.object({
     // TrackNet remains readable for legacy history and explicit local development analyses.
     profile: z.enum(LEGACY_RESULT_MODEL_PROFILES),
     component_version: z.string().min(1).nullable(),
+    runtime: z.object({
+      format: z.literal('onnx'),
+      provider: z.enum(['directml', 'cpu']),
+      model_filename: z.literal('blurball_best.onnx'),
+      model_sha256: z.string().regex(/^[a-f0-9]{64}$/),
+      runtime_version: z.string().min(1),
+      fallback_reason: z.string().min(1).optional(),
+    }).strict().optional(),
     trajectory: z.object({
       frame_count: z.number().int().nonnegative(),
       detected_frames: z.number().int().nonnegative(),
@@ -909,7 +931,7 @@ export const componentStatusSchema = z.object({
     available: z.boolean(),
     version: z.string().nullable(),
     path: z.string().nullable(),
-    acceleration: z.enum(['cuda', 'cpu', 'coreml', 'unavailable']),
+    acceleration: z.enum(['directml', 'cuda', 'cpu', 'coreml', 'unavailable']),
     detail: z.string().nullable(),
   }).strict(),
   media: z.object({
@@ -920,26 +942,6 @@ export const componentStatusSchema = z.object({
     x264_available: z.boolean(),
     detail: z.string().nullable(),
   }).strict(),
-}).strict();
-
-export const managedComponentOfferSchema = z.object({
-  id: z.enum(['analysis', 'media']),
-  version: z.string().min(1),
-  download_size_bytes: z.number().int().positive(),
-  license_url: z.string().url(),
-  available_for_download: z.boolean(),
-}).strict();
-
-export const componentSetupInfoSchema = z.object({
-  analysis_offer: managedComponentOfferSchema.nullable(),
-  media_offer: managedComponentOfferSchema.nullable(),
-  x264_manual_offer: z.object({
-    id: z.literal('media-x264'),
-    version: z.string().min(1),
-    filename: z.string().endsWith('.zip'),
-    download_size_bytes: z.number().int().positive(),
-    license_url: z.string().url(),
-  }).strict().nullable(),
 }).strict();
 
 export const platformCompatibilitySchema = z.object({
@@ -1004,8 +1006,6 @@ export type HistorySource = z.infer<typeof historySourceSchema>;
 export type HistoryRecordV1 = z.infer<typeof historyRecordSchema>;
 export type HistorySummaryV1 = z.infer<typeof historySummarySchema>;
 export type ComponentStatus = z.infer<typeof componentStatusSchema>;
-export type ManagedComponentOffer = z.infer<typeof managedComponentOfferSchema>;
-export type ComponentSetupInfo = z.infer<typeof componentSetupInfoSchema>;
 export type PlatformCompatibility = z.infer<typeof platformCompatibilitySchema>;
 export type ExportRequest = z.infer<typeof exportRequestSchema>;
 export type UpdateState = z.infer<typeof updateStateSchema>;
@@ -1020,7 +1020,7 @@ export type CutGroup = {
 
 export type TaskProgress = {
   taskId: string;
-  kind: 'analysis' | 'calibration' | 'export' | 'setup';
+  kind: 'analysis' | 'calibration' | 'export';
   stage: string;
   percent: number;
   current?: number;

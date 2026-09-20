@@ -17,8 +17,10 @@ _UI_: 参与剪辑的视频
 
 ## Analysis Model
 
-An immutable checkpoint bundled with the application and verified by filename,
-size, and SHA-256 before packaging.
+An immutable ONNX graph bundled with the Windows application and verified by
+filename, size, SHA-256, opset, source-checkpoint hash, and tensor contract
+before packaging. Production packages contain `blurball_best.onnx` and
+`table_analyze.onnx`; PyTorch checkpoints and TrackNet weights are not shipped.
 
 ## BlurBall Analysis Mode
 
@@ -157,7 +159,11 @@ _Avoid_: PR project file, `.prproj`, FCPXML
 
 ## Analysis Runtime
 
-The platform-specific local environment that executes analysis. Windows uses a separately managed Python/PyTorch environment; macOS uses the bundled Core ML models and native analysis helper.
+The platform-specific local environment that executes analysis. Windows ships
+an immutable Python 3.12 runtime with NumPy, OpenCV, and ONNX Runtime DirectML.
+Table calibration always uses the CPU provider. BlurBall uses DirectML when it
+can initialize and finish the model stage; otherwise that complete stage is
+discarded and rerun on CPU. macOS uses bundled Core ML and its native helper.
 
 ## Installation Root
 
@@ -172,9 +178,12 @@ _Avoid_: Installation Root
 
 ## Component Store
 
-The `data/components` area inside the Installation Root that contains managed
-runtimes, media tools, downloads, staging, and rollback backups.
-_Avoid_: AppData, Program Area
+A legacy `data/components` area from releases that downloaded Python/PyTorch,
+CUDA, FFmpeg, or models after installation. New production code never resolves
+runtime assets from this store. After all bundled ONNX/runtime/x264 self-checks
+succeed, only the known legacy runtime, download, staging, rollback, and
+manifest paths are removed; failed self-checks preserve them for recovery.
+_Avoid_: active runtime, fallback runtime, Program Area
 
 ## Legacy Installation
 
