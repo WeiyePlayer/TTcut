@@ -256,6 +256,24 @@ export function setCustomClipSelected(
   return next.map((candidate) => rebuilt.get(candidate.clipId) ?? candidate);
 }
 
+export function selectCustomClipsByBounceCount(
+  clips: readonly CustomRallyClip[],
+  threshold: number,
+  videoDuration: number,
+  fps: number,
+): CustomRallyClip[] {
+  if (!Number.isInteger(threshold) || threshold < 1 || threshold > 10) {
+    throw new RangeError('INVALID_BOUNCE_THRESHOLD');
+  }
+  const matches = (clip: CustomRallyClip) => clip.bounceCount !== null
+    && Number.isInteger(clip.bounceCount) && clip.bounceCount >= threshold;
+  let next = clips.map((clip) => ({ ...clip, selected: clip.selected && matches(clip) }));
+  for (const clip of clips) {
+    if (matches(clip)) next = setCustomClipSelected(next, clip.clipId, true, videoDuration, fps);
+  }
+  return next;
+}
+
 export function deleteCustomClip(clips: readonly CustomRallyClip[], clipId: string): CustomRallyClip[] {
   return reindexCustomClips(clips.filter((clip) => clip.clipId !== clipId));
 }
