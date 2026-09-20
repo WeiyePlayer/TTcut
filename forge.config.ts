@@ -11,7 +11,6 @@ const macBuild = process.platform === 'darwin';
 const publicReleaseCandidate = process.env.TTCUT_PUBLIC_RC === '1';
 const officialRelease = process.env.TTCUT_OFFICIAL_RELEASE === '1';
 const releaseSigningRequired = !macBuild && (publicReleaseCandidate || officialRelease);
-const onlineModelInstaller = process.env.TTCUT_ONLINE_MODEL_INSTALLER === '1';
 const retainedWindowsLocales = new Set(['en-US.pak', 'zh-CN.pak']);
 
 function ignoreUnbuiltSource(file: string): boolean {
@@ -92,7 +91,8 @@ const config: ForgeConfig = {
     extraResource: macBuild ? ['.runtime/macos'] : [
       '.runtime/worker',
       '.runtime/release-metadata',
-      onlineModelInstaller ? '.runtime/online-installer/resources' : 'resources',
+      '.runtime/resources',
+      '.runtime/windows',
     ],
     win32metadata: {
       CompanyName: publisherName,

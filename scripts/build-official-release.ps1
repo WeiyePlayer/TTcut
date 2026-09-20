@@ -3,9 +3,7 @@ param(
   [string]$CertificateThumbprint = '',
 
   [ValidatePattern('^https?://')]
-  [string]$TimestampServer = 'http://timestamp.digicert.com',
-
-  [switch]$OnlineModelInstaller
+  [string]$TimestampServer = 'http://timestamp.digicert.com'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -66,7 +64,6 @@ function Invoke-NodeScript([string]$RelativePath) {
 
 $env:TTCUT_OFFICIAL_RELEASE = '1'
 $env:TTCUT_PUBLIC_RC = '0'
-$env:TTCUT_ONLINE_MODEL_INSTALLER = if ($OnlineModelInstaller) { '1' } else { '0' }
 $env:TTCUT_PUBLISHER_NAME = 'weiye'
 $env:WINDOWS_CERTIFICATE_THUMBPRINT = $normalizedThumbprint
 $env:WINDOWS_SIGNTOOL_PATH = $signTool.FullName

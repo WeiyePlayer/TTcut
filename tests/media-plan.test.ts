@@ -84,9 +84,9 @@ describe('media export planning', () => {
     const args = buildReencodeArgs(metadata.path, output, [oneGroup], metadata);
     expect(args).toContain(metadata.path);
     expect(args).toContain(output);
-    expect(args).toContain('libopenh264');
+    expect(args).toContain('libx264');
     expect(args).toContain('aac');
-    expect(args[args.indexOf('-b:v') + 1]).toBe('2000000');
+    expect(args).toEqual(expect.arrayContaining(['-preset', 'veryfast', '-crf', '18']));
     expect(args).toContain('vfr');
     expect(args).not.toContain('-r');
     expect(args).toContain('-autorotate');
@@ -94,9 +94,7 @@ describe('media export planning', () => {
     expect(args.slice(args.indexOf('-metadata:s:v:0'), args.indexOf('-metadata:s:v:0') + 2))
       .toEqual(['-metadata:s:v:0', 'rotate=0']);
     expect(args.join(' ')).toContain('setsar=sar=1/1,setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709');
-    expect(args).toEqual(expect.arrayContaining([
-      '-bsf:v', 'h264_metadata=video_full_range_flag=0:colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1',
-    ]));
+    expect(args).not.toContain('-bsf:v');
   });
 
   it('builds a single concat graph for multiple groups', () => {

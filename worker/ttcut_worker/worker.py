@@ -7,7 +7,6 @@ import sys
 import traceback
 
 from .blurball_bounce import detect_blurball_bounce_frames
-from .blurball_models import configure_stable_visibility_inference, load_blurball
 from .blurball_predictor import BlurBallPredictor
 from .blurball_rallies import (
     blurball_inter_rally_filter_provenance,
@@ -15,7 +14,14 @@ from .blurball_rallies import (
 )
 from .analysis_intervals import REFINEMENT_EXPANSION_SECONDS, expanded_union_intervals
 from .calibration import TableCalibration
-from .errors import InvalidRequestError, ModelResourceError, TableModelResourceError, WorkerError
+from .errors import (
+    DirectMLFallbackRequired,
+    InvalidRequestError,
+    ModelResourceError,
+    TableModelResourceError,
+    WorkerError,
+)
+from .onnx_models import load_blurball
 from .roi import AnalysisRoiConfig, build_analysis_roi, stabilize_visibility_roi
 from .rallies import group_rallies
 from .hybrid_rallies import hybrid_motion_rallies, hybrid_provenance
@@ -25,25 +31,6 @@ from .request import (
     validate_request,
 )
 from .table_analyze import analyze_table
-from .tracknet_bounce import detect_tracknet_bounce_frames
-from .tracknet_model import load_tracknet
-from .tracknet_predictor import (
-    TRACKNET_CONFIDENCE_THRESHOLD,
-    TRACKNET_ROI_MODEL_SCALE,
-    TrackNetPredictor,
-)
-from .tracknet_rallies import (
-    TRACKNET_EXPANDED_TABLE_LENGTH_MARGIN_CM,
-    TRACKNET_EXPANDED_TABLE_WIDTH_MARGIN_CM,
-    TRACKNET_MINIMUM_HORIZONTAL_RUN_REVERSALS,
-    TRACKNET_MINIMUM_RALLY_SECONDS,
-    TRACKNET_MINIMUM_SHORT_RALLY_EXPANDED_TABLE_RATIO,
-    TRACKNET_RELIABLE_FRAGMENT_BRIDGE_SECONDS,
-    TRACKNET_SHORT_RALLY_SECONDS,
-    TRACKNET_STRONG_EVIDENCE_MINIMUM_EXPANDED_TABLE_RATIO,
-    TRACKNET_STRONG_EVIDENCE_MINIMUM_RALLY_SECONDS,
-    tracknet_visibility_rallies,
-)
 from .visibility_rallies import (
     CONTINUOUS_VISIBILITY_CONFIDENCE_THRESHOLD,
     CONTINUOUS_VISIBILITY_END_SECONDS,
@@ -66,6 +53,13 @@ from .visibility_rallies import (
     is_end_on_table_view,
 )
 
+# Test seams and lazy development-only TrackNet imports. These stay unset in
+# the packaged BlurBall Worker, whose staged source omits TrackNet modules.
+load_tracknet = None
+TrackNetPredictor = None
+detect_tracknet_bounce_frames = None
+tracknet_visibility_rallies = None
+
 
 def emit(payload: dict) -> None:
     sys.stdout.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n")
@@ -73,6 +67,7 @@ def emit(payload: dict) -> None:
 
 
 def analyze(request: dict) -> dict:
+    global load_tracknet, TrackNetPredictor, detect_tracknet_bounce_frames, tracknet_visibility_rallies
     task_id = request["task_id"]
     choice = request["calibration_choice"]
     table_analysis = None
@@ -102,8 +97,23 @@ def analyze(request: dict) -> dict:
         )
     analysis_roi = build_analysis_roi(calibration, AnalysisRoiConfig())
     profile = request.get("ball_model_profile", "blurball_v1")
+    tracknet_bounce = tracknet_predictor = tracknet_rallies = None
     emit({"type": "progress", "task_id": task_id, "stage": "load_model", "current": 0, "total": 1, "percent": 0.0})
     if profile == "tracknet_v1":
+        # The historical TrackNet/PyTorch path is development-only. Keep all of
+        # its imports behind the explicit profile so the packaged ONNX Worker
+        # never imports or requires Torch/CUDA modules.
+        from . import tracknet_bounce, tracknet_predictor, tracknet_rallies
+        from .tracknet_model import load_tracknet as load_tracknet_impl
+        if load_tracknet is None:
+            load_tracknet = load_tracknet_impl
+        if TrackNetPredictor is None:
+            TrackNetPredictor = tracknet_predictor.TrackNetPredictor
+        if detect_tracknet_bounce_frames is None:
+            detect_tracknet_bounce_frames = tracknet_bounce.detect_tracknet_bounce_frames
+        if tracknet_visibility_rallies is None:
+            tracknet_visibility_rallies = tracknet_rallies.tracknet_visibility_rallies
+
         tracknet_path = os.environ.get("TTCUT_TRACKNET_WEIGHTS", "").strip()
         if not tracknet_path:
             raise ModelResourceError("Local TrackNet testing is not configured.")
@@ -120,9 +130,8 @@ def analyze(request: dict) -> dict:
     recognition_method = recognition["method"]
     if profile == "blurball_v1" and recognition_method in {"continuous_visibility", "hybrid_motion_bounce"}:
         analysis_roi = stabilize_visibility_roi(analysis_roi)
-        configure_stable_visibility_inference()
     effective_config = (
-        {"mode": "full", "confidence_threshold": TRACKNET_CONFIDENCE_THRESHOLD}
+        {"mode": "full", "confidence_threshold": tracknet_predictor.TRACKNET_CONFIDENCE_THRESHOLD}
         if profile == "tracknet_v1"
         else config if recognition_method == "bounce_events" else {
             "mode": "full",
@@ -144,7 +153,7 @@ def analyze(request: dict) -> dict:
             TrackNetPredictor(
                 loaded,
                 confidence_threshold=effective_config["confidence_threshold"],
-                roi_model_scale=TRACKNET_ROI_MODEL_SCALE,
+                roi_model_scale=tracknet_predictor.TRACKNET_ROI_MODEL_SCALE,
             )
             if profile == "tracknet_v1"
             else BlurBallPredictor(
@@ -352,21 +361,21 @@ def analyze(request: dict) -> dict:
                     ),
                 },
                 **({"tracknet_filter": {
-                    "minimum_rally_seconds": TRACKNET_MINIMUM_RALLY_SECONDS,
+                    "minimum_rally_seconds": tracknet_rallies.TRACKNET_MINIMUM_RALLY_SECONDS,
                     "strong_evidence_minimum_rally_seconds": (
-                        TRACKNET_STRONG_EVIDENCE_MINIMUM_RALLY_SECONDS
+                        tracknet_rallies.TRACKNET_STRONG_EVIDENCE_MINIMUM_RALLY_SECONDS
                     ),
                     "strong_evidence_minimum_expanded_table_ratio": (
-                        TRACKNET_STRONG_EVIDENCE_MINIMUM_EXPANDED_TABLE_RATIO
+                        tracknet_rallies.TRACKNET_STRONG_EVIDENCE_MINIMUM_EXPANDED_TABLE_RATIO
                     ),
-                    "minimum_horizontal_run_reversals": TRACKNET_MINIMUM_HORIZONTAL_RUN_REVERSALS,
-                    "short_rally_seconds": TRACKNET_SHORT_RALLY_SECONDS,
+                    "minimum_horizontal_run_reversals": tracknet_rallies.TRACKNET_MINIMUM_HORIZONTAL_RUN_REVERSALS,
+                    "short_rally_seconds": tracknet_rallies.TRACKNET_SHORT_RALLY_SECONDS,
                     "minimum_short_rally_expanded_table_ratio": (
-                        TRACKNET_MINIMUM_SHORT_RALLY_EXPANDED_TABLE_RATIO
+                        tracknet_rallies.TRACKNET_MINIMUM_SHORT_RALLY_EXPANDED_TABLE_RATIO
                     ),
-                    "expanded_table_length_margin_cm": TRACKNET_EXPANDED_TABLE_LENGTH_MARGIN_CM,
-                    "expanded_table_width_margin_cm": TRACKNET_EXPANDED_TABLE_WIDTH_MARGIN_CM,
-                    "reliable_fragment_bridge_seconds": TRACKNET_RELIABLE_FRAGMENT_BRIDGE_SECONDS,
+                    "expanded_table_length_margin_cm": tracknet_rallies.TRACKNET_EXPANDED_TABLE_LENGTH_MARGIN_CM,
+                    "expanded_table_width_margin_cm": tracknet_rallies.TRACKNET_EXPANDED_TABLE_WIDTH_MARGIN_CM,
+                    "reliable_fragment_bridge_seconds": tracknet_rallies.TRACKNET_RELIABLE_FRAGMENT_BRIDGE_SECONDS,
                 }} if profile == "tracknet_v1" else {}),
                 **({"inter_rally_fragment_filter": (
                     blurball_inter_rally_filter_provenance()
@@ -382,6 +391,15 @@ def analyze(request: dict) -> dict:
         },
         "model_provenance": {
             "profile": profile,
+            **({"runtime": {
+                "format": "onnx",
+                "provider": getattr(loaded, "provider", "cpu"),
+                "model_filename": "blurball_best.onnx",
+                "model_sha256": getattr(loaded, "model_sha256", "0" * 64),
+                "runtime_version": getattr(loaded, "runtime_version", "test"),
+                **({"fallback_reason": os.environ["TTCUT_DIRECTML_FALLBACK_REASON"]}
+                   if os.environ.get("TTCUT_DIRECTML_FALLBACK_REASON") else {}),
+            }} if profile == "blurball_v1" else {}),
             "trajectory": {
                 "frame_count": len(points),
                 "detected_frames": detected_frames,
@@ -449,7 +467,26 @@ def main() -> int:
             raise InvalidRequestError("No analysis request was provided.")
         request = validate_request(json.loads(line))
         task_id = request["task_id"]
-        result = analyze(request)
+        try:
+            result = analyze(request)
+        except DirectMLFallbackRequired as fallback:
+            if request.get("ball_model_profile", "blurball_v1") == "tracknet_v1" or request["device"] == "cpu":
+                raise
+            emit({
+                "type": "progress", "task_id": task_id, "stage": "provider_fallback",
+                "current": 0, "total": 1, "percent": 0.0,
+            })
+            os.environ["TTCUT_FORCE_ONNX_CPU"] = "1"
+            os.environ["TTCUT_DIRECTML_FALLBACK_REASON"] = str(fallback)
+            try:
+                result = analyze(request)
+            finally:
+                os.environ.pop("TTCUT_FORCE_ONNX_CPU", None)
+                os.environ.pop("TTCUT_DIRECTML_FALLBACK_REASON", None)
+            emit({
+                "type": "progress", "task_id": task_id, "stage": "provider_fallback",
+                "current": 1, "total": 1, "percent": 100.0,
+            })
         emit({"type": "result", "task_id": task_id, "data": result})
         return 0
     except json.JSONDecodeError as exc:

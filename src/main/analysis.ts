@@ -252,7 +252,7 @@ export async function startAnalysis(
         processing = await prepareProcessingMedia(
           taskId,
           sourceMetadata,
-          encoder ?? 'libopenh264',
+          encoder ?? 'libx264',
           mediaComponents.ffmpeg ?? '',
           controller.signal,
           () => undefined,

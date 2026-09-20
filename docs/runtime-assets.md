@@ -1,58 +1,65 @@
-# 分析运行时资产
+# Windows 分析与媒体运行时资产
 
-## 固定版本和目录
+## 随包版本
 
-TTcut 的分析运行时固定为 Python 3.12.13、PyTorch 2.12.1、NumPy 2.5.1 和 opencv-python 4.13.0.92。CPU、CUDA 12.6 和 CUDA 13.2 必须构建为三个完整且互不修改的目录。CUDA 13.2 运行时用于包含 `sm_120` 的新架构；CUDA 12.6 资产、URL、哈希和安装目录保持不变：
+Windows x64 生产包固定携带：
 
-```text
-<root>\data\components\analysis-runtime\3.12.13-2.12.1\cpu\python.exe
-<root>\data\components\analysis-runtime\3.12.13-2.12.1\cu126\python.exe
-<root>\data\components\analysis-runtime\3.12.13-2.12.1\cu132\python.exe
-```
+- Python 3.12.13
+- NumPy 2.5.1
+- OpenCV 4.13.0.92
+- `onnxruntime-directml` 1.24.3
+- 支持 `libx264` 的同一套 FFmpeg/ffprobe
+- `blurball_best.onnx` 与 `table_analyze.onnx`
 
-根目录的 `active-runtime.json` 只记录最近一次通过自检的运行时。`device:auto` 优先测试 CUDA；CUDA 不存在或自检失败时选择 CPU。不得在同一环境中通过 pip 原地替换 CPU/CUDA 版 PyTorch。
+构建目录为 `.runtime/windows`，安装后的目录为
+`<resources>/windows`。Worker 分别位于 `.runtime/worker` 和
+`<resources>/worker`，模型分别位于 `.runtime/resources/models` 和
+`<resources>/resources/models`。安装包不包含 PyTorch、CUDA、`.pt`、
+TrackNet、OpenH264或模型转换工具。
 
-Python 3.12.13 官方只发布源码，因此公开资产不能伪装成 python.org 提供的 Windows 二进制。当前基座已从官方 `Python-3.12.13.tar.xz`（SHA-256 `c08bc65a81971c1dd5783182826503369466c7e67374d1646519adf05207b684`）使用 Visual Studio 2022 Community 17.14、MSVC 14.44/v143 构建；源码、编译器、固定 wheel 和自检结果记录在每个运行时根目录的 `TTcut-runtime-provenance.json`。
+## 模型转换与清单
 
-直接 wheel 的不可变 URL、字节数和 SHA-256 已锁定在 `worker/runtime-wheel-lock.json`。可运行 `node scripts/resolve-runtime-wheel-lock.mjs` 重新解析官方索引并人工审阅差异；Release 构建使用已提交清单，不在用户电脑上解析浮动索引。
-
-## 构建运行包
-
-准备好的目录必须分别命名为：
-
-```text
-ttcut-analysis-3.12.13-2.12.1-cpu
-ttcut-analysis-3.12.13-2.12.1-cu126
-ttcut-analysis-3.12.13-2.12.1-cu132
-```
-
-目录中需要根部 `python.exe`、`LICENSE.txt`、完整标准库和 site-packages。pip 安装产生的 PyTorch、NumPy、OpenCV `.dist-info` 及全部许可证目录不得删除。然后在与目标运行时相符的 Windows x64 发布机运行：
+在包含受控源权重、Torch、ONNX 和 ONNX Runtime 的离线构建环境执行：
 
 ```powershell
-node scripts/package-analysis-runtime.mjs cpu D:\prepared\ttcut-analysis-3.12.13-2.12.1-cpu
-node scripts/package-analysis-runtime.mjs cu126 D:\prepared\ttcut-analysis-3.12.13-2.12.1-cu126
-node scripts/package-analysis-runtime.mjs cu132 D:\prepared\ttcut-analysis-3.12.13-2.12.1-cu132
+python scripts/export-onnx-models.py
+node scripts/verify-model-assets.mjs
+node scripts/stage-windows-resources.mjs
 ```
 
-脚本执行固定版本、自带许可证和 CUDA 可用性检查，拒绝包含 `TrackNet_best.pt` 的运行包，并在忽略的 `.baseline/runtime-assets` 中生成 ZIP、大小和 SHA-256。CPU ZIP 为 269,628,039 字节，SHA-256 `b656c87f6261ad53929d72b6726855ecb5961b378315137de1b1af6ce8fd125b`；cu126 完整 ZIP 为 2,766,688,555 字节，SHA-256 `2fd0f1498153bd77b886d2e50787a7e40ff35e683ab8b6d6a55787ea51d98e0d`。
+`resources/model-manifest.json` 记录 opset、转换工具版本、ONNX 文件名、
+大小、SHA-256、源 `.pt` 哈希及输入输出契约。源 `.pt` 只用于转换和
+回归，不进入暂存目录或安装包。转换脚本执行 ONNX checker、CPU 数值
+回归、阈值判定、Argmax 和峰值候选门禁。
 
-## 托管和发布
+BlurBall 图使用动态批次与宽高，输出 scale-0 logits。CPU 批次为 4；
+DirectML 批次固定为 16，尾批补零并裁剪输出。球桌图输入固定为
+`[1,3,896,1600]`，输出为 `[1,4,224,400]`，且只在 CPU provider 上运行。
 
-1. 把 CPU ZIP、cu126 固定分片和 cu132 固定分片上传到不可变、支持 HTTPS 和 Range 请求的正式发布资产位置。cu126 与 cu132 完整 ZIP 超过 GitHub 单资产限制，因此由 `scripts/split-runtime-asset.mjs` 按 1,000,000,000 字节切成有序分片。
-2. 将真实 URL、大小和 SHA-256 写入 `resources/components.json` 的 `analysis_runtime.assets`；禁止 `latest`、可覆盖对象或占位 URL。
-3. CPU、cu126 与 cu132 三个描述必须齐全，目录和 variant 必须匹配。
-4. 在当前发布机执行 CPU 运行时自检、可用 CUDA 运行时自检和真实 Worker 验证；不再要求跨机器发布矩阵。
-5. 运行 `TTCUT_OFFICIAL_RELEASE=1` 的发布审计；资产缺少、URL仍是占位值或哈希不匹配都会阻止正式构建。
+## 运行时暂存
 
-CPU 与 cu126 资产固定在 [WeiyePlayer/TTcut-runtime-assets `analysis-3.12.13-2.12.1-r1`](https://github.com/WeiyePlayer/TTcut-runtime-assets/releases/tag/analysis-3.12.13-2.12.1-r1)。cu132 资产固定在 [WeiyePlayer/TTcut-runtime-assets `analysis-3.12.13-2.12.1-cu132-r1`](https://github.com/WeiyePlayer/TTcut-runtime-assets/releases/tag/analysis-3.12.13-2.12.1-cu132-r1)。安装器逐片校验后顺序合并，并再次校验完整 ZIP 哈希；发布前必须验证每个远端对象的文件名、字节数、GitHub SHA-256 摘要和 `206 Partial Content` Range 响应。
+`scripts/stage-windows-runtime.py` 从受控 Python 3.12.13 基座复制标准库，
+明确排除 Torch/TorchGen/Functorch/Triton，再安装固定版本的 NumPy、
+OpenCV 和 ONNX Runtime DirectML，并复制 x264 FFmpeg/ffprobe。脚本在
+`.runtime/windows/runtime-manifest.json` 写入版本和关键文件哈希，并执行
+导入、provider、编码器和 8K 单帧编码检查。
 
-## 固定模型文件
+```powershell
+python scripts/stage-windows-runtime.py
+npm.cmd run stage:release
+```
 
-模型二进制不进入普通 Git 或源码归档，但 `analyze.pt`、`blurball_best.pt` 和 `table_analyze.pt` 会作为应用资源进入 TTcut 安装包。三个模型的固定文件名、大小和 SHA-256 记录在 `resources/model-manifest.json`，构建前由 `scripts/verify-model-assets.mjs` 严格校验。
+DirectML Session 使用顺序执行、关闭 memory pattern 和图优化。初始化、
+运行或非有限输出触发当前模型阶段整体 CPU 重跑，不允许在同一分析结果
+中混合 provider。球桌模型不会尝试 DirectML。
 
-- `analyze.pt`：`136191005` 字节，SHA-256 `ffb5469161c4bd39a5a7e745c3d13f076b2c5e575f33279ea62f1e5803245a52`
-- `blurball_best.pt`：`6156034` 字节，SHA-256 `3545206c7155194ea654899d33579c88c9fd8e82c632cbdbae3b0c0ec3f2985f`
-- `table_analyze.pt`：`99028986` 字节，SHA-256 `160e1a9b2d0236b501dc4a4d38bbfb39315eeef6de5d8c11770452623ff102df`
-- 打包位置：应用资源目录中的 `resources/models`
+## 产品行为
 
-用户安装“分析组件”时，应用只下载缺失或校验失败的 Python/PyTorch 运行时文件。运行时自检和内置模型检查全部通过后，分析组件才进入可用状态。设置页不单独显示模型名称、版本、哈希或路径。
+设置页只显示内置分析运行时和 x264 媒体工具的状态，并提供“重新检查”。
+缺失或自检失败显示安装损坏提示；应用不会下载、导入或安装组件，也不会
+把旧组件目录作为生产回退。全部内置自检成功后，应用只按固定白名单清理
+旧运行时、FFmpeg、下载缓存、暂存、回滚和组件清单；任一自检失败则保留
+旧数据。
+
+macOS Core ML 和应用版本更新流程不受此文档影响。显式本地 TrackNet 仅在
+未打包开发环境通过外部 Python 与外部权重启用。

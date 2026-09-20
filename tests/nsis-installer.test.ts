@@ -8,8 +8,6 @@ const installerPath = path.join(process.cwd(), 'build', 'installer', 'installer.
 const makeNsisPath = path.join(process.cwd(), 'scripts', 'make-nsis.mjs');
 const compareVersionsPath = path.join(process.cwd(), 'build', 'installer', 'compare-versions.ps1');
 const chooseDefaultRootPath = path.join(process.cwd(), 'build', 'installer', 'choose-default-root.ps1');
-const downloadModelsPath = path.join(process.cwd(), 'build', 'installer', 'download-models.ps1');
-const updateManifestPath = path.join(process.cwd(), 'scripts', 'generate-update-manifest.mjs');
 const registrationPath = path.join(process.cwd(), 'build', 'installer', 'registration.nsh');
 const finalizeLegacyPath = path.join(process.cwd(), 'build', 'installer', 'finalize-legacy-install.ps1');
 const legacyRegistryKey = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\TTcut';
@@ -48,7 +46,7 @@ describe('assisted NSIS installer contract', () => {
     );
     expect(source).toContain('!macro customFinishPage');
     expect(source).toContain('!insertmacro MUI_PAGE_FINISH');
-    expect(source).toContain('${NSD_CreateLabel} 0 110u 100% 24u "$(TTCUT_MIGRATION)"');
+    expect(source).not.toContain('TTCUT_MIGRATION');
   });
 
   it('turns a selected drive root into its TTcut installation folder', async () => {
@@ -113,25 +111,17 @@ describe('assisted NSIS installer contract', () => {
     expect(compareVersions).toContain('New-Object -TypeName PSObject -Property');
   });
 
-  it('gates verified model delivery to the distinct online installer build', async () => {
-    const [installer, modelDownload, makeNsis, updateManifest] = await Promise.all([
+  it('has no online model delivery path and emits one normal Setup', async () => {
+    const [installer, makeNsis] = await Promise.all([
       readFile(installerPath, 'utf8'),
-      readFile(downloadModelsPath, 'utf8'),
       readFile(makeNsisPath, 'utf8'),
-      readFile(updateManifestPath, 'utf8'),
     ]);
-    expect(installer).toContain('online-model-installer.nsh');
-    expect(installer).toContain('Function TTcutInstallOnlineModels');
-    expect(installer).toContain('download-models.ps1');
-    expect(installer).not.toContain('AdditionalRequiredBytes');
-    expect(modelDownload).toContain("'weiye76/TTcut-runtime-assets'");
-    expect(modelDownload).toContain('"/weiye76/TTcut-runtime-assets/releases/download/models-1.0.0/$filename"');
-    expect(modelDownload).toContain('MODEL_HASH_MISMATCH');
-    expect(modelDownload).toContain('MODEL_DELIVERY_MISMATCH');
-    expect(makeNsis).toContain("'scripts', 'stage-online-installer-resources.mjs'");
-    expect(makeNsis).toContain('!define TTCUT_ONLINE_MODEL_INSTALLER');
-    expect(updateManifest).toContain("process.env.TTCUT_ONLINE_MODEL_INSTALLER === '1'");
-    expect(updateManifest).toContain('x64-Online-Setup.exe');
+    expect(installer).not.toContain('online-model-installer.nsh');
+    expect(installer).not.toContain('TTcutInstallOnlineModels');
+    expect(installer).not.toContain('download-models.ps1');
+    expect(makeNsis).not.toContain('stage-online-installer-resources.mjs');
+    expect(makeNsis).not.toContain('TTCUT_ONLINE_MODEL_INSTALLER');
+    expect(makeNsis).toContain("'nsis', 'x64'");
   });
 
   it('registers natively and keeps diagnostics outside the rollback tree', async () => {
@@ -145,10 +135,11 @@ describe('assisted NSIS installer contract', () => {
     expect(source).toContain('$TTcutRegistrationError$\\r$\\n$TTcutRegistrationLog');
   });
 
-  it('commits and activates the new install before transactionally removing the legacy app', async () => {
+  it('commits the new install without migrating or deleting legacy components', async () => {
     const source = await readFile(installerPath, 'utf8');
-    expect(source).toContain('$TTcutRoot\\data\\components.migration');
-    expect(source).toContain('--installer-migrate-components');
+    expect(source).not.toContain('$TTcutRoot\\data\\components.migration');
+    expect(source).not.toContain('--installer-migrate-components');
+    expect(source).not.toContain('RMDir /r "$TTcutLegacyComponents"');
     expect(source).toContain('Function TTcutRollbackNewInstall');
     expect(source).toContain('StrCpy $TTcutLegacyUninstall "$LOCALAPPDATA\\TTcut\\Update.exe"');
     expect(source).toContain(
@@ -160,20 +151,13 @@ describe('assisted NSIS installer contract', () => {
     const registrationIndex = source.indexOf(
       'Call TTcutCommitRegistration',
     );
-    const activationIndex = source.indexOf(
-      'Rename "$TTcutRoot\\data\\components.migration" "$TTcutRoot\\data\\components"',
-    );
     const shortcutIndex = source.lastIndexOf(
       'CreateShortcut "$DESKTOP\\TTcut.lnk"',
     );
     expect(source).toContain('${If} $TTcutRegistrationError != ""');
     expect(registrationIndex).toBeGreaterThan(-1);
-    expect(registrationIndex).toBeLessThan(activationIndex);
-    expect(activationIndex).toBeLessThan(legacyUninstallIndex);
+    expect(registrationIndex).toBeLessThan(legacyUninstallIndex);
     expect(legacyUninstallIndex).toBeLessThan(shortcutIndex);
-    expect(source.slice(activationIndex - 40, activationIndex + 350)).toContain('ClearErrors');
-    expect(source.slice(activationIndex, activationIndex + 350)).toContain('${If} ${Errors}');
-    expect(source.slice(activationIndex, activationIndex + 350)).toContain('Call TTcutRollbackNewInstall');
     expect(source).toContain('-BackupRoot "$TTcutRoot\\data\\.legacy-install.backup"');
     expect(source).not.toContain('!insertmacro registryAddInstallInfo');
   });
@@ -320,13 +304,11 @@ describe('assisted NSIS installer contract', () => {
   });
 
   it('routes every semantic-version prerelease through the beta update channel', async () => {
-    const [makeNsisSource, builderSource, verifierSource] = await Promise.all([
+    const [makeNsisSource, builderSource] = await Promise.all([
       readFile(makeNsisPath, 'utf8'),
       readFile(path.resolve('electron-builder.config.cjs'), 'utf8'),
-      readFile(path.resolve('scripts/verify-release.mjs'), 'utf8'),
     ]);
     expect(makeNsisSource).toContain("packageVersion.includes('-') ? 'beta' : 'latest'");
     expect(builderSource).toContain("version.includes('-') ? 'beta' : 'latest'");
-    expect(verifierSource).toContain("packageJson.version.includes('-') ? 'channel: beta' : 'channel: latest'");
   });
 });
