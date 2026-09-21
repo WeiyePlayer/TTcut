@@ -7,6 +7,7 @@ const CLIP_EDGE_HIT_OUTSET = 8;
 const CLIP_EDGE_HIT_INSET = 4;
 const CLIP_BOUNDARY_MARKER_MIN_WIDTH = 24;
 const RESIZE_DIRECTION_THRESHOLD = 3;
+const PLAYHEAD_SNAP_DISTANCE_PX = 8;
 
 export type TimelineToolMode = 'add' | 'delete' | 'zoom' | null;
 export type TimelineSeekIntent = 'preview' | 'commit';
@@ -46,6 +47,18 @@ export function clipEdgeHitWidth(clipWidth: number): number {
 
 export function shouldShowClipBoundaryMarkers(clipWidth: number): boolean {
   return Number.isFinite(clipWidth) && clipWidth >= CLIP_BOUNDARY_MARKER_MIN_WIDTH;
+}
+
+export function snapTimelineBoundaryToPlayhead(
+  requestedTime: number,
+  playheadTime: number,
+  pixelsPerSecond: number,
+): number {
+  if (!Number.isFinite(requestedTime) || !Number.isFinite(playheadTime)
+    || !Number.isFinite(pixelsPerSecond) || pixelsPerSecond <= 0) return requestedTime;
+  return Math.abs(requestedTime - playheadTime) * pixelsPerSecond <= PLAYHEAD_SNAP_DISTANCE_PX + 1e-6
+    ? playheadTime
+    : requestedTime;
 }
 
 export function timelineWheelDelta(
@@ -95,6 +108,7 @@ export function CustomTimeline({
   duration,
   fps,
   currentTime,
+  currentEditingClipId,
   timelineLabel,
   resizeStartLabel,
   resizeEndLabel,
@@ -110,6 +124,7 @@ export function CustomTimeline({
   duration: number;
   fps: number;
   currentTime: number;
+  currentEditingClipId: string | null;
   timelineLabel: string;
   resizeStartLabel: string;
   resizeEndLabel: string;
@@ -332,7 +347,15 @@ export function CustomTimeline({
       dragging.initialTime = clip[dragging.edge];
       dragging.adjacent = null;
     }
-    const boundaryTime = onResize(dragging.clipId, dragging.edge, dragging.initialTime + (event.clientX - dragging.startX) / pixelsPerSecond);
+    const requestedTime = dragging.initialTime + (event.clientX - dragging.startX) / pixelsPerSecond;
+    const snappedTime = contentWidth > PLAYHEAD_SNAP_DISTANCE_PX * 2
+      ? snapTimelineBoundaryToPlayhead(requestedTime, currentTime, pixelsPerSecond)
+      : requestedTime;
+    const boundaryTime = onResize(
+      dragging.clipId,
+      dragging.edge,
+      snappedTime,
+    );
     setResizeFeedback({ clipId: dragging.clipId, edge: dragging.edge, boundaryTime, durationDelta: dragging.edge === 'start' ? dragging.initialTime - boundaryTime : boundaryTime - dragging.initialTime });
   };
 
@@ -422,8 +445,9 @@ export function CustomTimeline({
             const previous = selectedClips[index - 1];
             const following = selectedClips[index + 1];
             const deleteTarget = toolMode === 'delete' && deleteTargetId === clip.clipId;
+            const currentEditing = currentEditingClipId === clip.clipId;
             return (
-              <div key={clip.clipId} className={`timeline-clip${deleteTarget ? ' delete-target' : ''}`} data-clip-id={clip.clipId} data-rally-id={clip.sourceRallyId ?? undefined} style={{ left, width }} onPointerEnter={() => { if (toolMode === 'delete') setDeleteTargetId(clip.clipId); }} onPointerLeave={() => { if (deleteTargetId === clip.clipId) setDeleteTargetId(null); }} onPointerDown={(event) => {
+              <div key={clip.clipId} className={`timeline-clip${currentEditing ? ' current-editing' : ''}${deleteTarget ? ' delete-target' : ''}`} aria-current={currentEditing ? 'true' : undefined} data-clip-id={clip.clipId} data-rally-id={clip.sourceRallyId ?? undefined} style={{ left, width }} onPointerEnter={() => { if (toolMode === 'delete') setDeleteTargetId(clip.clipId); }} onPointerLeave={() => { if (deleteTargetId === clip.clipId) setDeleteTargetId(null); }} onPointerDown={(event) => {
                 // Right-click is reserved for CustomCutPage's context-menu cancellation.
                 if (event.button !== 0) return;
                 if (toolMode === 'delete') { event.preventDefault(); event.stopPropagation(); onDeleteClip(clip.clipId); return; }

@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { calculateRallyPlaybackScrollTop, CustomCutPage, findPlaybackTargetClip } from '../src/renderer/CustomCutPage';
@@ -344,9 +344,102 @@ describe('playback rally location', () => {
     setVideoTime(monitor, 7.5);
     expect(document.querySelector('[data-playback-cue="true"]')).toBeNull();
   });
+
+  it('keeps the current editing rally through gaps and switches on the next selected clip', () => {
+    render(<PlaybackHarness clips={playbackClips.slice(0, 2)} />);
+    const monitor = document.querySelector('.custom-monitor video') as HTMLVideoElement;
+    const clip = (id: string) => document.querySelector(`.timeline-clip[data-clip-id="${id}"]`);
+
+    setVideoTime(monitor, 1.5);
+    expect(clip('rally_001')).toHaveClass('current-editing');
+    expect(clip('rally_001')).toHaveAttribute('aria-current', 'true');
+    expect(clip('rally_002')).not.toHaveClass('current-editing');
+
+    setVideoTime(monitor, 3);
+    expect(clip('rally_001')).toHaveClass('current-editing');
+    setVideoTime(monitor, 4.5);
+    expect(clip('rally_002')).toHaveClass('current-editing');
+    expect(clip('rally_001')).not.toHaveClass('current-editing');
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Rally 2' }));
+    expect(document.querySelector('.timeline-clip[aria-current="true"]')).toBeNull();
+  });
 });
 
 describe('manual timeline tools', () => {
+  it('sets current clip boundaries with A/D without changing playback and ignores unsafe key contexts', () => {
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue();
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
+    try {
+      render(<PlaybackHarness clips={playbackClips.slice(0, 2)} />);
+      const monitor = document.querySelector('.custom-monitor video') as HTMLVideoElement;
+      setVideoTime(monitor, 1.5);
+      fireEvent.keyDown(document.body, { code: 'KeyA', key: 'a' });
+      expect(screen.getByRole('slider', { name: 'Resize clip start 1' })).toHaveAttribute('aria-valuenow', '1.5');
+
+      setVideoTime(monitor, 1.8);
+      fireEvent.keyDown(document.body, { code: 'KeyD', key: 'd' });
+      expect(screen.getByRole('slider', { name: 'Resize clip end 1' })).toHaveAttribute('aria-valuenow', '1.8');
+
+      setVideoTime(monitor, 1.6);
+      fireEvent.keyDown(document.body, { code: 'KeyA', key: 'a', repeat: true });
+      expect(screen.getByRole('slider', { name: 'Resize clip start 1' })).toHaveAttribute('aria-valuenow', '1.5');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Multi-select' }));
+      const input = screen.getByRole('textbox', { name: 'Bounces at least' });
+      fireEvent.keyDown(input, { code: 'KeyD', key: 'd' });
+      expect(screen.getByRole('slider', { name: 'Resize clip end 1' })).toHaveAttribute('aria-valuenow', '1.8');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Delete rally' }));
+      setVideoTime(monitor, 1.7);
+      fireEvent.keyDown(document.body, { code: 'KeyD', key: 'd' });
+      fireEvent.click(screen.getByRole('button', { name: 'Delete rally' }));
+      expect(screen.getByRole('slider', { name: 'Resize clip end 1' })).toHaveAttribute('aria-valuenow', '1.8');
+      expect(play).not.toHaveBeenCalled();
+      expect(pause).not.toHaveBeenCalled();
+    } finally { play.mockRestore(); pause.mockRestore(); }
+  });
+
+  it('creates a one-second current rally with A and repeatedly adjusts its end with D', () => {
+    render(<PlaybackHarness clips={playbackClips.slice(0, 2)} />);
+    const monitor = document.querySelector('.custom-monitor video') as HTMLVideoElement;
+    fireEvent.click(screen.getByRole('button', { name: 'Add rally' }));
+
+    setVideoTime(monitor, 2.5);
+    fireEvent.keyDown(document.body, { code: 'KeyA', key: 'a' });
+    let manualClips = document.querySelectorAll<HTMLElement>('.timeline-clip[data-clip-id^="manual_"]');
+    expect(manualClips).toHaveLength(1);
+    expect(manualClips[0]).toHaveClass('current-editing');
+    const manualRow = screen.getByRole('checkbox', { name: 'Rally 2' }).closest('tr')!;
+    expect(within(manualRow).getByText('1.0s')).toBeVisible();
+
+    setVideoTime(monitor, 3.2);
+    fireEvent.keyDown(document.body, { code: 'KeyD', key: 'd' });
+    expect(within(manualRow).getByText('0.7s')).toBeVisible();
+    setVideoTime(monitor, 3.6);
+    fireEvent.keyDown(document.body, { code: 'KeyD', key: 'd' });
+    expect(within(manualRow).getByText('1.1s')).toBeVisible();
+
+    setVideoTime(monitor, 5.5);
+    fireEvent.keyDown(document.body, { code: 'KeyA', key: 'a' });
+    manualClips = document.querySelectorAll<HTMLElement>('.timeline-clip[data-clip-id^="manual_"]');
+    expect(manualClips).toHaveLength(2);
+    expect(document.querySelectorAll('.timeline-clip.current-editing')).toHaveLength(1);
+    expect(manualClips[1]).toHaveClass('current-editing');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add rally' }));
+    expect(document.querySelectorAll('.timeline-clip[data-clip-id^="manual_"]')).toHaveLength(2);
+  });
+
+  it('does not add with A where a one-second clip would be invalid', () => {
+    render(<PlaybackHarness clips={playbackClips.slice(0, 2)} />);
+    const monitor = document.querySelector('.custom-monitor video') as HTMLVideoElement;
+    fireEvent.click(screen.getByRole('button', { name: 'Add rally' }));
+    setVideoTime(monitor, 1.5);
+    fireEvent.keyDown(document.body, { code: 'KeyA', key: 'a' });
+    expect(document.querySelector('.timeline-clip[data-clip-id^="manual_"]')).toBeNull();
+  });
+
   it.each(['.timeline-track-window', '.timeline-ruler'])('zooms with ordinary wheel input over %s only while the zoom tool is active', (target) => {
     const width = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(100);
     try {

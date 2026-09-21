@@ -19,6 +19,11 @@ import type { CustomPlaybackMode } from '../domain/custom-playback';
 const PLAYBACK_CUE_DURATION_MS = 500;
 const PLAYBACK_SCROLL_TIMEOUT_MS = 800;
 
+function isEditableShortcutTarget(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement
+    && (target.isContentEditable || target.matches('input, textarea, select'));
+}
+
 export function findPlaybackTargetClip(
   clips: readonly CustomRallyClip[],
   time: number,
@@ -192,6 +197,7 @@ export function CustomCutPage({
   const previewMetadata = analysis.source_video?.path === video.path ? analysis.source_video : analysis.video;
   const preview = useCompatiblePreview(videoRef, video.mediaUrl, previewMetadata.video_codec);
   const [currentTime, setCurrentTime] = useState(0);
+  const [currentEditingClipId, setCurrentEditingClipId] = useState<string | null>(null);
   const [playbackCue, setPlaybackCue] = useState<PlaybackCue | null>(null);
   const [toolMode, setToolMode] = useState<TimelineToolMode>(null);
   const [exportOptionsOpen, setExportOptionsOpen] = useState(false);
@@ -355,7 +361,9 @@ export function CustomCutPage({
   const updatePlaybackTime = useCallback((time: number) => {
     currentTimeRef.current = time;
     setCurrentTime(time);
-  }, []);
+    const target = findPlaybackTargetClip(clips, time);
+    if (target) setCurrentEditingClipId(target.clipId);
+  }, [clips]);
 
   const playback = useCustomPlayback({
     videoRef, preview, clips, mode: playbackMode, duration: analysis.video.duration_seconds,
@@ -393,6 +401,43 @@ export function CustomCutPage({
   const { seek, togglePlayback, playClip } = playback;
 
   useEffect(() => {
+    setCurrentEditingClipId((clipId) => (
+      clipId && clips.some((clip) => clip.clipId === clipId && clip.selected) ? clipId : null
+    ));
+  }, [clips]);
+
+  const resizeClipAt = useCallback((clipId: string, edge: 'start' | 'end', time: number) => {
+    const nextClips = resizeCustomClip(
+      clips,
+      clipId,
+      edge,
+      time,
+      analysis.video.duration_seconds,
+      analysis.video.fps,
+      showBounceCounts ? analysis.bounce_times_seconds : undefined,
+    );
+    onClipsChange(nextClips);
+    const resized = nextClips.find((clip) => clip.clipId === clipId);
+    return resized ? resized[edge] : time;
+  }, [analysis, clips, onClipsChange, showBounceCounts]);
+
+  const addManualAt = useCallback((start: number, makeCurrent = false) => {
+    const clipId = manualClipId();
+    if (!clipId) return false;
+    const nextClips = createManualCustomClip(
+      clips,
+      clipId,
+      start,
+      analysis.video.duration_seconds,
+      showBounceCounts ? analysis.bounce_times_seconds : undefined,
+    );
+    if (!nextClips) return false;
+    onClipsChange(nextClips);
+    if (makeCurrent) setCurrentEditingClipId(clipId);
+    return true;
+  }, [analysis, clips, onClipsChange, showBounceCounts]);
+
+  useEffect(() => {
     const handleSpace = (event: KeyboardEvent) => {
       if (event.isComposing || (event.code !== 'Space' && event.key !== ' ')) return;
       // Own Space before row handlers and native button/checkbox activation.
@@ -409,23 +454,31 @@ export function CustomCutPage({
     };
   }, [togglePlayback]);
 
+  useEffect(() => {
+    const handleBoundaryShortcut = (event: KeyboardEvent) => {
+      if (event.isComposing || event.repeat || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey
+        || isEditableShortcutTarget(event.target)
+        || (event.code !== 'KeyA' && event.code !== 'KeyD')
+        || toolMode === 'delete') return;
+
+      if (toolMode === 'add' && event.code === 'KeyA') {
+        event.preventDefault();
+        event.stopPropagation();
+        addManualAt(currentTimeRef.current, true);
+        return;
+      }
+
+      if (!currentEditingClipId) return;
+      event.preventDefault();
+      event.stopPropagation();
+      resizeClipAt(currentEditingClipId, event.code === 'KeyA' ? 'start' : 'end', currentTimeRef.current);
+    };
+    window.addEventListener('keydown', handleBoundaryShortcut, true);
+    return () => window.removeEventListener('keydown', handleBoundaryShortcut, true);
+  }, [addManualAt, currentEditingClipId, resizeClipAt, toolMode]);
+
   const toggleTool = (nextTool: Exclude<TimelineToolMode, null>) => {
     setToolMode((active) => active === nextTool ? null : nextTool);
-  };
-
-  const addManualAt = (start: number) => {
-    const clipId = manualClipId();
-    if (!clipId) return false;
-    const nextClips = createManualCustomClip(
-      clips,
-      clipId,
-      start,
-      analysis.video.duration_seconds,
-      showBounceCounts ? analysis.bounce_times_seconds : undefined,
-    );
-    if (!nextClips) return false;
-    onClipsChange(nextClips);
-    return true;
   };
 
   const updateExportOutputs = (nextOutputs: NonNullable<ExportRequest['outputs']>) => {
@@ -516,12 +569,7 @@ export function CustomCutPage({
             <CompatibleVideo hdr={Boolean(analysis.video.native_video && analysis.video.native_video.hdr !== 'sdr')} ref={videoRef} src={preview.url} controls={false} preload={preview.url === video.mediaUrl ? 'metadata' : 'auto'} playsInline tabIndex={0} aria-label={translations.togglePlayback} onClick={togglePlayback} onLoadedMetadata={() => { lastPlaybackClipIdRef.current = null; playback.tick(); }} onPlay={() => { playback.tick(); startVideoFrameTracking(); }} onPause={stopVideoFrameTracking} onEnded={stopVideoFrameTracking} onTimeUpdate={() => playback.tick()} onSeeked={() => playback.tick()} />
           </div></div>
 
-          <CustomTimeline clips={clips} duration={analysis.video.duration_seconds} fps={analysis.video.fps} currentTime={currentTime} timelineLabel={translations.timeline} resizeStartLabel={translations.resizeStart} resizeEndLabel={translations.resizeEnd} toolMode={toolMode} onSeek={seek} onScrubCancel={playback.cancelScrub} onPlayClip={playClip} onAddAt={addManualAt} onDeleteClip={(clipId) => onClipsChange(deleteCustomClip(clips, clipId))} onResize={(clipId, edge, time) => {
-            const nextClips = resizeCustomClip(clips, clipId, edge, time, analysis.video.duration_seconds, analysis.video.fps, showBounceCounts ? analysis.bounce_times_seconds : undefined);
-            onClipsChange(nextClips);
-            const resized = nextClips.find((clip) => clip.clipId === clipId);
-            return resized ? resized[edge] : time;
-          }} />
+          <CustomTimeline clips={clips} duration={analysis.video.duration_seconds} fps={analysis.video.fps} currentTime={currentTime} currentEditingClipId={currentEditingClipId} timelineLabel={translations.timeline} resizeStartLabel={translations.resizeStart} resizeEndLabel={translations.resizeEnd} toolMode={toolMode} onSeek={seek} onScrubCancel={playback.cancelScrub} onPlayClip={playClip} onAddAt={addManualAt} onDeleteClip={(clipId) => onClipsChange(deleteCustomClip(clips, clipId))} onResize={resizeClipAt} />
 
           <div className="custom-timeline-actions">
             <div className="timeline-tool-buttons" role="group" aria-label={translations.timelineTools}>
