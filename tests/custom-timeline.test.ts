@@ -5,6 +5,7 @@ import {
   chooseTimelineInterval,
   formatResizeDelta,
   formatTimelineLabel,
+  snapTimelineBoundaryToPlayhead,
   shouldShowClipBoundaryMarkers,
   timelineWheelDelta,
   timelineWheelScroll,
@@ -70,6 +71,13 @@ describe('custom timeline ruler', () => {
 });
 
 describe('custom timeline clip boundaries', () => {
+  it('uses a zoom-independent eight-pixel playhead snap distance', () => {
+    expect(snapTimelineBoundaryToPlayhead(5.08, 5, 100)).toBe(5);
+    expect(snapTimelineBoundaryToPlayhead(5.081, 5, 100)).toBe(5.081);
+    expect(snapTimelineBoundaryToPlayhead(5.04, 5, 200)).toBe(5);
+    expect(snapTimelineBoundaryToPlayhead(5.041, 5, 200)).toBe(5.041);
+  });
+
   it('keeps the two pointer hit areas separate even for a one-pixel clip', () => {
     expect(clipEdgeHitWidth(1)).toBe(8.5);
     expect(clipEdgeHitWidth(8)).toBe(12);

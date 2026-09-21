@@ -16,11 +16,11 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
-function setup(gap = 0) {
+function setup(gap = 0, currentTime = 0) {
   const onResize = vi.fn((_id: string, _edge: string, time: number) => time);
   const onPlayClip = vi.fn();
   render(<CustomTimeline clips={[clip(1, 1, 5), clip(2, 5 + gap, 9)]} duration={10} fps={30}
-    currentTime={0} timelineLabel="Timeline" resizeStartLabel="Start" resizeEndLabel="End"
+    currentTime={currentTime} currentEditingClipId={null} timelineLabel="Timeline" resizeStartLabel="Start" resizeEndLabel="End"
     toolMode={null} onSeek={vi.fn()} onScrubCancel={vi.fn()} onPlayClip={onPlayClip}
     onResize={onResize} onAddAt={() => false} onDeleteClip={vi.fn()} />);
   const handle = (name: string) => {
@@ -70,5 +70,15 @@ describe('adjacent timeline handles', () => {
     fireEvent.pointerUp(target);
     fireEvent.keyDown(handle('End 1'), { key: 'ArrowLeft', shiftKey: true });
     expect(onResize).toHaveBeenLastCalledWith('1', 'end', 4);
+  });
+
+  it('snaps pointer resizing to the playhead within eight rendered pixels', () => {
+    const { handle, onResize } = setup(0.5, 5.38);
+    const target = handle('Start 2');
+    fireEvent.pointerDown(target, { clientX: 550 });
+    fireEvent.pointerMove(target, { clientX: 539 });
+    expect(onResize).toHaveBeenLastCalledWith('2', 'start', 5.38);
+    fireEvent.pointerMove(target, { clientX: 528 });
+    expect(onResize).toHaveBeenLastCalledWith('2', 'start', 5.28);
   });
 });

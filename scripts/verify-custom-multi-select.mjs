@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import path from 'node:path';
+import { expect } from '@playwright/test';
 import { chromium } from 'playwright';
 
 // Focused renderer acceptance: deterministic board counts, not algorithm accuracy.
@@ -188,6 +189,71 @@ try {
     await page.screenshot({ path: path.join(run, 'multi-select-en.png') });
   });
   await page.getByRole('textbox', { name: 'Bounces at least' }).press('Escape');
+  await check('packaged timeline keeps a current editing rally and applies A/D boundaries', async () => {
+    const monitor = page.locator('.custom-monitor video');
+    const playhead = page.locator('.timeline-playhead');
+    const clip = id => page.locator(`.timeline-clip[data-clip-id="${id}"]`);
+    const clipRange = async id => ({
+      start: Number(await clip(id).locator('.clip-handle.start').getAttribute('aria-valuenow')),
+      end: Number(await clip(id).locator('.clip-handle.end').getAttribute('aria-valuenow')),
+    });
+    const setTime = async time => {
+      await monitor.evaluate(video => video.pause());
+      const ruler = await page.locator('.timeline-ruler').boundingBox();
+      await page.mouse.click(ruler.x + ruler.width * time / 15, ruler.y + ruler.height / 2);
+      await expect.poll(async () => Number(await playhead.getAttribute('aria-valuenow'))).toBeGreaterThan(time - .1);
+      return Number(await playhead.getAttribute('aria-valuenow'));
+    };
+
+    const first = await clipRange('rally_001');
+    const second = await clipRange('rally_002');
+    const firstStart = await setTime((first.start + first.end) / 2);
+    await expect(clip('rally_001')).toHaveClass(/current-editing/);
+    await page.keyboard.press('KeyA');
+    assert.ok(Math.abs(Number(await clip('rally_001').locator('.clip-handle.start').getAttribute('aria-valuenow')) - firstStart) < 1e-6);
+
+    const shortenedEnd = await setTime(Math.min(first.end - 1 / 15, firstStart + .25));
+    await page.keyboard.press('KeyD');
+    assert.ok(Math.abs(Number(await clip('rally_001').locator('.clip-handle.end').getAttribute('aria-valuenow')) - shortenedEnd) < 1e-6);
+    assert.ok(second.start > shortenedEnd, 'Editing the first clip must create a gap before the second clip');
+    await setTime((shortenedEnd + second.start) / 2);
+    await expect(clip('rally_001')).toHaveClass(/current-editing/);
+    const secondEnd = await setTime((second.start + second.end) / 2);
+    await expect(clip('rally_002')).toHaveClass(/current-editing/);
+    await page.keyboard.press('KeyD');
+    assert.ok(Math.abs(Number(await clip('rally_002').locator('.clip-handle.end').getAttribute('aria-valuenow')) - secondEnd) < 1e-6);
+
+    const ranges = await page.locator('.timeline-clip').evaluateAll(elements => elements.map(element => ({
+      start: Number(element.querySelector('.clip-handle.start')?.getAttribute('aria-valuenow')),
+      end: Number(element.querySelector('.clip-handle.end')?.getAttribute('aria-valuenow')),
+    })));
+    let addTime = null;
+    for (let candidate = 0; candidate <= 14; candidate += .25) {
+      if (ranges.every(range => candidate >= range.end || candidate + 1 <= range.start)) {
+        addTime = candidate;
+        break;
+      }
+    }
+    assert.notEqual(addTime, null, `Fixture must leave room for a one-second manual clip: ${JSON.stringify(ranges)}`);
+    await page.getByRole('button', { name: 'Add rally', exact: true }).click();
+    const manualStart = await setTime(addTime);
+    await page.keyboard.press('KeyA');
+    const manual = page.locator('.timeline-clip[data-clip-id^="manual_"]');
+    await expect(manual).toHaveCount(1);
+    await expect(manual).toHaveClass(/current-editing/);
+    const manualEnd = await setTime(manualStart + .7);
+    await page.keyboard.press('KeyD');
+    await page.getByRole('button', { name: 'Add rally', exact: true }).click();
+    assert.ok(Math.abs(Number(await manual.locator('.clip-handle.end').getAttribute('aria-valuenow')) - manualEnd) < 1e-6);
+    await page.screenshot({ path: path.join(run, 'current-editing-rally-en.png') });
+
+    await page.getByRole('button', { name: 'Delete rally', exact: true }).click();
+    await manual.click();
+    await expect(manual).toHaveCount(0);
+    await page.getByRole('button', { name: 'Delete rally', exact: true }).click();
+    await page.reload();
+    await openReview('en');
+  });
   await check('shared timeline boundary follows mouse direction and playhead does not block track', async () => {
     const left = page.locator('.timeline-clip').nth(0);
     const right = page.locator('.timeline-clip').nth(1);
