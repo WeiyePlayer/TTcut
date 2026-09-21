@@ -32,6 +32,7 @@ import { probeVideo } from './probe';
 import { overallAnalysisProgress } from '../domain/analysis-progress';
 import { requestedAnalysisDevice } from '../domain/analysis-device';
 import { analysisProcessEnvironment } from './analysis-environment';
+import { reconcileAnalysisVideoMetadata } from '../domain/analysis-result';
 import {
   CfrNormalizationError,
   prepareProcessingMedia,
@@ -383,7 +384,7 @@ export async function startAnalysis(
       });
       const data = analysisResultSchema.parse({
         ...workerResult,
-        video: processingMedia.metadata,
+        video: reconcileAnalysisVideoMetadata(workerResult.video, processingMedia.metadata),
         source_video: sourceMetadata,
         processing: {
           mode: processingMedia.mode,
