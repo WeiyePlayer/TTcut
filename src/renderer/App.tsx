@@ -706,12 +706,9 @@ export function App() {
               </article>
               <article className="card setup-card">
                 <div className="setup-heading">
-                  <div><h2>{settings.language === 'en' ? 'Built-in runtime' : '内置运行时'}</h2></div>
+                  <div><h2>{settings.language === 'en' ? 'Component integrity check' : '组件完整性检测'}</h2></div>
                   <button className="secondary" onClick={() => void refreshComponents()}>{t.refreshComponents}</button>
                 </div>
-                <p>{settings.language === 'en'
-                  ? 'ONNX models and x264 media tools are included. No component download is required.'
-                  : 'ONNX 模型与 x264 视频组件已随软件内置，无需下载组件。'}</p>
                 {(bootstrap?.components.analysis.detail || bootstrap?.components.media.detail) && (
                   <p role="alert">{settings.language === 'en'
                     ? 'The built-in runtime is damaged. Reinstall or update TTcut.'
