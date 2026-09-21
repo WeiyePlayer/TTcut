@@ -93,6 +93,14 @@ current playback time. At most one Playback Target Clip exists at a time; a
 gap or an unselected clip has no target.
 _Avoid_: current selection, active Rally
 
+## Current Editing Rally
+
+The selected Custom Rally Clip most recently entered by the timeline playhead,
+or most recently created with the add shortcut. It is the persistent keyboard
+editing target and does not determine whether a clip participates in export.
+_UI_: 当前编辑回合
+_Avoid_: selected clip, Playback Target Clip, Rally Location Cue
+
 ## Rally Location Cue
 
 A transient list-row indicator that connects playback or an explicit jump to
