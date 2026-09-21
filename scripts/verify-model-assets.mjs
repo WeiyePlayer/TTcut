@@ -6,11 +6,11 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const manifest = JSON.parse(await readFile(path.join(root, 'resources', 'model-manifest.json'), 'utf8'));
 
-if (manifest.schema_version !== 1 || !Array.isArray(manifest.models) || manifest.models.length !== 2) {
-  throw new Error('Model manifest must contain exactly two schema-v1 model entries.');
+if (manifest.schema_version !== 2 || manifest.opset !== 20 || !Array.isArray(manifest.models) || manifest.models.length !== 2) {
+  throw new Error('Model manifest must contain exactly two schema-v2 opset-20 ONNX entries.');
 }
 
-const expectedNames = new Set(['table_analyze.pt', 'blurball_best.pt']);
+const expectedNames = new Set(['table_analyze.onnx', 'blurball_best.onnx']);
 const modelsDirectory = path.join(root, 'resources', 'models');
 const forbiddenLocalTestWeights = new Set(['analyze.pt', 'tracknet_best.pt']);
 for (const entry of await readdir(modelsDirectory)) {
@@ -20,6 +20,9 @@ for (const entry of await readdir(modelsDirectory)) {
 }
 for (const model of manifest.models) {
   if (!expectedNames.delete(model.filename)) throw new Error(`Unexpected or duplicate model asset: ${model.filename}`);
+  if (!model.source_filename?.endsWith('.pt') || !/^[a-f0-9]{64}$/.test(model.source_sha256 ?? '')) {
+    throw new Error(`Model source provenance is invalid: ${model.filename}`);
+  }
   if (!Number.isSafeInteger(model.size_bytes) || model.size_bytes <= 0 || !/^[a-f0-9]{64}$/.test(model.sha256)) {
     throw new Error(`Invalid model manifest entry: ${model.filename}`);
   }

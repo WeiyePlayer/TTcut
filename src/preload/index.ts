@@ -14,21 +14,16 @@ const api: TTcutApi = {
   bootstrap: () => ipcRenderer.invoke(IPC.appBootstrap),
   saveSettings: (settings: AppSettings) => ipcRenderer.invoke(IPC.settingsSave, settings),
   refreshComponents: () => ipcRenderer.invoke(IPC.componentsRefresh),
-  importComponents: () => ipcRenderer.invoke(IPC.componentsImport),
-  openComponentDownloads: () => ipcRenderer.invoke(IPC.componentsOpenDownloads),
-  openX264Download: () => ipcRenderer.invoke(IPC.componentsOpenX264Download),
-  installAnalysisComponent: (consent: true) => ipcRenderer.invoke(IPC.componentsInstallAnalysis, consent),
-  installMediaComponent: (consent: true) => ipcRenderer.invoke(IPC.componentsInstallMedia, consent),
   selectVideo: () => ipcRenderer.invoke(IPC.videoSelect),
   selectVideos: () => ipcRenderer.invoke(IPC.videosSelect),
   pathForDroppedFile: (file: File) => webUtils.getPathForFile(file),
   acceptDroppedVideo: (path: string) => ipcRenderer.invoke(IPC.videoAcceptDrop, path),
   probeVideo: (path: string) => ipcRenderer.invoke(IPC.videoProbe, path),
   prepareVideoPreview: (mediaUrl: string) => ipcRenderer.invoke(IPC.videoPreparePreview, mediaUrl),
-  startAutoCalibration: (input: { videoPath: string; device: 'auto' | 'cuda' | 'cpu' }) => (
+  startAutoCalibration: (input: { videoPath: string; device: 'auto' | 'directml' | 'cuda' | 'cpu' }) => (
     ipcRenderer.invoke(IPC.calibrationStart, input)
   ),
-  startAnalysis: (input: { videoPath: string; calibrationChoice: CalibrationChoice; device: 'auto' | 'cuda' | 'cpu'; historyVisibility: 'visible' | 'deferred'; normalizeVariableFrameRate: boolean }) => (
+  startAnalysis: (input: { videoPath: string; calibrationChoice: CalibrationChoice; device: 'auto' | 'directml' | 'cuda' | 'cpu'; historyVisibility: 'visible' | 'deferred'; normalizeVariableFrameRate: boolean }) => (
     ipcRenderer.invoke(IPC.analysisStart, input)
   ),
   startExport: (input: ExportRequest) => ipcRenderer.invoke(IPC.exportStart, input),

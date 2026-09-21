@@ -1,17 +1,69 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
+  "opset": 20,
+  "exporter": {
+    "python": "3.12.13",
+    "torch": "2.12.1+cpu",
+    "onnx": "1.19.0"
+  },
   "models": [
     {
       "model_id": "table_analysis",
-      "filename": "table_analyze.pt",
-      "size_bytes": 99028986,
-      "sha256": "160e1a9b2d0236b501dc4a4d38bbfb39315eeef6de5d8c11770452623ff102df"
+      "identifier": "mn:segformerpp_b2-hs:12.00-lr:1.00e-03-dn:tthq-mp:False-bs:04-exp:None-08302025-012958",
+      "filename": "table_analyze.onnx",
+      "size_bytes": 102278496,
+      "sha256": "fa696e07cf103230f54c67aebcad24e5388fed70b89788ba762ce4ce46a31eaa",
+      "source_filename": "table_analyze.pt",
+      "source_sha256": "160e1a9b2d0236b501dc4a4d38bbfb39315eeef6de5d8c11770452623ff102df",
+      "input": {
+        "name": "input",
+        "shape": [
+          1,
+          3,
+          896,
+          1600
+        ],
+        "dtype": "float32"
+      },
+      "output": {
+        "name": "logits",
+        "shape": [
+          1,
+          13,
+          224,
+          400
+        ],
+        "dtype": "float32"
+      }
     },
     {
       "model_id": "blurball_analysis",
-      "filename": "blurball_best.pt",
-      "size_bytes": 6156034,
-      "sha256": "3545206c7155194ea654899d33579c88c9fd8e82c632cbdbae3b0c0ec3f2985f"
+      "identifier": "blurball_best",
+      "filename": "blurball_best.onnx",
+      "size_bytes": 5971009,
+      "sha256": "e5058da26e92d78493475b46361cb63179f99aea5495b5ca599349a84307f5f4",
+      "source_filename": "blurball_best.pt",
+      "source_sha256": "3545206c7155194ea654899d33579c88c9fd8e82c632cbdbae3b0c0ec3f2985f",
+      "input": {
+        "name": "input",
+        "shape": [
+          "batch",
+          9,
+          "height",
+          "width"
+        ],
+        "dtype": "float32"
+      },
+      "output": {
+        "name": "logits",
+        "shape": [
+          "batch",
+          3,
+          "height",
+          "width"
+        ],
+        "dtype": "float32"
+      }
     }
   ]
 }

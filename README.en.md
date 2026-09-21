@@ -8,26 +8,24 @@ TTcut is a local automatic table-tennis video cutter for players and enthusiasts
 
 Videos, analysis results, and history stay on the local computer. TTcut requires no account, uploads no video, and collects no telemetry. The Windows full installer and macOS packages include their runtime resources. Analysis, preview, and cutting can run offline after setup.
 
-> The current stable release for Windows x64 and macOS 15+ on Apple Silicon is `v1.3.5`.
+> The current stable release for Windows x64 and macOS 15+ on Apple Silicon is `v1.3.6`.
 
 ## Download and installation
 
 1. For Windows x64, download the full installer from [TTcut Releases](https://github.com/WeiyePlayer/TTcut/releases).
 2. For macOS 15+ on Apple Silicon, download the DMG (recommended) or ZIP from the same [TTcut Releases](https://github.com/WeiyePlayer/TTcut/releases) page. The current macOS build is ad-hoc signed and not notarized; if first launch is blocked, allow it in System Settings > Privacy & Security.
 3. Download the Android version from [TTcut-Mobile-Releases](https://github.com/WeiyePlayer/TTcut-Mobile-Releases/releases).
-4. If GitHub downloads are slow, use the Baidu Netdisk mirror for Windows resources: [link](https://pan.baidu.com/s/1LXDzs74xOM1t50-IRM_Vvw?pwd=ttct), extraction code: `ttct`.
-5. On Windows, run the installer, choose the installation root, and decide whether to create a desktop shortcut. Application files are written under `<root>\app`; large runtime resources, downloads, and import staging are stored under `<root>\data\components`. A Start menu shortcut is always created.
-6. On first Windows launch, open Settings, review the prompts, and install the required runtime resources.
+4. On Windows, run the installer and choose whether to create a desktop shortcut. The full installer already contains the analysis models, runtime, and video tools, so no component download or import is required after setup.
 
 TTcut detects an NVIDIA GPU automatically and falls back to CPU if accelerated setup or its self-test fails. Its video-processing capability reads media information, cuts and joins segments, and validates exported files.
 
-## What's new in v1.3.5
+## What's new in v1.3.6
 
-- Space now consistently pauses or resumes playback on the custom-cut page without activating a focused rally, checkbox, or button.
-- Windows HEVC videos prepare a compatible preview up front for more reliable rally seeking and later playback.
-- Installer registration is now written and verified natively, so enterprise PowerShell execution policies no longer block setup.
+- The Windows full installer now bundles the analysis models, hardware-accelerated/CPU runtime, and video tools, replacing model and media-component download/import flows.
+- Both platforms restore bounce-count multi-selection and shared-boundary timeline interaction, and add a current-rally editing target, 8-pixel playhead snapping, and `A`/`D` boundary editing.
+- Fixed calibration seek overshoot, overlapping hybrid rallies, HEVC duration boundaries, and video color-range output.
 
-See the [v1.3.5 release notes](docs/release-notes-v1.3.5.en.md) for the complete details.
+See the [v1.3.6 release notes](docs/release-notes-v1.3.6.en.md) for the complete details.
 
 ## Contact the author on WeChat: m2924931661
 
@@ -83,14 +81,14 @@ Select multiple MP4 files in Batch tasks. On entry, TTcut automatically calibrat
 
 ## Local analysis
 
-The full installer includes the ball- and table-recognition resources required at runtime; the online installer downloads and verifies them during installation. Local analysis is responsible for:
+The full installer includes the ball-recognition, table-recognition, and video-processing resources required at runtime. Local analysis is responsible for:
 
 - automatic or manual table calibration and coordinate mapping;
 - locating the ball and organizing valid rallies with Continuous motion or Bounce events;
 - organizing valid rallies with shared table-region, timing, and rally rules;
 - selecting GPU acceleration or CPU processing according to the local environment.
 
-Runtime resources are installed under `<root>\data\components`. Models shipped with the application are checked against fixed sizes and SHA-256 values before packaging.
+Runtime resources are installed with the application and checked against fixed sizes and SHA-256 values during packaging, startup, and task preparation. Damaged resources produce an explicit reinstall prompt.
 
 ## Video processing
 
@@ -101,7 +99,7 @@ Video processing is responsible for:
 - using lossless copying at safe boundaries and one accurate re-encode otherwise;
 - preserving resolution, orientation, aspect ratio, and color information while validating duration, audio/video synchronization, and playability.
 
-Regular videos use the default processing configuration. An optional video-processing extension can be installed from Settings when high-resolution re-encoding is required; TTcut falls back to the default configuration if the extension is missing or damaged. Lower-resolution videos are never upscaled.
+Video-processing tools are included in the full installer and require no optional extension. Lower-resolution videos are never upscaled.
 
 ## Run from source
 

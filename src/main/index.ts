@@ -24,10 +24,9 @@ import {
 import { IPC } from '../shared/ipc';
 import { startAnalysis } from './analysis';
 import { startAutoCalibration } from './calibration';
-import { componentSetupInfo, loadComponentCatalog } from './component-catalog';
-import { recoverComponentInstallState, startAnalysisComponentInstall, startComponentImport, startMediaComponentInstall } from './component-manager';
+import { inspectInstalledComponents, startupComponentStatus } from './component-status';
 import { managedComponentsRoot } from './components';
-import { inspectInstalledComponents, silentlyInspectComponents, startupComponentStatus } from './component-status';
+import { cleanupLegacyComponents } from './legacy-component-cleanup';
 import { purgeRemovedModelAssets } from './retired-model-assets';
 import { startExport } from './export';
 import { startBatchExport } from './batch-export';
@@ -50,21 +49,14 @@ import {
   SUPPORTED_VIDEO_EXTENSIONS,
   videoContainerFromFileName,
 } from '../domain/video-input';
-import { COMPONENT_ASSETS_RELEASE_URL } from '../shared/urls';
 import { openExternalUrl } from './external-links';
 import { getUpdater } from './updater';
-import { runInstallerMigrationRequest } from './installer-migration';
 import { requestSystemShutdown } from './system-power';
 
-const installerMigrationIndex = process.argv.indexOf('--installer-migrate-components');
-const installerMigrationRequest = installerMigrationIndex >= 0 ? process.argv[installerMigrationIndex + 1] : null;
-
-if (!installerMigrationRequest) {
-  protocol.registerSchemesAsPrivileged([{
-    scheme: 'ttcut-media',
-    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true },
-  }]);
-}
+protocol.registerSchemesAsPrivileged([{
+  scheme: 'ttcut-media',
+  privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true },
+}]);
 
 let mainWindow: BrowserWindow | null = null;
 let exitApproved = false;
@@ -83,7 +75,7 @@ if (e2eHarnessEnabled() && process.env.TTCUT_E2E_USER_DATA) {
   app.setPath('userData', path.resolve(process.env.TTCUT_E2E_USER_DATA));
 }
 if (e2eHarnessEnabled()) app.disableHardwareAcceleration();
-if (!installerMigrationRequest) installRuntimeDiagnostics();
+installRuntimeDiagnostics();
 
 function currentWindow(): BrowserWindow {
   if (!mainWindow || mainWindow.isDestroyed()) throw new Error('WINDOW_UNAVAILABLE');
@@ -105,25 +97,22 @@ async function selectedVideo(filePath: string) {
 
 function registerIpc(): void {
   ipcMain.handle(IPC.appBootstrap, async () => {
-    const [settings, components, setup, platformCompatibility] = await Promise.all([
-      loadSettings(), startupComponentStatus(), componentSetupInfo(), getPlatformCompatibility(),
+    const [settings, components, platformCompatibility] = await Promise.all([
+      loadSettings(), startupComponentStatus(), getPlatformCompatibility(),
     ]);
-    silentlyInspectComponents((error) => {
-      void logLine('app', 'WARN', `Background component check: ${String(error)}`).catch(() => undefined);
-    });
+    if (!isMac && components.analysis.available && components.media.available) {
+      void cleanupLegacyComponents(managedComponentsRoot()).catch((error) => (
+        logLine('app', 'WARN', `Legacy component cleanup failed: ${String(error)}`).catch(() => undefined)
+      ));
+    }
     return {
       version: app.getVersion(),
       windowState: { visible: mainWindow?.isVisible() ?? false },
       settings,
       components,
-      componentSetup: {
-        analysis_offer: setup.analysis_offer,
-        media_offer: setup.media_offer,
-        x264_manual_offer: setup.x264_manual_offer,
-      },
       platformCompatibility,
       logsPath: getLogDirectory(),
-      capabilities: { managedComponents: !isMac, nativeWindow: isMac, shutdown: !isMac, automaticUpdates: !isMac },
+      capabilities: { managedComponents: false, nativeWindow: isMac, shutdown: !isMac, automaticUpdates: !isMac },
     };
   });
   ipcMain.handle(IPC.previewPrepare, (_event, mediaUrl: unknown, taskId: unknown) => {
@@ -132,42 +121,6 @@ function registerIpc(): void {
   });
   ipcMain.handle(IPC.settingsSave, (_event, value: unknown) => saveSettings(appSettingsSchema.parse(value)));
   ipcMain.handle(IPC.componentsRefresh, () => inspectInstalledComponents());
-  ipcMain.handle(IPC.componentsOpenDownloads, async () => {
-    if (isMac) throw new Error('MANAGED_COMPONENTS_UNSUPPORTED');
-    const catalog = await loadComponentCatalog();
-    await shell.openExternal(COMPONENT_ASSETS_RELEASE_URL);
-    await shell.openExternal(catalog.ffmpeg.url);
-  });
-  ipcMain.handle(IPC.componentsOpenX264Download, async () => {
-    if (isMac) throw new Error('MANAGED_COMPONENTS_UNSUPPORTED');
-    const catalog = await loadComponentCatalog();
-    await shell.openExternal(catalog.ffmpeg_x264.url);
-  });
-  ipcMain.handle(IPC.componentsImport, async () => {
-    if (isMac) throw new Error('MANAGED_COMPONENTS_UNSUPPORTED');
-    if (e2eHarnessEnabled() && process.env.TTCUT_E2E_COMPONENT_IMPORT_FILES) {
-      const filePaths = JSON.parse(process.env.TTCUT_E2E_COMPONENT_IMPORT_FILES) as unknown;
-      if (!Array.isArray(filePaths) || !filePaths.every((value): value is string => typeof value === 'string')) {
-        throw new Error('TTCUT_E2E_COMPONENT_IMPORT_FILES must be a JSON string array.');
-      }
-      return startComponentImport(currentWindow(), filePaths);
-    }
-    const result = await dialog.showOpenDialog(currentWindow(), {
-      title: 'Import TTcut components',
-      properties: ['openFile', 'multiSelections'],
-      filters: [{ name: 'TTcut component files', extensions: ['zip', 'part001', 'part002', 'part003'] }],
-    });
-    if (result.canceled || result.filePaths.length === 0) return null;
-    return startComponentImport(currentWindow(), result.filePaths);
-  });
-  ipcMain.handle(IPC.componentsInstallAnalysis, async (_event, consent: unknown) => {
-    if (isMac) throw new Error('MANAGED_COMPONENTS_UNSUPPORTED');
-    return startAnalysisComponentInstall(currentWindow(), consent);
-  });
-  ipcMain.handle(IPC.componentsInstallMedia, async (_event, consent: unknown) => {
-    if (isMac) throw new Error('MANAGED_COMPONENTS_UNSUPPORTED');
-    return startMediaComponentInstall(currentWindow(), consent);
-  });
   ipcMain.handle(IPC.videoSelect, async () => {
     if (e2eHarnessEnabled()) {
       const fixture = process.env.TTCUT_E2E_VIDEO;
@@ -396,22 +349,11 @@ async function createWindow(): Promise<void> {
   else await mainWindow.loadFile(path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`));
 }
 
-if (installerMigrationRequest) {
-  app.whenReady().then(async () => {
-    const exitCode = await runInstallerMigrationRequest(installerMigrationRequest);
-    app.exit(exitCode);
-  });
-} else app.whenReady().then(async () => {
+app.whenReady().then(async () => {
   configureTaskSuspensionBlocker(powerSaveBlocker);
   const compatibility = await getPlatformCompatibility();
   await logLine('app', 'INFO', `Platform compatibility gate disabled: ${JSON.stringify(compatibility)}`)
     .catch(() => undefined);
-  try {
-    if (!isMac) await recoverComponentInstallState();
-  } catch (error) {
-    await logLine('app', 'WARN', `Component recovery could not finish: ${error instanceof Error ? error.stack ?? error.message : String(error)}`)
-      .catch(() => undefined);
-  }
   try {
     if (!isMac) await purgeRemovedModelAssets(managedComponentsRoot());
   } catch (error) {

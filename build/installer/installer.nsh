@@ -2,7 +2,6 @@
 !include "FileFunc.nsh"
 !include "StrFunc.nsh"
 !include "nsDialogs.nsh"
-!include "${PROJECT_DIR}\.runtime\installer-assets\online-model-installer.nsh"
 
 !ifndef BUILD_UNINSTALLER
 ${StrRep}
@@ -13,12 +12,8 @@ Var TTcutRootField
 Var TTcutBrowseButton
 Var TTcutDesktopCheckbox
 Var TTcutDesktopShortcut
-Var TTcutMigrationLabel
 Var TTcutIsRepair
-Var TTcutLegacyComponents
 Var TTcutLegacyUninstall
-Var TTcutLegacyDeleteApproved
-Var TTcutMigrationState
 Var TTcutPreservedDataRoot
 Var TTcutDeleteAllData
 Var TTcutDeleteAllCheckbox
@@ -29,16 +24,14 @@ Var TTcutDeleteAllCheckbox
 
 LangString TTCUT_SETUP_TITLE 1033 "Install TTcut"
 LangString TTCUT_SETUP_TITLE 2052 "安装 TTcut"
-LangString TTCUT_SETUP_DETAIL 1033 "Choose an installation location and shortcut. Analysis and media components will also be stored here."
-LangString TTCUT_SETUP_DETAIL 2052 "选择安装位置和快捷方式。TTcut 的分析与视频处理组件也会保存在此位置。"
+LangString TTCUT_SETUP_DETAIL 1033 "Choose an installation location and shortcut. Analysis models and media tools are built in."
+LangString TTCUT_SETUP_DETAIL 2052 "选择安装位置和快捷方式。分析模型与视频处理工具已内置。"
 LangString TTCUT_INSTALL_LOCATION 1033 "Installation location"
 LangString TTCUT_INSTALL_LOCATION 2052 "安装位置"
 LangString TTCUT_BROWSE 1033 "Browse..."
 LangString TTCUT_BROWSE 2052 "浏览…"
 LangString TTCUT_DESKTOP 1033 "Create a desktop shortcut"
 LangString TTCUT_DESKTOP 2052 "创建桌面快捷方式"
-LangString TTCUT_MIGRATION 1033 "Existing components will be moved to the selected location before the old version is removed."
-LangString TTCUT_MIGRATION 2052 "检测到旧版组件；验证迁移成功后才会移除旧版。"
 LangString TTCUT_PATH_REQUIRED 1033 "Choose an installation location."
 LangString TTCUT_PATH_REQUIRED 2052 "请选择安装位置。"
 LangString TTCUT_PATH_SYSTEM 1033 "Choose a writable folder outside Windows and Program Files."
@@ -46,17 +39,11 @@ LangString TTCUT_PATH_SYSTEM 2052 "请选择 Windows 和 Program Files 之外的
 LangString TTCUT_PATH_WRITE 1033 "The selected installation location is not writable."
 LangString TTCUT_PATH_NOT_EMPTY 1033 "Choose an empty folder, or the existing TTcut installation location."
 LangString TTCUT_PATH_NOT_EMPTY 2052 "请选择空文件夹，或已经安装的 TTcut 位置。"
-LangString TTCUT_MODEL_DOWNLOAD_FAILED 1033 "TTcut could not download or verify its required analysis models. Check your network connection and run the installer again."
-LangString TTCUT_MODEL_DOWNLOAD_FAILED 2052 "TTcut 无法下载或验证所需的分析模型。请检查网络连接后重新运行安装程序。"
 LangString TTCUT_PATH_WRITE 2052 "所选安装位置不可写。"
-LangString TTCUT_MIGRATION_FAILED 1033 "Component migration failed. The old installation and components were left unchanged."
-LangString TTCUT_MIGRATION_FAILED 2052 "组件迁移失败，旧程序和旧组件保持不变。"
 LangString TTCUT_LEGACY_UNINSTALL_FAILED 1033 "The old TTcut installation could not be removed and was restored. The old components were left unchanged."
 LangString TTCUT_LEGACY_UNINSTALL_FAILED 2052 "无法移除旧版 TTcut，旧程序已恢复，旧组件保持不变。"
 LangString TTCUT_REGISTRATION_FAILED 1033 "TTcut installation registration failed. Installation was stopped."
 LangString TTCUT_REGISTRATION_FAILED 2052 "TTcut 安装信息写入失败，安装已停止。"
-LangString TTCUT_COMPONENT_ACTIVATION_FAILED 1033 "The migrated components could not be enabled. The old installation and components were left unchanged."
-LangString TTCUT_COMPONENT_ACTIVATION_FAILED 2052 "无法启用迁移后的组件，旧程序和旧组件保持不变。"
 LangString TTCUT_DOWNGRADE_BLOCKED 1033 "A newer version of TTcut is already installed. Uninstall it before installing this older version."
 LangString TTCUT_DOWNGRADE_BLOCKED 2052 "已安装更高版本的 TTcut。如需安装旧版本，请先卸载当前版本。"
 LangString TTCUT_VERSION_INVALID 1033 "The installer version could not be validated. Installation was stopped."
@@ -272,32 +259,13 @@ Function TTcutOptionsCreate
     EnableWindow $TTcutBrowseButton 0
   ${EndIf}
 
-  StrCpy $TTcutLegacyComponents "$LOCALAPPDATA\TTcutData\components"
-  StrCpy $TTcutLegacyUninstall ""
-  StrCpy $TTcutLegacyDeleteApproved "1"
-  ReadRegStr $TTcutPreservedDataRoot HKCU "Software\TTcut\Install" "PreservedDataRoot"
+   StrCpy $TTcutLegacyUninstall ""
+   ReadRegStr $TTcutPreservedDataRoot HKCU "Software\TTcut\Install" "PreservedDataRoot"
   ReadRegStr $3 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\TTcut" "InstallLocation"
   ${If} $3 == "$LOCALAPPDATA\TTcut"
   ${AndIf} ${FileExists} "$LOCALAPPDATA\TTcut\Update.exe"
     StrCpy $TTcutLegacyUninstall "$LOCALAPPDATA\TTcut\Update.exe"
   ${EndIf}
-  ${IfNot} ${FileExists} "$TTcutLegacyComponents\*.*"
-    StrCpy $TTcutLegacyDeleteApproved "0"
-    StrCpy $3 $TTcutPreservedDataRoot
-    ${If} $3 != ""
-      ${GetRoot} "$3" $4
-      ${If} $3 != $4
-        StrCpy $TTcutLegacyComponents "$3\data\components"
-        StrCpy $TTcutLegacyDeleteApproved "1"
-      ${EndIf}
-    ${EndIf}
-  ${EndIf}
-  ${If} ${FileExists} "$TTcutLegacyComponents\*.*"
-    ${NSD_CreateLabel} 0 110u 100% 24u "$(TTCUT_MIGRATION)"
-    Pop $TTcutMigrationLabel
-    SendMessage $TTcutMigrationLabel ${WM_SETFONT} $9 1
-  ${EndIf}
-
   nsDialogs::Show
 FunctionEnd
 
@@ -387,11 +355,6 @@ Function TTcutOptionsLeave
   Delete "$TTcutRoot\.ttcut-write-test"
 
   System::Call 'kernel32::SetEnvironmentVariableW(w "TTCUT_INSTALLER_ROOT", w "$TTcutRoot")i.r1'
-  ${If} $TTcutIsRepair == "1"
-    System::Call 'kernel32::SetEnvironmentVariableW(w "TTCUT_INSTALLER_LEGACY", w "")i.r1'
-  ${Else}
-    System::Call 'kernel32::SetEnvironmentVariableW(w "TTCUT_INSTALLER_LEGACY", w "$TTcutLegacyComponents")i.r1'
-  ${EndIf}
   System::Call 'kernel32::SetEnvironmentVariableW(w "TTCUT_INSTALLER_LEGACY_APP", w "$TTcutLegacyUninstall")i.r1'
 
   ${If} $TTcutLegacyUninstall != ""
@@ -413,7 +376,6 @@ Function TTcutOptionsLeave
     ${EndIf}
   ${EndIf}
   System::Call 'kernel32::SetEnvironmentVariableW(w "TTCUT_INSTALLER_ROOT", w "")i.r1'
-  System::Call 'kernel32::SetEnvironmentVariableW(w "TTCUT_INSTALLER_LEGACY", w "")i.r1'
   System::Call 'kernel32::SetEnvironmentVariableW(w "TTCUT_INSTALLER_LEGACY_APP", w "")i.r1'
 
   StrCpy $INSTDIR "$TTcutRoot\app"
@@ -421,13 +383,7 @@ Function TTcutOptionsLeave
 FunctionEnd
 
 Function TTcutRollbackNewInstall
-  ${If} $TTcutMigrationState == "1"
-    RMDir /r "$TTcutRoot\data\components.migration"
-  ${ElseIf} $TTcutMigrationState == "2"
-    RMDir /r "$TTcutRoot\data\components"
-  ${EndIf}
   RMDir /r "$TTcutRoot\data\.legacy-install.backup"
-  Delete "$TTcutRoot\data\migration-report.json"
   Delete "$TTcutRoot\data\legacy-uninstall-report.json"
   Delete "$TTcutRoot\data\install-registration-report.json"
 
@@ -444,34 +400,9 @@ Function TTcutRollbackNewInstall
   ${EndIf}
 FunctionEnd
 
-!if ${TTCUT_ONLINE_MODEL_INSTALLER} == 1
-Function TTcutInstallOnlineModels
-  IfFileExists "$INSTDIR\resources\resources\.ttcut-online-model-delivery" 0 ttcut_online_models_done
-  InitPluginsDir
-  SetOutPath "$PLUGINSDIR"
-  File /oname=download-models.ps1 "${PROJECT_DIR}\build\installer\download-models.ps1"
-  File /oname=online-model-delivery.json "${PROJECT_DIR}\resources\online-model-delivery.json"
-  nsExec::ExecToStack 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\download-models.ps1" -InstallDirectory "$INSTDIR" -DeliveryManifestPath "$PLUGINSDIR\online-model-delivery.json" -ModelManifestPath "$INSTDIR\resources\resources\model-manifest.json"'
-  Pop $6
-  Pop $7
-  ${If} $6 != 0
-    Call TTcutRollbackNewInstall
-    MessageBox MB_ICONSTOP "$(TTCUT_MODEL_DOWNLOAD_FAILED)"
-    SetErrorLevel 1
-    Quit
-  ${EndIf}
-  ttcut_online_models_done:
-FunctionEnd
-!endif
-
 !macro customInstall
   SetShellVarContext current
   ${GetParent} "$INSTDIR" $TTcutRoot
-  StrCpy $TTcutMigrationState "0"
-
-  !if ${TTCUT_ONLINE_MODEL_INSTALLER} == 1
-  Call TTcutInstallOnlineModels
-  !endif
 
   ; --updated skips the assisted options page. Restore the existing shortcut
   ; preference before the registration helper runs so a silent update cannot
@@ -489,31 +420,6 @@ FunctionEnd
     ${EndIf}
   ${EndIf}
 
-  ${If} $TTcutIsRepair == "0"
-  ${AndIf} ${FileExists} "$TTcutLegacyComponents\*.*"
-  ${AndIf} "$TTcutLegacyComponents" != "$TTcutRoot\data\components"
-    CreateDirectory "$TTcutRoot\data"
-    RMDir /r "$TTcutRoot\data\components.migration"
-    ${StrRep} $1 "$TTcutLegacyComponents" "\" "/"
-    ${StrRep} $2 "$TTcutRoot\data\components.migration" "\" "/"
-    ${StrRep} $3 "$PLUGINSDIR\migration-report.json" "\" "/"
-    StrCpy $4 "$PLUGINSDIR\migration-request.json"
-    FileOpen $5 "$4" w
-    FileWriteWord $5 0xFEFF
-    FileWriteUTF16LE $5 '{"schema_version":1,"source":"$1","target":"$2","report":"$3"}'
-    FileClose $5
-    ExecWait '"$INSTDIR\TTcut.exe" --installer-migrate-components "$4"' $6
-    ${If} $6 != 0
-      StrCpy $TTcutMigrationState "1"
-      Call TTcutRollbackNewInstall
-      MessageBox MB_ICONSTOP "$(TTCUT_MIGRATION_FAILED)"
-      SetErrorLevel 1
-      Quit
-    ${EndIf}
-    CopyFiles /SILENT "$PLUGINSDIR\migration-report.json" "$TTcutRoot\data\migration-report.json"
-    StrCpy $TTcutMigrationState "1"
-  ${EndIf}
-
   ; Commit and read back all new registration before touching the legacy app.
   Call TTcutCommitRegistration
   ${If} $TTcutRegistrationError != ""
@@ -521,21 +427,6 @@ FunctionEnd
     MessageBox MB_ICONSTOP|MB_OK "$(TTCUT_REGISTRATION_FAILED)$\r$\n$\r$\n$TTcutRegistrationError$\r$\n$TTcutRegistrationLog" /SD IDOK
     SetErrorLevel 1
     Quit
-  ${EndIf}
-
-  ; Enable the verified component copy while the old app and source component
-  ; store are still intact. A failed rename therefore has no destructive side
-  ; effects and can be rolled back locally.
-  ${If} $TTcutMigrationState == "1"
-    ClearErrors
-    Rename "$TTcutRoot\data\components.migration" "$TTcutRoot\data\components"
-    ${If} ${Errors}
-      Call TTcutRollbackNewInstall
-      MessageBox MB_ICONSTOP "$(TTCUT_COMPONENT_ACTIVATION_FAILED)"
-      SetErrorLevel 1
-      Quit
-    ${EndIf}
-    StrCpy $TTcutMigrationState "2"
   ${EndIf}
 
   ; The legacy helper verifies a complete app backup before uninstalling and
@@ -555,12 +446,6 @@ FunctionEnd
       Quit
     ${EndIf}
   ${EndIf}
-
-  ${If} $TTcutMigrationState == "2"
-  ${AndIf} $TTcutLegacyDeleteApproved == "1"
-    RMDir /r "$TTcutLegacyComponents"
-  ${EndIf}
-  StrCpy $TTcutMigrationState "0"
 
   CreateDirectory "$SMPROGRAMS"
   CreateShortcut "$SMPROGRAMS\TTcut.lnk" "$INSTDIR\TTcut.exe"

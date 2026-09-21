@@ -84,9 +84,9 @@ describe('media export planning', () => {
     const args = buildReencodeArgs(metadata.path, output, [oneGroup], metadata);
     expect(args).toContain(metadata.path);
     expect(args).toContain(output);
-    expect(args).toContain('libopenh264');
+    expect(args).toContain('libx264');
     expect(args).toContain('aac');
-    expect(args[args.indexOf('-b:v') + 1]).toBe('2000000');
+    expect(args).toEqual(expect.arrayContaining(['-preset', 'veryfast', '-crf', '18']));
     expect(args).toContain('vfr');
     expect(args).not.toContain('-r');
     expect(args).toContain('-autorotate');
@@ -94,9 +94,7 @@ describe('media export planning', () => {
     expect(args.slice(args.indexOf('-metadata:s:v:0'), args.indexOf('-metadata:s:v:0') + 2))
       .toEqual(['-metadata:s:v:0', 'rotate=0']);
     expect(args.join(' ')).toContain('setsar=sar=1/1,setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709');
-    expect(args).toEqual(expect.arrayContaining([
-      '-bsf:v', 'h264_metadata=video_full_range_flag=0:colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1',
-    ]));
+    expect(args).not.toContain('-bsf:v');
   });
 
   it('builds a single concat graph for multiple groups', () => {
@@ -125,6 +123,10 @@ describe('media export planning', () => {
   it('keeps supported source pixel formats for x264 and falls back for unknown formats', () => {
     const tenBit = buildReencodeArgs(metadata.path, 'x264-10bit.mp4', [oneGroup], { ...metadata, pixel_format: 'yuv420p10le' }, 'libx264');
     expect(tenBit[tenBit.indexOf('-pix_fmt') + 1]).toBe('yuv420p10le');
+    const limitedJpeg = buildReencodeArgs(metadata.path, 'x264-limited.mp4', [oneGroup], { ...metadata, pixel_format: 'yuvj420p', color_range: 'tv' }, 'libx264');
+    expect(limitedJpeg[limitedJpeg.indexOf('-pix_fmt') + 1]).toBe('yuv420p');
+    const fullRangeJpeg = buildReencodeArgs(metadata.path, 'x264-full.mp4', [oneGroup], { ...metadata, pixel_format: 'yuvj420p', color_range: 'pc' }, 'libx264');
+    expect(fullRangeJpeg[fullRangeJpeg.indexOf('-pix_fmt') + 1]).toBe('yuvj420p');
     const unknown = buildReencodeArgs(metadata.path, 'x264-unknown.mp4', [oneGroup], { ...metadata, pixel_format: 'gbrp' }, 'libx264');
     expect(unknown[unknown.indexOf('-pix_fmt') + 1]).toBe('yuv420p');
   });

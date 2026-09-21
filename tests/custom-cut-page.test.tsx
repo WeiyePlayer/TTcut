@@ -242,6 +242,102 @@ describe('custom multi-select card', () => {
   });
 });
 
+it('shows board counts for continuous-visibility results that include bounce metadata', () => {
+  render(<ContinuousBoardHarness />);
+  expect(screen.getByText('板数 2')).toBeVisible();
+});
+
+describe('custom multi-select card', () => {
+  it('opens from Multi-select and keeps Select all and Clear all behavior', () => {
+    render(<SelectionHarness />);
+    const trigger = screen.getByRole('button', { name: '多选' });
+    expect(screen.queryByRole('button', { name: '全选' })).toBeNull();
+    fireEvent.click(trigger);
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('dialog', { name: '多选选项' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '全选' }));
+    expect(screen.getAllByRole('checkbox', { name: /回合/ }).every((input) => (input as HTMLInputElement).checked)).toBe(true);
+    expect(screen.queryByRole('dialog', { name: '多选选项' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '取消全选' }));
+    expect(screen.getAllByRole('checkbox', { name: /回合/ }).every((input) => !(input as HTMLInputElement).checked)).toBe(true);
+  });
+
+  it('applies inclusive board matches on Enter without changing playback or removing clips', () => {
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue();
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
+    try {
+      render(<SelectionHarness />);
+      const monitor = document.querySelector('.custom-monitor video') as HTMLVideoElement;
+      setVideoTime(monitor, 4.5);
+      fireEvent.click(screen.getByRole('button', { name: '多选' }));
+      const input = screen.getByRole('textbox', { name: '板数大于等于' });
+      fireEvent.change(input, { target: { value: '5' } });
+      expect(screen.getByText('3 / 4')).toBeVisible();
+      fireEvent.keyDown(input, { key: 'Enter' });
+      expect(screen.getAllByRole('checkbox', { name: /回合/ }).map((checkbox) => (checkbox as HTMLInputElement).checked)).toEqual([false, false, true, true]);
+      expect(document.querySelectorAll('.custom-rally-table tbody tr')).toHaveLength(4);
+      expect(monitor.currentTime).toBe(4.5);
+      expect(play).not.toHaveBeenCalled();
+      expect(pause).not.toHaveBeenCalled();
+      expect(screen.queryByRole('dialog', { name: '多选选项' })).toBeNull();
+    } finally { play.mockRestore(); pause.mockRestore(); }
+  });
+
+  it('accepts only 1–10 integers, permits clearing, and ignores empty Enter', () => {
+    render(<SelectionHarness />);
+    fireEvent.click(screen.getByRole('button', { name: '多选' }));
+    const input = screen.getByRole('textbox', { name: '板数大于等于' });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(screen.getByRole('dialog', { name: '多选选项' })).toBeVisible();
+    for (const value of ['0', '11', '-1', '1.5', 'abc', '01']) {
+      fireEvent.change(input, { target: { value } });
+      expect(input).toHaveValue('');
+    }
+    fireEvent.change(input, { target: { value: '1' } });
+    expect(input).toHaveValue('1');
+    fireEvent.change(input, { target: { value: '10' } });
+    expect(input).toHaveValue('10');
+    fireEvent.change(input, { target: { value: '20' } });
+    expect(input).toHaveValue('10');
+    fireEvent.change(input, { target: { value: '' } });
+    expect(input).toHaveValue('');
+    fireEvent.change(input, { target: { value: '10' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(screen.getByText('0 / 4')).toBeVisible();
+  });
+
+  it('closes on Escape, an outside click, or focus leaving the card', () => {
+    render(<SelectionHarness />);
+    const trigger = screen.getByRole('button', { name: '多选' });
+    fireEvent.click(trigger);
+    const input = screen.getByRole('textbox', { name: '板数大于等于' });
+    act(() => input.focus());
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(trigger).toHaveFocus();
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(trigger);
+    fireEvent.pointerDown(document.body);
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(trigger);
+    act(() => screen.getByRole('textbox', { name: '板数大于等于' }).focus());
+    act(() => screen.getByRole('button', { name: '取消全选' }).focus());
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('disables board filtering for old continuous results without board metadata', () => {
+    const legacy: AnalysisResultV1 = {
+      schema_version: 2, video: analysis.video,
+      rallies: [{ id: 'rally_001', index: 1, start_time_seconds: 3, end_time_seconds: 4 }],
+      rally_recognition: { method: 'continuous_visibility', start_visible_seconds: .2, end_invisible_seconds: .5 },
+    };
+    render(<SelectionHarness result={legacy} />);
+    fireEvent.click(screen.getByRole('button', { name: '多选' }));
+    expect(screen.getByRole('textbox', { name: '板数大于等于' })).toBeDisabled();
+    expect(screen.getByText('重新分析后可按板数筛选')).toBeVisible();
+    expect(screen.getByRole('button', { name: '全选' })).toBeEnabled();
+  });
+});
+
 describe('playback rally location', () => {
   it.each(['list', 'timeline'])('plays the requested clip after delayed metadata from the %s', async (entry) => {
     const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue();

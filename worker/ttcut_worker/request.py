@@ -41,7 +41,7 @@ def validate_request(value: object) -> dict:
             raise InvalidRequestError("Unsupported analysis request schema fields.")
     try:
         uuid.UUID(str(value["task_id"]))
-        if value["device"] not in {"auto", "cuda", "cpu"}:
+        if value["device"] not in {"auto", "directml", "cuda", "cpu"}:
             raise ValueError("device")
         if (
             not isinstance(value["video_path"], str)

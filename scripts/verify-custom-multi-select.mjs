@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import path from 'node:path';
 import { expect } from '@playwright/test';
@@ -19,47 +19,66 @@ const output = path.join(root, 'output/custom-multi-select');
 await mkdir(output, { recursive: true });
 const run = await mkdtemp(path.join(output, 'run-'));
 const userData = path.join(run, 'user-data');
-const media = path.join(run, 'multi-select-fixture.mp4');
+const media = path.join(run, 'macos-continuous-board-count.mp4');
+const hybridMedia = path.join(run, 'windows-hybrid-board-count.mp4');
+const legacyMedia = path.join(run, 'legacy-continuous-no-board-count.mp4');
 const generated = spawnSync(ffmpeg, [
   '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=15:duration=15',
   '-c:v', windows ? 'libopenh264' : 'libx264', '-pix_fmt', 'yuv420p', media,
 ], { encoding: 'utf8', windowsHide: true });
 assert.equal(generated.status, 0, generated.stderr);
-const source = await stat(media);
-const id = randomUUID();
-const analyzedAt = new Date().toISOString();
+await copyFile(media, hybridMedia);
+await copyFile(media, legacyMedia);
 const rallies = [2, 5, 6, 10, 11].map((count, index) => ({
   id: `rally_${String(index + 1).padStart(3, '0')}`, index: index + 1, bounce_count: count,
   start_time_seconds: .5 + index * 2.5, end_time_seconds: 2.5 + index * 2.5,
 }));
+const videoMetadata = mediaPath => ({
+  path: mediaPath, duration_seconds: 15, width: 320, height: 180, fps: 15,
+  variable_frame_rate: false, video_codec: 'h264', audio_codec: null, container: 'mp4',
+});
+const bounceTimes = rallies.flatMap(rally => Array.from({ length: rally.bounce_count }, (_, index) =>
+  rally.start_time_seconds + 1.8 * (index + 1) / (rally.bounce_count + 1)));
 const analysis = {
   schema_version: 3,
-  video: { path: media, duration_seconds: 15, width: 320, height: 180, fps: 15,
-    variable_frame_rate: false, video_codec: 'h264', audio_codec: null, container: 'mp4' },
+  video: videoMetadata(media),
   rallies,
-  bounce_times_seconds: rallies.flatMap(rally => Array.from({ length: rally.bounce_count }, (_, index) =>
-    rally.start_time_seconds + 1.8 * (index + 1) / (rally.bounce_count + 1))),
+  bounce_times_seconds: bounceTimes,
   rally_recognition: { method: 'continuous_visibility', start_visible_seconds: .2, end_invisible_seconds: .5,
     board_count: { detector: 'blurball_trajectory_change', source_path: 'worker/ttcut_worker/blurball_bounce.py',
       source_sha256: 'e1e7674cd1209a6f4deffe5ff0e57633e2859605f031b1c012cb2d16c9f49ea8',
       minimum_interval_seconds: .315, landing_region: 'expanded_table',
       table_length_margin_cm: 35, table_width_margin_cm: 25 } },
 };
-if (windows) {
-  // Exercise the existing production Windows contract, without another detector.
-  analysis.rally_recognition = JSON.parse(await readFile(path.join(root, 'tests/fixtures/hybrid-provenance.json'), 'utf8'));
-  analysis.excluded_fragments = [];
-}
+const hybridAnalysis = {
+  ...analysis, video: videoMetadata(hybridMedia),
+  rally_recognition: JSON.parse(await readFile(path.join(root, 'tests/fixtures/hybrid-provenance.json'), 'utf8')),
+  excluded_fragments: [],
+};
+const legacyAnalysis = {
+  schema_version: 2,
+  video: videoMetadata(legacyMedia),
+  rallies: rallies.map(({ bounce_count: _count, ...rally }) => rally),
+  rally_recognition: { method: 'continuous_visibility', start_visible_seconds: .2, end_invisible_seconds: .5 },
+};
 await mkdir(path.join(userData, 'history/records'), { recursive: true });
-await writeFile(path.join(userData, 'history/records', `${id}.json`), JSON.stringify({
-  schema_version: 1, id, analyzed_at: analyzedAt,
-  source: { path: media, name: path.basename(media), size: source.size, modified_time_ms: source.mtimeMs },
-  calibration: { video_width: 320, video_height: 180,
-    points: { top_left: [60, 40], top_right: [250, 40], bottom_right: [275, 145], bottom_left: [40, 145] } },
-  analysis, visible_in_history: true, completion_kind: 'analysis', output_path: null,
-}));
+const calibration = { video_width: 320, video_height: 180,
+  points: { top_left: [60, 40], top_right: [250, 40], bottom_right: [275, 145], bottom_left: [40, 145] } };
+const records = [
+  { id: randomUUID(), media, analysis, analyzedAt: new Date(Date.now() + 2_000).toISOString() },
+  { id: randomUUID(), media: hybridMedia, analysis: hybridAnalysis, analyzedAt: new Date(Date.now() + 1_000).toISOString() },
+  { id: randomUUID(), media: legacyMedia, analysis: legacyAnalysis, analyzedAt: new Date().toISOString() },
+];
+for (const record of records) {
+  const source = await stat(record.media);
+  await writeFile(path.join(userData, 'history/records', `${record.id}.json`), JSON.stringify({
+    schema_version: 1, id: record.id, analyzed_at: record.analyzedAt,
+    source: { path: record.media, name: path.basename(record.media), size: source.size, modified_time_ms: source.mtimeMs },
+    calibration, analysis: record.analysis, visible_in_history: true, completion_kind: 'analysis', output_path: null,
+  }));
+}
 await writeFile(path.join(userData, 'history/index.json'), JSON.stringify({
-  schema_version: 1, entries: [{ id, analyzed_at: analyzedAt }],
+  schema_version: 1, entries: records.map(record => ({ id: record.id, analyzed_at: record.analyzedAt })),
 }));
 const server = createServer();
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -77,6 +96,7 @@ child.stderr.on('data', data => { log += data; });
 let browser;
 let page;
 const checks = [];
+let timelineEvidence = null;
 async function check(name, work) {
   await work();
   checks.push({ name, passed: true });
@@ -85,9 +105,12 @@ async function check(name, work) {
 async function selected() {
   return page.locator('.custom-rally-table input[type="checkbox"]').evaluateAll(inputs => inputs.map(input => input.checked));
 }
-async function openReview(language) {
+async function openReview(language, videoName) {
   await page.getByRole('button', { name: language === 'en' ? 'History' : '历史剪辑', exact: true }).click();
-  await page.locator('.history-open').first().click();
+  const historyCard = page.locator('.history-card').filter({ hasText: videoName });
+  await historyCard.waitFor({ state: 'visible' });
+  assert.equal(await historyCard.count(), 1, `Expected one history card for ${videoName}`);
+  await historyCard.locator('.history-open').click();
   await page.locator('.mode-card').filter({ hasText: language === 'en' ? 'Custom' : '自定义' }).click();
   await page.locator('.custom-rally-table tbody tr').first().waitFor();
   await page.waitForFunction(() => document.querySelector('.custom-monitor video')?.readyState >= 2);
@@ -111,7 +134,17 @@ try {
   const bootstrap = await page.evaluate(() => window.ttcut.bootstrap());
   await page.evaluate(settings => window.ttcut.saveSettings({ ...settings, language: 'zh-CN' }), bootstrap.settings);
   await page.reload();
-  await openReview('zh-CN');
+  await check('packaged Windows Worker keeps full-frame BlurBall inference', async () => {
+    const sourcePredictor = await readFile(path.join(root, 'worker/ttcut_worker/blurball_predictor.py'), 'utf8');
+    const packagedPredictor = await readFile(path.join(app, 'resources/worker/ttcut_worker/blurball_predictor.py'), 'utf8');
+    assert.equal(packagedPredictor, sourcePredictor, 'Packaged BlurBall predictor must match the audited source');
+    assert.doesNotMatch(packagedPredictor, /temporal_stride|interpolated_frames|F1\/F4\/F7/);
+    assert.match(packagedPredictor, /for packet in reader:\r?\n\s+packets\.append\(packet\)/);
+  });
+  await openReview('zh-CN', path.basename(media));
+  await check('macOS continuous-v3 board metadata appears exactly once', async () => {
+    assert.deepEqual(await page.locator('.custom-rally-meta span').allInnerTexts(), ['板数 2', '板数 5', '板数 6', '板数 10', '板数 11']);
+  });
   const trigger = page.getByRole('button', { name: '多选', exact: true });
   const before = await page.locator('.custom-monitor').boundingBox();
   await check('downward card stays inside rally list without moving video', async () => {
@@ -175,7 +208,7 @@ try {
   await check('English card fits and displays inclusive comparator', async () => {
     await page.evaluate(settings => window.ttcut.saveSettings({ ...settings, language: 'en' }), bootstrap.settings);
     await page.reload();
-    await openReview('en');
+    await openReview('en', path.basename(media));
     await page.getByRole('button', { name: 'Multi-select', exact: true }).click();
     const card = page.getByRole('dialog', { name: 'Multi-select options' });
     await card.waitFor();
@@ -264,17 +297,34 @@ try {
     assert.ok(Math.abs(end - start) < 1e-6, 'Fixture must contain adjacent selected clips');
     const box = await right.boundingBox();
     const y = box.y + box.height / 2;
+    const track = page.locator('.timeline-track-window');
+    const trackBox = await track.boundingBox();
+    const trackRadius = await track.evaluate(element => getComputedStyle(element).borderRadius);
+    const clipRadius = await left.evaluate(element => getComputedStyle(element).borderRadius);
+    assert.equal(trackRadius, '6px');
+    assert.equal(clipRadius, '6px');
     // Put the playhead exactly on the shared boundary using the ruler.
     const ruler = await page.locator('.timeline-ruler').boundingBox();
     await page.mouse.click(box.x, ruler.y + 18);
-    assert.ok(await page.evaluate(({ x, y }) => Boolean(document.elementFromPoint(x, y)?.closest('.clip-handle')), { x: box.x, y }));
+    const playheadBox = await page.locator('.timeline-playhead').boundingBox();
+    assert.ok(playheadBox.y + playheadBox.height <= trackBox.y + 1, 'Playhead hit target must end above the clip track');
+    const hitTarget = await page.evaluate(({ x, y }) => {
+      const target = document.elementFromPoint(x, y);
+      return { className: target?.className ?? '', handle: target?.closest('.clip-handle')?.className ?? null };
+    }, { x: box.x, y });
+    assert.ok(hitTarget.handle, 'Shared boundary must remain reachable while the playhead is aligned');
+    await page.screenshot({ path: path.join(run, 'timeline-playhead-boundary.png') });
     await page.mouse.move(box.x, y);
     await page.mouse.down();
     await page.mouse.move(box.x - 20, y, { steps: 5 });
-    assert.equal(await page.locator('.resize-feedback').getAttribute('data-edge'), 'end');
-    assert.equal(await page.locator('.resize-feedback').getAttribute('data-clip-id'), 'rally_001');
+    const leftFeedback = page.locator('.resize-feedback');
+    assert.equal(await leftFeedback.getAttribute('data-edge'), 'end');
+    assert.equal(await leftFeedback.getAttribute('data-clip-id'), 'rally_001');
+    const leftFeedbackText = await leftFeedback.innerText();
+    await page.screenshot({ path: path.join(run, 'timeline-drag-left.png') });
     await page.mouse.up();
-    assert.ok(Number(await leftEnd.getAttribute('aria-valuenow')) < end);
+    const leftAfter = Number(await leftEnd.getAttribute('aria-valuenow'));
+    assert.ok(leftAfter < end);
     assert.equal(Number(await rightStart.getAttribute('aria-valuenow')), start);
     // Restore adjacency with the real keyboard handle, then drag right.
     await leftEnd.press('Shift+ArrowRight');
@@ -282,13 +332,48 @@ try {
     await page.mouse.move(box.x, y);
     await page.mouse.down();
     await page.mouse.move(box.x + 20, y, { steps: 5 });
-    assert.equal(await page.locator('.resize-feedback').getAttribute('data-edge'), 'start');
-    assert.equal(await page.locator('.resize-feedback').getAttribute('data-clip-id'), 'rally_002');
+    const rightFeedback = page.locator('.resize-feedback');
+    assert.equal(await rightFeedback.getAttribute('data-edge'), 'start');
+    assert.equal(await rightFeedback.getAttribute('data-clip-id'), 'rally_002');
+    const rightFeedbackText = await rightFeedback.innerText();
+    await page.screenshot({ path: path.join(run, 'timeline-drag-right.png') });
     await page.mouse.up();
-    assert.ok(Number(await rightStart.getAttribute('aria-valuenow')) > start);
+    const rightAfter = Number(await rightStart.getAttribute('aria-valuenow'));
+    assert.ok(rightAfter > start);
     assert.equal(Number(await leftEnd.getAttribute('aria-valuenow')), start);
-    assert.equal(await left.evaluate(element => getComputedStyle(element).borderRadius), '6px');
-    await page.screenshot({ path: path.join(run, 'timeline-resize.png') });
+    timelineEvidence = {
+      sharedBoundarySeconds: start,
+      trackRadius,
+      clipRadius,
+      playheadBottom: playheadBox.y + playheadBox.height,
+      trackTop: trackBox.y,
+      hitTarget,
+      leftDrag: { feedback: leftFeedbackText, before: end, after: leftAfter, untouchedRightStart: start },
+      rightDrag: { feedback: rightFeedbackText, before: start, after: rightAfter, untouchedLeftEnd: start },
+    };
+    await page.screenshot({ path: path.join(run, 'timeline-final.png') });
+  });
+  await openReview('en', path.basename(hybridMedia));
+  await check('Windows hybrid board counts use the same single UI path', async () => {
+    assert.deepEqual(await page.locator('.custom-rally-meta span').allInnerTexts(), ['Bounces 2', 'Bounces 5', 'Bounces 6', 'Bounces 10', 'Bounces 11']);
+    await page.getByRole('button', { name: 'Multi-select', exact: true }).click();
+    const input = page.getByRole('textbox', { name: 'Bounces at least' });
+    assert.equal(await input.isEnabled(), true);
+    await input.fill('6');
+    await input.press('Enter');
+    assert.deepEqual(await selected(), [false, false, true, true, true]);
+    await page.screenshot({ path: path.join(run, 'windows-hybrid-filter.png') });
+  });
+  await openReview('en', path.basename(legacyMedia));
+  await check('legacy continuous history disables unavailable board filtering', async () => {
+    assert.deepEqual(await page.locator('.custom-rally-meta span').allInnerTexts(), []);
+    await page.getByRole('button', { name: 'Multi-select', exact: true }).click();
+    const input = page.getByRole('textbox', { name: 'Bounces at least' });
+    assert.equal(await input.isDisabled(), true);
+    assert.equal(await page.locator('.custom-bounce-filter small').innerText(), 'Reanalyze to filter by bounce count');
+    assert.equal(await page.getByRole('button', { name: 'Select all', exact: true }).isEnabled(), true);
+    await page.waitForTimeout(200);
+    await page.screenshot({ path: path.join(run, 'legacy-filter-disabled.png') });
   });
   console.log(`Verification: ${run}`);
 } catch (error) {
@@ -296,7 +381,16 @@ try {
   if (page) await page.screenshot({ path: path.join(run, 'failure.png') }).catch(() => {});
   throw error;
 } finally {
-  await writeFile(path.join(run, 'report.json'), JSON.stringify({ app, fixtureCounts: [2, 5, 6, 10, 11], checks }, null, 2));
+  await writeFile(path.join(run, 'report.json'), JSON.stringify({
+    app,
+    fixtures: {
+      macosContinuousV3: [2, 5, 6, 10, 11],
+      windowsHybrid: [2, 5, 6, 10, 11],
+      legacyContinuousV2: 'no board metadata',
+    },
+    timelineEvidence,
+    checks,
+  }, null, 2));
   if (page) await page.evaluate(() => window.ttcut.confirmClose('exit')).catch(() => {});
   if (child.exitCode === null) child.kill('SIGTERM');
   await browser?.close().catch(() => {});

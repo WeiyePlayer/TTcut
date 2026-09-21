@@ -22,7 +22,7 @@ from ttcut_worker.table_analyze import (
 from ttcut_worker.types import TrajectoryPoint
 from ttcut_worker.video import VideoInfo
 from ttcut_worker.visibility_rallies import VisibilityRallySummary
-from ttcut_worker.worker import analyze, validate_request
+from ttcut_worker.worker import _normalize_hybrid_rallies, analyze, validate_request
 
 
 def calibration() -> TableCalibration:
@@ -168,6 +168,24 @@ def test_worker_v5_runs_single_low_threshold_pass_and_returns_exact_source_times
     assert result['excluded_fragments'] == []
     assert result['rally_recognition']['version'] == 3
     assert result['rally_recognition']['dead_bounce_filter']['reenergization_veto'] is True
+
+
+def test_hybrid_result_splits_overlapping_context_and_recounts_bounces():
+    rallies = [
+        {'id': 'rally_002', 'index': 2, 'start_time_seconds': 5.0,
+         'end_time_seconds': 9.0, 'bounce_count': 3},
+        {'id': 'rally_001', 'index': 1, 'start_time_seconds': 1.0,
+         'end_time_seconds': 6.0, 'bounce_count': 3},
+    ]
+
+    normalized = _normalize_hybrid_rallies(rallies, [2.0, 4.0, 5.5, 7.0, 8.0])
+
+    assert [(item['id'], item['index']) for item in normalized] == [
+        ('rally_001', 1), ('rally_002', 2),
+    ]
+    assert normalized[0]['end_time_seconds'] == 5.5
+    assert normalized[1]['start_time_seconds'] > normalized[0]['end_time_seconds']
+    assert [item['bounce_count'] for item in normalized] == [3, 2]
 
 
 @pytest.mark.parametrize('visible_frames', [0, 6])

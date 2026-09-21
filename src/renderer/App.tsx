@@ -16,7 +16,7 @@ import {
   type UpdateState,
   type VideoMetadata,
 } from '../shared/contracts';
-import type { AppEvent, BootstrapData, PendingComponentImport, SelectedVideo } from '../shared/api';
+import type { AppEvent, BootstrapData, SelectedVideo } from '../shared/api';
 import { DONATION_URL, GITHUB_URL, RELEASES_URL, WEBSITE_URL } from '../shared/urls';
 import { formatTimestamp } from '../domain/time';
 import { createCustomClipDraft, customExportSegments, setCustomClipSelected, type CustomRallyClip } from '../domain/custom-clips';
@@ -129,14 +129,8 @@ export function App() {
   const [dragging, setDragging] = useState(false);
   const [videoSelectionPending, setVideoSelectionPending] = useState(false);
   const videoSelectionPendingRef = useRef(false);
-  const [setupTask, setSetupTask] = useState<string | null>(null);
-  const setupTaskRef = useRef<string | null>(null);
   const multiActiveRef = useRef(false);
   const settingsRef = useRef(settings);
-  const [setupProgress, setSetupProgress] = useState<{ percent: number; stage: string; current?: number; total?: number } | null>(null);
-  const [setupOutcome, setSetupOutcome] = useState<'success' | 'pending' | 'cancelled' | 'failed' | null>(null);
-  const [setupFailureCode, setSetupFailureCode] = useState<string | null>(null);
-  const [setupPendingImports, setSetupPendingImports] = useState<PendingComponentImport[]>([]);
   const [historyEntries, setHistoryEntries] = useState<HistorySummaryV1[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -174,19 +168,8 @@ export function App() {
       }
     });
     const removeTask = window.ttcut.onTaskEvent((event: AppEvent) => {
-      if (multiActiveRef.current && event.type !== 'component-result') return;
+      if (multiActiveRef.current) return;
       if (event.type === 'progress') {
-        if (event.data.kind === 'setup') {
-          setupTaskRef.current = event.data.taskId;
-          setSetupTask(event.data.taskId);
-          setSetupProgress({
-            percent: event.data.percent,
-            stage: event.data.stage,
-            ...(event.data.current === undefined ? {} : { current: event.data.current }),
-            ...(event.data.total === undefined ? {} : { total: event.data.total }),
-          });
-          return;
-        }
         setActiveTask(event.data.taskId);
         setProgress({ percent: event.data.percent, stage: event.data.stage });
       } else if (event.type === 'analysis-result') {
@@ -218,23 +201,7 @@ export function App() {
         setExportResult(event.data);
         setStep('complete');
         showSupportPrompt();
-      } else if (event.type === 'component-result') {
-        setupTaskRef.current = null;
-        setSetupTask(null);
-        setSetupProgress(null);
-        setSetupOutcome(event.pendingImports.length ? 'pending' : 'success');
-        setSetupFailureCode(null);
-        setSetupPendingImports(event.pendingImports);
-        setBootstrap((current) => current ? { ...current, components: event.data } : current);
       } else {
-        if (setupTaskRef.current === event.taskId) {
-          setupTaskRef.current = null;
-          setSetupTask(null);
-          setSetupProgress(null);
-          setSetupOutcome(event.code === 'SETUP_CANCELLED' ? 'cancelled' : 'failed');
-          setSetupFailureCode(event.code);
-          return;
-        }
         if (settingsRef.current.calibration_method === 'automatic'
           && ['AUTO_CALIBRATION_FAILED', 'TABLE_MODEL_RESOURCE_ERROR'].includes(event.code)) {
           setActiveTask(null);
@@ -529,76 +496,12 @@ export function App() {
     setMissingComponents(missing.length > 0 ? missing : null);
   };
 
-  const importComponents = async () => {
-    if (videoTaskOwnerRef.current) return;
-    setSetupOutcome(null);
-    setSetupFailureCode(null);
-    setSetupPendingImports([]);
-    if (!platformSupported) {
-      setSetupOutcome('failed');
-      setSetupFailureCode(bootstrap?.platformCompatibility.reason === 'probe_failed' ? 'PLATFORM_PROBE_FAILED' : 'PLATFORM_UNSUPPORTED');
-      return;
-    }
-    try {
-      const taskId = await window.ttcut.importComponents();
-      if (!taskId) return;
-      setupTaskRef.current = taskId;
-      setSetupTask(taskId);
-    } catch (caught) {
-      setSetupOutcome('failed');
-      setSetupFailureCode(errorCode(caught));
-    }
-  };
-
-  const installMediaComponent = async () => {
-    if (videoTaskOwnerRef.current) return;
-    setSetupOutcome(null);
-    setSetupFailureCode(null);
-    if (!platformSupported) {
-      setSetupOutcome('failed');
-      setSetupFailureCode(bootstrap?.platformCompatibility.reason === 'probe_failed' ? 'PLATFORM_PROBE_FAILED' : 'PLATFORM_UNSUPPORTED');
-      return;
-    }
-    try {
-      const taskId = await window.ttcut.installMediaComponent(true);
-      setupTaskRef.current = taskId;
-      setSetupTask(taskId);
-    } catch (caught) {
-      setSetupOutcome('failed');
-      setSetupFailureCode(errorCode(caught));
-    }
-  };
-
-  const installAnalysisComponent = async () => {
-    if (videoTaskOwnerRef.current) return;
-    setSetupOutcome(null);
-    setSetupFailureCode(null);
-    if (!platformSupported) {
-      setSetupOutcome('failed');
-      setSetupFailureCode(bootstrap?.platformCompatibility.reason === 'probe_failed' ? 'PLATFORM_PROBE_FAILED' : 'PLATFORM_UNSUPPORTED');
-      return;
-    }
-    try {
-      const taskId = await window.ttcut.installAnalysisComponent(true);
-      setupTaskRef.current = taskId;
-      setSetupTask(taskId);
-    } catch (caught) {
-      setSetupOutcome('failed');
-      setSetupFailureCode(errorCode(caught));
-    }
-  };
-
   const tableRecognitionStage = progress.stage === 'table_sampling'
     || progress.stage === 'table_model'
     || progress.stage === 'table_inference';
   const stageText = tableRecognitionStage
     ? (settings.language === 'zh-CN' ? '正在识别球桌' : 'Recognizing table')
     : t.stages[progress.stage as keyof typeof t.stages] ?? progress.stage;
-  const setupPendingText = setupPendingImports.map((pending) => interpolate(t.setupPending, {
-    variant: pending.variant,
-    received: pending.receivedParts,
-    total: pending.totalParts,
-  })).join(' ');
   const canReturnToSelection = (view === 'multi' && videoTaskOwner !== 'multi') || (
     view === 'auto'
       && step !== 'select'
@@ -606,7 +509,6 @@ export function App() {
       && step !== 'cutting'
       && Boolean(video)
       && !activeTask
-      && !setupTask
   );
   const customWorkspace = view === 'auto' && step === 'custom';
   const discardMulti = () => {
@@ -800,35 +702,18 @@ export function App() {
                 <h2>{t.components}</h2>
                 <div className="component-row"><div><strong>{t.analysisComponent}</strong><span>{bootstrap?.components.analysis.version ?? (bootstrap?.components.analysis.available ? t.available : bootstrap ? t.unavailable : '—')}</span>{bootstrap?.components.analysis.path && <span>{t.componentPath}: {bootstrap.components.analysis.path}</span>}</div><span className={`status ${bootstrap?.components.analysis.available ? 'ok' : ''}`}>{bootstrap?.components.analysis.available ? t.available : bootstrap ? t.unavailable : '—'}</span></div>
                 <div className="component-row"><div><strong>{t.mediaComponent}</strong><span>{bootstrap?.components.media.version ?? (bootstrap?.components.media.available ? t.available : bootstrap ? t.unavailable : '—')}</span>{bootstrap?.components.media.available && <span>{t.activeEncoder}: {isMac ? 'x264 / x265' : bootstrap.components.media.active_encoder === 'libx264' ? t.x264 : t.openh264}</span>}{bootstrap?.components.media.path && <span>{t.componentPath}: {bootstrap.components.media.path}</span>}</div><span className={`status ${bootstrap?.components.media.available ? 'ok' : ''}`}>{bootstrap?.components.media.available ? t.available : bootstrap ? t.unavailable : '—'}</span></div>
-                <div className="component-row"><div><strong>{t.acceleration}</strong><span>{isMac ? 'Core ML · CPU / GPU' : bootstrap?.components.analysis.acceleration === 'cuda' ? t.gpu : bootstrap?.components.analysis.acceleration === 'cpu' ? t.cpu : t.unavailable}</span></div></div>
+                <div className="component-row"><div><strong>{t.acceleration}</strong><span>{isMac ? 'Core ML · CPU / GPU' : bootstrap?.components.analysis.acceleration === 'directml' ? 'DirectML · GPU / CPU' : bootstrap?.components.analysis.acceleration === 'cpu' ? t.cpu : t.unavailable}</span></div></div>
               </article>
               <article className="card setup-card">
-                <div className="setup-heading"><div><h2>{isMac ? (settings.language === 'en' ? 'Built-in runtime' : '内置运行时') : t.setupTitle}</h2>{!isMac && <p>{t.setupDetail}</p>}</div><button className="secondary" disabled={Boolean(setupTask)} onClick={() => void refreshComponents()}>{t.refreshComponents}</button></div>
-                {!isMac && <p className="setup-purpose">{t.setupPurpose}</p>}
-                {isMac ? <p>{settings.language === 'en' ? 'Models and media tools are included. No component installation is required.' : '已内置模型和媒体工具，无需安装组件。'}{bootstrap?.components.analysis.detail && <span role="alert"> {bootstrap.components.analysis.detail}</span>}</p> : setupProgress ? (
-                  <div className="setup-progress" role="status">
-                    <div><strong>{t.setupWorking}</strong><span>{t.setupStages[setupProgress.stage as keyof typeof t.setupStages] ?? setupProgress.stage}</span><b>{Math.round(setupProgress.percent)}%</b></div>
-                    <div className="progress-track"><span style={{ width: `${setupProgress.percent}%` }} /></div>
-                    <button className="secondary" onClick={() => setupTask && void window.ttcut.cancelTask(setupTask)}>{t.cancel}</button>
-                  </div>
-                ) : (
-                  <div className="setup-options">
-                    {bootstrap?.componentSetup.analysis_offer && !bootstrap.components.analysis.available && (
-                      <div className="setup-option"><div><strong>{t.analysisOffer}</strong><span>{t.analysisOfferDetail}</span><small>{interpolate(t.downloadUpTo, { size: fileSize(bootstrap.componentSetup.analysis_offer.download_size_bytes) })}</small><small className="setup-network-hint">{t.networkHint}</small></div><div><button className="text-button" onClick={() => void window.ttcut.openExternalUrl(bootstrap.componentSetup.analysis_offer!.license_url)}>{t.viewLicense}</button><button className="primary" disabled={!platformSupported || !bootstrap.componentSetup.analysis_offer.available_for_download || Boolean(videoTaskOwner)} onClick={() => void installAnalysisComponent()}>{t.consentInstall}</button></div></div>
-                    )}
-                    {bootstrap?.componentSetup.media_offer && !bootstrap.components.media.available && (
-                      <div className="setup-option"><div><strong>{t.mediaOffer}</strong><span>{t.mediaOfferDetail}</span><small>{interpolate(t.downloadSize, { size: fileSize(bootstrap.componentSetup.media_offer.download_size_bytes) })}</small></div><div><button className="text-button" onClick={() => void window.ttcut.openExternalUrl(bootstrap.componentSetup.media_offer!.license_url)}>{t.viewLicense}</button><button className="primary" disabled={!platformSupported || !bootstrap.componentSetup.media_offer.available_for_download || Boolean(videoTaskOwner)} onClick={() => void installMediaComponent()}>{t.consentInstall}</button></div></div>
-                    )}
-                    {bootstrap?.componentSetup.x264_manual_offer && !bootstrap.components.media.x264_available && (
-                      <div className="setup-option optional-component"><div><strong>{t.x264ManualOffer}</strong><span>{t.x264ManualDetail}</span><small>{interpolate(t.downloadSize, { size: fileSize(bootstrap.componentSetup.x264_manual_offer.download_size_bytes) })}</small></div><div><button className="secondary" disabled={Boolean(setupTask)} onClick={() => void window.ttcut.openX264Download()}>{t.goToDownload}</button></div></div>
-                    )}
-                    <div className="setup-manual">
-                      <div><strong>{t.manualDownload}</strong></div>
-                      <div className="setup-manual-actions"><button className="text-button" disabled={Boolean(setupTask)} onClick={() => void window.ttcut.openComponentDownloads()}>{t.goToDownload}</button><button className="secondary" disabled={!platformSupported || Boolean(setupTask) || Boolean(videoTaskOwner)} onClick={() => void importComponents()}>{t.importComponents}</button></div>
-                    </div>
-                  </div>
+                <div className="setup-heading">
+                  <div><h2>{settings.language === 'en' ? 'Component integrity check' : '组件完整性检测'}</h2></div>
+                  <button className="secondary" onClick={() => void refreshComponents()}>{t.refreshComponents}</button>
+                </div>
+                {(bootstrap?.components.analysis.detail || bootstrap?.components.media.detail) && (
+                  <p role="alert">{settings.language === 'en'
+                    ? 'The built-in runtime is damaged. Reinstall or update TTcut.'
+                    : '内置运行时已损坏，请重新安装或更新 TTcut。'}</p>
                 )}
-                {setupOutcome && <p className={`setup-outcome ${setupOutcome}`}>{setupOutcome === 'success' ? t.setupSuccess : setupOutcome === 'pending' ? setupPendingText : setupOutcome === 'cancelled' ? t.setupCancelled : setupFailureCode === 'COMPONENT_DOWNLOAD_RETRY_EXHAUSTED' ? t.setupNetworkFailed : setupFailureCode && (setupFailureCode.startsWith('COMPONENT_IMPORT_') || setupFailureCode.startsWith('X264_')) ? localizedError(setupFailureCode, t) : t.setupFailed}</p>}
               </article>
               <article className="card actions-card">
                 <div><h2>{t.version}</h2><p>{appVersion}</p></div>
@@ -839,7 +724,7 @@ export function App() {
           </section>
         ) : view === 'history' ? (
           <section className="page history-page">
-            <div className="history-header"><div className="page-heading"><h1>{t.history}</h1><p>{t.historyDescription}</p></div><button className="secondary" disabled={historyEntries.length === 0 || Boolean(activeTask || setupTask || videoTaskOwner)} onClick={() => setHistoryConfirmation({ kind: 'clear' })}>{t.clearHistory}</button></div>
+            <div className="history-header"><div className="page-heading"><h1>{t.history}</h1><p>{t.historyDescription}</p></div><button className="secondary" disabled={historyEntries.length === 0 || Boolean(activeTask || videoTaskOwner)} onClick={() => setHistoryConfirmation({ kind: 'clear' })}>{t.clearHistory}</button></div>
             {historyError && <div className="history-error" role="alert"><span>{localizedError(historyError, t)}</span><button className="text-button" onClick={() => void loadHistory()}>{t.retry}</button></div>}
             {historyLoading ? (
               <div className="history-loading" role="status">{t.loadingHistory}</div>
@@ -850,11 +735,11 @@ export function App() {
                 {historyEntries.map((entry) => {
                   const unavailable = entry.source_status !== 'available';
                   return <article className={`history-card card ${unavailable ? 'unavailable' : ''}`} key={entry.id}>
-                    <button className="history-open" disabled={unavailable || Boolean(activeTask || setupTask || videoTaskOwner)} onClick={() => void openHistory(entry.id)}>
+                    <button className="history-open" disabled={unavailable || Boolean(activeTask || videoTaskOwner)} onClick={() => void openHistory(entry.id)}>
                       <div className="history-cover">{entry.cover_url ? <img src={entry.cover_url} alt="" /> : <span>{t.coverUnavailable}</span>}</div>
                       <div className="history-info"><strong title={entry.video_name}>{entry.video_name}</strong><div><span>{interpolate(t.historyRallies, { count: entry.rally_count })}</span><span>{formatTimestamp(entry.duration_seconds)}</span></div>{unavailable && <small>{entry.source_status === 'missing' ? t.historyMissing : t.historyChanged}</small>}</div>
                     </button>
-                    <button className="history-delete" disabled={Boolean(activeTask || setupTask || videoTaskOwner)} aria-label={interpolate(t.deleteHistoryItem, { name: entry.video_name })} onClick={() => setHistoryConfirmation({ kind: 'delete', id: entry.id })}>×</button>
+                    <button className="history-delete" disabled={Boolean(activeTask || videoTaskOwner)} aria-label={interpolate(t.deleteHistoryItem, { name: entry.video_name })} onClick={() => setHistoryConfirmation({ kind: 'delete', id: entry.id })}>×</button>
                   </article>;
                 })}
               </div>
