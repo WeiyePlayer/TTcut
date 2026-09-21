@@ -66,6 +66,46 @@ def emit(payload: dict) -> None:
     sys.stdout.flush()
 
 
+def _normalize_hybrid_rallies(rallies: list[dict], bounce_times: list[float]) -> list[dict]:
+    """Serialize hybrid rallies as strictly ordered, disjoint intervals.
+
+    Motion-candidate refinement adds a small amount of boundary context. Two
+    adjacent candidates can therefore overlap even though their underlying
+    exchanges are separate. Split that shared context at its midpoint and
+    recalculate counts from the retained bounce events before the strict result
+    contract is evaluated.
+    """
+    ordered = sorted(
+        ({**rally} for rally in rallies),
+        key=lambda rally: (rally["start_time_seconds"], rally["end_time_seconds"]),
+    )
+    for index in range(1, len(ordered)):
+        previous = ordered[index - 1]
+        current = ordered[index]
+        if current["start_time_seconds"] > previous["end_time_seconds"]:
+            continue
+        boundary = (previous["end_time_seconds"] + current["start_time_seconds"]) / 2
+        previous["end_time_seconds"] = boundary
+        current["start_time_seconds"] = math.nextafter(boundary, math.inf)
+
+    normalized = []
+    for rally in ordered:
+        start = rally["start_time_seconds"]
+        end = rally["end_time_seconds"]
+        if end <= start:
+            continue
+        count = sum(start <= time <= end for time in bounce_times)
+        if count == 0:
+            continue
+        rally.update({
+            "id": f"rally_{len(normalized) + 1:03d}",
+            "index": len(normalized) + 1,
+            "bounce_count": count,
+        })
+        normalized.append(rally)
+    return normalized
+
+
 def analyze(request: dict) -> dict:
     global load_tracknet, TrackNetPredictor, detect_tracknet_bounce_frames, tracknet_visibility_rallies
     task_id = request["task_id"]
@@ -286,6 +326,8 @@ def analyze(request: dict) -> dict:
         elif rally.lead_in_start_time is not None:
             item["lead_in_start_time_seconds"] = round(max(0.0, min(start, rally.lead_in_start_time)), 6)
         normalized.append(item)
+    if recognition_method == "hybrid_motion_bounce":
+        normalized = _normalize_hybrid_rallies(normalized, bounce_times or [])
     emit({"type": "progress", "task_id": task_id, "stage": "postprocess", "current": 1, "total": 1, "percent": 100.0})
     detected_frames = sum(bool(point.visibility) for point in points)
     result = {
