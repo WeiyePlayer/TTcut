@@ -134,13 +134,15 @@ try {
   const bootstrap = await page.evaluate(() => window.ttcut.bootstrap());
   await page.evaluate(settings => window.ttcut.saveSettings({ ...settings, language: 'zh-CN' }), bootstrap.settings);
   await page.reload();
-  await check('packaged Windows Worker keeps full-frame BlurBall inference', async () => {
-    const sourcePredictor = await readFile(path.join(root, 'worker/ttcut_worker/blurball_predictor.py'), 'utf8');
-    const packagedPredictor = await readFile(path.join(app, 'resources/worker/ttcut_worker/blurball_predictor.py'), 'utf8');
-    assert.equal(packagedPredictor, sourcePredictor, 'Packaged BlurBall predictor must match the audited source');
-    assert.doesNotMatch(packagedPredictor, /temporal_stride|interpolated_frames|F1\/F4\/F7/);
-    assert.match(packagedPredictor, /for packet in reader:\r?\n\s+packets\.append\(packet\)/);
-  });
+  if (windows) {
+    await check('packaged Windows Worker keeps full-frame BlurBall inference', async () => {
+      const sourcePredictor = await readFile(path.join(root, 'worker/ttcut_worker/blurball_predictor.py'), 'utf8');
+      const packagedPredictor = await readFile(path.join(app, 'resources/worker/ttcut_worker/blurball_predictor.py'), 'utf8');
+      assert.equal(packagedPredictor, sourcePredictor, 'Packaged BlurBall predictor must match the audited source');
+      assert.doesNotMatch(packagedPredictor, /temporal_stride|interpolated_frames|F1\/F4\/F7/);
+      assert.match(packagedPredictor, /for packet in reader:\r?\n\s+packets\.append\(packet\)/);
+    });
+  }
   await openReview('zh-CN', path.basename(media));
   await check('macOS continuous-v3 board metadata appears exactly once', async () => {
     assert.deepEqual(await page.locator('.custom-rally-meta span').allInnerTexts(), ['板数 2', '板数 5', '板数 6', '板数 10', '板数 11']);
@@ -285,7 +287,7 @@ try {
     await expect(manual).toHaveCount(0);
     await page.getByRole('button', { name: 'Delete rally', exact: true }).click();
     await page.reload();
-    await openReview('en');
+    await openReview('en', path.basename(media));
   });
   await check('shared timeline boundary follows mouse direction and playhead does not block track', async () => {
     const left = page.locator('.timeline-clip').nth(0);

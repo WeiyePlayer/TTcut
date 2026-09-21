@@ -38,6 +38,9 @@
 
 ## Verification
 
+- macOS release verification: type checking, 17 macOS boundary tests, 156 relevant TypeScript/React regression tests, and Swift tests with native dependencies enabled passed.
+- The packaged macOS app passed 17 real Electron analysis/media checks, 10 bounce-count multi-select and timeline-editing checks, and three batch-UI checks.
+- macOS DMG mounting, packaged-app signature integrity, dependency boundaries for 29 arm64 native files, and DMG/ZIP size and SHA-256 verification passed. These checks are not Apple notarization.
 - TypeScript type checking passed. Vitest passed 439 tests across 62 files, with 24 tests across 6 files skipped by existing conditions. All 198 Python Worker regression tests passed.
 - The production website build and both rendered-page tests passed.
 - Packaged Windows x64 acceptance passed 10/10 checks covering the full-frame Worker, bounce-count multi-selection, shared boundaries, playhead hit testing, Windows hybrid results, and legacy history. Its deterministic UI records do not establish real-video landing accuracy.
