@@ -82,6 +82,9 @@ export function overallAnalysisProgress(
   analysisMode: 'full' | 'two_stage' = 'full',
   processingMode: 'source' | 'normalized' = 'source',
 ): number {
+  const effectiveStage = stage === 'provider_fallback'
+    ? (analysisMode === 'two_stage' ? 'candidate_analysis' : 'analysis')
+    : stage;
   const ranges = processingMode === 'normalized'
     ? (calibrationMethod === 'automatic'
       ? NORMALIZED_AUTOMATIC_ANALYSIS_RANGES
@@ -89,7 +92,7 @@ export function overallAnalysisProgress(
     : analysisMode === 'two_stage'
       ? (calibrationMethod === 'automatic' ? AUTOMATIC_TWO_STAGE_ANALYSIS_RANGES : MANUAL_TWO_STAGE_ANALYSIS_RANGES)
       : (calibrationMethod === 'automatic' ? AUTOMATIC_ANALYSIS_RANGES : MANUAL_ANALYSIS_RANGES);
-  return mapProgress(ranges, stage, percent);
+  return mapProgress(ranges, effectiveStage, percent);
 }
 
 export function overallCalibrationProgress(stage: string, percent: number): number {

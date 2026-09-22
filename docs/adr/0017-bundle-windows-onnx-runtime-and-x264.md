@@ -19,13 +19,17 @@ Windows x64 packages contain two FP32 opset-20 graphs,
 source `.pt` files, conversion tools, and TrackNet files are excluded.
 
 The table model has fixed input `[1,3,896,1600]` and always uses the CPU
-provider. BlurBall has dynamic spatial axes. CPU uses batches of four;
-DirectML uses batches of sixteen and pads the tail before trimming its output.
+provider. BlurBall has dynamic spatial axes. CPU uses batches of four.
+DirectML starts at batch sixteen and, after a failed inference, discards that
+attempt and restarts the analysis entrypoint at batches eight, four, and two.
+If batch two fails, it restarts on CPU. Every DirectML tail is padded to the
+active attempt's batch size before its output is trimmed.
 DirectML sessions use sequential execution, disable memory patterns, and
 disable graph optimization to avoid the ORT 1.24.3 invalid bias-free Gemm
-fusion. If DirectML initialization or inference fails, all partial output from
-that model stage is discarded and the stage is rerun from its entry point on
-CPU. Provenance records the provider, runtime, model hash, and fallback reason.
+fusion. DirectML initialization failures skip batch retries and restart on CPU.
+Every retry discards partial output and starts from the analysis entrypoint.
+Provenance records the successful provider and batch size, runtime, model hash,
+and any fallback reason.
 
 The package also contains one FFmpeg/ffprobe build with `libx264`. Windows
 preprocessing, clipping, preview, and export resolve that same pair and encode

@@ -433,6 +433,7 @@ const analysisResultBaseSchema = z.object({
       model_filename: z.literal('blurball_best.onnx'),
       model_sha256: z.string().regex(/^[a-f0-9]{64}$/),
       runtime_version: z.string().min(1),
+      batch_size: z.number().int().positive().optional(),
       fallback_reason: z.string().min(1).optional(),
     }).strict().optional(),
     trajectory: z.object({
@@ -751,7 +752,7 @@ const workerBase = z.object({
 export const workerEventSchema = z.discriminatedUnion('type', [
   workerBase.extend({
     type: z.literal('progress'),
-    stage: z.enum(['probe', 'table_sampling', 'table_model', 'table_inference', 'load_model', 'analysis', 'candidate_analysis', 'interval_union', 'refinement_analysis', 'postprocess']),
+    stage: z.enum(['probe', 'table_sampling', 'table_model', 'table_inference', 'load_model', 'provider_fallback', 'analysis', 'candidate_analysis', 'interval_union', 'refinement_analysis', 'postprocess']),
     current: z.number().int().nonnegative(),
     total: z.number().int().nonnegative(),
     percent: finiteNumber.min(0).max(100),

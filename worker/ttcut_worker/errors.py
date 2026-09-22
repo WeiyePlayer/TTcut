@@ -30,6 +30,10 @@ class InferenceError(WorkerError):
 class DirectMLFallbackRequired(InferenceError):
     code = "DIRECTML_FALLBACK_REQUIRED"
 
+    def __init__(self, message: str, *, retry_smaller_batch: bool = True):
+        super().__init__(message)
+        self.retry_smaller_batch = retry_smaller_batch
+
 
 class CalibrationError(WorkerError):
     code = "INVALID_CALIBRATION"
