@@ -141,7 +141,7 @@ const zh = {
     CUSTOM_ARTIFACT_EXPORT_FAILED: '分段视频和 XML 都未能导出，请查看日志后重试。',
     UNKNOWN: '无法完成操作。请重试；若问题持续，请打开技术日志。',
   },
-  stages: { probe: '正在读取视频', table_sampling: '正在识别球桌', table_model: '正在识别球桌', table_inference: '正在识别球桌', video_normalization: '正在准备固定帧率媒体', load_model: '正在准备分析', analysis: '正在分析视频', candidate_analysis: '正在筛选候选回合', interval_union: '正在生成精分析区间', refinement_analysis: '正在进行二次分析', postprocess: '正在识别回合', preparing: '正在准备剪辑', 'preparing-artifacts': '正在准备导出', 'writing-xml': '正在写入 Premiere XML', 'exporting-rallies': '正在导出回合视频', cutting: '正在剪辑视频', 'cutting-and-exporting': '正在剪辑与导出', complete: '正在写入输出文件' },
+  stages: { probe: '正在读取视频', table_sampling: '正在识别球桌', table_model: '正在识别球桌', table_inference: '正在识别球桌', video_normalization: '正在准备固定帧率媒体', load_model: '正在准备分析', provider_fallback: 'DirectML 失败，正在重新分析', analysis: '正在分析视频', candidate_analysis: '正在筛选候选回合', interval_union: '正在生成精分析区间', refinement_analysis: '正在进行二次分析', postprocess: '正在识别回合', preparing: '正在准备剪辑', 'preparing-artifacts': '正在准备导出', 'writing-xml': '正在写入 Premiere XML', 'exporting-rallies': '正在导出回合视频', cutting: '正在剪辑视频', 'cutting-and-exporting': '正在剪辑与导出', complete: '正在写入输出文件' },
   setupStages: { download: '正在下载', verify: '正在校验文件', extract: '正在解压', self_test: '正在执行组件自检', install: '正在安全安装', complete: '正在完成设置' },
 } as const;
 
@@ -290,7 +290,7 @@ const en: Messages = {
     CUSTOM_ARTIFACT_EXPORT_FAILED: 'Neither rally videos nor XML could be exported. Inspect the log and retry.',
     UNKNOWN: 'The operation could not be completed. Retry and open the technical log if it continues.',
   },
-  stages: { probe: 'Reading video', table_sampling: 'Recognizing table', table_model: 'Recognizing table', table_inference: 'Recognizing table', video_normalization: 'Preparing constant-frame-rate media', load_model: 'Preparing analysis', analysis: 'Analyzing video', candidate_analysis: 'Screening candidate rallies', interval_union: 'Building refinement intervals', refinement_analysis: 'Running second-pass analysis', postprocess: 'Detecting rallies', preparing: 'Preparing', 'preparing-artifacts': 'Preparing exports', 'writing-xml': 'Writing Premiere XML', 'exporting-rallies': 'Exporting rally videos', cutting: 'Cutting video', 'cutting-and-exporting': 'Cutting and exporting', complete: 'Writing output' },
+  stages: { probe: 'Reading video', table_sampling: 'Recognizing table', table_model: 'Recognizing table', table_inference: 'Recognizing table', video_normalization: 'Preparing constant-frame-rate media', load_model: 'Preparing analysis', provider_fallback: 'DirectML failed; restarting analysis', analysis: 'Analyzing video', candidate_analysis: 'Screening candidate rallies', interval_union: 'Building refinement intervals', refinement_analysis: 'Running second-pass analysis', postprocess: 'Detecting rallies', preparing: 'Preparing', 'preparing-artifacts': 'Preparing exports', 'writing-xml': 'Writing Premiere XML', 'exporting-rallies': 'Exporting rally videos', cutting: 'Cutting video', 'cutting-and-exporting': 'Cutting and exporting', complete: 'Writing output' },
   setupStages: { download: 'Downloading', verify: 'Verifying files', extract: 'Extracting', self_test: 'Running component self-test', install: 'Installing safely', complete: 'Completing setup' },
 };
 

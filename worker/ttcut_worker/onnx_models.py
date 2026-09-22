@@ -44,7 +44,10 @@ def create_session(path: str | Path, provider: str):
         raise ModelResourceError(f"Bundled ONNX model is missing: {model}")
     ort = _ort()
     if provider == "directml" and "DmlExecutionProvider" not in ort.get_available_providers():
-        raise DirectMLFallbackRequired("DirectML execution provider is unavailable.")
+        raise DirectMLFallbackRequired(
+            "DirectML execution provider is unavailable.",
+            retry_smaller_batch=False,
+        )
     providers = ["DmlExecutionProvider"] if provider == "directml" else ["CPUExecutionProvider"]
     try:
         return ort.InferenceSession(
@@ -54,7 +57,10 @@ def create_session(path: str | Path, provider: str):
         )
     except Exception as exc:
         if provider == "directml":
-            raise DirectMLFallbackRequired("DirectML session initialization failed.") from exc
+            raise DirectMLFallbackRequired(
+                "DirectML session initialization failed.",
+                retry_smaller_batch=False,
+            ) from exc
         raise ModelResourceError(f"Bundled ONNX model is invalid: {model}") from exc
 
 

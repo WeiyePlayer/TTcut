@@ -7,7 +7,11 @@ import sys
 import traceback
 
 from .blurball_bounce import detect_blurball_bounce_frames
-from .blurball_predictor import BlurBallPredictor
+from .blurball_predictor import (
+    BLURBALL_CPU_BATCH_SIZE,
+    BLURBALL_DIRECTML_BATCH_SIZES,
+    BlurBallPredictor,
+)
 from .blurball_rallies import (
     blurball_inter_rally_filter_provenance,
     blurball_visibility_rallies,
@@ -106,7 +110,7 @@ def _normalize_hybrid_rallies(rallies: list[dict], bounce_times: list[float]) ->
     return normalized
 
 
-def analyze(request: dict) -> dict:
+def analyze(request: dict, *, directml_batch_size: int | None = None) -> dict:
     global load_tracknet, TrackNetPredictor, detect_tracknet_bounce_frames, tracknet_visibility_rallies
     task_id = request["task_id"]
     choice = request["calibration_choice"]
@@ -188,6 +192,15 @@ def analyze(request: dict) -> dict:
             })
         return callback
 
+    def blurball_predictor(confidence_threshold: float) -> BlurBallPredictor:
+        if getattr(loaded, "provider", "cpu") == "directml" and directml_batch_size is not None:
+            return BlurBallPredictor(
+                loaded,
+                batch_size=directml_batch_size,
+                confidence_threshold=confidence_threshold,
+            )
+        return BlurBallPredictor(loaded, confidence_threshold=confidence_threshold)
+
     if effective_config["mode"] == "full":
         predictor = (
             TrackNetPredictor(
@@ -196,10 +209,7 @@ def analyze(request: dict) -> dict:
                 roi_model_scale=tracknet_predictor.TRACKNET_ROI_MODEL_SCALE,
             )
             if profile == "tracknet_v1"
-            else BlurBallPredictor(
-                loaded,
-                confidence_threshold=effective_config["confidence_threshold"],
-            )
+            else blurball_predictor(effective_config["confidence_threshold"])
         )
         points, info, stats = predictor.predict(
             request["video_path"],
@@ -217,10 +227,7 @@ def analyze(request: dict) -> dict:
             }]
             expansion_seconds = None
     else:
-        predictor = BlurBallPredictor(
-            loaded,
-            confidence_threshold=effective_config["stage1_confidence_threshold"],
-        )
+        predictor = blurball_predictor(effective_config["stage1_confidence_threshold"])
         stage1_points, stage1_info, stage1_stats = predictor.predict(
             request["video_path"],
             progress_callback=progress("candidate_analysis"),
@@ -439,6 +446,7 @@ def analyze(request: dict) -> dict:
                 "model_filename": "blurball_best.onnx",
                 "model_sha256": getattr(loaded, "model_sha256", "0" * 64),
                 "runtime_version": getattr(loaded, "runtime_version", "test"),
+                "batch_size": getattr(predictor, "batch_size", BLURBALL_CPU_BATCH_SIZE),
                 **({"fallback_reason": os.environ["TTCUT_DIRECTML_FALLBACK_REASON"]}
                    if os.environ.get("TTCUT_DIRECTML_FALLBACK_REASON") else {}),
             }} if profile == "blurball_v1" else {}),
@@ -500,6 +508,63 @@ def analyze(request: dict) -> dict:
     return result
 
 
+def _emit_provider_fallback(task_id: str) -> None:
+    emit({
+        "type": "progress", "task_id": task_id, "stage": "provider_fallback",
+        "current": 0, "total": 1, "percent": 0.0,
+    })
+
+
+def analyze_with_provider_fallback(request: dict) -> dict:
+    profile = request.get("ball_model_profile", "blurball_v1")
+    if (
+        profile == "tracknet_v1"
+        or request["device"] not in {"auto", "directml"}
+        or os.environ.get("TTCUT_FORCE_ONNX_CPU") == "1"
+    ):
+        return analyze(request)
+
+    task_id = request["task_id"]
+    environment_keys = ("TTCUT_FORCE_ONNX_CPU", "TTCUT_DIRECTML_FALLBACK_REASON")
+    previous_environment = {key: os.environ.get(key) for key in environment_keys}
+    failures: list[str] = []
+    try:
+        for index, batch_size in enumerate(BLURBALL_DIRECTML_BATCH_SIZES):
+            if failures:
+                os.environ["TTCUT_DIRECTML_FALLBACK_REASON"] = "; ".join(failures)
+            try:
+                return analyze(request, directml_batch_size=batch_size)
+            except DirectMLFallbackRequired as fallback:
+                failures.append(f"DirectML batch {batch_size} failed: {fallback}")
+                has_smaller_batch = (
+                    fallback.retry_smaller_batch
+                    and index + 1 < len(BLURBALL_DIRECTML_BATCH_SIZES)
+                )
+                next_target = (
+                    f"batch {BLURBALL_DIRECTML_BATCH_SIZES[index + 1]}"
+                    if has_smaller_batch
+                    else "CPU"
+                )
+                print(
+                    f"{failures[-1]} Restarting analysis from its entrypoint with {next_target}.",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                _emit_provider_fallback(task_id)
+                if not has_smaller_batch:
+                    break
+
+        os.environ["TTCUT_FORCE_ONNX_CPU"] = "1"
+        os.environ["TTCUT_DIRECTML_FALLBACK_REASON"] = "; ".join(failures)
+        return analyze(request)
+    finally:
+        for key, previous in previous_environment.items():
+            if previous is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = previous
+
+
 def main() -> int:
     task_id = "00000000-0000-0000-0000-000000000000"
     traceback_text = ""
@@ -509,26 +574,7 @@ def main() -> int:
             raise InvalidRequestError("No analysis request was provided.")
         request = validate_request(json.loads(line))
         task_id = request["task_id"]
-        try:
-            result = analyze(request)
-        except DirectMLFallbackRequired as fallback:
-            if request.get("ball_model_profile", "blurball_v1") == "tracknet_v1" or request["device"] == "cpu":
-                raise
-            emit({
-                "type": "progress", "task_id": task_id, "stage": "provider_fallback",
-                "current": 0, "total": 1, "percent": 0.0,
-            })
-            os.environ["TTCUT_FORCE_ONNX_CPU"] = "1"
-            os.environ["TTCUT_DIRECTML_FALLBACK_REASON"] = str(fallback)
-            try:
-                result = analyze(request)
-            finally:
-                os.environ.pop("TTCUT_FORCE_ONNX_CPU", None)
-                os.environ.pop("TTCUT_DIRECTML_FALLBACK_REASON", None)
-            emit({
-                "type": "progress", "task_id": task_id, "stage": "provider_fallback",
-                "current": 1, "total": 1, "percent": 100.0,
-            })
+        result = analyze_with_provider_fallback(request)
         emit({"type": "result", "task_id": task_id, "data": result})
         return 0
     except json.JSONDecodeError as exc:
