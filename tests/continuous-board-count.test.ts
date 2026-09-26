@@ -3,8 +3,10 @@ import {
   analysisResultSchema,
   continuousVisibilityAnalysisResultV3Schema,
   hasBounceCounts,
+  SOURCE_TIME_RALLY_TIMEBASE,
 } from '../src/shared/contracts';
 import { createCustomClipDraft } from '../src/domain/custom-clips';
+import { createCutGroups, exportExclusions } from '../src/domain/segments';
 
 const fixture = () => ({
   schema_version: 3,
@@ -29,6 +31,34 @@ const fixture = () => ({
 });
 
 describe('continuous-visibility board-count metadata', () => {
+  const modern = () => ({
+    ...fixture(),
+    rally_recognition: { ...fixture().rally_recognition, timebase: SOURCE_TIME_RALLY_TIMEBASE },
+    excluded_fragments: [{ start_time_seconds: 5, end_time_seconds: 7, evidence: [{ reason: 'observed_pause' }] }],
+  });
+  it('keeps source-time pauses out of automatic groups and custom defaults, without relabelling legacy history', () => {
+    const result = analysisResultSchema.parse(modern());
+    const selection = { mode: 'all', pre_roll_seconds: 5, post_roll_seconds: 4 } as const;
+    const groups = createCutGroups(result, selection);
+    expect(groups.map(group => [group.start, group.end])).toEqual([[0, 5], [7, 16]]);
+    const clips = createCustomClipDraft(result.rallies, 5, 4, 30, 30, 'continuous_visibility', exportExclusions(result));
+    expect(clips.map(clip => [clip.defaultStart, clip.defaultEnd])).toEqual([[0, 5], [7, 16]]);
+    const legacy = analysisResultSchema.parse(fixture());
+    expect(createCutGroups(legacy, selection)).toHaveLength(1);
+    expect(exportExclusions(legacy)).toEqual([]);
+  });
+  it('rejects incomplete provenance, overlapping pauses, and rallies or bounces in excluded time', () => {
+    const value = modern();
+    expect(analysisResultSchema.safeParse(value).success).toBe(true);
+    expect(analysisResultSchema.safeParse({ ...value, excluded_fragments: undefined }).success).toBe(false);
+    expect(analysisResultSchema.safeParse({ ...value, rally_recognition: fixture().rally_recognition }).success).toBe(false);
+    for (const [start, end] of [[3, 6], [19, 21], [29, 31]]) {
+      expect(analysisResultSchema.safeParse({ ...value, excluded_fragments: [{
+        start_time_seconds: start, end_time_seconds: end, evidence: [{ reason: 'observed_pause' }],
+      }] }).success).toBe(false);
+    }
+    expect(analysisResultSchema.safeParse({ ...value, excluded_fragments: [...value.excluded_fragments, ...value.excluded_fragments] }).success).toBe(false);
+  });
   it('validates the historical detector provenance independently of the current Windows source', () => {
     // The macOS port records its original source, not the evolving Windows file
     // (whose bytes also depend on checkout line endings).

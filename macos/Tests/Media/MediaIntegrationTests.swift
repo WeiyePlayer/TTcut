@@ -51,6 +51,28 @@ final class MediaIntegrationTests: XCTestCase {
     if audio { args += ["-c:a", "aac", "-ac", "2"] }
     _ = try await ProcessRunner.run(paths.ffmpeg, args + [url.path])
   }
+  func testPreviewConvertsActualFullRangeAndIgnoresLongerAudioTail() async throws {
+    let folder = try workspace()
+    let source = folder.appendingPathComponent("full-range-audio-tail.mp4")
+    _ = try await ProcessRunner.run(paths.ffmpeg, [
+      "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=30:duration=3",
+      "-f", "lavfi", "-i", "sine=frequency=440:duration=5", "-vf", "scale=out_range=pc",
+      "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-color_range", "pc",
+      "-c:a", "aac", source.path,
+    ])
+    let video = try await MediaProbe(paths: paths).inspect(source)
+    XCTAssertEqual(video.pixelFormat, "yuvj420p")
+    XCTAssertGreaterThan(video.audioDuration ?? 0, (video.videoDuration ?? 0) + 1)
+    let destination = folder.appendingPathComponent("preview.mp4")
+    try await MediaPreview.render(video: video, paths: paths, destination: destination)
+    let preview = try await MediaProbe(paths: paths).inspect(destination)
+    XCTAssertEqual(preview.videoCodec, "h264")
+    XCTAssertEqual(preview.pixelFormat, "yuv420p")
+    XCTAssertEqual(preview.colorRange, "tv")
+    XCTAssertEqual(preview.videoDuration ?? 0, 3, accuracy: 1 / 30)
+    XCTAssertEqual(preview.frameCount, 90)
+  }
+
   func testBothExportStrategiesAndAudio() async throws {
     let folder = try workspace()
     let source = folder.appendingPathComponent("source.mp4")

@@ -241,6 +241,8 @@ public struct WorkerEvent: Codable, Sendable {
   public var rallies: [Rally]?
   public var visibilityRallies: [VisibilityRally]?
   public var bounceTimes: [Double]?
+  public var rallyTimebaseVersion: Int?
+  public var observedPauses: [ObservedPause]?
   public var tableSamples: [TableSample]?
   public var error: TTError?
   public init(type: String, taskID: String) {

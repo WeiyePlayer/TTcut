@@ -19,6 +19,7 @@ import {
 import type { AppEvent, BootstrapData, SelectedVideo } from '../shared/api';
 import { DONATION_URL, GITHUB_URL, RELEASES_URL, WEBSITE_URL } from '../shared/urls';
 import { formatTimestamp } from '../domain/time';
+import { exportExclusions } from '../domain/segments';
 import { createCustomClipDraft, customExportSegments, setCustomClipSelected, type CustomRallyClip } from '../domain/custom-clips';
 import type { CustomPlaybackMode } from '../domain/custom-playback';
 import { normalizeCalibrationPoints, validateCalibration } from '../domain/calibration';
@@ -345,6 +346,7 @@ export function App() {
       analysis.video.duration_seconds,
       analysis.video.fps,
       rallyRecognitionMethod(analysis),
+      exportExclusions(analysis),
     ));
     setCustomOutputs({ combined_video: true, rally_videos: false, premiere_xml: false });
     setStep('custom');

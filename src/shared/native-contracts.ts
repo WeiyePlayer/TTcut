@@ -46,6 +46,9 @@ export const nativeEventSchema = z.object({
   rallies: z.array(z.object({ id: z.string(), index: positive.int(), start: number.nonnegative(), end: positive, bounceCount: positive.int(), startFrame: number.int(), endFrame: number.int() }).strict()).optional(),
   visibilityRallies: z.array(nativeVisibilityRallySchema).optional(),
   bounceTimes: z.array(number.nonnegative()).optional(),
+  rallyTimebaseVersion: z.literal(1).optional(),
+  observedPauses: z.array(z.object({ start: number.nonnegative(), end: positive }).strict()
+    .refine(pause => pause.end > pause.start)).optional(),
   video: nativeVideoSchema.optional(), outputPath: z.string().optional(),
   error: z.object({ code: z.string(), message: z.string() }).strict().optional(),
 }).strict();
