@@ -24,6 +24,7 @@ BLURBALL_STEP = 3
 BLURBALL_MAX_DISPLACEMENT_PIXELS = 100.0
 BLURBALL_BATCH_SIZE = 16
 BLURBALL_CPU_BATCH_SIZE = 4
+BLURBALL_DIRECTML_BATCH_SIZES = (16, 8, 4, 2)
 _MEAN = np.asarray([0.485, 0.456, 0.406], dtype=np.float32)[:, None, None]
 _STD = np.asarray([0.229, 0.224, 0.225], dtype=np.float32)[:, None, None]
 
@@ -197,10 +198,10 @@ class BlurBallPredictor:
 
     def _infer_heatmaps(self, inputs: np.ndarray) -> np.ndarray:
         original_batch = inputs.shape[0]
-        if self.loaded.provider == "directml" and original_batch < BLURBALL_BATCH_SIZE:
+        if self.loaded.provider == "directml" and original_batch < self.batch_size:
             inputs = np.concatenate([
                 inputs,
-                np.zeros((BLURBALL_BATCH_SIZE - original_batch, *inputs.shape[1:]), dtype=np.float32),
+                np.zeros((self.batch_size - original_batch, *inputs.shape[1:]), dtype=np.float32),
             ], axis=0)
         logits = self.loaded.run(np.ascontiguousarray(inputs, dtype=np.float32))[:original_batch]
         return 1.0 / (1.0 + np.exp(-logits))

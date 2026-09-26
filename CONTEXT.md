@@ -170,8 +170,10 @@ _Avoid_: PR project file, `.prproj`, FCPXML
 The platform-specific local environment that executes analysis. Windows ships
 an immutable Python 3.12 runtime with NumPy, OpenCV, and ONNX Runtime DirectML.
 Table calibration always uses the CPU provider. BlurBall uses DirectML when it
-can initialize and finish the model stage; otherwise that complete stage is
-discarded and rerun on CPU. macOS uses bundled Core ML and its native helper.
+can initialize and finish the model stage. DirectML inference failures discard
+the attempt and restart from the analysis entrypoint at batch sizes 16, 8, 4,
+and 2; failure at batch 2 restarts on CPU. Initialization failures go directly
+to CPU. macOS uses bundled Core ML and its native helper.
 
 ## Installation Root
 

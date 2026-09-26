@@ -1,18 +1,26 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 
-type PreviewState = { source: string; url: string; status: 'ready' | 'preparing' | 'failed' };
+type PreviewState = { source: string; url: string; status: 'ready' | 'preparing' | 'failed'; error: string | null };
+
+function previewErrorDetail(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  return raw
+    .replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '')
+    .trim()
+    .slice(0, 500) || 'UNKNOWN_PREVIEW_ERROR';
+}
 
 export function useCompatiblePreview(videoRef: RefObject<HTMLVideoElement | null>, source: string, videoCodec?: string) {
   // HEVC support varies with the Windows GPU/driver and installed decoder. A
   // metadata/first-frame success does not prove that a later rally seek works.
   const requiresProxy = window.ttcut?.platform === 'win32' && videoCodec?.toLowerCase() === 'hevc';
   const initialStatus = requiresProxy ? 'preparing' : 'ready';
-  const [state, setState] = useState<PreviewState>({ source, url: source, status: initialStatus });
+  const [state, setState] = useState<PreviewState>({ source, url: source, status: initialStatus, error: null });
   // Keep user intent separate from the media element: loading a source/proxy
   // resets currentTime and can abort an outstanding play() promise.
   const pending = useRef<{ source: string; time: number; playing: boolean } | null>(null);
   const preparing = useRef(false);
-  const recover = useRef<((reason?: string) => void) | null>(null);
+  const recover = useRef<((reason?: string, force?: boolean) => void) | null>(null);
   const applyPending = useCallback(() => {
     const intent = pending.current;
     const video = videoRef.current;
@@ -30,7 +38,7 @@ export function useCompatiblePreview(videoRef: RefObject<HTMLVideoElement | null
       if (name === 'AbortError') return;
       if (name === 'NotAllowedError') {
         pending.current = null;
-        setState((current) => ({ ...current, status: 'failed' }));
+        setState((current) => ({ ...current, status: 'failed', error: 'PLAYBACK_NOT_ALLOWED' }));
         return;
       }
       recover.current?.('play-rejected');
@@ -55,6 +63,7 @@ export function useCompatiblePreview(videoRef: RefObject<HTMLVideoElement | null
     const intent = pending.current?.source === source ? pending.current : null;
     seekTo(intent?.time ?? video.currentTime, !(intent?.playing ?? !video.paused));
   }, [seekTo, source, videoRef]);
+  const retry = useCallback(() => recover.current?.('manual-retry', true), []);
 
   useEffect(() => {
     // macOS has a native preview path with progress, cancellation, HDR tone
@@ -71,12 +80,26 @@ export function useCompatiblePreview(videoRef: RefObject<HTMLVideoElement | null
     let resumeTime = 0;
     let resumePlayback = false;
     let watchdog: ReturnType<typeof setTimeout> | undefined;
-    setState({ source, url: source, status: 'ready' });
+    setState({ source, url: source, status: 'ready', error: null });
 
-    const fallback = (reason: string | Event = 'media-error') => {
+    const fallback = (reason: string | Event = 'media-error', force = false) => {
       if (disposed || nativePreview) return;
+      if (force) {
+        attempted = false;
+        proxy = false;
+      }
       if (proxy) {
-        setState((current) => ({ ...current, status: 'failed' }));
+        const detail = `MEDIA_ERR_${video.error?.code ?? 'UNKNOWN'}${video.error?.message ? `: ${video.error.message}` : ''}`;
+        console.error('[preview] Proxy playback failed', JSON.stringify({
+          reason: typeof reason === 'string' ? reason : 'media-error',
+          error: detail, readyState: video.readyState, networkState: video.networkState,
+          currentTime: video.currentTime,
+        }));
+        setState((current) => ({
+          ...current,
+          status: 'failed',
+          error: detail,
+        }));
         return;
       }
       if (attempted) return;
@@ -92,13 +115,17 @@ export function useCompatiblePreview(videoRef: RefObject<HTMLVideoElement | null
       pending.current ??= { source, time: resumeTime, playing: resumePlayback };
       preparing.current = true;
       video.pause();
-      setState({ source, url: source, status: 'preparing' });
+      setState({ source, url: source, status: 'preparing', error: null });
       void Promise.resolve().then(() => window.ttcut.prepareVideoPreview(source)).then((url) => {
         if (disposed) return;
         proxy = true;
-        setState({ source, url, status: 'preparing' });
-      }).catch(() => {
-        if (!disposed) setState({ source, url: source, status: 'failed' });
+        setState({ source, url, status: 'preparing', error: null });
+      }).catch((error: unknown) => {
+        if (!disposed) {
+          const detail = previewErrorDetail(error);
+          console.error('[preview] Preparation failed', detail);
+          setState({ source, url: source, status: 'failed', error: detail });
+        }
       });
     };
     const metadata = () => {
@@ -112,7 +139,7 @@ export function useCompatiblePreview(videoRef: RefObject<HTMLVideoElement | null
       if (proxy && preparing.current) {
         preparing.current = false;
         pending.current ??= { source, time: Math.min(resumeTime, Number.isFinite(video.duration) ? video.duration : resumeTime), playing: resumePlayback };
-        setState((current) => ({ ...current, status: 'ready' }));
+        setState((current) => ({ ...current, status: 'ready', error: null }));
       }
       applyPending();
     };
@@ -156,5 +183,11 @@ export function useCompatiblePreview(videoRef: RefObject<HTMLVideoElement | null
       video.removeEventListener('playing', playing);
     };
   }, [source, videoRef, applyPending, requiresProxy]);
-  return { ...(state.source === source ? state : { source, url: source, status: initialStatus }), seekTo, togglePlayback, getPlaybackIntent };
+  return {
+    ...(state.source === source ? state : { source, url: source, status: initialStatus, error: null }),
+    seekTo,
+    togglePlayback,
+    getPlaybackIntent,
+    retry,
+  };
 }

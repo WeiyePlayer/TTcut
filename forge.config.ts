@@ -10,6 +10,9 @@ import type { SignToolOptions as EsmSignToolOptions } from '@electron/windows-si
 const macBuild = process.platform === 'darwin';
 const publicReleaseCandidate = process.env.TTCUT_PUBLIC_RC === '1';
 const officialRelease = process.env.TTCUT_OFFICIAL_RELEASE === '1';
+const independentBeta = process.env.TTCUT_INDEPENDENT_BETA === '1';
+const windowsProductName = independentBeta ? 'TTcut Beta' : 'TTcut';
+const windowsExecutableName = independentBeta ? 'TTcut Beta' : 'TTcut';
 const releaseSigningRequired = !macBuild && (publicReleaseCandidate || officialRelease);
 const retainedWindowsLocales = new Set(['en-US.pak', 'zh-CN.pak']);
 
@@ -82,10 +85,11 @@ const packagerWindowsSign = signingConfigured ? {
 
 const config: ForgeConfig = {
   packagerConfig: {
+    ...(!macBuild ? { name: windowsProductName } : {}),
     asar: true,
     icon: path.resolve(macBuild ? 'macos/Resources/TTcut.icns' : 'public/ttcut.ico'),
     ...(macBuild ? { appBundleId: 'com.weiye.ttcut.electron.macos', appCategoryType: 'public.app-category.video', extendInfo: { LSMinimumSystemVersion: '15.0' } } : {}),
-    executableName: 'TTcut',
+    executableName: macBuild ? 'TTcut' : windowsExecutableName,
     ignore: ignoreUnbuiltSource,
     afterExtract: [retainSupportedWindowsLocales],
     extraResource: macBuild ? ['.runtime/macos'] : [
@@ -96,10 +100,10 @@ const config: ForgeConfig = {
     ],
     win32metadata: {
       CompanyName: publisherName,
-      FileDescription: 'TTcut local table-tennis rally cutter',
-      InternalName: 'TTcut',
-      OriginalFilename: 'TTcut.exe',
-      ProductName: 'TTcut',
+      FileDescription: independentBeta ? 'TTcut Beta local table-tennis rally cutter' : 'TTcut local table-tennis rally cutter',
+      InternalName: windowsProductName,
+      OriginalFilename: `${windowsExecutableName}.exe`,
+      ProductName: windowsProductName,
     },
     ...(packagerWindowsSign ? { windowsSign: packagerWindowsSign } : {}),
     download: {

@@ -84,9 +84,8 @@ if ([int]$updateTrust.schema_version -ne 1 -or $trustedSigner.Count -ne 1) {
   throw 'The selected release certificate is not pinned in src\main\update-trust.json.'
 }
 
-Invoke-NodeScript 'scripts\verify-model-assets.mjs'
-Invoke-NodeScript 'scripts\stage-worker.mjs'
-Invoke-NodeScript 'scripts\generate-release-metadata.mjs'
+& npm.cmd run stage:release
+if ($LASTEXITCODE -ne 0) { throw "stage:release failed with exit code $LASTEXITCODE." }
 Invoke-NodeScript 'scripts\make-nsis.mjs'
 
 $packageJson = Get-Content -LiteralPath (Join-Path $projectRoot 'package.json') -Raw | ConvertFrom-Json

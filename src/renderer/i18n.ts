@@ -2,7 +2,8 @@ export type Language = 'zh-CN' | 'en';
 
 const zh = {
   previewPreparing: '正在准备兼容预览…',
-  previewFailed: '预览加载失败，请重新打开此视频后重试。',
+  previewFailed: '预览加载失败。',
+  previewRetry: '重试',
   autoCut: '自动剪辑', history: '历史剪辑', settings: '设置', back: '返回',
   selectTitle: '选择比赛视频',
   captureGuideTitle: '推荐视频拍摄视角', captureGuideImageAlt: '推荐视频拍摄视角示意图',
@@ -47,10 +48,11 @@ const zh = {
   historyDescription: '重新使用已完成的本地分析，无需再次标定和等待分析。', loadingHistory: '正在读取历史记录…', noHistory: '还没有历史记录', noHistoryDetail: '完成一次包含有效回合的视频分析后，记录会显示在这里。', startFirstAnalysis: '开始首次分析',
   historyRallies: '{{count}} 个回合', coverUnavailable: '封面暂不可用', historyMissing: '源视频已移动或删除', historyChanged: '源视频已发生变化，请重新分析', clearHistory: '清空历史', deleteHistoryItem: '删除 {{name}} 的历史记录',
   deleteHistoryTitle: '删除历史记录', deleteHistoryConfirm: '只会删除本地分析记录和封面，不会删除源视频或导出视频。', clearHistoryTitle: '清空全部历史', clearHistoryConfirm: '全部本地分析记录和封面将被删除，源视频和导出视频不会受到影响。', confirmDelete: '确认删除',
-  available: '可用', unavailable: '安装损坏', acceleration: '运行模式', activeEncoder: '当前编码器', openh264: '旧版 OpenH264', x264: 'x264（内置）', gpu: 'GPU 加速', cpu: 'CPU', version: '应用版本', componentPath: '组件路径',
+  available: '可用', unavailable: '不可用', acceleration: '运行模式', activeEncoder: '当前编码器', openh264: '旧版 OpenH264', x264: 'x264（内置）', gpu: 'GPU 加速', cpu: 'CPU', version: '应用版本', componentPath: '组件路径',
   logs: '打开日志文件夹', licenses: '第三方许可说明', setupTitle: '内置组件状态', setupDetail: '分析、剪辑和预览所需组件已随应用安装，并在本机离线运行。',
-  componentMissing: '内置组件损坏', componentMissingDetail: '请重新安装或更新应用后再试。', openSetup: '打开设置',
-  componentCheckTitle: '组件检测结果', missingComponentsMessage: '缺少{{components}}', confirm: '确认',
+  componentMissing: '内置组件不可用', componentMissingDetail: '请在设置中重新检查组件，并打开日志查看失败原因。', openSetup: '打开设置',
+  componentCheckTitle: '组件检测结果', missingComponentsMessage: '{{components}}自检未通过', confirm: '确认',
+  componentCheckHelp: '请打开日志文件夹，将 app.log 提供给作者排查。若重新检查仍失败，请更新或重新安装 TTcut。',
   setupPurpose: '网络只用于下载你明确同意安装的固定版本组件；不会上传视频或分析数据。',
   analysisOffer: '安装分析组件', analysisOfferDetail: '包含本地分析所需文件，自动检测 GPU；仅在 CUDA 安装或自检失败时切换到独立 CPU 运行环境。',
   mediaOffer: '安装视频处理组件', mediaOfferDetail: '用于读取视频信息、准确剪辑、合并和导出成片。',
@@ -141,7 +143,7 @@ const zh = {
     CUSTOM_ARTIFACT_EXPORT_FAILED: '分段视频和 XML 都未能导出，请查看日志后重试。',
     UNKNOWN: '无法完成操作。请重试；若问题持续，请打开技术日志。',
   },
-  stages: { probe: '正在读取视频', table_sampling: '正在识别球桌', table_model: '正在识别球桌', table_inference: '正在识别球桌', video_normalization: '正在准备固定帧率媒体', load_model: '正在准备分析', analysis: '正在分析视频', candidate_analysis: '正在筛选候选回合', interval_union: '正在生成精分析区间', refinement_analysis: '正在进行二次分析', postprocess: '正在识别回合', preparing: '正在准备剪辑', 'preparing-artifacts': '正在准备导出', 'writing-xml': '正在写入 Premiere XML', 'exporting-rallies': '正在导出回合视频', cutting: '正在剪辑视频', 'cutting-and-exporting': '正在剪辑与导出', complete: '正在写入输出文件' },
+  stages: { probe: '正在读取视频', table_sampling: '正在识别球桌', table_model: '正在识别球桌', table_inference: '正在识别球桌', video_normalization: '正在准备固定帧率媒体', load_model: '正在准备分析', provider_fallback: 'DirectML 失败，正在重新分析', analysis: '正在分析视频', candidate_analysis: '正在筛选候选回合', interval_union: '正在生成精分析区间', refinement_analysis: '正在进行二次分析', postprocess: '正在识别回合', preparing: '正在准备剪辑', 'preparing-artifacts': '正在准备导出', 'writing-xml': '正在写入 Premiere XML', 'exporting-rallies': '正在导出回合视频', cutting: '正在剪辑视频', 'cutting-and-exporting': '正在剪辑与导出', complete: '正在写入输出文件' },
   setupStages: { download: '正在下载', verify: '正在校验文件', extract: '正在解压', self_test: '正在执行组件自检', install: '正在安全安装', complete: '正在完成设置' },
 } as const;
 
@@ -151,7 +153,8 @@ export type Messages = DeepStrings<typeof zh>;
 
 const en: Messages = {
   previewPreparing: 'Preparing compatible preview…',
-  previewFailed: 'Preview could not be loaded. Reopen this video to try again.',
+  previewFailed: 'Preview could not be loaded.',
+  previewRetry: 'Retry',
   autoCut: 'Auto Cut', history: 'History', settings: 'Settings', back: 'Back',
   selectTitle: 'Choose match videos',
   captureGuideTitle: 'Recommended video camera angle', captureGuideImageAlt: 'Recommended video camera angle illustration',
@@ -196,10 +199,11 @@ const en: Messages = {
   historyDescription: 'Reuse completed local analysis without calibrating or waiting again.', loadingHistory: 'Loading history…', noHistory: 'No history yet', noHistoryDetail: 'A video analysis containing valid rallies will appear here.', startFirstAnalysis: 'Analyze the first video',
   historyRallies: '{{count}} rallies', coverUnavailable: 'Cover unavailable', historyMissing: 'Source video was moved or deleted', historyChanged: 'Source video changed; analyze it again', clearHistory: 'Clear history', deleteHistoryItem: 'Delete the history for {{name}}',
   deleteHistoryTitle: 'Delete history entry', deleteHistoryConfirm: 'Only the local analysis record and cover will be deleted. Source and exported videos remain untouched.', clearHistoryTitle: 'Clear all history', clearHistoryConfirm: 'All local analysis records and covers will be deleted. Source and exported videos remain untouched.', confirmDelete: 'Delete',
-  available: 'Available', unavailable: 'Installation damaged', acceleration: 'Mode', activeEncoder: 'Active encoder', openh264: 'Legacy OpenH264', x264: 'x264 (built in)', gpu: 'GPU acceleration', cpu: 'CPU', version: 'App version', componentPath: 'Component path',
+  available: 'Available', unavailable: 'Unavailable', acceleration: 'Mode', activeEncoder: 'Active encoder', openh264: 'Legacy OpenH264', x264: 'x264 (built in)', gpu: 'GPU acceleration', cpu: 'CPU', version: 'App version', componentPath: 'Component path',
   logs: 'Open logs folder', licenses: 'Third-party notices', setupTitle: 'Built-in component status', setupDetail: 'Components for analysis, cutting, and preview are installed with the app and run offline.',
-  componentMissing: 'Built-in components are damaged', componentMissingDetail: 'Reinstall or update the app, then try again.', openSetup: 'Open Settings',
-  componentCheckTitle: 'Component check result', missingComponentsMessage: 'Missing {{components}}', confirm: 'Confirm',
+  componentMissing: 'Built-in components are unavailable', componentMissingDetail: 'Recheck components in Settings and open the logs to see why the check failed.', openSetup: 'Open Settings',
+  componentCheckTitle: 'Component check result', missingComponentsMessage: '{{components}} failed the self-check', confirm: 'Confirm',
+  componentCheckHelp: 'Open the logs folder and share app.log with the author for diagnosis. If rechecking still fails, update or reinstall TTcut.',
   setupPurpose: 'The network is used only to download a pinned component after your explicit consent. Videos and analysis data are never uploaded.',
   analysisOffer: 'Install analysis component', analysisOfferDetail: 'Includes the files required for local analysis, detects the GPU automatically, and switches to a separate CPU environment only if CUDA installation or self-test fails.',
   mediaOffer: 'Install media component', mediaOfferDetail: 'Reads video metadata and performs accurate cutting, concatenation, and final export.',
@@ -290,7 +294,7 @@ const en: Messages = {
     CUSTOM_ARTIFACT_EXPORT_FAILED: 'Neither rally videos nor XML could be exported. Inspect the log and retry.',
     UNKNOWN: 'The operation could not be completed. Retry and open the technical log if it continues.',
   },
-  stages: { probe: 'Reading video', table_sampling: 'Recognizing table', table_model: 'Recognizing table', table_inference: 'Recognizing table', video_normalization: 'Preparing constant-frame-rate media', load_model: 'Preparing analysis', analysis: 'Analyzing video', candidate_analysis: 'Screening candidate rallies', interval_union: 'Building refinement intervals', refinement_analysis: 'Running second-pass analysis', postprocess: 'Detecting rallies', preparing: 'Preparing', 'preparing-artifacts': 'Preparing exports', 'writing-xml': 'Writing Premiere XML', 'exporting-rallies': 'Exporting rally videos', cutting: 'Cutting video', 'cutting-and-exporting': 'Cutting and exporting', complete: 'Writing output' },
+  stages: { probe: 'Reading video', table_sampling: 'Recognizing table', table_model: 'Recognizing table', table_inference: 'Recognizing table', video_normalization: 'Preparing constant-frame-rate media', load_model: 'Preparing analysis', provider_fallback: 'DirectML failed; restarting analysis', analysis: 'Analyzing video', candidate_analysis: 'Screening candidate rallies', interval_union: 'Building refinement intervals', refinement_analysis: 'Running second-pass analysis', postprocess: 'Detecting rallies', preparing: 'Preparing', 'preparing-artifacts': 'Preparing exports', 'writing-xml': 'Writing Premiere XML', 'exporting-rallies': 'Exporting rally videos', cutting: 'Cutting video', 'cutting-and-exporting': 'Cutting and exporting', complete: 'Writing output' },
   setupStages: { download: 'Downloading', verify: 'Verifying files', extract: 'Extracting', self_test: 'Running component self-test', install: 'Installing safely', complete: 'Completing setup' },
 };
 

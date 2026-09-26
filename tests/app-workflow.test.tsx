@@ -8,7 +8,7 @@ import { analysisResultSchema } from '../src/shared/contracts';
 import hybridProvenance from './fixtures/hybrid-provenance.json';
 
 const bootstrap: BootstrapData = {
-  version: '1.3.6',
+  version: '1.3.7',
   settings: {
     language: 'zh-CN',
     calibration_method: 'automatic',
@@ -102,6 +102,7 @@ describe('App workflow notices and multi-task entry', () => {
       }),
       openExternalUrl: vi.fn().mockResolvedValue(undefined),
       revealLogs: vi.fn().mockResolvedValue(undefined),
+      refreshComponents: vi.fn().mockResolvedValue(bootstrap.components),
       revealOutput: vi.fn().mockResolvedValue(undefined),
       selectVideos,
       pathForDroppedFile: vi.fn((file: File) => `C:\\video\\${file.name}`),
@@ -146,6 +147,23 @@ describe('App workflow notices and multi-task entry', () => {
     const manualDownload = screen.getByRole('button', { name: 'Download update manually' });
     fireEvent.click(manualDownload);
     expect(window.ttcut.openExternalUrl).toHaveBeenCalledWith('https://github.com/WeiyePlayer/TTcut/releases');
+  });
+
+  it.each(['zh-CN', 'en'] as const)('reports a failed component check without claiming files are missing (%s)', async (language) => {
+    bootstrap.settings.language = language;
+    vi.mocked(window.ttcut.refreshComponents).mockResolvedValue({
+      ...bootstrap.components,
+      analysis: { ...bootstrap.components.analysis, available: false, version: null, detail: 'ANALYSIS_RUNTIME_SELF_TEST_FAILED' },
+    });
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: language === 'en' ? 'Settings' : '设置' }));
+    fireEvent.click(screen.getByRole('button', { name: language === 'en' ? 'Check again' : '重新检查' }));
+    const result = await screen.findByRole('dialog', { name: language === 'en' ? 'Component check result' : '组件检测结果' });
+    expect(within(result).getByText(language === 'en' ? 'Analysis component failed the self-check' : '分析组件自检未通过')).toBeVisible();
+    expect(within(result).getByText(/app\.log/)).toBeVisible();
+    expect(within(result).queryByText(/Missing|缺少|损坏|damaged/)).toBeNull();
+    fireEvent.click(within(result).getByRole('button', { name: language === 'en' ? 'Open logs folder' : '打开日志文件夹' }));
+    expect(window.ttcut.revealLogs).toHaveBeenCalledTimes(1);
   });
 
   it('offers update, later and skip choices without starting a download', async () => {

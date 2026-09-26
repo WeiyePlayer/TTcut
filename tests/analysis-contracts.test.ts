@@ -4,6 +4,7 @@ import {
   analysisResultSchema,
   continuousVisibilityRallySchema,
   tableAnalysisSchema,
+  workerEventSchema,
 } from '../src/shared/contracts';
 
 it('preserves an optional transfer boundary while accepting older rallies', () => {
@@ -37,6 +38,19 @@ const base = {
     },
   },
 };
+
+it('accepts the DirectML fallback progress event emitted by the Worker', () => {
+  const event = {
+    type: 'progress' as const,
+    task_id: base.task_id,
+    stage: 'provider_fallback' as const,
+    current: 0,
+    total: 1,
+    percent: 0,
+  };
+  expect(workerEventSchema.parse(event)).toEqual(event);
+  expect(workerEventSchema.safeParse({ ...event, stage: 'unknown_fallback' }).success).toBe(false);
+});
 
 it('round-trips FP16 CPU/NE provenance while retaining older Core ML history', () => {
   const result = {
@@ -148,6 +162,11 @@ describe('BlurBall analysis request contracts', () => {
       rallies: [],
       model_provenance: {
         profile: 'blurball_v1', component_version: '1.0.0',
+        runtime: {
+          format: 'onnx', provider: 'directml', model_filename: 'blurball_best.onnx',
+          model_sha256: 'a'.repeat(64), runtime_version: '1.24.3', batch_size: 8,
+          fallback_reason: 'DirectML batch 16 failed: DirectML inference failed.',
+        },
         roi: { x: 0, y: 0, width: 1280, height: 720 },
         main_input: { width: 512, height: 288 }, aux_input: null,
         detection: { confidence_threshold: 0.7, step: 1, maximum_displacement_pixels: 100, landing_region: 'expanded_table' },
@@ -171,6 +190,7 @@ describe('BlurBall analysis request contracts', () => {
     candidate.window_stride = 9;
     candidate.temporal_stride = 3;
     expect(analysisResultSchema.parse(sampled).model_provenance?.analysis?.stages[0]).toEqual(candidate);
+    expect(result.model_provenance?.runtime).toMatchObject({ provider: 'directml', batch_size: 8 });
     const withTrajectory = (trajectory: unknown) => ({
       ...result, model_provenance: { ...result.model_provenance, trajectory },
     });

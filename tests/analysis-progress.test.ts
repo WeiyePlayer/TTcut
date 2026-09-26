@@ -22,6 +22,14 @@ describe('analysis progress mapping', () => {
     expect(overallAnalysisProgress('analysis', 50, 'precalibrated')).toBe(53);
   });
 
+  it('maps provider fallback to the existing analysis restart boundary', () => {
+    expect(overallAnalysisProgress('provider_fallback', 0, 'manual')).toBe(10);
+    expect(overallAnalysisProgress('provider_fallback', 0, 'automatic')).toBe(5);
+    expect(overallAnalysisProgress('provider_fallback', 0, 'precalibrated', 'full', 'normalized')).toBe(25);
+    expect(overallAnalysisProgress('provider_fallback', 0, 'automatic', 'full', 'normalized')).toBe(30);
+    expect(overallAnalysisProgress('provider_fallback', 0, 'precalibrated', 'two_stage')).toBe(10);
+  });
+
   it('reserves the first 25% for CFR preparation in a pre-calibrated VFR run', () => {
     expect(overallAnalysisProgress('analysis', 0, 'precalibrated', 'full', 'normalized')).toBe(25);
     expect(overallAnalysisProgress('analysis', 100, 'precalibrated', 'full', 'normalized')).toBe(96);

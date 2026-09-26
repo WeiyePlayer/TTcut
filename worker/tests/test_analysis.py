@@ -157,7 +157,7 @@ def test_worker_v5_runs_single_low_threshold_pass_and_returns_exact_source_times
     monkeypatch.setenv('TTCUT_BLURBALL_WEIGHTS', 'blurball.pt')
     monkeypatch.setattr('ttcut_worker.worker.load_blurball', lambda *args: SimpleNamespace(component_version='1'))
     monkeypatch.setattr('ttcut_worker.worker.BlurBallPredictor', Predictor)
-    monkeypatch.setattr('ttcut_worker.worker.hybrid_motion_rallies', lambda *args, **kwargs: HybridResult(
+    monkeypatch.setattr('ttcut_worker.worker.source_time_hybrid_rallies', lambda *args, **kwargs: HybridResult(
         (RallySummary(1, 9, values[1].time, values[9].time, 1),), (1,), ()))
     result = analyze(validate_request(hybrid_request()))
     assert len(calls) == 1
@@ -166,7 +166,7 @@ def test_worker_v5_runs_single_low_threshold_pass_and_returns_exact_source_times
     assert result['rallies'][0]['start_time_seconds'] == 1 / 30
     assert result['rallies'][0]['bounce_count'] == 1
     assert result['excluded_fragments'] == []
-    assert result['rally_recognition']['version'] == 3
+    assert result['rally_recognition']['version'] == 4
     assert result['rally_recognition']['dead_bounce_filter']['reenergization_veto'] is True
 
 
@@ -209,7 +209,7 @@ def test_empty_hybrid_result_reports_ball_detection_coverage(monkeypatch, visibl
     monkeypatch.setenv('TTCUT_BLURBALL_WEIGHTS', 'blurball.pt')
     monkeypatch.setattr('ttcut_worker.worker.load_blurball', lambda *args: SimpleNamespace(component_version='1'))
     monkeypatch.setattr('ttcut_worker.worker.BlurBallPredictor', Predictor)
-    monkeypatch.setattr('ttcut_worker.worker.hybrid_motion_rallies', lambda *args, **kwargs: HybridResult((), (), ()))
+    monkeypatch.setattr('ttcut_worker.worker.source_time_hybrid_rallies', lambda *args, **kwargs: HybridResult((), (), ()))
     result = analyze(validate_request(hybrid_request()))
     assert result['rallies'] == []
     assert result['model_provenance']['trajectory'] == {

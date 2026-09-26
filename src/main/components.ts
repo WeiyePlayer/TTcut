@@ -7,6 +7,7 @@ import type { ComponentStatus } from '../shared/contracts';
 import { ProcessExecutionError, runProcess, type ProcessResult } from './processes';
 import { inspectMacComponents, macMediaComponents } from './macos/runtime';
 import { resolveInstallationLayout } from './installation-layout';
+import { logLine } from './logger';
 
 const PYTHON_VERSION = '3.12.13';
 const NUMPY_VERSION = '2.5.1';
@@ -263,19 +264,34 @@ export async function resolveUsableMediaComponents(): Promise<Pick<ComponentPath
 }
 
 export async function inspectComponentPaths(paths: ComponentPaths): Promise<ComponentStatus> {
+  const recordFailure = async (stage: string, error: unknown) => {
+    const runtime = formatAnalysisRuntimeDiagnostics(error);
+    const processResult = error instanceof ProcessExecutionError ? {
+      stdout: error.stdout, stderr: error.stderr, exitCode: error.exitCode,
+    } : undefined;
+    await logLine('app', 'ERROR', `Component check failed (${stage}): ${JSON.stringify({
+      paths, error: error instanceof Error ? error.stack ?? error.message : String(error), processResult,
+    })}; ${runtime ?? ''}`).catch(() => undefined);
+  };
   let analysisVersion: string | null = null;
   let acceleration: 'directml' | 'cpu' | 'unavailable' = 'unavailable';
   let analysisDetail: string | null = null;
   let modelsAvailable = false;
   let modelDetail: string | null = null;
   try { await validateBundledModels(paths); modelsAvailable = true; }
-  catch (error) { modelDetail = error instanceof Error ? error.message : String(error); }
+  catch (error) {
+    modelDetail = error instanceof Error ? error.message : String(error);
+    await recordFailure('models', error);
+  }
   if (paths.python && modelsAvailable) {
     try {
       const result = await validateAnalysisRuntime(paths.python);
       analysisVersion = `${result.version} (bundled)`;
       acceleration = result.acceleration;
-    } catch (error) { analysisDetail = error instanceof Error ? error.message : String(error); }
+    } catch (error) {
+      analysisDetail = error instanceof Error ? error.message : String(error);
+      await recordFailure('analysis runtime', error);
+    }
   } else { analysisDetail = !paths.python ? 'ANALYSIS_RUNTIME_MISSING' : modelDetail ?? 'MODEL_RESOURCE_MISSING'; }
 
   let mediaVersion: string | null = null;
@@ -285,7 +301,10 @@ export async function inspectComponentPaths(paths: ComponentPaths): Promise<Comp
       mediaVersion = (await validateMediaComponent(paths.ffmpeg, paths.ffprobe)).version;
       await validateX264EightKCapability(paths.ffmpeg);
     }
-    catch (error) { mediaDetail = error instanceof Error ? error.message : String(error); }
+    catch (error) {
+      mediaDetail = error instanceof Error ? error.message : String(error);
+      await recordFailure('media runtime', error);
+    }
   } else { mediaDetail = 'MEDIA_RUNTIME_MISSING'; }
   return {
     analysis: {

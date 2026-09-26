@@ -23,6 +23,8 @@ beforeEach(async () => {
   mocks.probe.mockImplementation(async (file: string) => ({
     path: file, duration_seconds: 10, width: file === source ? 3840 : 1280, height: file === source ? 2160 : 720,
     fps: 60, video_codec: file === source ? 'hevc' : 'h264', pixel_format: 'yuv420p', audio_codec: 'aac',
+    frame_count: 600, video_duration_seconds: 10, audio_duration_seconds: 10,
+    video_start_time_seconds: 0, audio_start_time_seconds: 0,
   }));
   mocks.run.mockImplementation(async (_exe, args: string[]) => {
     await writeFile(args.at(-1)!, 'proxy');
@@ -66,8 +68,57 @@ describe('compatible preview media', () => {
     mocks.probe.mockImplementation(async (file: string) => ({
       path: file, duration_seconds: file === source ? 10 : 2, width: 1280, height: 720,
       fps: 60, video_codec: 'h264', pixel_format: 'yuv420p', audio_codec: 'aac',
+      frame_count: file === source ? 600 : 120,
+      video_duration_seconds: file === source ? 10 : 2,
+      audio_duration_seconds: file === source ? 10 : 2,
+      video_start_time_seconds: file === source ? 4 : 0,
+      audio_start_time_seconds: file === source ? 4 : 0,
     }));
-    await expect(service.preparePreviewMedia(source)).rejects.toThrow('PREVIEW_VALIDATION_FAILED');
+    await expect(service.preparePreviewMedia(source)).rejects.toThrow('PREVIEW_VALIDATION_FAILED:VIDEO_TRUNCATED');
+    expect(mocks.log).toHaveBeenCalledWith('preview', 'ERROR', expect.stringContaining('"normalized_video_timeline"'));
+  });
+
+  it('accepts a usable proxy despite a large container-duration difference', async () => {
+    mocks.probe.mockImplementation(async (file: string) => file === source ? ({
+      path: file, duration_seconds: 25, width: 3840, height: 2160, fps: 60,
+      video_codec: 'hevc', pixel_format: 'yuv420p', audio_codec: 'aac', frame_count: 600,
+      video_duration_seconds: 10, audio_duration_seconds: 10.5,
+      video_start_time_seconds: 5, audio_start_time_seconds: 4.5,
+    }) : ({
+      path: file, duration_seconds: 9.4, width: 1280, height: 720, fps: 60,
+      video_codec: 'h264', pixel_format: 'yuv420p', audio_codec: 'aac', frame_count: 564,
+      video_duration_seconds: 9.4, audio_duration_seconds: 9.45,
+      video_start_time_seconds: 0, audio_start_time_seconds: 0,
+    }));
+    await expect(service.preparePreviewMedia(source)).resolves.toMatch(/\.mp4$/);
+    expect(mocks.log).toHaveBeenCalledWith('preview', 'WARN', expect.stringContaining('"container_duration_delta_seconds":-15.6'));
+    expect(mocks.log).toHaveBeenCalledWith('preview', 'INFO', expect.stringContaining('Compatible preview ready'));
+  });
+
+  it('accepts full-range 8-bit 4:2:0 H.264 reported by ffprobe as yuvj420p', async () => {
+    const probe = mocks.probe.getMockImplementation()!;
+    mocks.probe.mockImplementation(async (file: string) => ({
+      ...await probe(file), pixel_format: 'yuvj420p', color_range: 'pc',
+    }));
+
+    await expect(service.preparePreviewMedia(source)).resolves.toMatch(/\.mp4$/);
+  });
+
+  it('converts full-range input samples to limited range for the compatibility proxy', async () => {
+    await service.preparePreviewMedia(source);
+    const args = mocks.run.mock.calls[0]![1] as string[];
+    expect(args[args.indexOf('-vf') + 1]).toContain('out_range=tv');
+    expect(args[args.indexOf('-color_range') + 1]).toBe('tv');
+  });
+
+  it('still rejects genuinely unsupported chroma formats and logs their color metadata', async () => {
+    const probe = mocks.probe.getMockImplementation()!;
+    mocks.probe.mockImplementation(async (file: string) => ({
+      ...await probe(file), pixel_format: file === source ? 'yuvj420p' : 'yuv422p', color_range: 'pc',
+    }));
+
+    await expect(service.preparePreviewMedia(source)).rejects.toThrow('PREVIEW_VALIDATION_FAILED:FORMAT_UNSUPPORTED');
+    expect(mocks.log).toHaveBeenCalledWith('preview', 'ERROR', expect.stringContaining('"color_range":"pc"'));
   });
 
   it('aborts preparation and deletes its cache before shutdown completes', async () => {
