@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { copyFile, mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -26,6 +26,15 @@ if (updatePublisherName !== 'weiye') {
 const { api } = require('@electron-forge/core');
 await api.package({ dir: root, arch: 'x64', interactive: false });
 if (!existsSync(path.join(packaged, executableName))) throw new Error(`Packaged ${productName} executable is missing: ${packaged}`);
+// Electron Packager re-signs some Microsoft runtime DLLs, changing their bytes
+// after the runtime manifest is generated. Restore the exact staged DLLs before
+// NSIS captures the package; release verification checks their recorded hashes.
+const runtimeRoot = path.join(root, '.runtime', 'windows');
+const runtimeManifest = JSON.parse(await readFile(path.join(runtimeRoot, 'runtime-manifest.json'), 'utf8'));
+for (const relative of Object.keys(runtimeManifest.files ?? {}).filter((name) => /^python\/[^/]+\.dll$/i.test(name))) {
+  const segments = relative.split('/');
+  await copyFile(path.join(runtimeRoot, ...segments), path.join(packaged, 'resources', 'windows', ...segments));
+}
 if (!independentBeta) {
   await writeFile(path.join(packaged, 'resources', 'app-update.yml'), [
     'provider: github',
