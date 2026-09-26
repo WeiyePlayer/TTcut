@@ -11,6 +11,22 @@ import {
 
 const EPSILON = 1e-9;
 export const FINAL_RALLY_TAIL_SECONDS = 1;
+export type ExcludedRange = { start_time_seconds: number; end_time_seconds: number };
+
+/** Legacy histories keep their original grouping rules. Only new native decisions opt in. */
+export function exportExclusions(result: AnalysisResultV1): readonly ExcludedRange[] {
+  return 'rally_recognition' in result && result.rally_recognition.method === 'continuous_visibility'
+    && 'timebase' in result.rally_recognition && result.rally_recognition.timebase
+    && 'excluded_fragments' in result ? result.excluded_fragments ?? [] : [];
+}
+
+export function clampRollToExclusions(start: number, end: number, rawStart: number, rawEnd: number, excluded: readonly ExcludedRange[]): [number, number] {
+  for (const fragment of excluded) {
+    if (fragment.end_time_seconds <= rawStart) start = Math.max(start, fragment.end_time_seconds);
+    if (fragment.start_time_seconds > rawEnd) end = Math.min(end, fragment.start_time_seconds);
+  }
+  return [start, end];
+}
 
 export function finalRallyTailSeconds(method: RallyRecognitionMethod): number {
   return method === 'bounce_events' ? FINAL_RALLY_TAIL_SECONDS : 0;
@@ -70,6 +86,7 @@ export function buildCutGroups(
   postRollSeconds: number,
   videoDuration: number,
   recognitionMethod: RallyRecognitionMethod = 'bounce_events',
+  excluded: readonly ExcludedRange[] = [],
 ): CutGroup[] {
   if (!Number.isFinite(videoDuration) || videoDuration <= 0) return [];
   if (!Number.isFinite(preRollSeconds) || preRollSeconds < 0) return [];
@@ -90,7 +107,8 @@ export function buildCutGroups(
   const raw: Array<Omit<CutGroup, 'start' | 'end'>> = [];
   for (const rally of ordered) {
     const current = raw.at(-1);
-    if (current && rally.start_time_seconds - current.rawEnd < (recognitionMethod === 'hybrid_motion_bounce' ? 3 : 5 - EPSILON)) {
+    if (current && rally.start_time_seconds - current.rawEnd < (recognitionMethod === 'hybrid_motion_bounce' ? 3 : 5 - EPSILON)
+      && !excluded.some(f => f.start_time_seconds < rally.start_time_seconds && f.end_time_seconds > current.rawEnd)) {
       current.rawEnd = Math.max(current.rawEnd, rally.end_time_seconds);
       current.rallyIds.push(rally.id);
     } else {
@@ -105,12 +123,14 @@ export function buildCutGroups(
   const expanded: CutGroup[] = [];
   for (const group of raw) {
     const firstRally = ordered.find((rally) => rally.id === group.rallyIds[0])!;
-    const start = rallyLeadInStart(firstRally, preRollSeconds, recognitionMethod);
+    const rollStart = rallyLeadInStart(firstRally, preRollSeconds, recognitionMethod);
     // Only bounce recognition needs the fixed tail; always apply the configured roll.
-    const end = Math.min(videoDuration, group.rawEnd + finalRallyTailSeconds(recognitionMethod) + postRollSeconds);
+    const rollEnd = Math.min(videoDuration, group.rawEnd + finalRallyTailSeconds(recognitionMethod) + postRollSeconds);
+    const [start, end] = clampRollToExclusions(rollStart, rollEnd, group.rawStart, group.rawEnd, excluded);
     if (end <= start) continue;
     const previous = expanded.at(-1);
-    if (previous && start <= previous.end + EPSILON) {
+    if (previous && start <= previous.end + EPSILON
+      && !excluded.some(f => f.start_time_seconds < group.rawStart && f.end_time_seconds > previous.rawEnd)) {
       previous.rawEnd = Math.max(previous.rawEnd, group.rawEnd);
       previous.end = Math.max(previous.end, end);
       previous.rallyIds.push(...group.rallyIds);
@@ -130,6 +150,6 @@ export function createCutGroups(result: AnalysisResultV1, selection: CutSelectio
     selection.post_roll_seconds,
     result.video.duration_seconds,
     rallyRecognitionMethod(result),
+    exportExclusions(result),
   );
 }
-

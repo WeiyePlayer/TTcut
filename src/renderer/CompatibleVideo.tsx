@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type Ref, type VideoHTMLAttributes } from 'react';
+import { useCallback, useEffect, useRef, useState, type Ref, type VideoHTMLAttributes } from 'react';
 
 /** Keeps the same HTML video/ref while swapping only its disposable playback URL. */
 export function CompatibleVideo({ ref, hdr = false, ...props }: VideoHTMLAttributes<HTMLVideoElement> & { ref?: Ref<HTMLVideoElement>; hdr?: boolean }) {
@@ -8,6 +8,12 @@ export function CompatibleVideo({ ref, hdr = false, ...props }: VideoHTMLAttribu
   const task = useRef<string | null>(null);
   const generation = useRef(0);
   const attempted = useRef(false);
+  const video = useRef<HTMLVideoElement | null>(null);
+  const attach = useCallback((element: HTMLVideoElement | null) => {
+    video.current = element;
+    if (typeof ref === 'function') return ref(element);
+    if (ref) ref.current = element;
+  }, [ref]);
   const mac = window.ttcut?.platform === 'darwin';
   const english = document.documentElement.lang.startsWith('en');
   async function prepare() {
@@ -16,7 +22,14 @@ export function CompatibleVideo({ ref, hdr = false, ...props }: VideoHTMLAttribu
     const current = generation.current;
     const id = crypto.randomUUID(); task.current = id; setPercent(0); setError(null);
     const off = window.ttcut.onPreviewProgress?.((value) => { if (value.taskId === id && current === generation.current) setPercent(value.percent); });
-    try { const url = await window.ttcut.preparePreview(props.src, id); if (current === generation.current) setProxy(url); }
+    try {
+      const url = await window.ttcut.preparePreview(props.src, id);
+      if (current === generation.current) {
+        setProxy(url);
+        // A retry can return the same valid cached URL; reload clears the media error.
+        if (url === proxy) video.current?.load();
+      }
+    }
     catch (error) {
       if (current === generation.current) {
         const reason = (error instanceof Error ? error.message : String(error)).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '');
@@ -24,7 +37,7 @@ export function CompatibleVideo({ ref, hdr = false, ...props }: VideoHTMLAttribu
           ? (english ? 'Finish the current task, then retry preview.' : '请在当前任务完成后重试预览。')
           : reason.includes('CANCELLED')
             ? (english ? 'Preview cancelled.' : '已取消预览。')
-            : `${english ? 'Preview failed' : '预览生成失败'}: ${reason}`);
+            : `${english ? 'Preview failed' : '预览生成失败'}: ${reason.slice(0, 500)}`);
       }
     }
     finally { off?.(); if (task.current === id) task.current = null; if (current === generation.current) setPercent(null); }
@@ -35,7 +48,13 @@ export function CompatibleVideo({ ref, hdr = false, ...props }: VideoHTMLAttribu
     return () => { generation.current++; const id = task.current; task.current = null; if (id) void window.ttcut.cancelTask(id); };
   }, [props.src, hdr]);
   return <>
-    <video {...props} ref={ref} src={proxy ?? props.src} onError={(event) => { props.onError?.(event); if (!attempted.current) void prepare(); }} />
+    <video {...props} ref={attach} src={proxy ?? props.src}
+      onError={(event) => {
+        props.onError?.(event);
+        if (!mac) return;
+        if (proxy) setError(english ? 'Preview playback failed. Please retry.' : '预览播放失败，请重试。');
+        else if (!attempted.current) void prepare();
+      }} />
     {percent !== null && <div className="compatibility-preview-status" role="status" onPointerDown={(e) => e.stopPropagation()}>
       <span>{english ? 'Preparing preview' : '正在准备预览'} {Math.round(percent)}%</span>
       <button type="button" onClick={() => { if (task.current) void window.ttcut.cancelTask(task.current); }}>{english ? 'Cancel' : '取消'}</button>

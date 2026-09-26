@@ -6,7 +6,7 @@ import type {
   Rally,
   RallyRecognitionMethod,
 } from '../shared/contracts';
-import { finalRallyTailSeconds, rallyLeadInStart } from './segments';
+import { clampRollToExclusions, finalRallyTailSeconds, rallyLeadInStart, type ExcludedRange } from './segments';
 
 const EPSILON = 1e-6;
 const PRECISION = 1_000_000;
@@ -102,14 +102,16 @@ export function createCustomClipDraft(
   videoDuration: number,
   fps: number,
   recognitionMethod: RallyRecognitionMethod = 'bounce_events',
+  excluded: readonly ExcludedRange[] = [],
 ): CustomRallyClip[] {
   const minimumDuration = frameDuration(fps);
   const clips = orderedRallies(rallies).map((rally) => {
-    const defaultStart = seconds(rallyLeadInStart(rally, preRollSeconds, recognitionMethod));
-    const defaultEnd = seconds(Math.min(
+    const [boundedStart, boundedEnd] = clampRollToExclusions(rallyLeadInStart(rally, preRollSeconds, recognitionMethod), Math.min(
       videoDuration,
       rally.end_time_seconds + finalRallyTailSeconds(recognitionMethod) + postRollSeconds,
-    ));
+    ), rally.start_time_seconds, rally.end_time_seconds, excluded);
+    const defaultStart = seconds(boundedStart);
+    const defaultEnd = seconds(boundedEnd);
     const end = Math.max(defaultEnd, seconds(Math.min(videoDuration, defaultStart + minimumDuration)));
     return {
       clipId: rally.id,
