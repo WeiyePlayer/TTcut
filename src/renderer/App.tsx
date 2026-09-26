@@ -710,9 +710,7 @@ export function App() {
                   <button className="secondary" onClick={() => void refreshComponents()}>{t.refreshComponents}</button>
                 </div>
                 {(bootstrap?.components.analysis.detail || bootstrap?.components.media.detail) && (
-                  <p role="alert">{settings.language === 'en'
-                    ? 'The built-in runtime is damaged. Reinstall or update TTcut.'
-                    : '内置运行时已损坏，请重新安装或更新 TTcut。'}</p>
+                  <p role="alert">{t.componentCheckHelp}</p>
                 )}
               </article>
               <article className="card actions-card">
@@ -963,7 +961,7 @@ export function App() {
         />
       )}
       {languageTransition && <div className="language-loader"><span /></div>}
-      {missingComponents && <div className="modal-backdrop"><div className="modal" role="dialog" aria-modal="true" aria-label={t.componentCheckTitle}><h2>{t.componentCheckTitle}</h2><p>{interpolate(t.missingComponentsMessage, { components: missingComponents.join(settings.language === 'zh-CN' ? '、' : ', ') })}</p><div><button className="primary" onClick={() => setMissingComponents(null)}>{t.confirm}</button></div></div></div>}
+      {missingComponents && <div className="modal-backdrop"><div className="modal" role="dialog" aria-modal="true" aria-label={t.componentCheckTitle}><h2>{t.componentCheckTitle}</h2><p>{interpolate(t.missingComponentsMessage, { components: missingComponents.join(settings.language === 'zh-CN' ? '、' : ', ') })}</p><p>{t.componentCheckHelp}</p><div><button className="secondary" onClick={() => void window.ttcut.revealLogs()}>{t.logs}</button><button className="primary" onClick={() => setMissingComponents(null)}>{t.confirm}</button></div></div></div>}
       {historyConfirmation && <div className="modal-backdrop"><div className="modal" role="dialog" aria-modal="true"><h2>{historyConfirmation.kind === 'clear' ? t.clearHistoryTitle : t.deleteHistoryTitle}</h2><p>{historyConfirmation.kind === 'clear' ? t.clearHistoryConfirm : t.deleteHistoryConfirm}</p><div><button className="secondary" onClick={() => setHistoryConfirmation(null)}>{t.cancel}</button><button className="primary destructive-confirm" onClick={() => void confirmHistoryAction()}>{t.confirmDelete}</button></div></div></div>}
       {closeDialog && <div className="modal-backdrop"><div className="modal" role="dialog" aria-modal="true"><h2>{t.closeTitle}</h2><p>{t.closeDetail}</p><div><button className="secondary" onClick={() => { setCloseDialog(false); void window.ttcut.confirmClose('cancel'); }}>{t.cancel}</button><button className="secondary" onClick={() => { setCloseDialog(false); void window.ttcut.confirmClose('minimize'); }}>{t.minimize}</button><button className="primary" onClick={() => void window.ttcut.confirmClose('exit')}>{t.exit}</button></div></div></div>}
     </div>

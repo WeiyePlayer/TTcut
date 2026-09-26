@@ -62,6 +62,7 @@ async function auditRuntime(directory, label) {
   check(existsSync(directory), `${label} is missing.`);
   const required = [
     'python/python.exe', 'ffmpeg/ffmpeg.exe', 'ffmpeg/ffprobe.exe', 'runtime-manifest.json',
+    'python/msvcp140.dll', 'python/msvcp140_1.dll', 'python/vcruntime140.dll', 'python/vcruntime140_1.dll',
   ];
   for (const name of required) check(existsSync(path.join(directory, ...name.split('/'))), `${label} is missing ${name}.`);
   const files = (await walk(directory)).map((file) => path.relative(directory, file).replaceAll('\\', '/'));
@@ -76,6 +77,11 @@ async function auditRuntime(directory, label) {
     check(value.media_encoder === 'libx264', `${label} is not x264-only.`);
     check(value.providers?.includes('CPUExecutionProvider'), `${label} has no CPU provider.`);
     check(value.providers?.includes('DmlExecutionProvider'), `${label} has no DirectML provider.`);
+    for (const name of required.filter((name) => name.endsWith('.dll'))) {
+      const file = path.join(directory, ...name.split('/'));
+      check(/^[a-f0-9]{64}$/.test(value.files?.[name] ?? ''), `${label} has no recorded hash for ${name}.`);
+      if (existsSync(file)) check(await sha256(file) === value.files?.[name], `${label}/${name} hash mismatch.`);
+    }
   }
 }
 

@@ -8,18 +8,25 @@ vi.mock('electron', () => ({
   },
 }));
 
-import { validateAnalysisRuntime } from '../src/main/components';
+import { inspectComponentPaths, resolveComponents, validateAnalysisRuntime } from '../src/main/components';
 
 const python = process.env.TTCUT_ANALYSIS_RUNTIME_INTEGRATION;
 
 describe.skipIf(!python)('real analysis runtime validation', () => {
-  it('accepts the installed cu126 runtime after a real CUDA smoke test', async () => {
+  it('accepts the bundled ONNX runtime after a real import probe', async () => {
     if (!python) throw new Error('TTCUT_ANALYSIS_RUNTIME_INTEGRATION is required.');
-    await expect(validateAnalysisRuntime(python, 'cu126')).resolves.toMatchObject({
+    await expect(validateAnalysisRuntime(python)).resolves.toMatchObject({
       pythonVersion: '3.12.13',
-      torchVersion: '2.12.1+cu126',
-      acceleration: 'cuda',
-      variant: 'cu126',
+      onnxRuntimeVersion: '1.24.3',
+      acceleration: expect.stringMatching(/^(directml|cpu)$/),
+      variant: 'bundled',
     });
   }, 60_000);
+
+  it('passes the real model, analysis and media component checks', async () => {
+    const paths = await resolveComponents();
+    await expect(inspectComponentPaths({ ...paths, python: python! })).resolves.toMatchObject({
+      analysis: { available: true, detail: null }, media: { available: true, detail: null },
+    });
+  }, 120_000);
 });
