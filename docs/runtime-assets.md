@@ -44,6 +44,13 @@ OpenCV 和 ONNX Runtime DirectML，并复制 x264 FFmpeg/ffprobe。脚本在
 `.runtime/windows/runtime-manifest.json` 写入版本和关键文件哈希，并执行
 导入、provider、编码器和 8K 单帧编码检查。
 
+ONNX Runtime 还依赖 Visual C++ x64 运行库。暂存脚本从 Visual Studio 的
+`VC/Redist/MSVC/<version>/x64/Microsoft.VC*.CRT` 目录复制 DLL 到 Python
+可执行文件所在目录，不依赖用户预先安装系统运行库。默认通过 `vswhere`
+定位；构建机也可用 `TTCUT_VC_REDIST_SOURCE` 指定该目录。目录必须包含
+`msvcp140.dll`、`msvcp140_1.dll`、`vcruntime140.dll` 和 `vcruntime140_1.dll`。
+缺失或架构错误会中止暂存，发行校验也会核对这些文件及清单中的哈希。
+
 ```powershell
 python scripts/stage-windows-runtime.py
 npm.cmd run stage:release
@@ -56,7 +63,9 @@ DirectML Session 使用顺序执行、关闭 memory pattern 和图优化。初�
 ## 产品行为
 
 设置页只显示内置分析运行时和 x264 媒体工具的状态，并提供“重新检查”。
-缺失或自检失败显示安装损坏提示；应用不会下载、导入或安装组件，也不会
+缺失或自检失败显示不可用提示；启动和手动检测结果写入 `logs/app.log`，
+失败时保留模型路径、Python 路径、退出码和原始输出，便于区分文件缺失、
+完整性失败和运行时加载失败。应用不会下载、导入或安装组件，也不会
 把旧组件目录作为生产回退。全部内置自检成功后，应用只按固定白名单清理
 旧运行时、FFmpeg、下载缓存、暂存、回滚和组件清单；任一自检失败则保留
 旧数据。

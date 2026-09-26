@@ -52,6 +52,7 @@ import {
 import { openExternalUrl } from './external-links';
 import { getUpdater } from './updater';
 import { requestSystemShutdown } from './system-power';
+import { distributionIdentity } from './distribution';
 
 protocol.registerSchemesAsPrivileged([{
   scheme: 'ttcut-media',
@@ -61,6 +62,12 @@ protocol.registerSchemesAsPrivileged([{
 let mainWindow: BrowserWindow | null = null;
 let exitApproved = false;
 const isMac = process.platform === 'darwin';
+const distribution = distributionIdentity();
+if (distribution.independentBeta) {
+  app.setName(distribution.productName);
+  app.setPath('userData', path.join(app.getPath('appData'), distribution.userDataDirectoryName));
+  if (!isMac) app.setAppUserModelId(distribution.appId);
+}
 if (isMac) {
   const override = app.commandLine.getSwitchValue('user-data-dir');
   app.setPath('userData', override ? path.resolve(override) : path.join(app.getPath('appData'), 'TTcut-Electron', ...(app.isPackaged ? [] : ['development'])));
@@ -112,7 +119,7 @@ function registerIpc(): void {
       components,
       platformCompatibility,
       logsPath: getLogDirectory(),
-      capabilities: { managedComponents: false, nativeWindow: isMac, shutdown: !isMac, automaticUpdates: !isMac },
+      capabilities: { managedComponents: false, nativeWindow: isMac, shutdown: !isMac, automaticUpdates: !isMac && distribution.automaticUpdates },
     };
   });
   ipcMain.handle(IPC.previewPrepare, (_event, mediaUrl: unknown, taskId: unknown) => {
@@ -320,7 +327,7 @@ async function createWindow(): Promise<void> {
     frame: isMac,
     ...(isMac ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 14, y: 12 } } : {}),
     backgroundColor: '#FFFFFF',
-    title: 'TTcut',
+    title: distribution.productName,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

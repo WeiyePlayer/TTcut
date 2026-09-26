@@ -628,6 +628,7 @@ const excludedEvidenceSchema = z.discriminatedUnion('reason', [
     bounce_times_seconds: z.array(finiteNumber.nonnegative()),
   }).strict(),
   z.object({ reason: z.literal('zero_bounce_rally'), bounce_count: z.literal(0) }).strict(),
+  z.object({ reason: z.literal('observed_pause') }).strict(),
 ]);
 
 export const excludedFragmentSchema = z.object({
@@ -690,13 +691,23 @@ const hybridRecognitionV3Schema = hybridRecognitionV2Schema.extend({
   }).strict(),
 }).strict();
 
+const hybridRecognitionV4Schema = hybridRecognitionV3Schema.extend({
+  version: z.literal(4),
+  timebase: z.object({
+    maximum_clock_hz: z.literal(30), selection: z.literal('nearest_source_observation'),
+    pause_window_seconds: z.literal(0.5), pause_minimum_seconds: z.literal(0.75),
+    pause_minimum_support_seconds: z.literal(0.3), pause_maximum_speed_ratio_per_second: z.literal(0.35),
+    pause_maximum_observation_gap_seconds: z.literal(0.1), pause_boundary_context_seconds: z.literal(0.2),
+  }).strict(),
+}).strict();
+
 export const hybridAnalysisResultV3Schema = analysisResultBaseSchema.extend({
   schema_version: z.literal(3),
   rallies: z.array(bounceRallySchema),
   bounce_times_seconds: z.array(finiteNumber.nonnegative()),
   excluded_fragments: z.array(excludedFragmentSchema),
   rally_recognition: z.discriminatedUnion('version', [
-    hybridRecognitionV1Schema, hybridRecognitionV2Schema, hybridRecognitionV3Schema,
+    hybridRecognitionV1Schema, hybridRecognitionV2Schema, hybridRecognitionV3Schema, hybridRecognitionV4Schema,
   ]),
 }).strict().superRefine((result, ctx) => {
   const invalid = (message: string) => ctx.addIssue({ code: 'custom', message });
@@ -708,6 +719,10 @@ export const hybridAnalysisResultV3Schema = analysisResultBaseSchema.extend({
   for (const [i, f] of result.excluded_fragments.entries()) {
     if (f.end_time_seconds > result.video.duration_seconds || (i > 0 && f.start_time_seconds < result.excluded_fragments[i - 1]!.end_time_seconds)) invalid('Excluded fragments must be ordered, non-overlapping and source-bound');
     for (const evidence of f.evidence) {
+      if (evidence.reason === 'observed_pause') {
+        if (result.rally_recognition.version < 4) invalid('Observed pauses require source-time recognition');
+        continue;
+      }
       if (evidence.reason === 'zero_bounce_rally') continue;
       const times = evidence.bounce_times_seconds;
       if (times.some((t, j) => t < f.start_time_seconds || t >= f.end_time_seconds || (j > 0 && t <= times[j - 1]!))) invalid('Evidence bounce times must be ordered inside the exclusion');

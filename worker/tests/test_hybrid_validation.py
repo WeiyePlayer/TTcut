@@ -76,7 +76,7 @@ def test_full_and_compact_cache_rows_keep_confidence_and_exact_motion_configurat
                        {'frame': 2, 'time': .091, 'visibility': 1, 'x': 55, 'y': 62,
                         'confidence': .9, 'time_source': 'original_vfr'}],
     }
-    with patch.object(validation, 'hybrid_motion_rallies', return_value=HybridResult((), (), ())) as run:
+    with patch.object(validation, 'source_time_hybrid_rallies', return_value=HybridResult((), (), ())) as run:
         result = validation.replay(payload)
     assert result['missing_confidence'] is False
     points = run.call_args.args[0]

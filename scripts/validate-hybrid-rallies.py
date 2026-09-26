@@ -11,7 +11,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'worker'))
 from ttcut_worker.calibration import TableCalibration
-from ttcut_worker.hybrid_rallies import hybrid_motion_rallies, hybrid_provenance
+from ttcut_worker.hybrid_rallies import source_time_hybrid_rallies, hybrid_provenance
 from ttcut_worker.types import TrajectoryPoint
 from ttcut_worker.visibility_rallies import VisibilityMotionConfig, is_end_on_table_view
 
@@ -50,10 +50,10 @@ def replay(payload):
         else:
             missing_confidence |= len(row) < 7
             points.append(TrajectoryPoint(*row))
-    result = hybrid_motion_rallies(points, payload['fps'], calibration, motion_config=config)
+    result = source_time_hybrid_rallies(points, calibration, motion_config=config)
     bounce_frames = set(result.bounce_frames)
     return {
-        'rally_recognition': hybrid_provenance(vertical_exchange_enabled=config.vertical_exchange_enabled),
+        'rally_recognition': hybrid_provenance(vertical_exchange_enabled=config.vertical_exchange_enabled, source_time=True),
         'rallies': [{'start_time_seconds': r.start_time, 'end_time_seconds': r.end_time, 'bounce_count': r.bounce_count}
                     for r in result.rallies],
         'excluded_fragments': list(result.excluded_fragments),

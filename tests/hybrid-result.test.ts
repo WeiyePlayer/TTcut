@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest';
 import provenance from './fixtures/hybrid-provenance.json';
 import legacyProvenance from './fixtures/hybrid-provenance-v1.json';
 import previousProvenance from './fixtures/hybrid-provenance-v2.json';
+import sourceTimeProvenance from './fixtures/hybrid-provenance-v4.json';
 import { analysisResultSchema, hasBounceCounts, hybridAnalysisResultV3Schema } from '../src/shared/contracts';
-import { buildCutGroups, selectRallies } from '../src/domain/segments';
+import { buildCutGroups, createCutGroups, selectRallies } from '../src/domain/segments';
 import { calculateManualBounceCount } from '../src/domain/custom-clips';
 
 const rally = (start: number, end: number, index = 1, count = 4) => ({
@@ -20,6 +21,21 @@ const fixture = () => ({
 });
 
 describe('hybrid result and editing/export rules', () => {
+  it('keeps explicit pause boundaries through close-gap grouping and overlapping padding', () => {
+    const result = hybridAnalysisResultV3Schema.parse({
+      ...fixture(), rally_recognition: sourceTimeProvenance,
+      rallies: [rally(1, 5, 1, 2), rally(6, 9, 2, 2)], bounce_times_seconds: [2, 4, 7, 8],
+      excluded_fragments: [{ start_time_seconds: 5.2, end_time_seconds: 5.8, evidence: [{ reason: 'observed_pause' }] }],
+    });
+    const groups = createCutGroups(result, { mode: 'all', pre_roll_seconds: 2.5, post_roll_seconds: 2 });
+    expect(groups.map(group => [group.start, group.end, group.rallyIds])).toEqual([
+      [0, 5.2, ['rally_001']], [5.8, 11, ['rally_002']],
+    ]);
+    expect(hybridAnalysisResultV3Schema.safeParse({ ...result, rally_recognition: provenance }).success).toBe(false);
+    expect(hybridAnalysisResultV3Schema.safeParse({
+      ...result, rally_recognition: { ...sourceTimeProvenance, timebase: { ...sourceTimeProvenance.timebase, maximum_clock_hz: 120 } },
+    }).success).toBe(false);
+  });
   it('parses production provenance and exposes positive board counts', () => {
     const result = analysisResultSchema.parse(fixture());
     expect(hasBounceCounts(result)).toBe(true);

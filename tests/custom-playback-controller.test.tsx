@@ -25,7 +25,7 @@ function setup(initialMode: CustomPlaybackMode = 'rallies') {
   const onLocate = vi.fn();
   const onTime = vi.fn();
   const preview = {
-    source: 'source', url: 'source', status: 'ready' as const, seekTo, togglePlayback: vi.fn(),
+    source: 'source', url: 'source', status: 'ready' as const, error: null, seekTo, togglePlayback: vi.fn(), retry: vi.fn(),
     getPlaybackIntent: () => ({ time: queued?.time ?? player.currentTime, playing: queued?.playing ?? !player.paused, pending: queued !== null }),
   };
   const hook = renderHook(({ draft }) => {

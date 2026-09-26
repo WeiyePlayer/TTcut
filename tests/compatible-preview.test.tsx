@@ -6,13 +6,14 @@ import { useCompatiblePreview } from '../src/renderer/use-compatible-preview';
 function Harness({ source = 'ttcut-media://media/source', codec }: { source?: string; codec?: string }) {
   const ref = useRef<HTMLVideoElement>(null);
   const preview = useCompatiblePreview(ref, source, codec);
-  return <><video ref={ref} src={preview.url} /><span>{preview.status}</span><button onClick={() => preview.seekTo(12, true)}>Play clip</button><button onClick={() => preview.seekTo(24, true)}>Next clip</button><button onClick={preview.togglePlayback}>Toggle</button></>;
+  return <><video ref={ref} src={preview.url} /><span>{preview.status}</span><span data-testid="preview-error">{preview.error}</span><button onClick={() => preview.seekTo(12, true)}>Play clip</button><button onClick={() => preview.seekTo(24, true)}>Next clip</button><button onClick={preview.togglePlayback}>Toggle</button><button onClick={preview.retry}>Retry</button></>;
 }
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 function setup() {
   vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  vi.spyOn(console, 'error').mockImplementation(() => undefined);
   const prepareVideoPreview = vi.fn().mockResolvedValue('ttcut-media://media/proxy');
   vi.stubGlobal('ttcut', { prepareVideoPreview });
   vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
@@ -49,6 +50,21 @@ describe('compatible preview recovery', () => {
     await act(async () => {});
     expect(prepare).not.toHaveBeenCalled();
     expect(screen.getByText('ready')).toBeInTheDocument();
+  });
+
+  it('exposes the preparation error and retries without reopening the video', async () => {
+    const prepare = setup();
+    vi.stubGlobal('ttcut', { platform: 'win32', prepareVideoPreview: prepare });
+    prepare
+      .mockRejectedValueOnce(new Error("Error invoking remote method 'video:prepare-preview': Error: PREVIEW_VALIDATION_FAILED:VIDEO_TRUNCATED"))
+      .mockResolvedValueOnce('ttcut-media://media/proxy');
+    render(<Harness codec="hevc" />);
+    await act(async () => {});
+    expect(screen.getByText('failed')).toBeInTheDocument();
+    expect(screen.getByTestId('preview-error')).toHaveTextContent('PREVIEW_VALIDATION_FAILED:VIDEO_TRUNCATED');
+    await act(async () => { fireEvent.click(screen.getByText('Retry')); });
+    expect(prepare).toHaveBeenCalledTimes(2);
+    expect(screen.getByText('preparing')).toBeInTheDocument();
   });
 
   it('exposes the playing intent during recovery even after the media element pauses', async () => {
@@ -112,9 +128,12 @@ describe('compatible preview recovery', () => {
     render(<Harness />);
     const video = document.querySelector('video')!;
     await act(async () => { fireEvent.error(video); });
+    Object.defineProperty(video, 'error', { value: { code: 3, message: 'PIPELINE_ERROR_DECODE' } });
     fireEvent.error(video);
     expect(prepare).toHaveBeenCalledTimes(1);
     expect(screen.getByText('failed')).toBeInTheDocument();
+    expect(screen.getByTestId('preview-error')).toHaveTextContent('MEDIA_ERR_3: PIPELINE_ERROR_DECODE');
+    expect(console.error).toHaveBeenCalledWith('[preview] Proxy playback failed', expect.stringContaining('PIPELINE_ERROR_DECODE'));
   });
 
   it('ignores a completed preparation after switching source videos', async () => {

@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import shutil
+import struct
 import subprocess
 import sys
 from pathlib import Path
@@ -22,6 +23,43 @@ DEFAULT_FFMPEG_SOURCE = (
     / "bin"
 )
 RUNTIME_ID = "python-3.12.13-ort-dml-1.24.3-r1"
+VC_RUNTIME_FILES = ("msvcp140.dll", "msvcp140_1.dll", "vcruntime140.dll", "vcruntime140_1.dll")
+
+
+def resolve_vc_runtime() -> Path:
+    configured = os.environ.get("TTCUT_VC_REDIST_SOURCE")
+    if configured:
+        return Path(configured)
+    vswhere = Path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)")) / "Microsoft Visual Studio/Installer/vswhere.exe"
+    if vswhere.is_file():
+        result = subprocess.run([
+            str(vswhere), "-latest", "-products", "*", "-find",
+            "VC/Redist/MSVC/**/x64/Microsoft.VC*.CRT/msvcp140.dll",
+        ], check=True, capture_output=True, text=True, encoding="utf-8")
+        candidates = [Path(line).parent for line in result.stdout.splitlines() if line.strip()]
+        # Use the desktop x64 redistributable, never the OneCore/debug libraries.
+        candidates = [candidate for candidate in candidates if "onecore" not in [part.lower() for part in candidate.parts]]
+        if candidates:
+            return max(candidates, key=lambda candidate: tuple(int(part) for part in candidate.parent.parent.name.split(".")))
+    raise RuntimeError("Set TTCUT_VC_REDIST_SOURCE to the Visual C++ x64 Microsoft.VC*.CRT redistributable directory.")
+
+
+def stage_vc_runtime(source: Path, destination: Path) -> dict[str, str]:
+    # Python ships vcruntime, but ONNX Runtime also imports msvcp140 and msvcp140_1.
+    # A smoke test on a developer machine can silently load these from System32.
+    missing = [name for name in VC_RUNTIME_FILES if not (source / name).is_file()]
+    if missing:
+        raise RuntimeError(f"Incomplete Visual C++ redistributable at {source}: {', '.join(missing)}")
+    files = sorted(source.glob("*.dll"))
+    for file in files:
+        data = file.read_bytes()
+        pe_offset = struct.unpack_from("<I", data, 0x3C)[0]
+        if data[pe_offset:pe_offset + 4] != b"PE\0\0" or struct.unpack_from("<H", data, pe_offset + 4)[0] != 0x8664:
+            raise RuntimeError(f"Visual C++ redistributable must be x64: {file}")
+    destination.mkdir(parents=True, exist_ok=True)
+    for file in files:
+        shutil.copy2(file, destination / file.name)
+    return {f"python/{file.name}": sha256(destination / file.name) for file in files}
 
 
 def sha256(path: Path) -> str:
@@ -68,6 +106,7 @@ def copy_runtime(source: Path, destination: Path) -> None:
 def main() -> int:
     python_source = Path(os.environ.get("TTCUT_ANALYSIS_RUNTIME_SOURCE", DEFAULT_PYTHON_SOURCE))
     ffmpeg_source = Path(os.environ.get("TTCUT_X264_BIN_SOURCE", DEFAULT_FFMPEG_SOURCE))
+    vc_runtime_source = resolve_vc_runtime()
     if not all((ffmpeg_source / name).is_file() for name in ("ffmpeg.exe", "ffprobe.exe")):
         raise RuntimeError(f"x264 FFmpeg source is invalid: {ffmpeg_source}")
     if DESTINATION.exists():
@@ -75,6 +114,7 @@ def main() -> int:
     python_destination = DESTINATION / "python"
     media_destination = DESTINATION / "ffmpeg"
     copy_runtime(python_source, python_destination)
+    vc_runtime_hashes = stage_vc_runtime(vc_runtime_source, python_destination)
     media_destination.mkdir(parents=True)
     for name in ("ffmpeg.exe", "ffprobe.exe"):
         shutil.copy2(ffmpeg_source / name, media_destination / name)
@@ -121,6 +161,7 @@ def main() -> int:
         "providers": runtime["providers"],
         "media_encoder": "libx264",
         "files": {
+            **vc_runtime_hashes,
             "python/python.exe": sha256(python_destination / "python.exe"),
             "ffmpeg/ffmpeg.exe": sha256(ffmpeg),
             "ffmpeg/ffprobe.exe": sha256(media_destination / "ffprobe.exe"),

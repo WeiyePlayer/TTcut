@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { app } from 'electron';
+import { distributionIdentity } from './distribution';
 
 export type InstallationLayout = {
   root: string;
@@ -42,6 +43,16 @@ export function layoutFromRoot(root: string, userDataRoot: string): Installation
   };
 }
 
+export function layoutForIndependentPackage(appRoot: string, userDataRoot: string): InstallationLayout {
+  const resolvedAppRoot = path.resolve(appRoot);
+  return {
+    root: resolvedAppRoot,
+    appRoot: resolvedAppRoot,
+    componentRoot: path.join(resolvedAppRoot, 'data', 'components'),
+    userDataRoot: path.resolve(userDataRoot),
+  };
+}
+
 export function isLocalForgePackage(appRoot: string): boolean {
   const resolvedAppRoot = path.resolve(appRoot);
   return path.basename(resolvedAppRoot).toLowerCase() === 'ttcut-win32-x64'
@@ -56,6 +67,9 @@ export function resolveInstallationLayout(): InstallationLayout {
 
   const appRoot = path.dirname(path.resolve(process.execPath));
   const derivedRoot = path.dirname(appRoot);
+  if (distributionIdentity().independentBeta) {
+    return layoutForIndependentPackage(appRoot, app.getPath('userData'));
+  }
   const registeredRoot = readRegisteredInstallRoot();
   if (!registeredRoot) throw new Error('INSTALL_ROOT_REGISTRY_MISSING');
   if (path.normalize(registeredRoot).toLowerCase() !== path.normalize(derivedRoot).toLowerCase()) {

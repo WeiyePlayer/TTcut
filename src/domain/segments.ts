@@ -70,6 +70,7 @@ export function buildCutGroups(
   postRollSeconds: number,
   videoDuration: number,
   recognitionMethod: RallyRecognitionMethod = 'bounce_events',
+  excludedFragments: readonly { start_time_seconds: number; end_time_seconds: number }[] = [],
 ): CutGroup[] {
   if (!Number.isFinite(videoDuration) || videoDuration <= 0) return [];
   if (!Number.isFinite(preRollSeconds) || preRollSeconds < 0) return [];
@@ -88,9 +89,13 @@ export function buildCutGroups(
     .sort((a, b) => a.start_time_seconds - b.start_time_seconds || a.index - b.index);
 
   const raw: Array<Omit<CutGroup, 'start' | 'end'>> = [];
+  const excludedBetween = (start: number, end: number) => excludedFragments.some(
+    (fragment) => fragment.start_time_seconds < end && fragment.end_time_seconds > start,
+  );
   for (const rally of ordered) {
     const current = raw.at(-1);
-    if (current && rally.start_time_seconds - current.rawEnd < (recognitionMethod === 'hybrid_motion_bounce' ? 3 : 5 - EPSILON)) {
+    if (current && !excludedBetween(current.rawEnd, rally.start_time_seconds)
+      && rally.start_time_seconds - current.rawEnd < (recognitionMethod === 'hybrid_motion_bounce' ? 3 : 5 - EPSILON)) {
       current.rawEnd = Math.max(current.rawEnd, rally.end_time_seconds);
       current.rallyIds.push(rally.id);
     } else {
@@ -105,12 +110,16 @@ export function buildCutGroups(
   const expanded: CutGroup[] = [];
   for (const group of raw) {
     const firstRally = ordered.find((rally) => rally.id === group.rallyIds[0])!;
-    const start = rallyLeadInStart(firstRally, preRollSeconds, recognitionMethod);
+    let start = rallyLeadInStart(firstRally, preRollSeconds, recognitionMethod);
     // Only bounce recognition needs the fixed tail; always apply the configured roll.
-    const end = Math.min(videoDuration, group.rawEnd + finalRallyTailSeconds(recognitionMethod) + postRollSeconds);
+    let end = Math.min(videoDuration, group.rawEnd + finalRallyTailSeconds(recognitionMethod) + postRollSeconds);
+    for (const fragment of excludedFragments) {
+      if (fragment.end_time_seconds <= group.rawStart) start = Math.max(start, fragment.end_time_seconds);
+      if (fragment.start_time_seconds >= group.rawEnd) end = Math.min(end, fragment.start_time_seconds);
+    }
     if (end <= start) continue;
     const previous = expanded.at(-1);
-    if (previous && start <= previous.end + EPSILON) {
+    if (previous && start <= previous.end + EPSILON && !excludedBetween(previous.rawEnd, group.rawStart)) {
       previous.rawEnd = Math.max(previous.rawEnd, group.rawEnd);
       previous.end = Math.max(previous.end, end);
       previous.rallyIds.push(...group.rallyIds);
@@ -130,6 +139,7 @@ export function createCutGroups(result: AnalysisResultV1, selection: CutSelectio
     selection.post_roll_seconds,
     result.video.duration_seconds,
     rallyRecognitionMethod(result),
+    'excluded_fragments' in result && result.rally_recognition.version >= 4 ? result.excluded_fragments : [],
   );
 }
 

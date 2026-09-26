@@ -28,7 +28,7 @@ from .errors import (
 from .onnx_models import load_blurball
 from .roi import AnalysisRoiConfig, build_analysis_roi, stabilize_visibility_roi
 from .rallies import group_rallies
-from .hybrid_rallies import hybrid_motion_rallies, hybrid_provenance
+from .hybrid_rallies import source_time_hybrid_rallies, hybrid_provenance
 from .request import (
     analysis_config,
     rally_recognition_config,
@@ -290,7 +290,7 @@ def analyze(request: dict, *, directml_batch_size: int | None = None) -> dict:
         )
         hybrid = None
         if recognition_method == "hybrid_motion_bounce":
-            hybrid = hybrid_motion_rallies(points, float(info.fps or 0.0), calibration, motion_config=motion_config)
+            hybrid = source_time_hybrid_rallies(points, calibration, motion_config=motion_config)
             bounce_frames = list(hybrid.bounce_frames)
         rallies = hybrid.rallies if hybrid is not None else (
             tracknet_visibility_rallies(
@@ -495,7 +495,7 @@ def analyze(request: dict, *, directml_batch_size: int | None = None) -> dict:
         result["bounce_times_seconds"] = bounce_times
     if recognition_method == "hybrid_motion_bounce":
         result["schema_version"] = 3
-        result["rally_recognition"] = hybrid_provenance(vertical_exchange_enabled=vertical_exchange_enabled)
+        result["rally_recognition"] = hybrid_provenance(vertical_exchange_enabled=vertical_exchange_enabled, source_time=True)
         result["excluded_fragments"] = [
             {**fragment, "end_time_seconds": min(duration, fragment["end_time_seconds"])}
             for fragment in hybrid.excluded_fragments
