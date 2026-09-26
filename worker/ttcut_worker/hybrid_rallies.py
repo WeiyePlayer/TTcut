@@ -30,6 +30,7 @@ from .blurball_rallies import (
 )
 from .calibration import TableCalibration
 from .types import RallySummary, TrajectoryPoint
+from .rally_timebase import RALLY_CLOCK_HZ, observed_pauses, rally_clock_points, rally_timebase_provenance
 from . import visibility_rallies as visibility
 from .visibility_rallies import (
     VisibilityMotionConfig, continuous_visibility_rallies,
@@ -55,9 +56,57 @@ class HybridResult:
     excluded_fragments: tuple[dict, ...]
 
 
-def hybrid_provenance(*, vertical_exchange_enabled: bool = False) -> dict:
+def source_time_hybrid_rallies(
+    points: Sequence[TrajectoryPoint], calibration: TableCalibration,
+    *, motion_config: VisibilityMotionConfig,
+) -> HybridResult:
+    """New analysis uses one clock; returned frames/times still name the source."""
+    clock_points, source = rally_clock_points(points)
+    periods = [b.time - a.time for a, b in zip(clock_points, clock_points[1:])]
+    # Lower-rate sources cannot supply 30 real observations per second. Keep
+    # their confirmation durations instead of treating each sample as 1/30 s.
+    clock_hz = min(RALLY_CLOCK_HZ, round(1 / median(periods), 6)) if periods else RALLY_CLOCK_HZ
+    result = hybrid_motion_rallies(clock_points, clock_hz, calibration, motion_config=motion_config)
+    pauses = observed_pauses(clock_points, motion_config)
+    valid = [source[frame] for frame in result.bounce_frames
+             if not any(start <= source[frame].time < end for start, end in pauses)]
+    rallies = []
+    fragments = list(result.excluded_fragments)
+    for rally in result.rallies:
+        pieces = [(rally.start_time, rally.end_time + 1e-9)]
+        for start, end in pauses:
+            remaining = []
+            for first, last in pieces:
+                if end <= first or start >= last:
+                    remaining.append((first, last))
+                else:
+                    if first < start:
+                        remaining.append((first, start))
+                    if end < last:
+                        remaining.append((end, last))
+            pieces = remaining
+        for start, end in pieces:
+            support = [p for p in clock_points if p.visibility and start <= p.time < end]
+            if len(support) < 2:
+                continue
+            first, last = support[0], support[-1]
+            count = sum(first.time <= p.time <= last.time for p in valid)
+            if count:
+                rallies.append(RallySummary(source[first.frame].frame, source[last.frame].frame,
+                                            first.time, last.time, count))
+            else:
+                fragments.append({'start_time_seconds': first.time, 'end_time_seconds': end,
+                                  'evidence': [{'reason': 'zero_bounce_rally', 'bounce_count': 0}]})
+    bounces = tuple(p.frame for p in valid)
+    fragments.extend({'start_time_seconds': start, 'end_time_seconds': end,
+                      'evidence': [{'reason': 'observed_pause'}]} for start, end in pauses)
+    return HybridResult(tuple(rallies), bounces, tuple(normalize_fragments(fragments)))
+
+
+def hybrid_provenance(*, vertical_exchange_enabled: bool = False, source_time: bool = False) -> dict:
     return {
-        "method": "hybrid_motion_bounce", "version": 3,
+        "method": "hybrid_motion_bounce", "version": 4 if source_time else 3,
+        **({'timebase': rally_timebase_provenance()} if source_time else {}),
         "candidate_refinement_version": 2,
         "observed_return_filter": observed_return_filter_provenance(),
         "detection_confidence_threshold": 0.30,
