@@ -32,6 +32,7 @@ const mock = vi.hoisted(() => {
     logLine: vi.fn(() => Promise.resolve()),
     on,
     updaterApi,
+    automaticUpdates: true,
     emit(event: string, ...args: unknown[]) {
       for (const listener of listeners.get(event) ?? []) listener(...args);
     },
@@ -47,6 +48,9 @@ vi.mock('electron-updater', () => ({
 }));
 
 vi.mock('../src/main/logger', () => ({ logLine: mock.logLine }));
+vi.mock('../src/main/distribution', () => ({
+  distributionIdentity: () => ({ automaticUpdates: mock.automaticUpdates }),
+}));
 import { AppUpdater } from '../src/main/updater';
 
 describe('application updater', () => {
@@ -62,6 +66,7 @@ describe('application updater', () => {
     mock.logLine.mockClear();
     mock.app.isPackaged = true;
     mock.app.getVersion.mockReturnValue('1.0.1');
+    mock.automaticUpdates = true;
     mock.updaterApi.allowPrerelease = false;
     mock.updaterApi.autoDownload = true;
     mock.updaterApi.autoInstallOnAppQuit = true;
@@ -225,6 +230,20 @@ describe('application updater', () => {
     const updater = new AppUpdater();
     updater.start(null);
     await vi.advanceTimersByTimeAsync(10_000);
+    expect((await updater.check()).status).toBe('unsupported');
+    expect((await updater.download('1.1.0')).status).toBe('unsupported');
+    expect(updater.skip('1.1.0').status).toBe('unsupported');
+    expect(mock.checkForUpdates).not.toHaveBeenCalled();
+    expect(mock.downloadUpdate).not.toHaveBeenCalled();
+  });
+
+  it('disables every updater operation for the independent Beta distribution', async () => {
+    mock.automaticUpdates = false;
+    const updater = new AppUpdater();
+
+    updater.start(null);
+    await vi.advanceTimersByTimeAsync(10_000);
+
     expect((await updater.check()).status).toBe('unsupported');
     expect((await updater.download('1.1.0')).status).toBe('unsupported');
     expect(updater.skip('1.1.0').status).toBe('unsupported');

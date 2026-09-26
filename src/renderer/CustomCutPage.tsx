@@ -565,7 +565,10 @@ export function CustomCutPage({
 
         <div className="custom-workspace-right">
           <div className="custom-monitor-slot"><div className="custom-monitor">
-            {preview.status !== 'ready' && <div className="custom-preview-status" role={preview.status === 'failed' ? 'alert' : 'status'}>{preview.status === 'preparing' ? translations.previewPreparing : translations.previewFailed}</div>}
+            {preview.status !== 'ready' && <div className="custom-preview-status" role={preview.status === 'failed' ? 'alert' : 'status'}>
+              <span>{preview.status === 'preparing' ? translations.previewPreparing : `${translations.previewFailed}${preview.error ? ` (${preview.error})` : ''}`}</span>
+              {preview.status === 'failed' && <button type="button" onClick={preview.retry}>{translations.previewRetry}</button>}
+            </div>}
             <CompatibleVideo hdr={Boolean(analysis.video.native_video && analysis.video.native_video.hdr !== 'sdr')} ref={videoRef} src={preview.url} controls={false} preload={preview.url === video.mediaUrl ? 'metadata' : 'auto'} playsInline tabIndex={0} aria-label={translations.togglePlayback} onClick={togglePlayback} onLoadedMetadata={() => { lastPlaybackClipIdRef.current = null; playback.tick(); }} onPlay={() => { playback.tick(); startVideoFrameTracking(); }} onPause={stopVideoFrameTracking} onEnded={stopVideoFrameTracking} onTimeUpdate={() => playback.tick()} onSeeked={() => playback.tick()} />
           </div></div>
 

@@ -1,5 +1,5 @@
 // Real Electron/decoded-frame regression using the actual custom page and media protocol.
-// Usage: node scripts/verify-custom-playback.mjs [source] [--baseline | --zoom-only | --original-media]
+// Usage: node scripts/verify-custom-playback.mjs [source] [--baseline | --zoom-only | --original-media] [--preview-only]
 // --original-media uses the full untouched source and the production preview service.
 // --reuse-preview=<file> can reuse a previously validated full preview for UI retries.
 import { mkdtemp, realpath, writeFile, readFile, symlink } from 'node:fs/promises';
@@ -15,6 +15,7 @@ const root = path.resolve(import.meta.dirname, '..');
 const baseline = process.argv.includes('--baseline');
 const zoomOnly = process.argv.includes('--zoom-only');
 const originalMedia = process.argv.includes('--original-media');
+const previewOnly = process.argv.includes('--preview-only');
 const reusePreview = process.argv.find(arg => arg.startsWith('--reuse-preview='))?.slice('--reuse-preview='.length);
 if (reusePreview && !originalMedia) throw new Error('--reuse-preview requires --original-media');
 const source = path.resolve(process.argv.slice(2).find(arg => !arg.startsWith('--')) ?? path.join(root, 'artifacts/dynamic-roi/full_frame_trajectory.mp4'));
@@ -71,8 +72,11 @@ app.whenReady().then(async()=>{
   console.log('Preparing full original media:',${JSON.stringify(media)});
   const output=${JSON.stringify(reusePreview ?? null)}??await backend.preparePreviewMedia(${JSON.stringify(media)});
   const preview=await backend.probeVideo(output);
-  if(preview.video_codec!=='h264'||preview.pixel_format!=='yuv420p'||Math.abs(preview.duration_seconds-metadata.duration_seconds)>0.25)throw new Error('Invalid full preview');
+  // Production preparation owns truncation validation; a container-duration
+  // comparison here would reintroduce the false rejection fixed in that service.
+  if(preview.video_codec!=='h264'||!['yuv420p','yuvj420p'].includes(preview.pixel_format))throw new Error('Invalid full preview format');
   console.log('Validated compatible media:',output);
+  console.log('Preview metadata:',JSON.stringify({codec:preview.video_codec,pixelFormat:preview.pixel_format,colorRange:preview.color_range,videoDuration:preview.video_duration_seconds,containerDuration:preview.duration_seconds}));
   return registerMediaPath(output);
  });
  const fixture={path:${JSON.stringify(media)},name:path.basename(${JSON.stringify(media)}),size:1,mediaUrl:url,metadata};
@@ -97,7 +101,23 @@ async function advancing(name, minimum, maximum, selector = '.custom-monitor vid
  checks.push({ name, before, after: await frameState(selector) });
 }
 try {
- if (zoomOnly) {
+ if (previewOnly) {
+  const monitor = page.locator('.custom-monitor video');
+  await expect.poll(async () => {
+   const alert = page.locator('.custom-preview-status[role="alert"]');
+   const failure = await alert.count() ? await alert.textContent() : null;
+   if (failure) return failure;
+   return (await frameState()).ready >= 2 && await page.locator('.custom-preview-status').count() === 0 ? 'ready' : 'preparing';
+  }, { timeout: 180000 }).not.toBe('preparing');
+  await expect(page.locator('.custom-preview-status[role="alert"]')).toHaveCount(0);
+  await expect(page.locator('.custom-preview-status')).toHaveCount(0);
+  await monitor.evaluate(video => video.play());
+  await advancing('compatible preview decodes the first frames', 0, 5);
+  const duration = await monitor.evaluate(video => video.duration);
+  await monitor.evaluate(video => { video.currentTime = video.duration - 3; });
+  await advancing('compatible preview decodes the final frames after seeking', duration - 3, duration);
+  await page.screenshot({ path: path.join(run, 'preview-regression.png') });
+ } else if (zoomOnly) {
   const viewport = page.locator('.timeline-viewport');
   const track = page.locator('.timeline-track-window');
   const button = page.getByRole('button',{name:'Zoom timeline',exact:true});

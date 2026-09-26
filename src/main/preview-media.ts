@@ -15,16 +15,83 @@ const prepared = new Map<string, Promise<string>>();
 const controllers = new Set<AbortController>();
 let closing = false;
 
+type NormalizedVideoTimeline = {
+  startSeconds: number;
+  endSeconds: number;
+  durationSeconds: number;
+  source: 'video-stream' | 'frame-count';
+};
+
+function finiteNumber(value: number | null | undefined): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function normalizedVideoTimeline(metadata: VideoMetadata): NormalizedVideoTimeline | null {
+  const startSeconds = finiteNumber(metadata.video_start_time_seconds) ?? 0;
+  const streamDuration = finiteNumber(metadata.video_duration_seconds);
+  if (streamDuration !== null && streamDuration > 0) {
+    return {
+      startSeconds,
+      endSeconds: startSeconds + streamDuration,
+      durationSeconds: streamDuration,
+      source: 'video-stream',
+    };
+  }
+  const fps = finiteNumber(metadata.fps);
+  const frameCount = finiteNumber(metadata.frame_count);
+  if (fps !== null && fps > 0 && frameCount !== null && frameCount > 0) {
+    const durationSeconds = frameCount / fps;
+    return {
+      startSeconds,
+      endSeconds: startSeconds + durationSeconds,
+      durationSeconds,
+      source: 'frame-count',
+    };
+  }
+  return null;
+}
+
+function previewDiagnostics(source: VideoMetadata, preview: VideoMetadata) {
+  const sourceTimeline = normalizedVideoTimeline(source);
+  const previewTimeline = normalizedVideoTimeline(preview);
+  const allowedShortfallSeconds = sourceTimeline
+    ? Math.max(1, Math.min(5, sourceTimeline.durationSeconds * 0.005))
+    : null;
+  const videoShortfallSeconds = sourceTimeline && previewTimeline
+    ? sourceTimeline.durationSeconds - previewTimeline.durationSeconds
+    : null;
+  const media = (metadata: VideoMetadata, timeline: NormalizedVideoTimeline | null) => ({
+    codec: metadata.video_codec,
+    pixel_format: metadata.pixel_format ?? null,
+    color_range: metadata.color_range ?? null,
+    container_duration_seconds: metadata.duration_seconds,
+    video_duration_seconds: metadata.video_duration_seconds ?? null,
+    audio_duration_seconds: metadata.audio_duration_seconds ?? null,
+    video_start_time_seconds: metadata.video_start_time_seconds ?? null,
+    audio_start_time_seconds: metadata.audio_start_time_seconds ?? null,
+    normalized_video_timeline: timeline,
+  });
+  return {
+    source: media(source, sourceTimeline),
+    preview: media(preview, previewTimeline),
+    container_duration_delta_seconds: preview.duration_seconds - source.duration_seconds,
+    video_shortfall_seconds: videoShortfallSeconds,
+    allowed_video_shortfall_seconds: allowedShortfallSeconds,
+  };
+}
+
 export function buildPreviewArgs(input: string, output: string, metadata: VideoMetadata, encoder: MediaEncoder): string[] {
   const fps = Math.min(60, metadata.nominal_fps || metadata.fps);
   return [
     '-hide_banner', '-loglevel', 'error', '-nostdin', '-y', '-i', input,
     '-map', '0:v:0', '-map', '0:a:0?', '-sn', '-dn', '-map_metadata', '-1',
-    '-vf', `scale=1280:720:force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,fps=${fps}`,
+    // Convert the sample range as well as tagging it. Merely requesting
+    // yuv420p lets a full-range source propagate to H.264 as yuvj420p.
+    '-vf', `scale=1280:720:force_original_aspect_ratio=decrease:force_divisible_by=2:out_range=tv,setsar=1,fps=${fps}`,
     ...(encoder === 'libx264'
       ? ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20']
       : ['-c:v', 'libopenh264', '-b:v', '5000000']),
-    '-pix_fmt', 'yuv420p', '-profile:v', 'main', '-level:v', '4.2',
+    '-pix_fmt', 'yuv420p', '-color_range', 'tv', '-profile:v', 'main', '-level:v', '4.2',
     '-c:a', 'aac', '-b:a', '128k', '-ac', '2',
     '-metadata:s:v:0', 'rotate=0', '-movflags', '+faststart', output,
   ];
@@ -60,9 +127,22 @@ export async function preparePreviewMedia(filePath: string): Promise<string> {
         signal: controller.signal,
       });
       const preview = await probeVideo(temporary, controller.signal);
-      if (preview.video_codec !== 'h264' || preview.pixel_format !== 'yuv420p'
-        || Math.abs(preview.duration_seconds - metadata.duration_seconds) > 0.25) {
-        throw new Error('PREVIEW_VALIDATION_FAILED');
+      const diagnostics = previewDiagnostics(metadata, preview);
+      // ffprobe uses yuvj420p for full-range 8-bit 4:2:0 H.264 too. It is
+      // playable, not an unsupported chroma format or a failed transcode.
+      const formatInvalid = preview.video_codec !== 'h264'
+        || !['yuv420p', 'yuvj420p'].includes(preview.pixel_format ?? '');
+      const truncated = diagnostics.video_shortfall_seconds !== null
+        && diagnostics.allowed_video_shortfall_seconds !== null
+        && diagnostics.video_shortfall_seconds > diagnostics.allowed_video_shortfall_seconds;
+      if (formatInvalid || truncated) {
+        const reason = formatInvalid ? 'FORMAT_UNSUPPORTED' : 'VIDEO_TRUNCATED';
+        await logLine('preview', 'ERROR', `Preview validation failed (${reason}): ${JSON.stringify(diagnostics)}`).catch(() => undefined);
+        throw new Error(`PREVIEW_VALIDATION_FAILED:${reason}`);
+      }
+      if (Math.abs(diagnostics.container_duration_delta_seconds) > 0.25
+        || diagnostics.video_shortfall_seconds === null) {
+        await logLine('preview', 'WARN', `Accepting usable preview with duration metadata difference: ${JSON.stringify(diagnostics)}`).catch(() => undefined);
       }
       const current = await stat(filePath);
       if (current.size !== source.size || current.mtimeMs !== source.mtimeMs) throw new Error('INPUT_CHANGED');

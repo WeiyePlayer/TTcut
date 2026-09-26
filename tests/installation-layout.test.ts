@@ -20,7 +20,7 @@ vi.mock('node:child_process', async (importOriginal) => ({
   spawnSync: mock.spawnSync,
 }));
 
-import { isLocalForgePackage, layoutFromRoot, parseRegistryString, resolveInstallationLayout } from '../src/main/installation-layout';
+import { isLocalForgePackage, layoutForIndependentPackage, layoutFromRoot, parseRegistryString, resolveInstallationLayout } from '../src/main/installation-layout';
 
 describe('installation layout', () => {
   const originalExecPath = process.execPath;
@@ -45,6 +45,18 @@ describe('installation layout', () => {
       appRoot: 'D:\\TTcut\\app',
       componentRoot: 'D:\\TTcut\\data\\components',
       userDataRoot: 'C:\\Users\\tester\\AppData\\Roaming\\TTcut',
+    });
+  });
+
+  it('stores independent Beta components under its own installation', () => {
+    expect(layoutForIndependentPackage(
+      'C:\\Users\\tester\\AppData\\Local\\Programs\\TTcut Beta',
+      'C:\\Users\\tester\\AppData\\Roaming\\TTcut-Beta',
+    )).toEqual({
+      root: 'C:\\Users\\tester\\AppData\\Local\\Programs\\TTcut Beta',
+      appRoot: 'C:\\Users\\tester\\AppData\\Local\\Programs\\TTcut Beta',
+      componentRoot: 'C:\\Users\\tester\\AppData\\Local\\Programs\\TTcut Beta\\data\\components',
+      userDataRoot: 'C:\\Users\\tester\\AppData\\Roaming\\TTcut-Beta',
     });
   });
 

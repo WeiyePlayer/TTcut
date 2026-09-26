@@ -145,6 +145,26 @@ it.each([true, false])('uses the codec of the selected playback file (original=%
   }
 });
 
+it('shows the Windows preview error and retries in place', async () => {
+  const prepareVideoPreview = vi.fn()
+    .mockRejectedValueOnce(new Error("Error invoking remote method 'video:prepare-preview': Error: PREVIEW_VALIDATION_FAILED:VIDEO_TRUNCATED"))
+    .mockResolvedValueOnce('ttcut-media://proxy');
+  vi.stubGlobal('ttcut', { platform: 'win32', prepareVideoPreview });
+  const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+  try {
+    const result = { ...analysis, video: { ...analysis.video, video_codec: 'hevc' } };
+    render(<CustomCutPage video={video} analysis={result} clips={initialClips} playbackMode="source" onPlaybackModeChange={vi.fn()} translations={messages('en')} mediaAvailable onClipsChange={vi.fn()} onToggleAll={vi.fn()} outputs={{ combined_video: true, rally_videos: false, premiere_xml: false }} onOutputsChange={vi.fn()} onExport={vi.fn()} />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('PREVIEW_VALIDATION_FAILED:VIDEO_TRUNCATED');
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Retry' })); });
+    expect(prepareVideoPreview).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole('status')).toHaveTextContent('Preparing compatible preview');
+  } finally {
+    cleanup(); pause.mockRestore(); warn.mockRestore(); error.mockRestore(); vi.unstubAllGlobals();
+  }
+});
+
 it('shows board counts for continuous-visibility results that include bounce metadata', () => {
   render(<ContinuousBoardHarness />);
   expect(screen.getByText('板数 2')).toBeVisible();

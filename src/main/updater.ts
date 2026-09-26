@@ -6,6 +6,7 @@ import { updateStateSchema, type UpdateState } from '../shared/contracts';
 import { IPC } from '../shared/ipc';
 import { logLine } from './logger';
 import { createUpdateCodeSignatureVerifier } from './update-verifier-runtime';
+import { distributionIdentity } from './distribution';
 
 function publicUpdateError(error: unknown, fallback = 'UPDATE_CHECK_FAILED'): string {
   const code = typeof error === 'object' && error !== null && 'code' in error
@@ -67,7 +68,8 @@ export class AppUpdater {
   }
 
   private supported(): boolean {
-    return process.platform === 'win32'
+    return distributionIdentity().automaticUpdates
+      && process.platform === 'win32'
       && process.arch === 'x64'
       && app.isPackaged
       && existsSync(path.join(process.resourcesPath, 'app-update.yml'));

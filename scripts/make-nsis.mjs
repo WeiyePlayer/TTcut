@@ -7,8 +7,11 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const packaged = path.join(root, 'out', 'TTcut-win32-x64');
-const output = path.join(root, 'out', 'make', 'nsis', 'x64');
+const independentBeta = process.env.TTCUT_INDEPENDENT_BETA === '1';
+const productName = independentBeta ? 'TTcut Beta' : 'TTcut';
+const executableName = independentBeta ? 'TTcut Beta.exe' : 'TTcut.exe';
+const packaged = path.join(root, 'out', `${productName}-win32-x64`);
+const output = path.join(root, 'out', 'make', independentBeta ? 'nsis-beta' : 'nsis', 'x64');
 const assets = path.join(root, '.runtime', 'installer-assets');
 const official = process.env.TTCUT_OFFICIAL_RELEASE === '1' || process.env.TTCUT_PUBLIC_RC === '1';
 const packageJson = require('../package.json');
@@ -22,16 +25,18 @@ if (updatePublisherName !== 'weiye') {
 
 const { api } = require('@electron-forge/core');
 await api.package({ dir: root, arch: 'x64', interactive: false });
-if (!existsSync(path.join(packaged, 'TTcut.exe'))) throw new Error(`Packaged TTcut executable is missing: ${packaged}`);
-await writeFile(path.join(packaged, 'resources', 'app-update.yml'), [
-  'provider: github',
-  'owner: WeiyePlayer',
-  'repo: TTcut',
-  `channel: ${updateChannel}`,
-  `publisherName: ${updatePublisherName}`,
-  'updaterCacheDirName: ttcut-updater',
-  '',
-].join('\n'), 'utf8');
+if (!existsSync(path.join(packaged, executableName))) throw new Error(`Packaged ${productName} executable is missing: ${packaged}`);
+if (!independentBeta) {
+  await writeFile(path.join(packaged, 'resources', 'app-update.yml'), [
+    'provider: github',
+    'owner: WeiyePlayer',
+    'repo: TTcut',
+    `channel: ${updateChannel}`,
+    `publisherName: ${updatePublisherName}`,
+    'updaterCacheDirName: ttcut-updater',
+    '',
+  ].join('\n'), 'utf8');
+}
 
 await mkdir(assets, { recursive: true });
 const powerShellExecutable = process.env.TTCUT_POWERSHELL_PATH
@@ -71,7 +76,7 @@ builder.once('exit', (code) => { builderExitCode = code ?? -1; });
 builder.once('error', () => { builderExitCode = -1; });
 
 const verificationDirectory = path.join(output, '.verification');
-const verificationUninstaller = path.join(verificationDirectory, 'Uninstall TTcut.exe');
+const verificationUninstaller = path.join(verificationDirectory, `Uninstall ${productName}.exe`);
 let capturedUninstaller = false;
 async function captureSignedUninstaller() {
   const candidate = (await readdir(output).catch(() => []))
@@ -100,5 +105,14 @@ const artifacts = (await readdir(output))
 if (!artifacts.some((name) => name.endsWith('-Setup.exe'))) {
   throw new Error('NSIS Setup artifact is missing.');
 }
-if (!artifacts.some((name) => name.endsWith('.yml'))) throw new Error('NSIS update metadata is missing.');
-for (const artifact of artifacts) console.log(`Created NSIS artifact: ${path.join(output, artifact)}`);
+if (!independentBeta && !artifacts.some((name) => name.endsWith('.yml'))) throw new Error('NSIS update metadata is missing.');
+if (independentBeta) {
+  const setupArtifact = artifacts.find((name) => name.endsWith('-Setup.exe'));
+  await Promise.all(artifacts
+    .filter((name) => name !== setupArtifact)
+    .map((name) => rm(path.join(output, name), { force: true })));
+  await rm(verificationDirectory, { recursive: true, force: true });
+  console.log(`Created independent Beta installer: ${path.join(output, setupArtifact)}`);
+} else {
+  for (const artifact of artifacts) console.log(`Created NSIS artifact: ${path.join(output, artifact)}`);
+}
