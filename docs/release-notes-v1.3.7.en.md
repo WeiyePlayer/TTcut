@@ -31,6 +31,9 @@
 
 ## Verification
 
+- macOS release verification passed type checking, 17 macOS boundary tests, 192 preview/contract/rally-boundary tests, and Swift tests with native dependencies enabled; the Swift Core suite passed 19 tests.
+- The packaged macOS app passed 21 real Electron checks and three batch-UI checks covering Core ML, 120 fps source-time results, full-range compatible previews, HDR/VFR, native export, and excluded-range grouping.
+- macOS DMG mounting, packaged-app signature integrity, dependency boundaries for 29 arm64 native files, and DMG/ZIP size and SHA-256 verification passed. These checks are not Apple notarization.
 - TypeScript type checks, project tests (460 passed, 25 skipped), Python Worker tests (236 passed), and website build/render tests passed.
 - The official installer build passed automated model and runtime integrity checks, update-manifest signature verification, and installer Authenticode verification.
-- No real-video quality comparison or manual installer run was performed for this release preparation.
+- No Windows real-video quality comparison or manual installer run was performed. The macOS 120 fps inference acceptance used synthetic video and does not establish accuracy on real match footage.
