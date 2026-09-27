@@ -5,6 +5,7 @@ import type {
   CutGroup,
   Rally,
   RallyRecognitionMethod,
+  ScoreboardScore,
 } from '../shared/contracts';
 import { finalRallyTailSeconds, rallyLeadInStart } from './segments';
 
@@ -24,7 +25,19 @@ export type CustomRallyClip = {
   start: number;
   end: number;
   selected: boolean;
+  score?: { left: number; right: number } | undefined;
 };
+
+export function resolvedSelectedClipScores(clips: readonly CustomRallyClip[]): Map<string, ScoreboardScore> {
+  const scores = new Map<string, ScoreboardScore>();
+  let current: ScoreboardScore = { left: 0, right: 0 };
+  for (const clip of clips) {
+    if (!clip.selected) continue;
+    current = clip.score ?? current;
+    scores.set(clip.clipId, current);
+  }
+  return scores;
+}
 
 export type { CustomExportSegment } from '../shared/contracts';
 

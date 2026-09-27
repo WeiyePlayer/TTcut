@@ -11,6 +11,8 @@ import {
   type CutGroup,
   type ExportRequest,
   type ExportTimingInfo,
+  type ScoreboardPosition,
+  type ScoreboardScore,
   type VideoMetadata,
 } from '../shared/contracts';
 import { IPC } from '../shared/ipc';
@@ -48,6 +50,9 @@ import {
   selectSeekStart,
 } from './media-plan';
 import { registerMediaPath } from './media-protocol';
+import { createScoreboardPng, scoreboardDimensions, scoreboardDisplayDimensions } from './scoreboard-image';
+import { scoreboardName } from '../domain/scoreboard';
+import type { ScoreboardAsset } from './media-plan';
 import {
   probeAudioPacketBoundaries,
   probeKeyframes,
@@ -65,6 +70,8 @@ import {
   markTaskTerminal,
   spawnTracked,
 } from './processes';
+
+type ScoreboardRender = ScoreboardPosition & ScoreboardScore & { image_data?: string | undefined };
 
 const lastExportProgress = new Map<string, number>();
 const AV_SYNC_TOLERANCE_SECONDS = 0.1;
@@ -531,6 +538,38 @@ function wrapExportError(error: unknown, code: string): Error {
   return wrapped;
 }
 
+async function writeScoreboardAssets(
+  directory: string,
+  video: VideoMetadata,
+  scoreboards: readonly ScoreboardRender[],
+): Promise<ScoreboardAsset[]> {
+  await mkdir(directory, { recursive: true });
+  const display = scoreboardDisplayDimensions(video.width, video.height, video.rotation ?? 0);
+  const assets: ScoreboardAsset[] = [];
+  for (const [index, scoreboard] of scoreboards.entries()) {
+    const dimensions = scoreboardDimensions(display.width, display.height, scoreboard.scale ?? 1);
+    const imagePath = path.join(directory, `scoreboard-${String(index + 1).padStart(6, '0')}.png`);
+    let image: Buffer;
+    if (scoreboard.image_data) {
+      const match = /^data:image\/png;base64,([A-Za-z0-9+/]+={0,2})$/.exec(scoreboard.image_data);
+      if (!match) throw new Error('INVALID_SCOREBOARD');
+      image = Buffer.from(match[1]!, 'base64');
+      if (image.length < 24 || !image.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+        || image.readUInt32BE(16) !== dimensions.width || image.readUInt32BE(20) !== dimensions.height) {
+        throw new Error('INVALID_SCOREBOARD');
+      }
+    } else {
+      if (scoreboardName(scoreboard.left_name, 'A') !== 'A' || scoreboardName(scoreboard.right_name, 'B') !== 'B') {
+        throw new Error('INVALID_SCOREBOARD');
+      }
+      image = createScoreboardPng(dimensions.width, dimensions.height, scoreboard);
+    }
+    await writeFile(imagePath, image);
+    assets.push({ x: scoreboard.x, y: scoreboard.y, scale: scoreboard.scale, imagePath });
+  }
+  return assets;
+}
+
 async function executeFastSegmented(
   window: BrowserWindow,
   taskId: string,
@@ -540,6 +579,7 @@ async function executeFastSegmented(
   partial: string,
   tempDirectory: string,
   signal?: AbortSignal,
+  scoreboards?: readonly ScoreboardAsset[],
 ): Promise<number[]> {
   const keyframes = await probeExportKeyframes(taskId, analysisVideo.path, components.ffprobe, signal);
   assertExportNotCancelled(taskId);
@@ -577,6 +617,7 @@ async function executeFastSegmented(
           seekStart,
           analysisVideo,
           components.mediaEncoder,
+          scoreboards?.[index],
         ),
         segmentDuration,
         'cutting-and-exporting',
@@ -647,6 +688,7 @@ async function executeFastSingle(
   partial: string,
   signal?: AbortSignal,
   progressRange?: FfmpegProgressRange,
+  scoreboard?: ScoreboardAsset,
 ): Promise<ExportValidationResult> {
   const keyframes = await probeExportKeyframes(taskId, analysisVideo.path, components.ffprobe, signal);
   assertExportNotCancelled(taskId);
@@ -669,6 +711,7 @@ async function executeFastSingle(
         seekStart,
         analysisVideo,
         components.mediaEncoder,
+        scoreboard,
       ),
       group.end - group.start,
       'cutting-and-exporting',
@@ -699,6 +742,7 @@ async function executeExport(
   output: string,
   partial: string,
   duration: number,
+  scoreboards?: readonly ScoreboardRender[],
 ): Promise<void> {
   const analysis = record.analysis;
   const highResolution = analysis.video.width > 4096 || analysis.video.height > 2160;
@@ -711,16 +755,17 @@ async function executeExport(
   };
   try {
     await mkdir(tempDirectory, { recursive: true });
+    const scoreboardAssets = scoreboards ? await writeScoreboardAssets(tempDirectory, analysis.video, scoreboards) : undefined;
     const requestedBudget = assessExportDuration(duration, duration, groups.length, analysis.video);
     await logExportTiming(taskId, 'Export timing budget (fast segmented)', requestedBudget, analysis.video);
     const signal = getTaskController(taskId)?.signal;
     if (process.platform === 'darwin') {
-      const rendered = await renderMacMedia(taskId, 'export', analysis.video.path, partial, groups, (percent) => send(window, { type: 'progress', data: { taskId, kind: 'export', stage: 'cutting', percent } }));
+      const rendered = await renderMacMedia(taskId, 'export', analysis.video.path, partial, groups, (percent) => send(window, { type: 'progress', data: { taskId, kind: 'export', stage: 'cutting', percent } }), scoreboardAssets);
       if (!rendered) throw new Error('EXPORT_INVALID');
       finalTiming = assessExportDuration(rendered.duration_seconds, duration, groups.length, analysis.video);
       if (!finalTiming.withinTolerance) throw new ExportDurationMismatchError(finalTiming);
     } else {
-    const canCopy = await streamCopyEligibility(
+    const canCopy = !scoreboards && await streamCopyEligibility(
       taskId,
       analysis.video.path,
       groups,
@@ -773,6 +818,7 @@ async function executeExport(
             startPercent: STREAM_COPY_ATTEMPT_PROGRESS_END,
             endPercent: IN_FLIGHT_EXPORT_PROGRESS_END,
           },
+          scoreboardAssets?.[0],
         );
         finalTiming = validation.timing;
       }
@@ -786,6 +832,7 @@ async function executeExport(
         partial,
         tempDirectory,
         signal,
+        scoreboardAssets,
       );
       const encodedSegmentDuration = encodedSegmentDurations.reduce(
         (total, segmentDuration) => total + segmentDuration,
@@ -820,6 +867,8 @@ async function executeExport(
         groups[0]!,
         partial,
         signal,
+        undefined,
+        scoreboardAssets?.[0],
       );
       finalTiming = validation.timing;
     }
@@ -941,6 +990,7 @@ async function executeCustomArtifactExport(
   segments: readonly ValidatedCustomExportSegment[],
   outputDirectory: string,
   components: { ffmpeg: string; ffprobe: string; mediaEncoder: MediaEncoder } | null,
+  scoreboards?: readonly ScoreboardRender[],
 ): Promise<void> {
   const analysis = record.analysis;
   const sourceVideoPath = analysis.source_video?.path ?? analysis.video.path;
@@ -949,10 +999,12 @@ async function executeCustomArtifactExport(
   const failedRallies: CustomArtifactFailure[] = [];
   let premiereXml: CustomArtifactExportResult['premiereXml'] = null;
   let xmlFailure: CustomArtifactFailure | null = null;
+  const scoreboardDirectory = path.join(outputDirectory, `.ttcut-scoreboards-${taskId}`);
   const sendError = (code: string, message: string) => {
     if (!terminalEvent && markTaskTerminal(taskId)) terminalEvent = { type: 'error', taskId, code, message };
   };
   try {
+    const scoreboardAssets = scoreboards ? await writeScoreboardAssets(scoreboardDirectory, analysis.video, scoreboards) : undefined;
     const source = await stat(analysis.video.path).catch(() => null);
     if (!source?.isFile() || source.size <= 0) throw new Error('INPUT_MOVED');
     const signal = getTaskController(taskId)?.signal;
@@ -1044,7 +1096,7 @@ async function executeCustomArtifactExport(
         send(window, { type: 'progress', data: { taskId, kind: 'export', stage: 'exporting-rallies', percent, current: position, total: segments.length } });
         try {
           if (process.platform === 'darwin') {
-            await renderMacMedia(taskId, 'export', analysis.video.path, partialPath, [segment]);
+            await renderMacMedia(taskId, 'export', analysis.video.path, partialPath, [segment], undefined, scoreboardAssets ? [scoreboardAssets[offset]!] : undefined);
           } else {
           const seekStart = selectSeekStart(segment.start, keyframes);
           await runFfmpeg(
@@ -1058,6 +1110,7 @@ async function executeCustomArtifactExport(
               seekStart,
               analysis.video,
               components.mediaEncoder,
+              scoreboardAssets?.[offset],
             ),
             segmentDuration,
             'exporting-rallies',
@@ -1118,6 +1171,7 @@ async function executeCustomArtifactExport(
     if (!(code === 'EXPORT_CANCELLED' && controller?.cancelReason === 'app-exit')) sendError(code, message);
     else markTaskTerminal(taskId);
   } finally {
+    if (scoreboards) await rm(scoreboardDirectory, { recursive: true, force: true }).catch(() => undefined);
     lastExportProgress.delete(taskId);
     endTrackedTask(taskId);
     if (terminalEvent) send(window, terminalEvent);
@@ -1127,7 +1181,10 @@ async function executeCustomArtifactExport(
 export async function startExport(window: BrowserWindow, rawRequest: ExportRequest): Promise<string> {
   const parsedRequest = exportRequestSchema.safeParse(rawRequest);
   if (!parsedRequest.success) {
-    const candidate = rawRequest as { selection?: { mode?: unknown }; outputs?: unknown };
+    const candidate = rawRequest as { selection?: { mode?: unknown }; outputs?: unknown; scoreboard?: unknown };
+    if (candidate.scoreboard !== undefined) {
+      throw new Error('INVALID_SCOREBOARD');
+    }
     if (candidate.outputs !== undefined) {
       throw new Error('INVALID_EXPORT_OUTPUTS');
     }
@@ -1147,8 +1204,24 @@ export async function startExport(window: BrowserWindow, rawRequest: ExportReque
   const customSegments = selection.mode === 'custom'
     ? validateCustomExportSegments(analysis, selection.segments)
     : null;
+  const scoreboardByClip = new Map(request.scoreboard?.scores.map((score) => [score.clip_id, score]));
+  if (request.scoreboard && (!customSegments || request.scoreboard.scores.length !== customSegments.length
+    || scoreboardByClip.size !== customSegments.length
+    || customSegments.some((segment) => !scoreboardByClip.has(segment.clipId)))) {
+    throw new Error('INVALID_SCOREBOARD');
+  }
+  const scoreboards = request.scoreboard && customSegments
+    ? customSegments.map((segment) => ({
+      x: request.scoreboard!.x,
+      y: request.scoreboard!.y,
+      scale: request.scoreboard!.scale,
+      left_name: request.scoreboard!.left_name,
+      right_name: request.scoreboard!.right_name,
+      ...scoreboardByClip.get(segment.clipId)!,
+    }))
+    : undefined;
   const groups = selection.mode === 'custom'
-    ? validateAndBuildCustomCutGroups(analysis, selection.segments)
+    ? scoreboards ? customSegments! : validateAndBuildCustomCutGroups(analysis, selection.segments)
     : [...createCutGroups(analysis, selection)].sort((left, right) => left.start - right.start);
   if (!groups.length) throw new Error('NO_RALLIES');
   if (artifactExport && (!customSegments || outputs.combinedVideo)) throw new Error('INVALID_EXPORT_OUTPUTS');
@@ -1174,6 +1247,7 @@ export async function startExport(window: BrowserWindow, rawRequest: ExportReque
         mediaAvailable && components?.ffmpeg && components.ffprobe && components.mediaEncoder !== 'unavailable'
           ? { ffmpeg: components.ffmpeg, ffprobe: components.ffprobe, mediaEncoder: components.mediaEncoder }
           : null,
+        scoreboards,
       );
       return taskId;
     } catch (error) {
@@ -1210,6 +1284,7 @@ export async function startExport(window: BrowserWindow, rawRequest: ExportReque
       output,
       partial,
       duration,
+      scoreboards,
     );
     return taskId;
   } catch (error) {

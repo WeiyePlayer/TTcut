@@ -7,6 +7,7 @@ import {
   deleteCustomClip,
   InvalidCustomSegmentsError,
   resizeCustomClip,
+  resolvedSelectedClipScores,
   selectCustomClipsByBounceCount,
   setCustomClipSelected,
   validateAndBuildCustomCutGroups,
@@ -39,6 +40,24 @@ function analysis(rallies: BounceRally[] = [rally('rally_001', 1, 10, 12), rally
     bounce_times_seconds: [1.25, 2.25, 4.75, 12, 16.5],
   };
 }
+
+it('carries the latest explicitly edited score into later selected rallies', () => {
+  const clips = createCustomClipDraft([
+    rally('rally_001', 1, 1, 2), rally('rally_002', 2, 3, 4),
+    rally('rally_003', 3, 5, 6), rally('rally_004', 4, 7, 8),
+  ], 0, 0, 10, 30);
+  clips[0]!.score = { left: 4, right: 3 };
+  clips[2]!.selected = false;
+  expect([...resolvedSelectedClipScores(clips).values()]).toEqual([
+    { left: 4, right: 3 }, { left: 4, right: 3 }, { left: 4, right: 3 },
+  ]);
+  clips[1]!.score = { left: 5, right: 3 };
+  expect([...resolvedSelectedClipScores(clips).values()]).toEqual([
+    { left: 4, right: 3 }, { left: 5, right: 3 }, { left: 5, right: 3 },
+  ]);
+  clips[0]!.score = { left: 6, right: 3 };
+  expect(resolvedSelectedClipScores(clips).get('rally_002')).toEqual({ left: 5, right: 3 });
+});
 
 describe('custom rally clip draft', () => {
   it('replaces selection with inclusive board-count matches and excludes unavailable counts', () => {

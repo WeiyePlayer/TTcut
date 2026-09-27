@@ -184,6 +184,18 @@ describe('export task start and terminal lifecycle', () => {
     expect(state.keyframes).not.toHaveBeenCalled();
   });
 
+  it('rejects a scoreboard whose scores do not match the selected clips', async () => {
+    await expect(startExport(windowMock() as never, {
+      ...request,
+      selection: {
+        mode: 'custom',
+        segments: [{ rally_id: 'rally_001', start_time_seconds: 8, end_time_seconds: 14 }],
+      },
+      scoreboard: { x: 0.78, y: 0.04, scores: [{ clip_id: 'another_clip', left: 11, right: 9 }] },
+    })).rejects.toThrow('INVALID_SCOREBOARD');
+    expect(state.keyframes).not.toHaveBeenCalled();
+  });
+
   it('rejects custom artifact outputs for non-custom selections in Main', async () => {
     await expect(startExport(windowMock() as never, {
       ...request,
