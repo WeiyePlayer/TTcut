@@ -108,6 +108,24 @@ describe('media export planning', () => {
     expect(expectedOutputDuration([oneGroup, second])).toBe(11);
   });
 
+  it('burns a clip score at its normalized position during segment encoding', () => {
+    const args = buildSegmentReencodeArgs(metadata.path, 'score.mp4', oneGroup, 0, metadata, 'libx264', {
+      x: 0.78, y: 0.04, imagePath: 'scoreboard.png',
+    });
+    const filter = args[args.indexOf('-filter_complex') + 1]!;
+    expect(filter).toContain('overlay=x=998:y=29:shortest=1:format=auto');
+    expect(args).toEqual(expect.arrayContaining(['-loop', '1', '-i', 'scoreboard.png']));
+    const plain = buildSegmentReencodeArgs(metadata.path, 'plain.mp4', oneGroup, 0, metadata);
+    expect(plain[plain.indexOf('-filter_complex') + 1]).not.toContain('overlay=');
+    const rotated = buildSegmentReencodeArgs(metadata.path, 'rotated.mp4', oneGroup, 0,
+      { ...metadata, width: 720, height: 1280, rotation: 90 }, 'libx264', { x: 0.78, y: 0.04, imagePath: 'scoreboard.png' });
+    expect(rotated[rotated.indexOf('-filter_complex') + 1]).toContain('overlay=x=998:y=29');
+    const enlarged = buildSegmentReencodeArgs(metadata.path, 'enlarged.mp4', oneGroup, 0, metadata, 'libx264', {
+      x: 0.6, y: 0.1, scale: 2, imagePath: 'scoreboard.png',
+    });
+    expect(enlarged[enlarged.indexOf('-filter_complex') + 1]).toContain('overlay=x=768:y=72');
+  });
+
   it('builds x264 veryfast CRF 18 arguments without the OpenH264 bitrate policy', () => {
     const args = buildReencodeArgs(metadata.path, 'x264.mp4', [oneGroup], metadata, 'libx264');
     expect(args).toContain('libx264');

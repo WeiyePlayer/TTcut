@@ -98,7 +98,9 @@ describe('analysis history', () => {
     const record = await store.upsert(analysis(source), calibration);
     const clips = createCustomClipDraft(record.analysis.rallies, 1.5, 0.5, 30, 60);
     clips[0]!.end -= 0.5;
+    clips[0]!.score = { left: 11, right: 9 };
     const draft = { schema_version: 1 as const, clips, playbackMode: 'rallies' as const,
+      scoreboard: { enabled: true, x: 0.6, y: 0.08, scale: 1.4, left_name: '林昀儒', right_name: '张本智和' },
       outputs: { combined_video: false, rally_videos: true, premiere_xml: false } };
     await Promise.all([store.saveCustomEditorDraft(record.id, draft), store.markVisible(record.id, 'export', 'output.mp4')]);
     const reopened = await new HistoryStore(path.join(root, 'history')).open(record.id);

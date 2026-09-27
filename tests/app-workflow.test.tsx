@@ -695,6 +695,33 @@ describe('App workflow notices and multi-task entry', () => {
     expect(await screen.findByRole('heading', { name: 'Choose match videos' })).toBeVisible();
   });
 
+  it('exports default scoreboard names through the canvas text renderer', async () => {
+    bootstrap.settings.language = 'en';
+    const selected = { path: 'C:\\video\\first.mp4', name: 'first.mp4', size: 100, mediaUrl: 'ttcut-media://first' };
+    selectVideos.mockResolvedValue([selected]);
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+      setTransform: vi.fn(), clearRect: vi.fn(), beginPath: vi.fn(), moveTo: vi.fn(), lineTo: vi.fn(), stroke: vi.fn(),
+      fillRect: vi.fn(), strokeRect: vi.fn(), fillText: vi.fn(),
+      measureText: (value: string) => ({ width: value.length * 10 }),
+    } as unknown as CanvasRenderingContext2D);
+    vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue('data:image/png;base64,AA==');
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose or drop a file here' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start analysis' }));
+    act(() => taskListener?.({
+      type: 'analysis-result', taskId: 'analysis-task-1', analysisId: '11111111-1111-4111-8111-111111111111',
+      calibration,
+      data: { schema_version: 1, video: metadata(selected.path),
+        rallies: [{ id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 1, end_time_seconds: 2 }], calibration },
+    }));
+    fireEvent.click(await screen.findByRole('button', { name: /Custom/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Scoreboard' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start cutting' }));
+    await waitFor(() => expect(window.ttcut.startExport).toHaveBeenCalledTimes(1));
+    const request = vi.mocked(window.ttcut.startExport).mock.calls[0]![0];
+    expect(request.scoreboard?.scores).toEqual([{ clip_id: 'rally_001', left: 0, right: 0, image_data: 'data:image/png;base64,AA==' }]);
+  });
+
   it('preserves custom edits on export cancellation and back, and resets only after confirmation', async () => {
     bootstrap.settings.language = 'en';
     const selected = {
