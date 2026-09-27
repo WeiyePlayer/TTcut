@@ -24,7 +24,8 @@ BLURBALL_STEP = 3
 BLURBALL_MAX_DISPLACEMENT_PIXELS = 100.0
 BLURBALL_BATCH_SIZE = 16
 BLURBALL_CPU_BATCH_SIZE = 4
-BLURBALL_DIRECTML_BATCH_SIZES = (16, 8, 4, 2)
+# Probe short inputs down to one window before starting full-video analysis.
+BLURBALL_DIRECTML_BATCH_SIZES = (16, 8, 4, 2, 1)
 _MEAN = np.asarray([0.485, 0.456, 0.406], dtype=np.float32)[:, None, None]
 _STD = np.asarray([0.229, 0.224, 0.225], dtype=np.float32)[:, None, None]
 
@@ -181,7 +182,7 @@ class BlurBallPredictor:
         if loaded.provider not in {"cpu", "directml"}:
             raise ValueError("BlurBall inference requires CPU or DirectML.")
         if batch_size is None:
-            batch_size = BLURBALL_CPU_BATCH_SIZE if loaded.provider == "cpu" else BLURBALL_BATCH_SIZE
+            batch_size = loaded.batch_size or (BLURBALL_CPU_BATCH_SIZE if loaded.provider == "cpu" else BLURBALL_BATCH_SIZE)
         if batch_size <= 0:
             raise ValueError("BlurBall inference requires a positive batch size.")
         if not math.isfinite(confidence_threshold) or not 0 <= confidence_threshold <= 1:

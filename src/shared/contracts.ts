@@ -869,6 +869,30 @@ export const historySourceSchema = z.object({
   modified_time_ms: finiteNumber.nonnegative(),
 }).strict();
 
+export const customRallyClipSchema = z.object({
+  clipId: z.string().min(1),
+  source: z.enum(['detected', 'manual']),
+  sourceRallyId: z.string().min(1).nullable(),
+  rallyIndex: z.number().int().positive(),
+  bounceCount: z.number().int().nonnegative().nullable(),
+  defaultStart: finiteNumber.nonnegative(),
+  defaultEnd: finiteNumber.positive(),
+  start: finiteNumber.nonnegative(),
+  end: finiteNumber.positive(),
+  selected: z.boolean(),
+}).strict();
+
+export const customEditorDraftSchema = z.object({
+  schema_version: z.literal(1),
+  clips: z.array(customRallyClipSchema),
+  playbackMode: z.enum(['source', 'rallies']),
+  outputs: z.object({
+    combined_video: z.boolean(), rally_videos: z.boolean(), premiere_xml: z.boolean(),
+  }).strict(),
+}).strict();
+
+export type CustomEditorDraft = z.infer<typeof customEditorDraftSchema>;
+
 export const historyRecordSchema = z.object({
   schema_version: z.literal(1),
   id: z.string().uuid(),
@@ -879,6 +903,7 @@ export const historyRecordSchema = z.object({
   visible_in_history: z.boolean().default(true),
   completion_kind: z.enum(['analysis', 'export']).default('analysis'),
   output_path: z.string().min(1).nullable().default(null),
+  custom_editor_draft: customEditorDraftSchema.optional(),
 }).strict();
 
 export const historySummarySchema = z.object({

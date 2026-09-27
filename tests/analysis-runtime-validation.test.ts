@@ -13,14 +13,17 @@ vi.mock('../src/main/processes', () => ({
       super(message); this.stdout = details.stdout; this.stderr = details.stderr; this.exitCode = details.exitCode;
     }
   },
-  runProcess: vi.fn(async () => {
+  runProcess: vi.fn(async (_python, args) => {
     if (processMock.error) throw processMock.error;
+    if (args.length > 2 && processMock.value.probeCrash) throw new Error('Native probe crashed');
+    if (args.length > 2) return { stdout: JSON.stringify({ provider: 'directml', batch_size: 4, ...(processMock.value.probe as object) }), stderr: '', code: 0 };
     return { stdout: JSON.stringify(processMock.value), stderr: '', code: 0 };
   }),
 }));
 
 import { AnalysisRuntimeValidationError, formatAnalysisRuntimeDiagnostics, validateAnalysisRuntime } from '../src/main/components';
 import { ProcessExecutionError } from '../src/main/processes';
+vi.mock('../src/main/logger', () => ({ logLine: vi.fn(async () => undefined) }));
 
 describe('bundled ONNX runtime validation', () => {
   beforeEach(() => {
@@ -47,6 +50,16 @@ describe('bundled ONNX runtime validation', () => {
       message: 'ANALYSIS_RUNTIME_VERSION_MISMATCH',
       diagnostics: { providers: ['DmlExecutionProvider'] },
     });
+  });
+
+  it('reports CPU when the provider exists but the real model probe fails', async () => {
+    processMock.value.probe = { provider: 'cpu', batch_size: 4, reason: 'Resize failed' };
+    await expect(validateAnalysisRuntime('python.exe')).resolves.toMatchObject({ acceleration: 'cpu' });
+  });
+
+  it('keeps CPU usable when the probe subprocess crashes', async () => {
+    processMock.value.probeCrash = true;
+    await expect(validateAnalysisRuntime('python.exe')).resolves.toMatchObject({ acceleration: 'cpu' });
   });
 
   it('preserves raw streams when importing ONNX Runtime fails', async () => {

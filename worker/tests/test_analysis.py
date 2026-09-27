@@ -304,7 +304,7 @@ def test_worker_uses_requested_blurball_threshold_and_records_it(monkeypatch):
 
     fake_loaded = SimpleNamespace(component_version="1.0.0")
     monkeypatch.setenv("TTCUT_BLURBALL_WEIGHTS", "blurball.pt")
-    monkeypatch.setattr("ttcut_worker.worker.load_blurball", lambda path, device: captured.update(weight_path=path, device=device) or fake_loaded)
+    monkeypatch.setattr("ttcut_worker.worker.load_blurball", lambda path, device, dimensions: captured.update(weight_path=path, device=device) or fake_loaded)
     monkeypatch.setattr("ttcut_worker.worker.BlurBallPredictor", FakeBlurBallPredictor)
     monkeypatch.setattr("ttcut_worker.worker.detect_blurball_bounce_frames", lambda points, calibration: [0, 5])
 
@@ -454,7 +454,7 @@ def test_worker_continuous_visibility_skips_bounce_detection_and_records_provena
 
     fake_loaded = SimpleNamespace(component_version="1.0.0")
     monkeypatch.setenv("TTCUT_BLURBALL_WEIGHTS", "blurball.pt")
-    monkeypatch.setattr("ttcut_worker.worker.load_blurball", lambda path, device: fake_loaded)
+    monkeypatch.setattr("ttcut_worker.worker.load_blurball", lambda path, device, dimensions: fake_loaded)
     monkeypatch.setattr("ttcut_worker.worker.BlurBallPredictor", FakeBlurBallPredictor)
 
     def fake_blurball_rallies(points, fps, table, *, motion_config):
@@ -563,7 +563,7 @@ def test_worker_two_stage_uses_separate_thresholds_and_only_refinement_results(m
 
     fake_loaded = SimpleNamespace(component_version="1.0.0")
     monkeypatch.setenv("TTCUT_BLURBALL_WEIGHTS", "blurball.pt")
-    monkeypatch.setattr("ttcut_worker.worker.load_blurball", lambda path, device: fake_loaded)
+    monkeypatch.setattr("ttcut_worker.worker.load_blurball", lambda path, device, dimensions: fake_loaded)
     monkeypatch.setattr("ttcut_worker.worker.BlurBallPredictor", FakeBlurBallPredictor)
     monkeypatch.setattr("ttcut_worker.worker.detect_blurball_bounce_frames", lambda points, calibration: [0, 3] if len(points) == 4 else [1, 2])
 
@@ -607,7 +607,7 @@ def test_worker_two_stage_with_no_candidate_rallies_returns_empty_result(monkeyp
 
     fake_loaded = SimpleNamespace(component_version="1.0.0")
     monkeypatch.setenv("TTCUT_BLURBALL_WEIGHTS", "blurball.pt")
-    monkeypatch.setattr("ttcut_worker.worker.load_blurball", lambda path, device: fake_loaded)
+    monkeypatch.setattr("ttcut_worker.worker.load_blurball", lambda path, device, dimensions: fake_loaded)
     monkeypatch.setattr("ttcut_worker.worker.BlurBallPredictor", FakeBlurBallPredictor)
     monkeypatch.setattr("ttcut_worker.worker.detect_blurball_bounce_frames", lambda points, calibration: [])
 

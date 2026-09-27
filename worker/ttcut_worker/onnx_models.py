@@ -54,6 +54,11 @@ def create_session(path: str | Path, provider: str):
             str(model),
             sess_options=session_options(provider),
             providers=providers,
+            # ORT's automatic fallback prints plain text to stdout, corrupting
+            # the Worker's JSONL, and can silently switch a DirectML session to
+            # CPU. Disable it before initialization (not just before run) so
+            # TTcut owns the batch retries and full CPU restart.
+            enable_fallback=False,
         )
     except Exception as exc:
         if provider == "directml":
@@ -72,6 +77,7 @@ class LoadedBlurBall:
     model_sha256: str = "0" * 64
     runtime_version: str = "test"
     component_version: str = "onnx-1.0.0"
+    batch_size: int | None = None
 
     def run(self, inputs: np.ndarray) -> np.ndarray:
         try:
@@ -96,10 +102,17 @@ def requested_onnx_provider(requested_device: str) -> str:
     return "cpu"
 
 
-def load_blurball(weight_value: str | Path, requested_device: str) -> LoadedBlurBall:
+def load_blurball(weight_value: str | Path, requested_device: str, dimensions: tuple[int, int] = (512, 288)) -> LoadedBlurBall:
     path = Path(weight_value)
     provider = requested_onnx_provider(requested_device)
-    return LoadedBlurBall(create_session(path, provider), provider, path, model_sha256(path), _ort().__version__)
+    batch_size = None
+    if provider == "directml":
+        from .directml_probe import select_configuration
+        configuration = select_configuration(path, *dimensions)
+        provider, batch_size = configuration["provider"], configuration["batch_size"]
+        if configuration["reason"]:
+            os.environ["TTCUT_DIRECTML_FALLBACK_REASON"] = configuration["reason"]
+    return LoadedBlurBall(create_session(path, provider), provider, path, model_sha256(path), _ort().__version__, batch_size=batch_size)
 
 
 def load_table_session(weight_value: str | Path):

@@ -9,8 +9,8 @@ import traceback
 from .blurball_bounce import detect_blurball_bounce_frames
 from .blurball_predictor import (
     BLURBALL_CPU_BATCH_SIZE,
-    BLURBALL_DIRECTML_BATCH_SIZES,
     BlurBallPredictor,
+    blurball_model_dimensions,
 )
 from .blurball_rallies import (
     blurball_inter_rally_filter_provenance,
@@ -141,6 +141,11 @@ def analyze(request: dict, *, directml_batch_size: int | None = None) -> dict:
         )
     analysis_roi = build_analysis_roi(calibration, AnalysisRoiConfig())
     profile = request.get("ball_model_profile", "blurball_v1")
+    config = analysis_config(request)
+    recognition = rally_recognition_config(request)
+    recognition_method = recognition["method"]
+    if profile == "blurball_v1" and recognition_method in {"continuous_visibility", "hybrid_motion_bounce"}:
+        analysis_roi = stabilize_visibility_roi(analysis_roi)
     tracknet_bounce = tracknet_predictor = tracknet_rallies = None
     emit({"type": "progress", "task_id": task_id, "stage": "load_model", "current": 0, "total": 1, "percent": 0.0})
     if profile == "tracknet_v1":
@@ -166,14 +171,10 @@ def analyze(request: dict, *, directml_batch_size: int | None = None) -> dict:
         blurball_path = os.environ.get("TTCUT_BLURBALL_WEIGHTS", "").strip()
         if not blurball_path:
             raise ModelResourceError("Bundled BlurBall model path is not configured.")
-        loaded = load_blurball(blurball_path, request["device"])
+        dimensions = blurball_model_dimensions(analysis_roi, calibration.video_width, calibration.video_height)
+        loaded = load_blurball(blurball_path, request["device"], dimensions)
     emit({"type": "progress", "task_id": task_id, "stage": "load_model", "current": 1, "total": 1, "percent": 100.0})
 
-    config = analysis_config(request)
-    recognition = rally_recognition_config(request)
-    recognition_method = recognition["method"]
-    if profile == "blurball_v1" and recognition_method in {"continuous_visibility", "hybrid_motion_bounce"}:
-        analysis_roi = stabilize_visibility_roi(analysis_roi)
     effective_config = (
         {"mode": "full", "confidence_threshold": tracknet_predictor.TRACKNET_CONFIDENCE_THRESHOLD}
         if profile == "tracknet_v1"
@@ -196,7 +197,7 @@ def analyze(request: dict, *, directml_batch_size: int | None = None) -> dict:
         if getattr(loaded, "provider", "cpu") == "directml" and directml_batch_size is not None:
             return BlurBallPredictor(
                 loaded,
-                batch_size=directml_batch_size,
+                batch_size=getattr(loaded, "batch_size", None) or directml_batch_size,
                 confidence_threshold=confidence_threshold,
             )
         return BlurBallPredictor(loaded, confidence_threshold=confidence_threshold)
@@ -527,35 +528,18 @@ def analyze_with_provider_fallback(request: dict) -> dict:
     task_id = request["task_id"]
     environment_keys = ("TTCUT_FORCE_ONNX_CPU", "TTCUT_DIRECTML_FALLBACK_REASON")
     previous_environment = {key: os.environ.get(key) for key in environment_keys}
-    failures: list[str] = []
     try:
-        for index, batch_size in enumerate(BLURBALL_DIRECTML_BATCH_SIZES):
-            if failures:
-                os.environ["TTCUT_DIRECTML_FALLBACK_REASON"] = "; ".join(failures)
-            try:
-                return analyze(request, directml_batch_size=batch_size)
-            except DirectMLFallbackRequired as fallback:
-                failures.append(f"DirectML batch {batch_size} failed: {fallback}")
-                has_smaller_batch = (
-                    fallback.retry_smaller_batch
-                    and index + 1 < len(BLURBALL_DIRECTML_BATCH_SIZES)
-                )
-                next_target = (
-                    f"batch {BLURBALL_DIRECTML_BATCH_SIZES[index + 1]}"
-                    if has_smaller_batch
-                    else "CPU"
-                )
-                print(
-                    f"{failures[-1]} Restarting analysis from its entrypoint with {next_target}.",
-                    file=sys.stderr,
-                    flush=True,
-                )
-                _emit_provider_fallback(task_id)
-                if not has_smaller_batch:
-                    break
-
+        try:
+            return analyze(request, directml_batch_size=16)
+        except DirectMLFallbackRequired as fallback:
+            from .directml_probe import remember_failure
+            traceback.print_exception(fallback, file=sys.stderr)
+            reason = f"DirectML runtime failure: {fallback}; cause={fallback.__cause__}"
+            remember_failure(os.environ.get("TTCUT_BLURBALL_WEIGHTS", ""), reason)
+            os.environ["TTCUT_DIRECTML_FALLBACK_REASON"] = reason
+            print(f"{reason}. Restarting once on CPU.", file=sys.stderr, flush=True)
+            _emit_provider_fallback(task_id)
         os.environ["TTCUT_FORCE_ONNX_CPU"] = "1"
-        os.environ["TTCUT_DIRECTML_FALLBACK_REASON"] = "; ".join(failures)
         return analyze(request)
     finally:
         for key, previous in previous_environment.items():

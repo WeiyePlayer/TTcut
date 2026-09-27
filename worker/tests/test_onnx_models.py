@@ -93,7 +93,7 @@ def run_worker_with(monkeypatch, request, fake_analyze):
     return events
 
 
-def test_worker_discards_failed_directml_attempt_and_retries_smaller_batch(monkeypatch):
+def test_worker_discards_late_directml_failure_and_restarts_only_once_on_cpu(monkeypatch):
     request = worker_request()
     attempts = []
 
@@ -106,20 +106,20 @@ def test_worker_discards_failed_directml_attempt_and_retries_smaller_batch(monke
         ))
         if directml_batch_size == 16:
             raise DirectMLFallbackRequired("injected allocation failure")
-        return {"provider": "directml", "batch_size": directml_batch_size}
+        return {"provider": "cpu", "batch_size": directml_batch_size}
 
     events = run_worker_with(monkeypatch, request, fake_analyze)
-    assert [(item[1], item[2]) for item in attempts] == [(16, None), (8, None)]
-    assert attempts[1][3] == "DirectML batch 16 failed: injected allocation failure"
+    assert [(item[1], item[2]) for item in attempts] == [(16, None), (None, "1")]
+    assert "injected allocation failure" in attempts[1][3]
     assert [event["stage"] for event in events if event["type"] == "progress"] == [
         "provider_fallback",
     ]
-    assert events[-1]["data"] == {"provider": "directml", "batch_size": 8}
+    assert events[-1]["data"] == {"provider": "cpu", "batch_size": None}
     assert "TTCUT_FORCE_ONNX_CPU" not in worker.os.environ
     assert "TTCUT_DIRECTML_FALLBACK_REASON" not in worker.os.environ
 
 
-def test_worker_tries_16_8_4_2_then_discards_all_attempts_and_reruns_on_cpu(monkeypatch):
+def test_worker_does_not_retry_smaller_batches_after_analysis_started(monkeypatch):
     request = worker_request()
     attempts = []
 
@@ -133,14 +133,25 @@ def test_worker_tries_16_8_4_2_then_discards_all_attempts_and_reruns_on_cpu(monk
         }
 
     events = run_worker_with(monkeypatch, request, fake_analyze)
-    assert attempts == [(16, None), (8, None), (4, None), (2, None), (None, "1")]
+    assert attempts == [(16, None), (None, "1")]
     assert [event["stage"] for event in events if event["type"] == "progress"] == [
         "provider_fallback",
-        "provider_fallback",
-        "provider_fallback",
-        "provider_fallback",
     ]
-    assert "DirectML batch 2 failed: batch 2 failed" in events[-1]["data"]["reason"]
+    assert "batch 16 failed" in events[-1]["data"]["reason"]
+
+
+def test_worker_does_not_retry_even_when_a_smaller_batch_might_fit(monkeypatch):
+    attempts = []
+
+    def fake_analyze(value, *, directml_batch_size=None):
+        attempts.append((directml_batch_size, worker.os.environ.get("TTCUT_FORCE_ONNX_CPU")))
+        if directml_batch_size is not None and directml_batch_size > 1:
+            raise DirectMLFallbackRequired("GPU allocation failed")
+        return {"provider": "directml" if directml_batch_size else "cpu"}
+
+    events = run_worker_with(monkeypatch, worker_request(), fake_analyze)
+    assert attempts == [(16, None), (None, "1")]
+    assert events[-1]["data"] == {"provider": "cpu"}
 
 
 def test_worker_skips_smaller_batches_when_directml_cannot_initialize(monkeypatch):

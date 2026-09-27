@@ -15,6 +15,7 @@ export const IPC = {
   batchExportStart: 'export:batch-start',
   historyList: 'history:list',
   historyOpen: 'history:open',
+  customEditorDraftSave: 'history:custom-editor-draft-save',
   historyDelete: 'history:delete',
   analysisDelete: 'analysis:delete',
   historyClear: 'history:clear',

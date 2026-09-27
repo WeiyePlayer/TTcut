@@ -173,6 +173,7 @@ export async function validateAnalysisRuntime(
   python: string,
   _expectedVariant?: unknown,
 ): Promise<{ version: string; pythonVersion: string; onnxRuntimeVersion: string; acceleration: 'directml' | 'cpu'; variant: 'bundled' }> {
+  const paths = await resolveComponents();
   let result: ProcessResult;
   try {
     result = await runProcess(python, ['-c', [
@@ -194,7 +195,24 @@ export async function validateAnalysisRuntime(
       || value.onnxruntime !== ONNXRUNTIME_VERSION || !providers.includes('CPUExecutionProvider')) {
     throw new AnalysisRuntimeValidationError('ANALYSIS_RUNTIME_VERSION_MISMATCH', diagnostics(python, result, value));
   }
-  const acceleration = providers.includes('DmlExecutionProvider') ? 'directml' : 'cpu';
+  let acceleration: 'directml' | 'cpu' = 'cpu';
+  if (providers.includes('DmlExecutionProvider') && process.env.TTCUT_FORCE_ONNX_CPU !== '1') {
+    try {
+      const probe = await runProcess(python, ['-c', [
+        'import json,sys',
+        'sys.path.insert(0, sys.argv[1])',
+        'from ttcut_worker.directml_probe import select_configuration',
+        'print(json.dumps(select_configuration(sys.argv[2])))',
+      ].join('\n'), paths.worker, paths.blurballWeights], {
+        timeoutMs: 180_000, env: { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' },
+      });
+      const configuration = parseRuntimeOutput(probe.stdout);
+      if (configuration.provider === 'directml' && [16, 8, 4, 2, 1].includes(Number(configuration.batch_size))) acceleration = 'directml';
+      await logLine('components', 'INFO', `BlurBall model probe: ${probe.stdout.trim()}; ${probe.stderr.trim()}`);
+    } catch (error) {
+      await logLine('components', 'WARN', `BlurBall DirectML probe failed; CPU selected: ${String(error)}`).catch(() => undefined);
+    }
+  }
   return {
     version: `Python ${value.python} / ONNX Runtime ${value.onnxruntime}`,
     pythonVersion: String(value.python),
@@ -219,8 +237,7 @@ export async function resolveUsableAnalysisComponents(
   const paths = await resolveComponents(device);
   if (!paths.python || !await exists(paths.python)) throw new Error('RUNTIME_MISSING');
   if (paths.runtimeVariant === 'external' && paths.tracknetWeights) return paths;
-  const runtime = await validateAnalysisRuntime(paths.python);
-  if (device === 'directml' && runtime.acceleration !== 'directml') throw new Error('DEVICE_UNAVAILABLE');
+  await validateAnalysisRuntime(paths.python);
   return paths;
 }
 
