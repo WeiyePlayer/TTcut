@@ -6,11 +6,13 @@ import { app } from 'electron';
 import { z } from 'zod';
 import {
   historyRecordSchema,
+  customEditorDraftSchema,
   type AnalysisResultV1,
   type Calibration,
   type HistoryRecordV1,
   type HistorySource,
 } from '../shared/contracts';
+import { customExportSegments, validateCustomExportSegments } from '../domain/custom-clips';
 import { resolveUsableMediaComponents } from './components';
 import { logLine } from './logger';
 import { runProcess, activeTaskIds } from './processes';
@@ -74,6 +76,22 @@ async function defaultCreateCover(sourcePath: string, destination: string): Prom
 }
 
 export class HistoryStore {
+  private pendingMutation: Promise<void> = Promise.resolve();
+  private pendingMutationCount = 0;
+
+  private mutate<T>(operation: () => Promise<T>): Promise<T> {
+    this.pendingMutationCount += 1;
+    const result = this.pendingMutation.then(operation).finally(() => { this.pendingMutationCount -= 1; });
+    this.pendingMutation = result.then(() => undefined, () => undefined);
+    return result;
+  }
+
+  hasPendingWrites(): boolean { return this.pendingMutationCount > 0; }
+
+  async flush(): Promise<void> {
+    while (this.hasPendingWrites()) await this.pendingMutation;
+  }
+
   constructor(
     private readonly root: string,
     private readonly createCover: CoverCreator = defaultCreateCover,
@@ -177,14 +195,18 @@ export class HistoryStore {
     };
   }
 
-  private async findMatchingRecord(source: HistorySource): Promise<HistoryRecordV1 | null> {
+  private async findMatchingRecord(source: HistorySource, visibleOnly = false): Promise<HistoryRecordV1 | null> {
     const files = await readdir(this.recordsRoot(), { withFileTypes: true }).catch(() => []);
+    let pending: HistoryRecordV1 | null = null;
     for (const file of files) {
       if (!file.isFile() || !file.name.endsWith('.json')) continue;
       const candidate = await this.loadRecord(file.name.slice(0, -5));
-      if (candidate && sameSource(candidate.source, source)) return candidate;
+      if (candidate && sameSource(candidate.source, source)) {
+        if (candidate.visible_in_history) return candidate;
+        pending ??= candidate;
+      }
     }
-    return null;
+    return visibleOnly ? null : pending;
   }
 
   async findBySource(videoPath: string): Promise<HistoryRecordV1 | null> {
@@ -197,9 +219,15 @@ export class HistoryStore {
     calibration: Calibration,
     visibleInHistory = true,
   ): Promise<HistoryRecordV1> {
+    return this.mutate(() => this.upsertRecord(analysis, calibration, visibleInHistory));
+  }
+
+  private async upsertRecord(analysis: AnalysisResultV1, calibration: Calibration, visibleInHistory: boolean): Promise<HistoryRecordV1> {
     const source = await this.sourceFor(analysis.source_video?.path ?? analysis.video.path);
     const index = await this.loadIndex();
-    const existing = await this.findMatchingRecord(source);
+    // A pending run must never replace the last successful result. Promote it
+    // only after export succeeds (or an explicit analysis-only completion).
+    const existing = visibleInHistory ? await this.findMatchingRecord(source, true) : null;
     const record = historyRecordSchema.parse({
       schema_version: 1,
       id: existing?.id ?? randomUUID(),
@@ -232,6 +260,10 @@ export class HistoryStore {
   }
 
   async markVisible(id: string, completionKind: 'analysis' | 'export', outputPath: string | null = null): Promise<void> {
+    return this.mutate(() => this.markRecordVisible(id, completionKind, outputPath));
+  }
+
+  private async markRecordVisible(id: string, completionKind: 'analysis' | 'export', outputPath: string | null): Promise<void> {
     const record = await this.open(id);
     const updated = historyRecordSchema.parse({
       ...record,
@@ -246,6 +278,40 @@ export class HistoryStore {
       { id: updated.id, analyzed_at: updated.analyzed_at },
       ...index.entries.filter((entry) => entry.id !== updated.id),
     ]);
+    // The new successful result supersedes the previous visible result, while
+    // other pending runs and their processing media remain independently owned.
+    for (const entry of index.entries) {
+      if (entry.id === updated.id) continue;
+      const previous = await this.loadRecord(entry.id);
+      if (previous?.visible_in_history && sameSource(previous.source, updated.source)) {
+        await this.deleteRecord(previous.id);
+      }
+    }
+  }
+
+  async saveCustomEditorDraft(id: string, value: unknown): Promise<void> {
+    const parsedId = z.string().uuid().parse(id);
+    const draft = customEditorDraftSchema.parse(value);
+    return this.mutate(async () => {
+      const record = await this.open(parsedId);
+      const rallyIds = new Set(record.analysis.rallies.map((rally) => rally.id));
+      const clipIds = new Set<string>();
+      for (const clip of draft.clips) {
+        if (clipIds.has(clip.clipId) || clip.start >= clip.end || clip.defaultStart >= clip.defaultEnd
+          || clip.end > record.analysis.video.duration_seconds + 1e-6
+          || clip.defaultEnd > record.analysis.video.duration_seconds + 1e-6
+          || (clip.source === 'detected' ? !rallyIds.has(clip.sourceRallyId ?? '') : clip.sourceRallyId !== null)) {
+          throw new Error('INVALID_CUSTOM_DRAFT');
+        }
+        clipIds.add(clip.clipId);
+      }
+      const selected = customExportSegments(draft.clips);
+      if (selected.length) validateCustomExportSegments(record.analysis, selected);
+      if (draft.outputs.combined_video === (draft.outputs.rally_videos || draft.outputs.premiere_xml)) {
+        throw new Error('INVALID_CUSTOM_DRAFT');
+      }
+      await this.writeJsonAtomic(this.recordPath(parsedId), { ...record, custom_editor_draft: draft });
+    });
   }
 
   async list(retryMissingCovers = false): Promise<StoredHistorySummary[]> {
@@ -295,6 +361,10 @@ export class HistoryStore {
   }
 
   async delete(id: string): Promise<void> {
+    return this.mutate(() => this.deleteRecord(id));
+  }
+
+  private async deleteRecord(id: string): Promise<void> {
     const parsedId = z.string().uuid().parse(id);
     const record = await this.loadRecord(parsedId);
     const index = await this.loadIndex();
@@ -314,6 +384,10 @@ export class HistoryStore {
   }
 
   async clear(): Promise<void> {
+    return this.mutate(() => this.clearRecords());
+  }
+
+  private async clearRecords(): Promise<void> {
     await Promise.all([
       rm(this.recordsRoot(), { recursive: true, force: true }),
       rm(this.coversRoot(), { recursive: true, force: true }),

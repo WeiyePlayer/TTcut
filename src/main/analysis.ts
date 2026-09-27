@@ -198,6 +198,7 @@ export async function startAnalysis(
   const controller = beginTrackedTask(taskId);
   let processing: ProcessingMediaOutcome | null = null;
   let historySaved = false;
+  let terminalEvent: Extract<AppEvent, { type: 'analysis-result' | 'error' }> | null = null;
 
   void (async () => {
     try {
@@ -423,7 +424,7 @@ export async function startAnalysis(
       if (controller.cancelRequested || controller.signal.aborted) {
         throw workerFailure('ANALYSIS_CANCELLED', 'Analysis was cancelled.', { cancelled: true });
       }
-      send(window, { type: 'analysis-result', taskId, analysisId: record.id, calibration, data });
+      terminalEvent = { type: 'analysis-result', taskId, analysisId: record.id, calibration, data };
     } catch (error) {
       const cancelled = controller.cancelRequested
         || (error instanceof CfrNormalizationError && error.cancelled)
@@ -433,10 +434,10 @@ export async function startAnalysis(
       const message = error instanceof Error ? error.message : String(error);
       const logPath = error instanceof Error && 'logPath' in error ? String((error as WorkerFailure).logPath) : undefined;
       await logLine(taskId, 'ERROR', `Analysis failed: ${message}`).catch(() => undefined);
-      send(window, { type: 'error', taskId, code, message, ...(logPath ? { logPath } : {}) });
+      terminalEvent = { type: 'error', taskId, code, message, ...(logPath ? { logPath } : {}) };
     } finally {
       if (!historySaved && processing?.cacheCreated && processing.cachePath) {
-        const stillReferenced = await getHistoryStore().hasProcessingMediaReference(processing.cachePath).catch(() => false);
+        const stillReferenced = await getHistoryStore().hasProcessingMediaReference(processing.cachePath).catch(() => true);
         if (!stillReferenced) {
           await removeProcessingCache({
             schema_version: 1,
@@ -453,6 +454,7 @@ export async function startAnalysis(
         }
       }
       endTrackedTask(taskId);
+      if (terminalEvent) send(window, terminalEvent);
     }
   })();
   void logLine(taskId, 'INFO', `Analysis started for ${path.basename(sourceMetadata.path)}`);

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../src/renderer/App';
 import { SUPPORT_PROMPT_SNOOZE_MS, SUPPORT_PROMPT_SNOOZE_STORAGE_KEY } from '../src/domain/support-prompt';
 import type { AppEvent, BootstrapData, SelectedVideo, TTcutApi } from '../src/shared/api';
-import type { UpdateState, VideoMetadata } from '../src/shared/contracts';
+import type { CustomEditorDraft, UpdateState, VideoMetadata } from '../src/shared/contracts';
 import { analysisResultSchema } from '../src/shared/contracts';
 import hybridProvenance from './fixtures/hybrid-provenance.json';
 
@@ -118,6 +118,7 @@ describe('App workflow notices and multi-task entry', () => {
       startExport: vi.fn().mockResolvedValue('export-task-1'),
       cancelTask: vi.fn().mockResolvedValue(undefined),
       listHistory: vi.fn().mockResolvedValue([]),
+      saveCustomEditorDraft: vi.fn().mockResolvedValue(undefined),
       saveSettings: vi.fn((settings) => Promise.resolve(settings)),
     } as unknown as TTcutApi;
     Object.defineProperty(window, 'ttcut', { configurable: true, value: api });
@@ -694,7 +695,7 @@ describe('App workflow notices and multi-task entry', () => {
     expect(await screen.findByRole('heading', { name: 'Choose match videos' })).toBeVisible();
   });
 
-  it('edits explicit custom ranges, preserves them on export cancellation, and resets them on back', async () => {
+  it('preserves custom edits on export cancellation and back, and resets only after confirmation', async () => {
     bootstrap.settings.language = 'en';
     const selected = {
       path: 'C:\\video\\first.mp4', name: 'first.mp4', size: 100, mediaUrl: 'ttcut-media://first',
@@ -867,11 +868,65 @@ describe('App workflow notices and multi-task entry', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Back' }));
     expect(await screen.findByRole('heading', { name: 'Choose a cutting mode' })).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: /Custom/ }));
+    expect(Number(screen.getByRole('slider', { name: 'Resize clip end 1' }).getAttribute('aria-valuenow'))).toBe(draggedEnd);
+    expect(screen.getByRole('checkbox', { name: 'Rally 2' })).not.toBeChecked();
+    const reset = screen.getByRole('button', { name: 'Reset edits' });
+    expect(reset.previousElementSibling).toHaveClass('playback-mode-toggle');
+    fireEvent.click(reset);
+    expect(screen.getByRole('dialog', { name: 'Reset edits' })).toHaveTextContent('Reset the changes on this page?');
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+    expect(Number(screen.getByRole('slider', { name: 'Resize clip end 1' }).getAttribute('aria-valuenow'))).toBe(draggedEnd);
+    fireEvent.click(reset);
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Confirm' }));
     expect(Number(screen.getByRole('slider', { name: 'Resize clip end 1' }).getAttribute('aria-valuenow'))).toBe(defaultEnd);
     expect(screen.getAllByRole('checkbox', { name: /Rally/ }).every((input) => (input as HTMLInputElement).checked)).toBe(true);
+    await waitFor(() => expect(window.ttcut.saveCustomEditorDraft).toHaveBeenLastCalledWith(
+      '11111111-1111-4111-8111-111111111111', expect.objectContaining({ clips: expect.arrayContaining([
+        expect.objectContaining({ sourceRallyId: 'rally_001', end: defaultEnd, selected: true }),
+        expect.objectContaining({ sourceRallyId: 'rally_002', selected: true }),
+      ]) }),
+    ));
   });
 
-  it('retains playback mode within a custom draft and resets it for a new draft', async () => {
+  it('restores saved edits when a new App instance opens the history record', async () => {
+    bootstrap.settings.language = 'en';
+    const id = '11111111-1111-4111-8111-111111111111';
+    const selected = { path: 'C:/video/match.mp4', name: 'match.mp4', size: 100, mediaUrl: 'ttcut-media://match' };
+    const analysis = analysisResultSchema.parse({ schema_version: 1, video: metadata(selected.path), rallies: [
+      { id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 1, end_time_seconds: 2 },
+      { id: 'rally_002', index: 2, bounce_count: 6, start_time_seconds: 6, end_time_seconds: 7 },
+    ] });
+    let saved: CustomEditorDraft | undefined;
+    vi.mocked(window.ttcut.saveCustomEditorDraft).mockImplementation(async (_id, draft) => { saved = structuredClone(draft); });
+    window.ttcut.openHistory = vi.fn(async () => ({ analysisId: id, video: selected, analysis, calibration,
+      ...(saved ? { customEditorDraft: structuredClone(saved) } : {}) }));
+    vi.mocked(window.ttcut.listHistory).mockResolvedValue([{ schema_version: 1, id, analyzed_at: '2026-09-27',
+      video_name: selected.name, rally_count: 2, duration_seconds: 10, cover_url: null, source_status: 'available',
+      completion_kind: 'analysis', output_path: null }]);
+    const openEditor = async () => {
+      fireEvent.click(await screen.findByRole('button', { name: 'History' }));
+      fireEvent.click((await screen.findByText('match.mp4')).closest('button')!);
+      fireEvent.click(await screen.findByRole('button', { name: /Custom/ }));
+    };
+    render(<App />);
+    await openEditor();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Rally 2' }));
+    fireEvent.keyDown(screen.getByRole('slider', { name: 'Resize clip end 1' }), { key: 'ArrowLeft' });
+    const editedEnd = screen.getByRole('slider', { name: 'Resize clip end 1' }).getAttribute('aria-valuenow');
+    fireEvent.click(screen.getByRole('button', { name: 'Source playback' }));
+    fireEvent.pointerEnter(screen.getByRole('button', { name: 'Start cutting' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Export XML' }));
+    await waitFor(() => expect(saved?.outputs.premiere_xml).toBe(true));
+    cleanup();
+    render(<App />);
+    await openEditor();
+    expect(screen.getByRole('slider', { name: 'Resize clip end 1' })).toHaveAttribute('aria-valuenow', editedEnd);
+    expect(screen.getByRole('checkbox', { name: 'Rally 2' })).not.toBeChecked();
+    expect(screen.getByRole('button', { name: 'Rally playback' })).toBeVisible();
+    expect(screen.getByRole('checkbox', { name: 'Export XML' })).toBeChecked();
+  });
+
+  it('retains playback mode within a custom draft when reentering the editor', async () => {
     bootstrap.settings.language = 'en';
     const selected = { path: 'C:\\video\\first.mp4', name: 'first.mp4', size: 100, mediaUrl: 'ttcut-media://first' };
     selectVideos.mockResolvedValue([selected]);
@@ -897,7 +952,7 @@ describe('App workflow notices and multi-task entry', () => {
     expect(await screen.findByRole('button', { name: 'Rally playback' })).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Back' }));
     fireEvent.click(await screen.findByRole('button', { name: /Custom/ }));
-    expect(screen.getByRole('button', { name: 'Source playback' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Rally playback' })).toBeVisible();
   });
 
   it('keeps the export support prompt visible across pages until it is rejected', async () => {

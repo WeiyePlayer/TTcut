@@ -164,6 +164,9 @@ export function CustomCutPage({
   outputs,
   onOutputsChange,
   onExport,
+  onReset,
+  saveError = false,
+  onRetrySave,
 }: {
   video: SelectedVideo;
   analysis: AnalysisResultV1;
@@ -177,6 +180,9 @@ export function CustomCutPage({
   outputs: NonNullable<ExportRequest['outputs']>;
   onOutputsChange: (outputs: NonNullable<ExportRequest['outputs']>) => void;
   onExport: (outputs: NonNullable<ExportRequest['outputs']>) => void;
+  onReset?: () => void;
+  saveError?: boolean;
+  onRetrySave?: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const rallyScrollRef = useRef<HTMLDivElement>(null);
@@ -203,6 +209,7 @@ export function CustomCutPage({
   const [exportOptionsOpen, setExportOptionsOpen] = useState(false);
   const [multiSelectOpen, setMultiSelectOpen] = useState(false);
   const [bounceFilterValue, setBounceFilterValue] = useState('');
+  const [resetConfirmation, setResetConfirmation] = useState(false);
   const selectedCount = clips.filter((clip) => clip.selected).length;
   const showBounceCounts = hasBounceCounts(analysis);
 
@@ -439,6 +446,7 @@ export function CustomCutPage({
 
   useEffect(() => {
     const handleSpace = (event: KeyboardEvent) => {
+      if (resetConfirmation) return;
       if (event.isComposing || (event.code !== 'Space' && event.key !== ' ')) return;
       // Own Space before row handlers and native button/checkbox activation.
       // Consume keyup and repeats too: neither should activate a focused tool.
@@ -452,10 +460,11 @@ export function CustomCutPage({
       window.removeEventListener('keydown', handleSpace, true);
       window.removeEventListener('keyup', handleSpace, true);
     };
-  }, [togglePlayback]);
+  }, [togglePlayback, resetConfirmation]);
 
   useEffect(() => {
     const handleBoundaryShortcut = (event: KeyboardEvent) => {
+      if (resetConfirmation) return;
       if (event.isComposing || event.repeat || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey
         || isEditableShortcutTarget(event.target)
         || (event.code !== 'KeyA' && event.code !== 'KeyD')
@@ -475,7 +484,7 @@ export function CustomCutPage({
     };
     window.addEventListener('keydown', handleBoundaryShortcut, true);
     return () => window.removeEventListener('keydown', handleBoundaryShortcut, true);
-  }, [addManualAt, currentEditingClipId, resizeClipAt, toolMode]);
+  }, [addManualAt, currentEditingClipId, resizeClipAt, toolMode, resetConfirmation]);
 
   const toggleTool = (nextTool: Exclude<TimelineToolMode, null>) => {
     setToolMode((active) => active === nextTool ? null : nextTool);
@@ -484,11 +493,12 @@ export function CustomCutPage({
   const updateExportOutputs = (nextOutputs: NonNullable<ExportRequest['outputs']>) => {
     cancelExportClose();
     setExportOptionsOpen(true);
-    onOutputsChange(nextOutputs);
+    onOutputsChange({ ...nextOutputs, combined_video: !nextOutputs.rally_videos && !nextOutputs.premiere_xml });
   };
 
   return (
     <div className="custom-cut-page">
+      {saveError && <div className="notice" role="alert">{translations.customSaveFailed}<button className="text-button" type="button" onClick={onRetrySave}>{translations.retry}</button></div>}
       <div className="custom-workspace" onContextMenu={(event) => { event.preventDefault(); setToolMode(null); }}>
         <section className="custom-rally-list" aria-label={translations.rally}>
           <div className="table-tools">
@@ -580,6 +590,9 @@ export function CustomCutPage({
               <button className={`timeline-tool${toolMode === 'delete' ? ' is-active' : ''}`} type="button" aria-label={translations.deleteRally} title={translations.deleteRally} aria-pressed={toolMode === 'delete'} onClick={() => toggleTool('delete')}><TrashIcon /></button>
               <button className={`timeline-tool${toolMode === 'zoom' ? ' is-active' : ''}`} type="button" aria-label={translations.zoomTimeline} title={translations.zoomTimelineHint} aria-pressed={toolMode === 'zoom'} onClick={() => toggleTool('zoom')}><ZoomIcon /></button>
               <button className={`timeline-tool playback-mode-toggle${playbackMode === 'rallies' ? ' is-active' : ''}`} type="button" aria-pressed={playbackMode === 'rallies'} title={playbackMode === 'rallies' ? translations.switchToSourcePlayback : translations.switchToRallyPlayback} onClick={playback.switchMode}>{playbackMode === 'rallies' ? translations.rallyPlayback : translations.sourcePlayback}</button>
+              {onReset && <button className="timeline-tool" type="button" aria-label={translations.resetCustomEdits} title={translations.resetCustomEdits} onClick={() => setResetConfirmation(true)}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 7v5h-5M20 12a8 8 0 1 0-2.3 5.7" /></svg>
+              </button>}
             </div>
             <div className={`custom-export-launcher floating-launcher${exportOptionsOpen ? ' is-open' : ''}`} onPointerLeave={scheduleExportClose}>
               <div className="custom-export-options floating-launch-options" role="group" aria-label={translations.customExportOptions} onPointerEnter={cancelExportClose} onPointerLeave={scheduleExportClose}>
@@ -599,6 +612,13 @@ export function CustomCutPage({
           </div>
         </div>
       </div>
+      {resetConfirmation && <div className="modal-backdrop" onKeyDown={(event) => { if (event.key === 'Escape') setResetConfirmation(false); }}>
+        <div className="modal" role="dialog" aria-modal="true" aria-labelledby="custom-reset-title">
+          <h2 id="custom-reset-title">{translations.resetCustomEdits}</h2>
+          <p>{translations.resetCustomEditsConfirm}</p>
+          <div><button className="secondary" type="button" autoFocus onClick={() => setResetConfirmation(false)}>{translations.cancel}</button><button className="primary" type="button" onClick={() => { setResetConfirmation(false); onReset?.(); }}>{translations.confirmReset}</button></div>
+        </div>
+      </div>}
     </div>
   );
 }

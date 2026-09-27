@@ -234,7 +234,12 @@ function registerIpc(): void {
       video: { ...preview, name: record.source.name },
       calibration: record.calibration,
       analysis,
+      customEditorDraft: record.custom_editor_draft,
     };
+  });
+  ipcMain.handle(IPC.customEditorDraftSave, async (_event, id: unknown, draft: unknown) => {
+    if (typeof id !== 'string') throw new Error('INVALID_REQUEST');
+    await getHistoryStore().saveCustomEditorDraft(id, draft);
   });
   ipcMain.handle(IPC.historyDelete, async (_event, id: unknown) => {
     if (hasActiveTasks()) throw new Error('TASK_BUSY');
@@ -380,6 +385,12 @@ app.on('activate', () => {
 });
 
 app.on('before-quit', async (event) => {
+  if (getHistoryStore().hasPendingWrites() && !hasActiveTasks()) {
+    event.preventDefault();
+    await getHistoryStore().flush();
+    app.quit();
+    return;
+  }
   if (hasPreviewMedia()) {
     event.preventDefault();
     await disposePreviewMedia();

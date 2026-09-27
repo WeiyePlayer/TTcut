@@ -1,6 +1,8 @@
 export type Language = 'zh-CN' | 'en';
 
 const zh = {
+  resetCustomEdits: '重置改动', resetCustomEditsConfirm: '确定要重置当前页面改动吗？', confirmReset: '确定',
+  customSaveFailed: '自定义改动保存失败，请重试后再关闭页面。',
   previewPreparing: '正在准备兼容预览…',
   previewFailed: '预览加载失败。',
   previewRetry: '重试',
@@ -152,6 +154,8 @@ type DeepStrings<T> = { [K in keyof T]: T[K] extends object ? DeepStrings<T[K]> 
 export type Messages = DeepStrings<typeof zh>;
 
 const en: Messages = {
+  resetCustomEdits: 'Reset edits', resetCustomEditsConfirm: 'Reset the changes on this page?', confirmReset: 'Confirm',
+  customSaveFailed: 'Could not save custom edits. Please retry before closing this page.',
   previewPreparing: 'Preparing compatible preview…',
   previewFailed: 'Preview could not be loaded.',
   previewRetry: 'Retry',

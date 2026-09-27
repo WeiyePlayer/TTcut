@@ -111,6 +111,9 @@ export function App() {
   const [durationTier, setDurationTier] = useState<DurationHighlightTier>('rally');
   const [customDraft, setCustomDraft] = useState<CustomRallyClip[] | null>(null);
   const [customPlaybackMode, setCustomPlaybackMode] = useState<CustomPlaybackMode>('source');
+  const [customSaveError, setCustomSaveError] = useState(false);
+  const [customResetVersion, setCustomResetVersion] = useState(0);
+  const customSaveRef = useRef<Promise<void>>(Promise.resolve());
   const [customOutputs, setCustomOutputs] = useState<NonNullable<ExportRequest['outputs']>>({
     combined_video: true,
     rally_videos: false,
@@ -177,6 +180,9 @@ export function App() {
         if (videoTaskOwnerRef.current === 'single') updateVideoTaskOwner(null);
         setAnalysisId(event.analysisId);
         setAnalysis(event.data);
+        setCustomDraft(null);
+        setCustomPlaybackMode('source');
+        setCustomOutputs({ combined_video: true, rally_videos: false, premiere_xml: false });
         setAnalysisWarning(event.data.processing?.mode === 'vfr_fallback' && event.data.processing.warning_code
           ? { code: event.data.processing.warning_code, message: event.data.processing.warning_code }
           : null);
@@ -241,6 +247,15 @@ export function App() {
   }, [showSupportPrompt, updateVideoTaskOwner]);
 
   useEffect(() => { settingsRef.current = settings; }, [settings]);
+  useEffect(() => {
+    setCustomSaveError(false);
+    if (!analysisId || customDraft === null) return;
+    let current = true;
+    customSaveRef.current = window.ttcut.saveCustomEditorDraft(analysisId, {
+      schema_version: 1, clips: customDraft, playbackMode: customPlaybackMode, outputs: customOutputs,
+    }).catch(() => { if (current) setCustomSaveError(true); });
+    return () => { current = false; };
+  }, [analysisId, customDraft, customPlaybackMode, customOutputs]);
   useEffect(() => {
     if (!toast) return;
     const timeout = window.setTimeout(() => setToast(null), 3_000);
@@ -337,7 +352,12 @@ export function App() {
   const openCustomEditor = () => {
     if (!analysis) return;
     setMode('custom');
-    setCustomPlaybackMode('source');
+    if (customDraft === null) resetCustomEditor();
+    setStep('custom');
+  };
+
+  const resetCustomEditor = () => {
+    if (!analysis) return;
     setCustomDraft(createCustomClipDraft(
       analysis.rallies,
       settings.pre_roll_seconds,
@@ -346,8 +366,9 @@ export function App() {
       analysis.video.fps,
       rallyRecognitionMethod(analysis),
     ));
+    setCustomPlaybackMode('source');
     setCustomOutputs({ combined_video: true, rally_videos: false, premiere_xml: false });
-    setStep('custom');
+    setCustomResetVersion((value) => value + 1);
   };
 
   const startAnalysis = async () => {
@@ -393,6 +414,11 @@ export function App() {
     updateVideoTaskOwner('single');
     setStep('cutting'); setProgress({ percent: 0, stage: 'preparing' });
     try {
+      if (selection.mode === 'custom' && customDraft) {
+        await window.ttcut.saveCustomEditorDraft(analysisId, {
+          schema_version: 1, clips: customDraft, playbackMode: customPlaybackMode, outputs: outputs ?? customOutputs,
+        });
+      }
       setActiveTask(await window.ttcut.startExport({
         analysis_id: analysisId,
         selection,
@@ -446,6 +472,7 @@ export function App() {
   const openHistory = async (id: string) => {
     if (videoTaskOwnerRef.current) return;
     try {
+      await customSaveRef.current;
       const opened = await window.ttcut.openHistory(id);
       setVideo(opened.video);
       setMetadata(opened.analysis.video);
@@ -458,9 +485,9 @@ export function App() {
       setMode('all');
       setBounceThreshold(5);
       setDurationTier('rally');
-      setCustomDraft(null);
-      setCustomPlaybackMode('source');
-      setCustomOutputs({ combined_video: true, rally_videos: false, premiere_xml: false });
+      setCustomDraft(opened.customEditorDraft?.clips ?? null);
+      setCustomPlaybackMode(opened.customEditorDraft?.playbackMode ?? 'source');
+      setCustomOutputs(opened.customEditorDraft?.outputs ?? { combined_video: true, rally_videos: false, premiere_xml: false });
       setExportResult(null);
       setError(null);
       setStep('mode');
@@ -547,9 +574,6 @@ export function App() {
   };
   const returnToSelection = () => {
     if (view === 'auto' && step === 'custom') {
-      setCustomDraft(null);
-      setCustomPlaybackMode('source');
-      setCustomOutputs({ combined_video: true, rally_videos: false, premiere_xml: false });
       setMode('all');
       setStep('mode');
       return;
@@ -835,6 +859,7 @@ export function App() {
 
             {step === 'custom' && analysis && video && customDraft && (
               <CustomCutPage
+                key={customResetVersion}
                 video={video}
                 analysis={analysis}
                 clips={customDraft}
@@ -845,6 +870,9 @@ export function App() {
                 outputs={customOutputs}
                 onOutputsChange={setCustomOutputs}
                 onClipsChange={setCustomDraft}
+                onReset={resetCustomEditor}
+                saveError={customSaveError}
+                onRetrySave={() => setCustomDraft((current) => current ? [...current] : null)}
                 onToggleAll={(selected) => {
                   if (!selected) {
                     setCustomDraft((current) => current?.map((clip) => ({ ...clip, selected: false })) ?? null);

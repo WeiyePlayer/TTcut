@@ -5,6 +5,7 @@ import type {
   AppSettings,
   Calibration,
   CalibrationChoice,
+  CustomEditorDraft,
   TableAnalysis,
   ComponentStatus,
   CutSelectionV1,
@@ -58,6 +59,7 @@ export type HistoryOpenResultV1 = {
   video: SelectedVideo;
   analysis: AnalysisResultV1;
   calibration: Calibration;
+  customEditorDraft?: CustomEditorDraft;
 };
 
 export interface TTcutApi {
@@ -88,6 +90,7 @@ export interface TTcutApi {
   startBatchExport(input: BatchExportRequest): Promise<string>;
   listHistory(): Promise<HistorySummaryV1[]>;
   openHistory(id: string): Promise<HistoryOpenResultV1>;
+  saveCustomEditorDraft(id: string, draft: CustomEditorDraft): Promise<void>;
   deleteHistory(id: string): Promise<void>;
   deleteAnalysis(id: string): Promise<void>;
   clearHistory(): Promise<void>;
