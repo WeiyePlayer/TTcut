@@ -1,4 +1,5 @@
 import { prepareMacPreview } from './macos/preview';
+import { registerNativePreviewIpc, closeNativePreviews } from './native-preview';
 import path from 'node:path';
 import { stat, writeFile } from 'node:fs/promises';
 import {
@@ -72,6 +73,10 @@ if (isMac) {
   const override = app.commandLine.getSwitchValue('user-data-dir');
   app.setPath('userData', override ? path.resolve(override) : path.join(app.getPath('appData'), 'TTcut-Electron', ...(app.isPackaged ? [] : ['development'])));
 }
+// Keep local packaged acceptance runs isolated using Electron's standard switch.
+if (!isMac && app.commandLine.getSwitchValue('user-data-dir')) {
+  app.setPath('userData', path.resolve(app.commandLine.getSwitchValue('user-data-dir')));
+}
 
 
 function e2eHarnessEnabled(): boolean {
@@ -103,6 +108,7 @@ async function selectedVideo(filePath: string) {
 }
 
 function registerIpc(): void {
+  registerNativePreviewIpc();
   ipcMain.handle(IPC.appBootstrap, async () => {
     const [settings, components, platformCompatibility] = await Promise.all([
       loadSettings(), startupComponentStatus(), getPlatformCompatibility(),
@@ -162,7 +168,7 @@ function registerIpc(): void {
   });
   ipcMain.handle(IPC.videoProbe, (_event, value: unknown) => {
     if (typeof value !== 'string') throw new Error('INVALID_INPUT');
-    return probeVideo(value);
+    return probeVideo(value, undefined, 'interactive');
   });
   ipcMain.handle(IPC.videoPreparePreview, async (_event, value: unknown) => {
     if (typeof value !== 'string') throw new Error('INVALID_INPUT');
@@ -228,7 +234,7 @@ function registerIpc(): void {
     const preview = await selectedVideo(previewPath);
     const analysis = record.analysis.processing
       ? record.analysis
-      : { ...record.analysis, video: await probeVideo(record.source.path) };
+      : { ...record.analysis, video: await probeVideo(record.source.path, undefined, 'interactive') };
     return {
       analysisId: record.id,
       video: { ...preview, name: record.source.name },
@@ -411,6 +417,7 @@ app.on('before-quit', async (event) => {
 });
 
 app.on('window-all-closed', () => {
+  void closeNativePreviews();
   clearMediaPaths();
   if (process.platform !== 'darwin') app.quit();
 });

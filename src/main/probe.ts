@@ -109,7 +109,7 @@ async function sampledVfr(ffprobe: string, videoPath: string, signal?: AbortSign
   return durations.some((duration) => Math.abs(duration - median) > tolerance);
 }
 
-export async function probeVideo(videoPath: string, signal?: AbortSignal): Promise<VideoMetadata> {
+export async function probeVideo(videoPath: string, signal?: AbortSignal, mode: 'complete' | 'interactive' = 'complete'): Promise<VideoMetadata> {
   if (process.platform === 'darwin') return probeMacVideo(videoPath, signal);
   const container = videoContainerFromFileName(videoPath);
   if (!container) throw new Error('INVALID_INPUT');
@@ -128,7 +128,7 @@ export async function probeVideo(videoPath: string, signal?: AbortSignal): Promi
     throw new Error('VIDEO_UNREADABLE');
   }
   let frameCount = optionalInteger(video.nb_frames);
-  if (frameCount === null) frameCount = await countFrames(components.ffprobe, videoPath, signal);
+  if (frameCount === null && mode === 'complete') frameCount = await countFrames(components.ffprobe, videoPath, signal);
   const fieldRatesDiffer = nominalFps > 0 && Math.abs(nominalFps - averageFps) / averageFps > 0.001;
   let packetDurationsDiffer = false;
   try {

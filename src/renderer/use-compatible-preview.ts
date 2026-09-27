@@ -10,11 +10,11 @@ function previewErrorDetail(error: unknown): string {
     .slice(0, 500) || 'UNKNOWN_PREVIEW_ERROR';
 }
 
-export function useCompatiblePreview(videoRef: RefObject<HTMLVideoElement | null>, source: string, videoCodec?: string) {
+export function useCompatiblePreview(videoRef: RefObject<HTMLVideoElement | null>, source: string, videoCodec?: string, disabled = false) {
   // HEVC support varies with the Windows GPU/driver and installed decoder. A
   // metadata/first-frame success does not prove that a later rally seek works.
   const requiresProxy = window.ttcut?.platform === 'win32' && videoCodec?.toLowerCase() === 'hevc';
-  const initialStatus = requiresProxy ? 'preparing' : 'ready';
+  const initialStatus: PreviewState['status'] = requiresProxy ? 'preparing' : 'ready';
   const [state, setState] = useState<PreviewState>({ source, url: source, status: initialStatus, error: null });
   // Keep user intent separate from the media element: loading a source/proxy
   // resets currentTime and can abort an outstanding play() promise.
@@ -66,6 +66,7 @@ export function useCompatiblePreview(videoRef: RefObject<HTMLVideoElement | null
   const retry = useCallback(() => recover.current?.('manual-retry', true), []);
 
   useEffect(() => {
+    if (disabled) return;
     // macOS has a native preview path with progress, cancellation, HDR tone
     // mapping and a persistent bounded cache. Keep this FFmpeg fallback for
     // other platforms so the two proxy generators cannot race each other.
@@ -182,7 +183,7 @@ export function useCompatiblePreview(videoRef: RefObject<HTMLVideoElement | null
       video.removeEventListener('stalled', playing);
       video.removeEventListener('playing', playing);
     };
-  }, [source, videoRef, applyPending, requiresProxy]);
+  }, [source, videoRef, applyPending, requiresProxy, disabled]);
   return {
     ...(state.source === source ? state : { source, url: source, status: initialStatus, error: null }),
     seekTo,

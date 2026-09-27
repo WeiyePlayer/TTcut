@@ -7,10 +7,12 @@
   "private": true,
   "main": ".vite/build/main.js",
   "scripts": {
+    "prestart": "node scripts/stage-libmpv.mjs",
+    "stage:preview": "node scripts/stage-libmpv.mjs",
     "start": "electron-forge start",
     "stage:worker": "node scripts/stage-worker.mjs",
     "stage:windows-runtime": "py -3.12 scripts/stage-windows-runtime.py",
-    "stage:release": "node scripts/verify-model-assets.mjs && node scripts/stage-windows-resources.mjs && npm.cmd run stage:windows-runtime && node scripts/stage-worker.mjs && node scripts/generate-release-metadata.mjs",
+    "stage:release": "node scripts/verify-model-assets.mjs && node scripts/stage-windows-resources.mjs && npm.cmd run stage:windows-runtime && node scripts/stage-libmpv.mjs && node scripts/stage-worker.mjs && node scripts/generate-release-metadata.mjs",
     "package": "npm.cmd run stage:release && electron-forge package --arch=x64",
     "make": "npm.cmd run stage:release && node scripts/make-nsis.mjs",
     "make:beta": "npm.cmd run stage:release && node scripts/make-independent-beta.mjs",

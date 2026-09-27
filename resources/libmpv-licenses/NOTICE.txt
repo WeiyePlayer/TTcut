@@ -1,0 +1,18 @@
+TTcut native preview dependencies
+
+libmpv: mpv v0.41.0-1084-ga1bf4b655, mpv-player contributors.
+Upstream: https://github.com/mpv-player/mpv/tree/a1bf4b6559
+Windows build: https://github.com/shinchiro/mpv-winbuild-cmake/releases/tag/20260927
+Build recipes: https://github.com/shinchiro/mpv-winbuild-cmake/tree/20260927
+Archive identity and SHA-256 are recorded in ../libmpv.json and ../manifest.json.
+This is the GPL-enabled build. See mpv-Copyright.txt, GPL-2.0.txt and
+LGPL-2.1.txt for upstream notices. Embedded dependencies retain their own
+licenses. A public binary release must provide the corresponding source and
+notices for the complete pinned build, including its linked dependencies.
+
+nlohmann/json 3.12.0, Niels Lohmann and contributors, MIT.
+Source: https://github.com/nlohmann/json/tree/v3.12.0
+See nlohmann-json-MIT.txt. The header is compiled into ttcut-preview.exe.
+
+The TTcut host source is native/preview/main.cpp; its build recipe is
+scripts/stage-libmpv.mjs. This local acceptance build is not a public release.

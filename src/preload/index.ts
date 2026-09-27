@@ -5,6 +5,14 @@ import { IPC } from '../shared/ipc';
 
 const api: TTcutApi = {
   platform: process.platform,
+  nativePreviewOpen: (input) => ipcRenderer.invoke(IPC.nativePreviewOpen, input),
+  nativePreviewCommand: (sessionId, command) => ipcRenderer.invoke(IPC.nativePreviewCommand, sessionId, command),
+  nativePreviewClose: (sessionId) => ipcRenderer.invoke(IPC.nativePreviewClose, sessionId),
+  onNativePreviewEvent: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, value: import('../shared/native-preview').NativePreviewEvent) => listener(value);
+    ipcRenderer.on(IPC.nativePreviewEvent, wrapped);
+    return () => ipcRenderer.removeListener(IPC.nativePreviewEvent, wrapped);
+  },
   preparePreview: (mediaUrl, taskId) => ipcRenderer.invoke(IPC.previewPrepare, mediaUrl, taskId),
   onPreviewProgress: (listener) => {
     const wrapped = (_event: Electron.IpcRendererEvent, value: { taskId: string; percent: number }) => listener(value);
