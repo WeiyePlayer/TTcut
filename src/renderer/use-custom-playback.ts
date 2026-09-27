@@ -2,11 +2,11 @@ import { useCallback, useLayoutEffect, useRef, type RefObject } from 'react';
 import type { CustomRallyClip } from '../domain/custom-clips';
 import { resolveCustomPlayback, type CustomPlaybackMode, type PlaybackReason } from '../domain/custom-playback';
 import type { TimelineSeekIntent } from './CustomTimeline';
-import type { useCompatiblePreview } from './use-compatible-preview';
+import type { PreviewController } from './preview-controller';
 
 export function useCustomPlayback({ videoRef, preview, clips, mode, duration, onModeChange, onTime, onLocate }: {
   videoRef: RefObject<HTMLVideoElement | null>;
-  preview: ReturnType<typeof useCompatiblePreview>;
+  preview: PreviewController;
   clips: readonly CustomRallyClip[];
   mode: CustomPlaybackMode;
   duration: number;
@@ -37,14 +37,14 @@ export function useCustomPlayback({ videoRef, preview, clips, mode, duration, on
   const tick = useCallback((publishTime = true) => {
     const state = current.current;
     const player = videoRef.current;
-    if (!player) return;
+    if (!player && !state.preview.native) return;
     const intent = state.preview.getPlaybackIntent();
     // Frame callbacks enforce boundaries without re-rendering the entire editor
     // at the source frame rate. Media timeupdate and jumps publish the playhead.
     if (publishTime) state.onTime(intent.time);
     // Both queued transport and native seeks own their target until ready.
     // Read currentTime here rather than using an older frame callback's timestamp.
-    if (scrubbing.current || intent.pending || player.seeking) return;
+    if (scrubbing.current || intent.pending || player?.seeking || intent.seeking) return;
     if (intent.playing && navigate(intent.time, true, 'advance', false)) return;
     state.onLocate(intent.time, 'continuous');
   }, [navigate, videoRef]);
@@ -56,7 +56,7 @@ export function useCustomPlayback({ videoRef, preview, clips, mode, duration, on
     const playing = state.preview.getPlaybackIntent().playing;
     if (scrubbing.current) {
       const boundedTime = Math.max(0, Math.min(state.duration, time));
-      state.preview.seekTo(boundedTime, playing);
+      state.preview.seekTo(boundedTime, playing, false);
       state.onTime(boundedTime);
     } else navigate(time, playing, 'reconcile', true);
   }, [navigate]);

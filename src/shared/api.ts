@@ -18,6 +18,7 @@ import type {
   VideoMetadata,
   UpdateState,
 } from './contracts';
+import type { NativePreviewCommand, NativePreviewEvent, NativePreviewOpen } from './native-preview';
 
 export type { ExportTimingInfo } from './contracts';
 
@@ -64,6 +65,10 @@ export type HistoryOpenResultV1 = {
 
 export interface TTcutApi {
   readonly platform?: string;
+  nativePreviewOpen?(input: NativePreviewOpen): Promise<void>;
+  nativePreviewCommand?(sessionId: string, command: NativePreviewCommand): Promise<void>;
+  nativePreviewClose?(sessionId: string): Promise<void>;
+  onNativePreviewEvent?(listener: (event: NativePreviewEvent) => void): () => void;
   preparePreview?(mediaUrl: string, taskId: string): Promise<string>;
   onPreviewProgress?(listener: (value: { taskId: string; percent: number }) => void): () => void;
   bootstrap(): Promise<BootstrapData>;

@@ -97,6 +97,7 @@ const config: ForgeConfig = {
       '.runtime/release-metadata',
       '.runtime/resources',
       '.runtime/windows',
+      '.runtime/libmpv',
     ],
     win32metadata: {
       CompanyName: publisherName,

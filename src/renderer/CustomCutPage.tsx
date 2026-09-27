@@ -1,4 +1,6 @@
 import { CompatibleVideo } from './CompatibleVideo';
+import { NativePreviewSurface } from './NativePreviewSurface';
+import { useNativePreview } from './use-native-preview';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { SelectedVideo } from '../shared/api';
 import { hasBounceCounts, type AnalysisResultV1, type ExportRequest, type ScoreboardPosition } from '../shared/contracts';
@@ -272,7 +274,10 @@ export function CustomCutPage({
   const scoreboardBaseHeight = scoreboardHeightFraction(previewAspect);
   const scoreboardMaxX = Math.max(0, 1 - SCOREBOARD_WIDTH_FRACTION * scoreboardScale);
   const scoreboardMaxY = Math.max(0, 1 - scoreboardBaseHeight * scoreboardScale);
-  const preview = useCompatiblePreview(videoRef, video.mediaUrl, previewMetadata.video_codec);
+  const nativeEnabled = window.ttcut?.platform === 'win32' && Boolean(window.ttcut.nativePreviewOpen);
+  const browserPreview = useCompatiblePreview(videoRef, video.mediaUrl, previewMetadata.video_codec, nativeEnabled);
+  const nativePreview = useNativePreview(video.mediaUrl, nativeEnabled);
+  const preview = nativeEnabled ? nativePreview : browserPreview;
   const [currentTime, setCurrentTime] = useState(0);
   const [currentEditingClipId, setCurrentEditingClipId] = useState<string | null>(null);
   const [playbackCue, setPlaybackCue] = useState<PlaybackCue | null>(null);
@@ -466,6 +471,7 @@ export function CustomCutPage({
     onModeChange: onPlaybackModeChange, onTime: updatePlaybackTime, onLocate: locatePlaybackClip,
   });
   playbackTickRef.current = () => playback.tick(false);
+  nativePreview.onFrame.current = () => playback.tick();
 
   const cancelExportClose = useCallback(() => {
     if (exportCloseTimerRef.current === null) return;
@@ -728,11 +734,14 @@ export function CustomCutPage({
         <div className="custom-workspace-right">
           <div className="custom-monitor-slot"><div className="custom-monitor">
             {preview.status !== 'ready' && <div className="custom-preview-status" role={preview.status === 'failed' ? 'alert' : 'status'}>
-              <span>{preview.status === 'preparing' ? translations.previewPreparing : `${translations.previewFailed}${preview.error ? ` (${preview.error})` : ''}`}</span>
+              <span>{preview.status === 'preparing' ? (nativeEnabled ? translations.previewOpening : translations.previewPreparing) : `${translations.previewFailed}${preview.error ? ` (${preview.error})` : ''}`}</span>
               {preview.status === 'failed' && <button type="button" onClick={preview.retry}>{translations.previewRetry}</button>}
             </div>}
-            <CompatibleVideo hdr={Boolean(analysis.video.native_video && analysis.video.native_video.hdr !== 'sdr')} ref={videoRef} src={preview.url} controls={false} preload={preview.url === video.mediaUrl ? 'metadata' : 'auto'} playsInline tabIndex={0} aria-label={translations.togglePlayback} onClick={togglePlayback} onLoadedMetadata={() => { lastPlaybackClipIdRef.current = null; playback.tick(); }} onPlay={() => { playback.tick(); startVideoFrameTracking(); }} onPause={stopVideoFrameTracking} onEnded={stopVideoFrameTracking} onTimeUpdate={() => playback.tick()} onSeeked={() => playback.tick()} />
-            {scoreboard.enabled && currentScoreClip && <div ref={scoreboardPlaneRef} className="custom-scoreboard-plane" style={{ '--source-aspect': String(previewAspect) } as React.CSSProperties}>
+            {nativeEnabled ? <NativePreviewSurface preview={nativePreview} label={translations.togglePlayback} onToggle={togglePlayback}
+              scoreboard={{ enabled: scoreboard.enabled && Boolean(currentScoreClip), x: scoreboard.x, y: scoreboard.y, scale: scoreboardScale, aspect: previewAspect, left: currentScore?.left ?? 0, right: currentScore?.right ?? 0, leftName, rightName }}
+              onPosition={value => onScoreboardChange({ ...scoreboard, ...value })} />
+              : <CompatibleVideo hdr={Boolean(analysis.video.native_video && analysis.video.native_video.hdr !== 'sdr')} ref={videoRef} src={preview.url} controls={false} preload={preview.url === video.mediaUrl ? 'metadata' : 'auto'} playsInline tabIndex={0} aria-label={translations.togglePlayback} onClick={togglePlayback} onLoadedMetadata={() => { lastPlaybackClipIdRef.current = null; playback.tick(); }} onPlay={() => { playback.tick(); startVideoFrameTracking(); }} onPause={stopVideoFrameTracking} onEnded={stopVideoFrameTracking} onTimeUpdate={() => playback.tick()} onSeeked={() => playback.tick()} />}
+            {!nativeEnabled && scoreboard.enabled && currentScoreClip && <div ref={scoreboardPlaneRef} className="custom-scoreboard-plane" style={{ '--source-aspect': String(previewAspect) } as React.CSSProperties}>
               <div className="custom-scoreboard" role="button" tabIndex={0} aria-label={translations.dragScoreboard} title={translations.dragScoreboard} style={{ left: `${scoreboard.x * 100}%`, top: `${scoreboard.y * 100}%`, transform: `scale(${scoreboardScale})` }} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => {
                 event.preventDefault(); event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId);
                 scoreboardDragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, x: scoreboard.x, y: scoreboard.y, scale: scoreboardScale, corner: null };
@@ -782,7 +791,7 @@ export function CustomCutPage({
                   <span className="export-checkbox-text">{translations.exportPremiereXml}</span>
                 </label>
               </div>
-              <button className="primary floating-launch-start" type="button" disabled={preview.status === 'preparing' || !selectedCount || (!outputs.premiere_xml && !outputs.rally_videos && !mediaAvailable)} onPointerEnter={() => { cancelExportClose(); setExportOptionsOpen(true); }} onFocus={() => { cancelExportClose(); setExportOptionsOpen(true); }} onClick={() => onExport({ combined_video: !outputs.rally_videos && !outputs.premiere_xml, rally_videos: outputs.rally_videos, premiere_xml: outputs.premiere_xml })}>{translations.startCutting}</button>
+              <button className="primary floating-launch-start" type="button" disabled={!selectedCount || (!outputs.premiere_xml && !outputs.rally_videos && !mediaAvailable)} onPointerEnter={() => { cancelExportClose(); setExportOptionsOpen(true); }} onFocus={() => { cancelExportClose(); setExportOptionsOpen(true); }} onClick={() => onExport({ combined_video: !outputs.rally_videos && !outputs.premiere_xml, rally_videos: outputs.rally_videos, premiere_xml: outputs.premiere_xml })}>{translations.startCutting}</button>
             </div>
           </div>
         </div>
