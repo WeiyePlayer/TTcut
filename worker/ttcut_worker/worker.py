@@ -8,6 +8,7 @@ import traceback
 
 from .blurball_bounce import detect_blurball_bounce_frames
 from .blurball_predictor import (
+    BLURBALL_BATCH_SIZE,
     BLURBALL_CPU_BATCH_SIZE,
     BlurBallPredictor,
     blurball_model_dimensions,
@@ -530,7 +531,7 @@ def analyze_with_provider_fallback(request: dict) -> dict:
     previous_environment = {key: os.environ.get(key) for key in environment_keys}
     try:
         try:
-            return analyze(request, directml_batch_size=16)
+            return analyze(request, directml_batch_size=BLURBALL_BATCH_SIZE)
         except DirectMLFallbackRequired as fallback:
             from .directml_probe import remember_failure
             traceback.print_exception(fallback, file=sys.stderr)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import gc
 import sys
 import time
 from dataclasses import dataclass
@@ -9,9 +10,9 @@ from typing import Sequence
 
 import numpy as np
 
-from .onnx_models import LoadedBlurBall
+from .onnx_models import DIRECTML_BATCH_SIZES, LoadedBlurBall, create_session
 from .analysis_intervals import interval_index_for_time
-from .errors import InferenceError, VideoError
+from .errors import DirectMLFallbackRequired, InferenceError, VideoError
 from .roi import AnalysisRoi, DEFAULT_ROI_MODEL_SCALE, model_dimensions
 from .types import TrajectoryPoint
 from .video import FramePacket, StreamingVideoReader, VideoInfo
@@ -22,10 +23,10 @@ BLURBALL_INPUT_HEIGHT = 288
 BLURBALL_CONFIDENCE_THRESHOLD = 0.7
 BLURBALL_STEP = 3
 BLURBALL_MAX_DISPLACEMENT_PIXELS = 100.0
-BLURBALL_BATCH_SIZE = 16
+BLURBALL_BATCH_SIZE = DIRECTML_BATCH_SIZES[0]
 BLURBALL_CPU_BATCH_SIZE = 4
 # Probe short inputs down to one window before starting full-video analysis.
-BLURBALL_DIRECTML_BATCH_SIZES = (16, 8, 4, 2, 1)
+BLURBALL_DIRECTML_BATCH_SIZES = DIRECTML_BATCH_SIZES
 _MEAN = np.asarray([0.485, 0.456, 0.406], dtype=np.float32)[:, None, None]
 _STD = np.asarray([0.229, 0.224, 0.225], dtype=np.float32)[:, None, None]
 
@@ -198,13 +199,48 @@ class BlurBallPredictor:
         )
 
     def _infer_heatmaps(self, inputs: np.ndarray) -> np.ndarray:
-        original_batch = inputs.shape[0]
-        if self.loaded.provider == "directml" and original_batch < self.batch_size:
-            inputs = np.concatenate([
-                inputs,
-                np.zeros((self.batch_size - original_batch, *inputs.shape[1:]), dtype=np.float32),
-            ], axis=0)
-        logits = self.loaded.run(np.ascontiguousarray(inputs, dtype=np.float32))[:original_batch]
+        if self.loaded.provider != "directml":
+            logits = self.loaded.run(np.ascontiguousarray(inputs, dtype=np.float32))
+            return 1.0 / (1.0 + np.exp(-logits))
+        outputs = []
+        offset = 0
+        reduced = False
+        while offset < len(inputs):
+            chunk = inputs[offset:offset + self.batch_size]
+            count = len(chunk)
+            if count < self.batch_size:
+                chunk = np.concatenate([
+                    chunk,
+                    np.zeros((self.batch_size - count, *inputs.shape[1:]), dtype=np.float32),
+                ])
+            try:
+                if self.loaded.session is None:
+                    self.loaded.session = create_session(
+                        self.loaded.model_path, "directml",
+                        input_shape=(self.batch_size, *inputs.shape[1:]),
+                    )
+                outputs.append(self.loaded.run(np.ascontiguousarray(chunk, dtype=np.float32))[:count])
+                offset += count
+                continue
+            except DirectMLFallbackRequired as error:
+                smaller = [batch for batch in DIRECTML_BATCH_SIZES if batch < self.batch_size]
+                if not error.retry_smaller_batch or not smaller:
+                    raise
+                print(
+                    f"DirectML batch {self.batch_size} failed; retrying pending windows on GPU "
+                    f"with batch={smaller[0]}. {error}", file=sys.stderr, flush=True,
+                )
+                self.batch_size = self.loaded.batch_size = smaller[0]
+                reduced = True
+            # Leave the except block before releasing the failed session so
+            # its traceback no longer holds native GPU allocations alive.
+            self.loaded.session = None
+            gc.collect()
+        if reduced:
+            from .directml_probe import remember_configuration
+            remember_configuration(self.loaded.model_path, inputs.shape[3], inputs.shape[2], self.batch_size)
+            print(f"DirectML recovered on GPU: batch={self.batch_size}.", file=sys.stderr, flush=True)
+        logits = np.concatenate(outputs, axis=0)
         return 1.0 / (1.0 + np.exp(-logits))
 
     @staticmethod
@@ -327,6 +363,12 @@ class BlurBallPredictor:
             progress_callback(len(points), len(points))
         elapsed = time.perf_counter() - started
         detected = sum(point.visibility for point in points)
+        print(
+            f"BlurBall analysis timing: provider={self.loaded.provider}, frames={len(points)}, "
+            f"inference_seconds={inference_seconds:.3f}, predictor_seconds={elapsed:.3f}, "
+            f"average_predictor_fps={len(points) / elapsed if elapsed else 0.0:.3f}.",
+            file=sys.stderr, flush=True,
+        )
         return points, info, BlurBallPredictionStats(
             detected_frames=detected,
             missing_frames=len(points) - detected,
