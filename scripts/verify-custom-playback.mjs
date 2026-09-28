@@ -264,7 +264,13 @@ try {
   const loopButton=page.getByRole('button',{name:'Loop playback',exact:true});
   await loopButton.screenshot({path:path.join(run,'loop-mode-icon.png')});
   expect(await loopButton.evaluate(button=>({width:button.getBoundingClientRect().width,text:button.textContent?.trim(),pressed:button.hasAttribute('aria-pressed')}))).toEqual({width:34,text:'',pressed:false});
-  await expect(page.locator('.timeline-clip[data-loop-target="true"]')).toHaveAttribute('data-clip-id','clip1');
+  await expect(page.locator('.custom-rally-table tbody tr[data-loop-target="true"]')).toHaveCount(1);
+  await expect(page.locator('.timeline-clip[data-loop-target="true"]')).toHaveCount(0);
+  const loopHighlight=await page.locator('.custom-rally-table tbody tr[data-loop-target="true"] .custom-rally-row-content').evaluate(row=>({border:getComputedStyle(row,'::after').borderColor,opacity:getComputedStyle(row,'::after').opacity,background:getComputedStyle(row).backgroundColor}));
+  expect(loopHighlight.border).toBe('rgb(58, 131, 247)');
+  expect(loopHighlight.opacity).toBe('1');
+  expect(loopHighlight.background).not.toBe('rgb(255, 241, 223)');
+  await page.screenshot({path:path.join(run,'loop-target.png'),animations:'disabled'});
   await position(17.8);
   await expect.poll(async()=>(await frameState()).time).toBeLessThan(16);
   const wrapped=await frameState();
@@ -274,7 +280,8 @@ try {
   expect(await page.locator('.custom-rally-table tbody tr[data-loop-target="true"]').evaluate(row=>[...row.parentElement.children].indexOf(row))).toBe(0);
   await advancing('list click changes loop target',5,8);
   await page.locator('.timeline-clip[data-clip-id="clip2"]').click({position:{x:15,y:15}});
-  await expect(page.locator('.timeline-clip[data-loop-target="true"]')).toHaveAttribute('data-clip-id','clip2');
+  expect(await page.locator('.custom-rally-table tbody tr[data-loop-target="true"]').evaluate(row=>[...row.parentElement.children].indexOf(row))).toBe(2);
+  await expect(page.locator('.timeline-clip[data-loop-target="true"]')).toHaveCount(0);
   await advancing('timeline click changes loop target',25,28);
   await page.evaluate(()=>window.setDraft(current=>current.map(clip=>clip.clipId==='clip1'?{...clip,selected:false}:clip)));
   await page.locator('.custom-rally-table tbody tr').nth(1).click();

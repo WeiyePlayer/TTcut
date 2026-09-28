@@ -318,7 +318,6 @@ td input { accent-color: var(--blue); }
   cursor: pointer; font-size: 11px; font-weight: 700;
 }
 .timeline-clip.current-editing { background: var(--blue); color: white; }
-.timeline-clip.is-loop-target { box-shadow: 0 0 0 2px #b85c00; }
 .timeline-clip > span { position: relative; z-index: 1; overflow: hidden; text-overflow: clip; pointer-events: none; }
 .timeline-clip.delete-target { border-color: #c5221f; background: #e5342e; }
 .timeline-delete-overlay { position: absolute; z-index: 4; display: grid; place-items: center; inset: 0; color: #fff; pointer-events: none; }
@@ -396,11 +395,6 @@ td input { accent-color: var(--blue); }
 .custom-rally-table tbody tr + tr { border-top: 1px solid var(--line); }
 .custom-rally-table tbody tr { cursor: pointer; }
 .custom-rally-table tbody tr:hover .custom-rally-row-content { background: #f7faff; }
-.custom-rally-table tbody tr.is-loop-target .custom-rally-row-content { background: #fff1df; }
-.custom-rally-table tbody tr.is-loop-target .custom-rally-row-content::before {
-  content: ""; position: absolute; inset: 8px auto 8px 2px; width: 3px;
-  border-radius: 3px; background: #b85c00; pointer-events: none;
-}
 .custom-rally-table tbody tr:focus-visible { outline: 2px solid rgba(58,131,247,.4); outline-offset: -2px; }
 .custom-rally-check { text-align: center; }
 .rally-checkbox { position: relative; display: inline-flex; width: 14px; height: 14px; cursor: pointer; }
@@ -416,6 +410,7 @@ td input { accent-color: var(--blue); }
 .custom-rally-duration strong { line-height: 10px; }
 .custom-rally-duration i { display: block; width: 45.333%; height: 2px; min-height: 2px; border-radius: 0; background: var(--blue); }
 .custom-rally-list tbody tr { cursor: pointer; }
+.custom-rally-table tbody tr.is-loop-target .custom-rally-row-content::after,
 .custom-rally-table tbody tr.is-playback-cue .custom-rally-row-content::after {
   content: ""; position: absolute; z-index: 3; inset: 2px; border: 3px solid var(--blue);
   border-radius: 8px; pointer-events: none;
@@ -442,6 +437,7 @@ td input { accent-color: var(--blue); }
   0%, 99.9% { opacity: 1; }
   100% { opacity: 0; }
 }
+.custom-rally-table tbody tr.is-loop-target.is-playback-cue .custom-rally-row-content::after { animation: none; }
 .custom-timeline-actions { min-height: 48px; display: flex; align-items: end; justify-content: space-between; gap: 12px; }
 .timeline-tool-buttons { display: flex; align-items: center; gap: 8px; }
 .timeline-tool { display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 1px solid var(--line-strong); border-radius: 8px; background: white; color: var(--text); cursor: pointer; }

@@ -109,7 +109,6 @@ export function CustomTimeline({
   fps,
   currentTime,
   currentEditingClipId,
-  loopClipId = null,
   timelineLabel,
   resizeStartLabel,
   resizeEndLabel,
@@ -126,7 +125,6 @@ export function CustomTimeline({
   fps: number;
   currentTime: number;
   currentEditingClipId: string | null;
-  loopClipId?: string | null;
   timelineLabel: string;
   resizeStartLabel: string;
   resizeEndLabel: string;
@@ -449,7 +447,7 @@ export function CustomTimeline({
             const deleteTarget = toolMode === 'delete' && deleteTargetId === clip.clipId;
             const currentEditing = currentEditingClipId === clip.clipId;
             return (
-              <div key={clip.clipId} className={`timeline-clip${currentEditing ? ' current-editing' : ''}${loopClipId === clip.clipId ? ' is-loop-target' : ''}${deleteTarget ? ' delete-target' : ''}`} aria-current={currentEditing ? 'true' : undefined} data-clip-id={clip.clipId} data-rally-id={clip.sourceRallyId ?? undefined} data-loop-target={loopClipId === clip.clipId ? 'true' : undefined} style={{ left, width }} onPointerEnter={() => { if (toolMode === 'delete') setDeleteTargetId(clip.clipId); }} onPointerLeave={() => { if (deleteTargetId === clip.clipId) setDeleteTargetId(null); }} onPointerDown={(event) => {
+              <div key={clip.clipId} className={`timeline-clip${currentEditing ? ' current-editing' : ''}${deleteTarget ? ' delete-target' : ''}`} aria-current={currentEditing ? 'true' : undefined} data-clip-id={clip.clipId} data-rally-id={clip.sourceRallyId ?? undefined} style={{ left, width }} onPointerEnter={() => { if (toolMode === 'delete') setDeleteTargetId(clip.clipId); }} onPointerLeave={() => { if (deleteTargetId === clip.clipId) setDeleteTargetId(null); }} onPointerDown={(event) => {
                 // Right-click is reserved for CustomCutPage's context-menu cancellation.
                 if (event.button !== 0) return;
                 if (toolMode === 'delete') { event.preventDefault(); event.stopPropagation(); onDeleteClip(clip.clipId); return; }

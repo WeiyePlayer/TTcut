@@ -107,7 +107,7 @@ function ZoomIcon() {
 function PlaybackModeIcon({ mode }: { mode: CustomPlaybackMode }) {
   if (mode === 'source') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M2 5h18m-3-3 3 3-3 3M2 12h18m-3-3 3 3-3 3M2 19h18m-3-3 3 3-3 3" /></svg>;
   if (mode === 'rallies') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M2 5h7M6 2l3 3-3 3m3 4h7m-3-3 3 3-3 3m3 4h6m-3-3 3 3-3 3" /></svg>;
-  return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 11a8 8 0 1 0-2 6M20 13v5h-5M12 7v6" /></svg>;
+  return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 10a8 8 0 1 0-2 7M18 17l1-9-3 3M12 8v8" /></svg>;
 }
 
 function ScoreboardIcon() {
@@ -772,7 +772,7 @@ export function CustomCutPage({
             </div>}
           </div></div>
 
-          <CustomTimeline clips={clips} duration={analysis.video.duration_seconds} fps={analysis.video.fps} currentTime={currentTime} currentEditingClipId={currentEditingClipId} loopClipId={playbackMode === 'loop' ? playback.loopClipId : null} timelineLabel={translations.timeline} resizeStartLabel={translations.resizeStart} resizeEndLabel={translations.resizeEnd} toolMode={toolMode} onSeek={seek} onScrubCancel={playback.cancelScrub} onPlayClip={playClip} onAddAt={addManualAt} onDeleteClip={(clipId) => onClipsChange(deleteCustomClip(clips, clipId))} onResize={resizeClipAt} />
+          <CustomTimeline clips={clips} duration={analysis.video.duration_seconds} fps={analysis.video.fps} currentTime={currentTime} currentEditingClipId={currentEditingClipId} timelineLabel={translations.timeline} resizeStartLabel={translations.resizeStart} resizeEndLabel={translations.resizeEnd} toolMode={toolMode} onSeek={seek} onScrubCancel={playback.cancelScrub} onPlayClip={playClip} onAddAt={addManualAt} onDeleteClip={(clipId) => onClipsChange(deleteCustomClip(clips, clipId))} onResize={resizeClipAt} />
 
           <div className="custom-timeline-actions">
             <div className="timeline-tool-buttons" role="group" aria-label={translations.timelineTools}>

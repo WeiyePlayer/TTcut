@@ -245,7 +245,7 @@ it.each(['.custom-rally-table tr', '.custom-rally-table input', '.playback-mode-
   } finally { play.mockRestore(); pause.mockRestore(); }
 });
 
-it('cycles icon-only playback modes and marks the chosen loop clip in the list and track', () => {
+it('cycles icon-only playback modes and marks the chosen loop clip only in the list', () => {
   render(<PlaybackHarness />);
   const button = screen.getByRole('button', { name: 'Sequential playback' });
   expect(button).toHaveAttribute('title', 'Switch to rally playback and skip gaps');
@@ -258,13 +258,14 @@ it('cycles icon-only playback modes and marks the chosen loop clip in the list a
   expect(button).toHaveAccessibleName('Loop playback');
   expect(button).toHaveAttribute('title', 'Switch to sequential playback');
   expect(document.querySelector('.custom-rally-table tr[data-loop-target="true"]')).toBe(document.querySelectorAll('.custom-rally-table tr')[0]);
-  expect(document.querySelector('.timeline-clip[data-loop-target="true"]')).toHaveAttribute('data-clip-id', 'rally_001');
+  expect(document.querySelector('.timeline-clip[data-loop-target="true"]')).toBeNull();
   fireEvent.click(document.querySelectorAll('.custom-rally-table tr')[2]!);
   expect(document.querySelector('.custom-rally-table tr[data-loop-target="true"]')).toBe(document.querySelectorAll('.custom-rally-table tr')[2]);
   expect(document.querySelector('.timeline-clip[data-loop-target="true"]')).toBeNull();
   expect(screen.getByRole('checkbox', { name: 'Rally 3' })).not.toBeChecked();
   fireEvent.pointerDown(document.querySelector('.timeline-clip[data-clip-id="rally_002"]')!, { button: 0 });
-  expect(document.querySelector('.timeline-clip[data-loop-target="true"]')).toHaveAttribute('data-clip-id', 'rally_002');
+  expect(document.querySelector('.custom-rally-table tr[data-loop-target="true"]')).toBe(document.querySelectorAll('.custom-rally-table tr')[1]);
+  expect(document.querySelector('.timeline-clip[data-loop-target="true"]')).toBeNull();
 });
 
 it.each([true, false])('uses the codec of the selected playback file (original=%s)', async (original) => {
