@@ -27,6 +27,7 @@ static bool desiredPaused = true;
 static double lastPts = -1;
 static json overlay;
 static HWND editor = nullptr;
+static HWND editorSurface = nullptr;
 static HFONT editorFont = nullptr;
 static WNDPROC editorProc = nullptr;
 static std::string editField, editClipId;
@@ -87,7 +88,8 @@ static void finishEdit(bool commit) {
   std::wstring value(GetWindowTextLengthW(window) + 1, L'\0');
   value.resize(GetWindowTextW(window, value.data(), int(value.size())));
   if (commit) emit({{"type", "scoreboard-edit"}, {"field", editField}, {"clipId", editClipId}, {"value", utf8(value)}});
-  DestroyWindow(window); if (editorFont) { DeleteObject(editorFont); editorFont = nullptr; }
+  DestroyWindow(editorSurface); editorSurface = nullptr;
+  if (editorFont) { DeleteObject(editorFont); editorFont = nullptr; }
 }
 static LRESULT CALLBACK editProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
   if (message == WM_IME_STARTCOMPOSITION) editComposing = true;
@@ -110,13 +112,21 @@ static void beginEdit(const json& value) {
   const bool bottom = editField.rfind("right", 0) == 0;
   const auto b = boardRect();
   const auto text = wide(name ? overlay.value(editField, std::string()) : std::to_string(overlay.value(editField, 0)));
-  editor = CreateWindowExW(0, L"EDIT", text.c_str(), WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | (name ? ES_LEFT : ES_CENTER | ES_NUMBER),
+  // Composite the text box and caret above mpv's D3D swapchain, while keeping
+  // the entire inline editor clipped to the video host.
+  editorSurface = CreateWindowExW(WS_EX_LAYERED, L"TTcutEditorSurface", L"", WS_CHILD | WS_VISIBLE,
     int(b.x + b.w * (name ? .025 : games ? .76 : .88)), int(b.y + b.h * (bottom ? .5 : 0)), int(b.w * (name ? .71 : .12)), int(b.h * .5), host, nullptr, GetModuleHandleW(nullptr), nullptr);
+  if (!editorSurface) return;
+  SetLayeredWindowAttributes(editorSurface, 0, 255, LWA_ALPHA);
+  RECT bounds; GetClientRect(editorSurface, &bounds);
+  editor = CreateWindowExW(0, L"EDIT", text.c_str(), WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL | (name ? ES_LEFT : ES_CENTER | ES_NUMBER),
+    0, 0, bounds.right, bounds.bottom, editorSurface, nullptr, GetModuleHandleW(nullptr), nullptr);
+  if (!editor) { DestroyWindow(editorSurface); editorSurface = nullptr; return; }
   editorFont = CreateFontW(-int(b.h * .32), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Microsoft YaHei");
   SendMessageW(editor, WM_SETFONT, reinterpret_cast<WPARAM>(editorFont), TRUE);
   SendMessageW(editor, EM_SETLIMITTEXT, name ? 24 : 3, 0);
   editorProc = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(editor, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(editProc)));
-  SetWindowPos(editor, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE); SetFocus(editor); SendMessageW(editor, EM_SETSEL, 0, -1);
+  SetWindowPos(editorSurface, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE); SetFocus(editor); SendMessageW(editor, EM_SETSEL, 0, -1);
 }
 static void drawOverlay() {
   if (!player || overlay.is_null()) return;
@@ -195,7 +205,7 @@ static LRESULT CALLBACK inputProc(HWND window, UINT message, WPARAM wp, LPARAM l
   return previous ? CallWindowProcW(previous, window, message, wp, lp) : DefWindowProcW(window, message, wp, lp);
 }
 static BOOL CALLBACK attachInput(HWND window, LPARAM) {
-  if (window == editor) return TRUE;
+  if (window == editor || window == editorSurface) return TRUE;
   // mpv disables its embedded HWND (w32_common.c). This process owns input,
   // so enable the video child before installing TTcut's input subclass.
   if (!IsWindowEnabled(window)) EnableWindow(window, TRUE);
@@ -257,6 +267,8 @@ int main(int argc, char** argv) {
   MPV_API(LOAD)
   WNDCLASSW wc{}; wc.lpfnWndProc = inputProc; wc.hInstance = GetModuleHandleW(nullptr); wc.lpszClassName = L"TTcutPreview"; wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
   RegisterClassW(&wc);
+  WNDCLASSW editSurfaceClass{}; editSurfaceClass.lpfnWndProc = inputProc; editSurfaceClass.hInstance = wc.hInstance; editSurfaceClass.lpszClassName = L"TTcutEditorSurface";
+  RegisterClassW(&editSurfaceClass);
   host = CreateWindowExW(0, wc.lpszClassName, L"TTcut native preview", WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS, 0, 0, 1, 1, parent, nullptr, wc.hInstance, nullptr);
   if (!host) { error("MPV_WINDOW_FAILED:" + std::to_string(GetLastError())); return 6; }
   player = api_mpv_create(); if (!player) return 7;

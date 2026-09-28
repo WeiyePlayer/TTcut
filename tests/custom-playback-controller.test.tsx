@@ -105,6 +105,17 @@ describe('custom playback transport', () => {
     act(() => h.result.current.cancelScrub());
     expect(h.seekTo).toHaveBeenLastCalledWith(4, true);
   });
+  it.each([[.12, 0], [11.9, 10]])('keeps the pointer time %s while preview decoding returns keyframe %s', (target, keyframe) => {
+    const h = setup('source');
+    act(() => h.result.current.seek(target, 'preview'));
+    h.onTime.mockClear();
+    h.tick(keyframe); h.tick(keyframe);
+    expect(h.onTime).not.toHaveBeenCalled();
+    act(() => h.result.current.seek(target, 'commit'));
+    expect(h.onTime).toHaveBeenLastCalledWith(target);
+    h.tick(target);
+    expect(h.onTime).toHaveBeenLastCalledWith(target);
+  });
   it('plays an unselected clip temporarily, including pause/resume, then returns to selected clips', () => {
     const h = setup();
     act(() => h.result.current.playClip(clips[2]!));

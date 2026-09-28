@@ -13,6 +13,35 @@ export function NativePreviewSurface({ preview, scoreboard, onPosition, onToggle
   const drag = useRef<(Position & { startX: number; startY: number; corner: string | null }) | null>(null);
   const click = useRef<{ x: number; y: number; field: ScoreboardField | null; side: 'left' | 'right' | null; clipId: string; video: boolean } | null>(null);
   const lastClick = useRef<{ field: ScoreboardField; clipId: string; time: number } | null>(null);
+  useEffect(() => {
+    const surface = preview.surfaceRef.current;
+    if (!surface) return;
+    // Windows can route input to Chromium while the embedded video HWND is
+    // being shown/repositioned. Use the same hit testing on either surface.
+    const point = (event: MouseEvent) => {
+      const bounds = surface.getBoundingClientRect();
+      return { sessionId: 'surface', x: event.clientX - bounds.left, y: event.clientY - bounds.top, width: bounds.width, height: bounds.height };
+    };
+    const pointer = (event: PointerEvent) => {
+      if (event.type === 'pointerdown') {
+        if (event.button !== 0) return;
+        surface.setPointerCapture(event.pointerId);
+      }
+      const action = event.type === 'pointerdown' ? 'down' : event.type === 'pointerup' ? 'up' : event.type === 'pointermove' ? 'move' : 'cancel';
+      preview.onInput.current?.({ ...point(event), type: 'pointer', action });
+    };
+    const wheel = (event: WheelEvent) => {
+      event.preventDefault();
+      preview.onInput.current?.({ ...point(event), type: 'wheel', delta: -event.deltaY });
+    };
+    const events = ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'lostpointercapture'] as const;
+    for (const type of events) surface.addEventListener(type, pointer);
+    surface.addEventListener('wheel', wheel, { passive: false });
+    return () => {
+      for (const type of events) surface.removeEventListener(type, pointer);
+      surface.removeEventListener('wheel', wheel);
+    };
+  }, [preview.surfaceRef, preview.onInput]);
   useEffect(() => { preview.send({ type: 'scoreboard', scoreboard }); }, [preview.send, preview.status, scoreboard.enabled, scoreboard.x, scoreboard.y, scoreboard.scale, scoreboard.aspect, scoreboard.left, scoreboard.right, scoreboard.leftGames, scoreboard.rightGames, scoreboard.leftName, scoreboard.rightName, scoreboard.clipId, scoreboard.winner]);
   preview.onInput.current = event => {
     const bw = SCOREBOARD_WIDTH_FRACTION, pw = SCOREBOARD_PREVIEW_WIDTH_FRACTION;
@@ -79,5 +108,5 @@ export function NativePreviewSurface({ preview, scoreboard, onPosition, onToggle
       drag.current = null; click.current = null;
     }
   };
-  return <div ref={preview.surfaceRef} className="native-preview-surface" role="button" tabIndex={0} aria-label={label} onClick={onToggle} data-native-preview="libmpv" />;
+  return <div ref={preview.surfaceRef} className="native-preview-surface" role="button" tabIndex={0} aria-label={label} data-native-preview="libmpv" />;
 }

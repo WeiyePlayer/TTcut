@@ -1,11 +1,44 @@
-import { act, cleanup, render } from '@testing-library/react';
+import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { useNativePreview } from '../src/renderer/use-native-preview';
 import { NativePreviewSurface } from '../src/renderer/NativePreviewSurface';
 import type { NativePreviewEvent, PreviewScoreboard } from '../src/shared/native-preview';
 let preview: ReturnType<typeof useNativePreview>;
 function Harness(){preview=useNativePreview('ttcut-media://media/test',true);return <div ref={preview.surfaceRef}/>;}
-afterEach(()=>{cleanup();vi.unstubAllGlobals();vi.useRealTimers();});
+afterEach(()=>{cleanup();vi.unstubAllGlobals();vi.useRealTimers();vi.restoreAllMocks();});
+it('hit tests Chromium pointer and wheel input instead of playing through the scoreboard', () => {
+  vi.stubGlobal('PointerEvent', MouseEvent);
+  const input = { current: null as ((event: NativePreviewEvent) => void) | null };
+  const send = vi.fn(), onWinner = vi.fn(), onEdit = vi.fn(), onToggle = vi.fn(), onPosition = vi.fn();
+  const native = { send, status: 'ready', onInput: input, surfaceRef: { current: null } } as unknown as ReturnType<typeof useNativePreview>;
+  const board: PreviewScoreboard = { enabled: true, x: .1, y: .1, scale: 1, aspect: 2, left: 4, right: 3, leftGames: 2, rightGames: 1, leftName: 'A', rightName: 'B', clipId: 'first' };
+  const view = render(<NativePreviewSurface preview={native} scoreboard={board} onPosition={onPosition} onWinner={onWinner} onEdit={onEdit} onToggle={onToggle} label="Preview" />);
+  const surface = view.getByRole('button', { name: 'Preview' });
+  surface.setPointerCapture = vi.fn();
+  // Letterboxed surface with a nonzero page offset: input must use video coordinates.
+  vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue({ left: 50, top: 30, width: 1000, height: 700 } as DOMRect);
+  const point = (rx: number, ry: number) => ({ clientX: 150 + 280 * rx, clientY: 180 + 280 / 5.2 * ry, button: 0 });
+  const click = (rx: number, ry: number) => {
+    const position = point(rx, ry);
+    fireEvent.pointerDown(surface, position); fireEvent.pointerUp(surface, position); fireEvent.click(surface, { ...position, detail: 1 });
+  };
+  click(1.08, .25);
+  expect(onWinner).toHaveBeenCalledExactlyOnceWith('first', 'left');
+  click(.3, .75); click(.3, .75);
+  expect(send).toHaveBeenLastCalledWith({ type: 'scoreboard-edit', field: 'rightName', clipId: 'first' });
+  fireEvent.wheel(surface, { ...point(.94, .25), deltaY: -100 });
+  expect(onEdit).toHaveBeenLastCalledWith('first', 'left', '5');
+  fireEvent.wheel(surface, { ...point(.82, .75), deltaY: 100 });
+  expect(onEdit).toHaveBeenLastCalledWith('first', 'rightGames', '0');
+  expect(onToggle).not.toHaveBeenCalled();
+  fireEvent.pointerDown(surface, point(.3, .25));
+  fireEvent.pointerMove(surface, { clientX: 2000, clientY: 1600 });
+  fireEvent.pointerUp(surface, { clientX: 2000, clientY: 1600 });
+  expect(onPosition.mock.lastCall![0].x).toBeCloseTo(1 - .28 * 1.14);
+  expect(onPosition.mock.lastCall![0].y).toBeCloseTo(1 - .28 * 2 / 5.2);
+  click(-.2, 2);
+  expect(onToggle).toHaveBeenCalledOnce();
+});
 it('routes native winner, wheel and inline edits to the rally captured at pointer down', () => {
   const input = { current: null as ((event: NativePreviewEvent) => void) | null };
   const send = vi.fn(), onWinner = vi.fn(), onEdit = vi.fn(), onToggle = vi.fn();

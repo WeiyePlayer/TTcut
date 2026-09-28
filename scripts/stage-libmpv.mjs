@@ -43,7 +43,8 @@ const licenses = path.join(root, 'resources/libmpv-licenses');
 await mkdir(path.join(destination, 'licenses'), { recursive: true });
 for (const name of await readdir(licenses)) await copyFile(path.join(licenses, name), path.join(destination, 'licenses', name));
 const source = path.join(root, 'native/preview/main.cpp');
-const buildHash = hash(Buffer.concat([await readFile(source), await readFile(path.join(root, 'scripts/stage-libmpv.mjs')), Buffer.from(JSON.stringify(spec))]));
+const applicationManifest = path.join(root, 'native/preview/ttcut-preview.manifest');
+const buildHash = hash(Buffer.concat([await readFile(source), await readFile(applicationManifest), await readFile(path.join(root, 'scripts/stage-libmpv.mjs')), Buffer.from(JSON.stringify(spec))]));
 const exe = path.join(destination, 'ttcut-preview.exe');
 const manifestPath = path.join(destination, 'manifest.json');
 const previous = existsSync(manifestPath) ? JSON.parse(await readFile(manifestPath, 'utf8')) : {};
@@ -56,7 +57,7 @@ if (!existsSync(exe) || previous.buildHash !== buildHash || !await verified(exe,
   const env = { ...process.env };
   for (const line of envText.split(/\r?\n/)) { const index = line.indexOf('='); if (index > 0) env[line.slice(0, index)] = line.slice(index + 1); }
   const compiler = path.join(env.VCToolsInstallDir, 'bin/Hostx64/x64/cl.exe');
-  execFileSync(compiler, ['/nologo', '/std:c++17', '/EHsc', '/O2', '/MT', '/utf-8', '/DUNICODE', '/D_UNICODE', '/I' + path.dirname(path.dirname(header)), '/I' + cache, source, '/Fo' + path.join(cache, 'preview.obj'), '/Fe' + exe, '/link', 'user32.lib', 'gdi32.lib', '/DYNAMICBASE', '/NXCOMPAT'], { cwd: cache, env, stdio: 'inherit', windowsHide: true });
+  execFileSync(compiler, ['/nologo', '/std:c++17', '/EHsc', '/O2', '/MT', '/utf-8', '/DUNICODE', '/D_UNICODE', '/I' + path.dirname(path.dirname(header)), '/I' + cache, source, '/Fo' + path.join(cache, 'preview.obj'), '/Fe' + exe, '/link', 'user32.lib', 'gdi32.lib', '/DYNAMICBASE', '/NXCOMPAT', '/MANIFEST:EMBED', '/MANIFESTINPUT:' + applicationManifest], { cwd: cache, env, stdio: 'inherit', windowsHide: true });
 }
 await writeFile(manifestPath, JSON.stringify({ version: spec.version, buildHash, exeSha256: hash(await readFile(exe)), dllSha256: hash(await readFile(dll)), archiveSha256: spec.sha256 }, null, 2));
 console.log('Pinned libmpv preview runtime ready:', destination);

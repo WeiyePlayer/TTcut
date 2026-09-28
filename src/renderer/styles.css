@@ -301,7 +301,7 @@ td input { accent-color: var(--blue); }
   background: transparent; overscroll-behavior: none; scrollbar-width: none; -ms-overflow-style: none;
 }
 .timeline-viewport::-webkit-scrollbar { display: none; width: 0; height: 0; }
-.timeline-content { position: relative; min-width: 100%; height: 78px; }
+.timeline-content { position: relative; min-width: 100%; height: 78px; overflow: clip; }
 .timeline-ruler { position: absolute; z-index: 3; inset: 0 0 auto; height: 34px; cursor: crosshair; background: transparent; }
 .timeline-ruler canvas { position: absolute; left: 0; top: 0; pointer-events: none; }
 .timeline-track-window {
