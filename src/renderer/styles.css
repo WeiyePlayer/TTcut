@@ -318,6 +318,7 @@ td input { accent-color: var(--blue); }
   cursor: pointer; font-size: 11px; font-weight: 700;
 }
 .timeline-clip.current-editing { background: var(--blue); color: white; }
+.timeline-clip.is-loop-target { box-shadow: 0 0 0 2px #b85c00; }
 .timeline-clip > span { position: relative; z-index: 1; overflow: hidden; text-overflow: clip; pointer-events: none; }
 .timeline-clip.delete-target { border-color: #c5221f; background: #e5342e; }
 .timeline-delete-overlay { position: absolute; z-index: 4; display: grid; place-items: center; inset: 0; color: #fff; pointer-events: none; }
@@ -395,6 +396,11 @@ td input { accent-color: var(--blue); }
 .custom-rally-table tbody tr + tr { border-top: 1px solid var(--line); }
 .custom-rally-table tbody tr { cursor: pointer; }
 .custom-rally-table tbody tr:hover .custom-rally-row-content { background: #f7faff; }
+.custom-rally-table tbody tr.is-loop-target .custom-rally-row-content { background: #fff1df; }
+.custom-rally-table tbody tr.is-loop-target .custom-rally-row-content::before {
+  content: ""; position: absolute; inset: 8px auto 8px 2px; width: 3px;
+  border-radius: 3px; background: #b85c00; pointer-events: none;
+}
 .custom-rally-table tbody tr:focus-visible { outline: 2px solid rgba(58,131,247,.4); outline-offset: -2px; }
 .custom-rally-check { text-align: center; }
 .rally-checkbox { position: relative; display: inline-flex; width: 14px; height: 14px; cursor: pointer; }
@@ -443,7 +449,7 @@ td input { accent-color: var(--blue); }
 .timeline-tool.is-active { border-color: var(--blue); background: var(--blue); color: white; box-shadow: 0 3px 10px rgba(58,131,247,.22); }
 .timeline-tool svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .timeline-tool .scoreboard-tool-icon { width: 25px; height: 25px; stroke-width: 1.6; }
-.timeline-tool.playback-mode-toggle { width: auto; padding: 0 12px; white-space: nowrap; font-size: 12px; }
+.timeline-tool.playback-mode-toggle svg { width: 24px; height: 24px; stroke-width: 1.8; }
 .custom-workspace-right .custom-export-launcher { align-self: end; justify-self: end; }
 
 .success-heading { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }

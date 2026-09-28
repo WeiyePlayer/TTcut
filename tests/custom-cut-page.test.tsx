@@ -139,7 +139,7 @@ it('replaces zero when typing and keeps it selected after clearing', async () =>
   render(<ScoreboardHarness language="zh-CN" />);
   const toolbar = document.querySelector('.timeline-tool-buttons')!;
   const scoreboardButton = screen.getByRole('button', { name: '积分牌' });
-  const playbackButton = screen.getByRole('button', { name: '原片播放' });
+  const playbackButton = screen.getByRole('button', { name: '顺序播放' });
   expect(toolbar.contains(scoreboardButton.querySelector('svg'))).toBe(true);
   expect([...scoreboardButton.querySelectorAll('svg text')].map((digit) => digit.textContent)).toEqual(['3', '1']);
   expect(scoreboardButton.compareDocumentPosition(playbackButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -241,8 +241,30 @@ it.each(['.custom-rally-table tr', '.custom-rally-table input', '.playback-mode-
     expect(monitor.currentTime).toBe(3.5);
     expect(play).toHaveBeenCalledTimes(2);
     expect(screen.getByRole('checkbox', { name: 'Rally 1' })).toBeChecked();
-    expect(screen.getByRole('button', { name: 'Source playback' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sequential playback' })).toBeInTheDocument();
   } finally { play.mockRestore(); pause.mockRestore(); }
+});
+
+it('cycles icon-only playback modes and marks the chosen loop clip in the list and track', () => {
+  render(<PlaybackHarness />);
+  const button = screen.getByRole('button', { name: 'Sequential playback' });
+  expect(button).toHaveAttribute('title', 'Switch to rally playback and skip gaps');
+  expect(button).not.toHaveAttribute('aria-pressed');
+  expect(button).toHaveTextContent('');
+  expect(button.querySelector('svg')).toBeInTheDocument();
+  fireEvent.click(button);
+  expect(button).toHaveAccessibleName('Rally playback');
+  fireEvent.click(button);
+  expect(button).toHaveAccessibleName('Loop playback');
+  expect(button).toHaveAttribute('title', 'Switch to sequential playback');
+  expect(document.querySelector('.custom-rally-table tr[data-loop-target="true"]')).toBe(document.querySelectorAll('.custom-rally-table tr')[0]);
+  expect(document.querySelector('.timeline-clip[data-loop-target="true"]')).toHaveAttribute('data-clip-id', 'rally_001');
+  fireEvent.click(document.querySelectorAll('.custom-rally-table tr')[2]!);
+  expect(document.querySelector('.custom-rally-table tr[data-loop-target="true"]')).toBe(document.querySelectorAll('.custom-rally-table tr')[2]);
+  expect(document.querySelector('.timeline-clip[data-loop-target="true"]')).toBeNull();
+  expect(screen.getByRole('checkbox', { name: 'Rally 3' })).not.toBeChecked();
+  fireEvent.pointerDown(document.querySelector('.timeline-clip[data-clip-id="rally_002"]')!, { button: 0 });
+  expect(document.querySelector('.timeline-clip[data-loop-target="true"]')).toHaveAttribute('data-clip-id', 'rally_002');
 });
 
 it.each([true, false])('uses the codec of the selected playback file (original=%s)', async (original) => {
@@ -584,7 +606,7 @@ describe('manual timeline tools', () => {
       const surface = document.querySelector(target)!;
       const zoom = screen.getByRole('button', { name: 'Zoom timeline' });
       expect(zoom.nextElementSibling).toBe(screen.getByRole('button', { name: 'Scoreboard' }));
-      expect(zoom.nextElementSibling?.nextElementSibling).toBe(screen.getByRole('button', { name: 'Source playback' }));
+      expect(zoom.nextElementSibling?.nextElementSibling).toBe(screen.getByRole('button', { name: 'Sequential playback' }));
       fireEvent.wheel(surface, { deltaY: -120, clientX: 50 });
       expect(Number(viewport.dataset.zoom)).toBe(1);
       fireEvent.click(zoom);
@@ -618,7 +640,7 @@ describe('manual timeline tools', () => {
     expect(zoom).toHaveAttribute('aria-pressed', 'false');
     fireEvent.click(zoom);
     expect(remove).toHaveAttribute('aria-pressed', 'false');
-    fireEvent.click(screen.getByRole('button', { name: 'Source playback' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sequential playback' }));
     expect(zoom).toHaveAttribute('aria-pressed', 'true');
     const monitor = document.querySelector('.custom-monitor video') as HTMLVideoElement;
     setVideoTime(monitor, 1.4);
@@ -629,7 +651,7 @@ describe('manual timeline tools', () => {
       expect(zoom).toHaveAttribute('aria-pressed', 'false');
       expect(monitor.currentTime).toBe(1.4);
       expect(screen.getByRole('slider', { name: 'Resize clip start 1' })).toHaveAttribute('aria-valuenow', '3');
-      expect(screen.getByRole('button', { name: 'Rally playback' })).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.getByRole('button', { name: 'Rally playback' })).not.toHaveAttribute('aria-pressed');
     }
   });
 

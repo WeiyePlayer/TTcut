@@ -940,7 +940,8 @@ describe('App workflow notices and multi-task entry', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: 'Rally 2' }));
     fireEvent.keyDown(screen.getByRole('slider', { name: 'Resize clip end 1' }), { key: 'ArrowLeft' });
     const editedEnd = screen.getByRole('slider', { name: 'Resize clip end 1' }).getAttribute('aria-valuenow');
-    fireEvent.click(screen.getByRole('button', { name: 'Source playback' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sequential playback' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Rally playback' }));
     fireEvent.pointerEnter(screen.getByRole('button', { name: 'Start cutting' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Export XML' }));
     await waitFor(() => expect(saved?.outputs.premiere_xml).toBe(true));
@@ -949,7 +950,7 @@ describe('App workflow notices and multi-task entry', () => {
     await openEditor();
     expect(screen.getByRole('slider', { name: 'Resize clip end 1' })).toHaveAttribute('aria-valuenow', editedEnd);
     expect(screen.getByRole('checkbox', { name: 'Rally 2' })).not.toBeChecked();
-    expect(screen.getByRole('button', { name: 'Rally playback' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Loop playback' })).toBeVisible();
     expect(screen.getByRole('checkbox', { name: 'Export XML' })).toBeChecked();
   });
 
@@ -967,19 +968,20 @@ describe('App workflow notices and multi-task entry', () => {
       ] },
     }));
     fireEvent.click(await screen.findByRole('button', { name: /Custom/ }));
-    expect(screen.getByRole('button', { name: 'Source playback' })).toHaveAttribute('aria-pressed', 'false');
-    fireEvent.click(screen.getByRole('button', { name: 'Source playback' }));
-    expect(screen.getByRole('button', { name: 'Rally playback' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Sequential playback' })).not.toHaveAttribute('aria-pressed');
+    fireEvent.click(screen.getByRole('button', { name: 'Sequential playback' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Rally playback' }));
+    expect(screen.getByRole('button', { name: 'Loop playback' })).not.toHaveAttribute('aria-pressed');
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
     fireEvent.click(screen.getByRole('button', { name: 'Auto Cut' }));
-    expect(screen.getByRole('button', { name: 'Rally playback' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Loop playback' })).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Start cutting' }));
     await waitFor(() => expect(window.ttcut.startExport).toHaveBeenCalledTimes(1));
     act(() => taskListener?.({ type: 'error', taskId: 'export-task-1', code: 'EXPORT_CANCELLED', message: 'EXPORT_CANCELLED' }));
-    expect(await screen.findByRole('button', { name: 'Rally playback' })).toBeVisible();
+    expect(await screen.findByRole('button', { name: 'Loop playback' })).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Back' }));
     fireEvent.click(await screen.findByRole('button', { name: /Custom/ }));
-    expect(screen.getByRole('button', { name: 'Rally playback' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Loop playback' })).toBeVisible();
   });
 
   it('keeps the export support prompt visible across pages until it is rejected', async () => {

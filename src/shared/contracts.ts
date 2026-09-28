@@ -910,7 +910,7 @@ export const customRallyClipSchema = z.object({
 export const customEditorDraftSchema = z.object({
   schema_version: z.literal(1),
   clips: z.array(customRallyClipSchema),
-  playbackMode: z.enum(['source', 'rallies']),
+  playbackMode: z.enum(['source', 'rallies', 'loop']),
   scoreboard: scoreboardPositionSchema.extend({ enabled: z.boolean() }).strict().optional(),
   outputs: z.object({
     combined_video: z.boolean(), rally_videos: z.boolean(), premiere_xml: z.boolean(),
