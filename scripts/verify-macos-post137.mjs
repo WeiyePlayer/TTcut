@@ -8,7 +8,8 @@ import { chromium, expect } from '@playwright/test';
 import assert from 'node:assert/strict';
 
 const root = path.resolve(import.meta.dirname, '..');
-const app = path.resolve(process.argv[2] ?? path.join(root, 'out/TTcut-darwin-arm64/TTcut.app'));
+const scoreEditOnly = process.argv.includes('--score-edit-only');
+const app = path.resolve(process.argv.slice(2).find(arg => !arg.startsWith('--')) ?? path.join(root, 'out/TTcut-darwin-arm64/TTcut.app'));
 const output = path.join(root, 'output/macos-post137');
 await mkdir(output, { recursive: true });
 const resume = process.env.TTCUT_VERIFY_RESUME_RUN;
@@ -31,6 +32,7 @@ let child, browser, page, stderr = '';
 const report = resume ? JSON.parse(await readFile(path.join(run, 'report.json'), 'utf8')) : { app, run, checks: [], errors: [] };
 assert.equal(report.app, app);
 async function check(name, work) {
+  if (scoreEditOnly && !name.startsWith('score editing:') && !name.startsWith('draft IPC')) return;
   if (resume && report.checks.some(check => check.name === name && check.passed)) return;
   const detail = await work(); report.checks.push({ name, passed: true, ...(detail ? { detail } : {}) });
   await writeFile(path.join(run, 'report.json'), JSON.stringify(report, null, 2)); console.log('PASS', name);
@@ -105,6 +107,62 @@ try {
     assert.equal(rejected, true); assert.deepEqual(await saved(), draft);
   });
   await openEditor();
+  await check('score editing: initial zeros, gaps, playback, cancel and persisted per-rally numbers', async () => {
+    const cell = (row, field) => page.locator('.custom-scoreboard-row').nth(row).locator('.custom-scoreboard-' + field);
+    const edit = async (row, field, value, key = 'Enter') => {
+      const target = cell(row, field);
+      await target.dblclick();
+      const input = target.locator('input');
+      await expect(input).toBeVisible(); await expect(input).toBeFocused();
+      await input.fill(value); await input.press(key);
+    };
+    const seek = async time => {
+      const ruler = await page.locator('.timeline-ruler').boundingBox();
+      await page.mouse.click(ruler.x + ruler.width * time / 12, ruler.y + 12);
+      await expect.poll(async () => Math.abs((await state()).time - time)).toBeLessThan(.1);
+    };
+    assert.ok((await state()).time < 1, 'Start outside the first selected rally');
+    for (const [row, field, value] of [[0, 'games', '1'], [1, 'games', '2'], [0, 'points', '04'], [1, 'points', '3']]) await edit(row, field, value);
+    await expect.poll(async () => (await saved()).clips[0].score).toEqual({ left: 4, right: 3, left_games: 1, right_games: 2 });
+    await expect(page.locator('.custom-scoreboard-winner').first()).toBeDisabled();
+    await seek(3.5); // Gap before rally 2: edit the upcoming selected rally.
+    await edit(0, 'points', '6');
+    await expect.poll(async () => (await saved()).clips[1].score?.left).toBe(6);
+    assert.equal((await saved()).clips[0].score.left, 4);
+    await seek(8.5); // Unselected rally after the final selected rally.
+    await edit(1, 'points', '8');
+    await expect.poll(async () => (await saved()).clips[1].score?.right).toBe(8);
+    assert.equal((await saved()).clips[2].score, undefined);
+    await page.locator('.custom-rally-table tbody tr').first().click();
+    await expect.poll(async () => (await state()).time).toBeGreaterThan(1.1);
+    await cell(0, 'points').dblclick();
+    await expect(cell(0, 'points').locator('input')).toBeFocused();
+    await expect.poll(async () => (await state()).paused).toBe(true);
+    const pausedAt = (await state()).time;
+    await cell(0, 'points').locator('input').fill('9');
+    // Longer than the remaining rally: the editor must keep focus and its original target.
+    await page.waitForTimeout(2200);
+    assert.ok(Math.abs((await state()).time - pausedAt) < .05);
+    await expect(cell(0, 'points').locator('input')).toBeFocused();
+    await page.screenshot({ path: path.join(run, 'score-number-editing.png') });
+    await cell(0, 'points').locator('input').press('Escape');
+    await expect(cell(0, 'points')).toHaveText('4');
+    // Blur also commits, just like the player name editor.
+    await cell(1, 'games').dblclick(); await cell(1, 'games').locator('input').fill('5');
+    await page.getByRole('button', { name: 'Scoreboard', exact: true }).focus();
+    await expect.poll(async () => (await saved()).clips[0].score?.right_games).toBe(5);
+    const before = await saved();
+    await stop(); await launch(); await openEditor();
+    assert.deepEqual(await saved(), before);
+    await expect(cell(0, 'points')).toHaveText('4'); await expect(cell(1, 'games')).toHaveText('5');
+    if (!scoreEditOnly) {
+      // Keep the existing export/score-inheritance acceptance independent of this regression.
+      await page.getByRole('button', { name: 'Back', exact: true }).click();
+      await page.evaluate(({ id, draft }) => window.ttcut.saveCustomEditorDraft(id, draft), { id, draft });
+      await page.reload(); await page.waitForFunction(() => Boolean(window.ttcut)); await openEditor();
+    }
+    return { firstScore: before.clips[0].score, secondScore: before.clips[1].score, pausedAt };
+  });
   await check('six scoreboard fields support Chinese names, scores, Escape and wheel input', async () => {
     await page.locator('.custom-rally-table tbody tr').first().click();
     await expect.poll(async () => (await state()).time).toBeGreaterThan(1.05); await pause();

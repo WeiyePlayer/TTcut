@@ -53,3 +53,16 @@
 - 应用：`out/TTcut-darwin-arm64/TTcut.app`。这是本次本地验证包，旧 `out/make` 下的 DMG/ZIP 不属于本次构建。
 
 本任务未合并 `macos`、未发布新 Release、未生成新安装归档。未执行 Windows 机器/安装器、正式 Developer ID 签名、公证、跨机升级或分发验收；不把本次结果作为这些项目的通过证据。
+
+## 比分双击编辑补验与修复
+
+用户反馈四个数字无法像名称一样双击编辑。此前六字段实测先播放并暂停在已选回合内部，漏掉了编辑器初始时间 0 和回合间隙：这些位置没有 `currentScoreClip`，数字被禁用，名称仍可编辑。旧应用包已实际复现首个数字双击后没有输入框，记录在 `output/macos-post137/app-868C6z/report.json`；新增两个回归测试在修复前也失败。
+
+现在比分预览与编辑优先对应指针所在的已选回合；开头或间隙对应下一个已选回合，末尾对应最后一个已选回合。这样数字显示和保存目标一致，未选回合不会被写入。胜者按钮仍仅在已选回合内部启用；没有任何已选回合时没有比分保存目标。双击名称或数字时暂停在当前预览位置，避免播放跨回合导致输入框卸载。
+
+- `npm test -- tests/custom-cut-page.test.tsx tests/custom-clips.test.ts tests/custom-playback-controller.test.tsx`：96 项通过；类型检查通过。
+- 重新打包前端，复用未改变的原生运行时；本地 app 的严格深度签名检查通过（ad-hoc）。
+- `node scripts/verify-macos-post137.mjs --score-edit-only`：真实打包应用专项通过，独立用户目录。覆盖初始四个 0 双击输入、前导零归一、间隙及末尾正确回合归属、播放中暂停并保持输入焦点超过回合结束时间、Enter/Escape/失焦、磁盘保存及进程重启恢复。
+- 成功报告：`output/macos-post137/app-hwvUAm/report.json`；数字输入状态截图：同目录 `score-number-editing.png`。日志：`score-edit-tests.log`、`score-edit-typecheck.log`、`score-edit-package.log`、`score-edit-app-after.log`，均位于 `output/macos-post137/`。
+
+本次只补验上述受影响交互，没有重跑之前已通过的原生导出、真实比赛素材或批量分析验收。

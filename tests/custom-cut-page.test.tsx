@@ -174,6 +174,52 @@ it('scores and plays the next selected rally, replacing prior choices without do
   expect(scoreCell('B')).toHaveTextContent('1');
 });
 
+it('edits all four numbers before the first rally, between rallies, and after the final rally', () => {
+  render(<ScoreboardHarness />);
+  fireEvent.click(screen.getByRole('button', { name: 'Scoreboard' }));
+  const monitor = document.querySelector<HTMLVideoElement>('.custom-monitor video')!;
+  // The editor initially opens at zero, outside the first selected rally.
+  editCell(scoreCell('A', 'games'), '1');
+  editCell(scoreCell('B', 'games'), '2');
+  editCell(scoreCell('A'), '4');
+  editCell(scoreCell('B'), '3');
+  expect(winner('A')).toBeDisabled();
+  setVideoTime(monitor, 1.5);
+  expect(scoreCell('A', 'games')).toHaveTextContent('1');
+  expect(scoreCell('B', 'games')).toHaveTextContent('2');
+  expect(scoreCell('A')).toHaveTextContent('4');
+  expect(scoreCell('B')).toHaveTextContent('3');
+  setVideoTime(monitor, 3);
+  editCell(scoreCell('A'), '6');
+  setVideoTime(monitor, 4.5);
+  expect(scoreCell('A')).toHaveTextContent('6');
+  setVideoTime(monitor, 1.5);
+  expect(scoreCell('A')).toHaveTextContent('4');
+  // An unselected rally must not receive the correction intended for the next selected one.
+  setVideoTime(monitor, 7.5);
+  editCell(scoreCell('B'), '8');
+  setVideoTime(monitor, 10);
+  expect(scoreCell('B')).toHaveTextContent('8');
+  editCell(scoreCell('A'), '9');
+  setVideoTime(monitor, 9.5);
+  expect(scoreCell('A')).toHaveTextContent('9');
+});
+
+it('pauses on double-click so a playing rally cannot remove the score editor', () => {
+  render(<ScoreboardHarness />);
+  fireEvent.click(screen.getByRole('button', { name: 'Scoreboard' }));
+  const monitor = document.querySelector<HTMLVideoElement>('.custom-monitor video')!;
+  setVideoTime(monitor, 1.9);
+  const pause = vi.spyOn(monitor, 'pause');
+  fireEvent.doubleClick(scoreCell('A'));
+  expect(pause).toHaveBeenCalled();
+  const input = within(scoreCell('A')).getByRole('textbox');
+  fireEvent.change(input, { target: { value: '9' } });
+  fireEvent.keyDown(input, { key: 'Escape' });
+  expect(scoreCell('A')).toHaveTextContent('0');
+  pause.mockRestore();
+});
+
 it('continues from manual scores and adjusts both columns by wheel without automatic game rules', () => {
   render(<ScoreboardHarness />);
   fireEvent.click(screen.getByRole('button', { name: 'Scoreboard' }));

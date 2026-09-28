@@ -253,7 +253,13 @@ export function CustomCutPage({
   const selectedCount = clips.filter((clip) => clip.selected).length;
   const visibleClips = clips;
   const selectedScores = useMemo(() => resolvedSelectedClipScores(clips), [clips]);
-  const currentScoreClip = clips.find((clip) => clip.selected && currentTime >= clip.start && currentTime < clip.end);
+  const selectedScoreClips = clips.filter((clip) => clip.selected);
+  const activeScoreClip = selectedScoreClips.find((clip) => currentTime >= clip.start && currentTime < clip.end);
+  // Outside a rally, show/edit the next selected rally's starting score (or the
+  // final selected rally after the end). Opening at time zero must allow edits.
+  const currentScoreClip = activeScoreClip
+    ?? selectedScoreClips.find((clip) => clip.start > currentTime)
+    ?? selectedScoreClips.at(-1);
   const currentScore = currentScoreClip ? selectedScores.get(currentScoreClip.clipId) : null;
   const leftName = scoreboardName(scoreboard.left_name, 'A');
   const rightName = scoreboardName(scoreboard.right_name, 'B');
@@ -698,8 +704,9 @@ export function CustomCutPage({
                 else return;
                 event.preventDefault(); event.stopPropagation(); onScoreboardChange(next);
               }}>
-                <ScoreboardFields key={currentScoreClip?.clipId ?? 'gap'} names={[leftName, rightName]} score={currentScore ?? { left: 0, right: 0 }} winner={currentScoreClip?.winner} enabled={Boolean(currentScoreClip)}
+                <ScoreboardFields key={currentScoreClip?.clipId ?? 'gap'} names={[leftName, rightName]} score={currentScore ?? { left: 0, right: 0 }} winner={currentScoreClip?.winner} enabled={Boolean(currentScoreClip)} winnerEnabled={Boolean(activeScoreClip)}
                   labels={{ name: translations.scoreboardEditName, games: translations.scoreboardGames, points: translations.scoreboardPoints, winner: translations.scoreboardWinner }}
+                  onEditStart={() => preview.seekTo(currentTimeRef.current, false)}
                   onName={(side, value) => onScoreboardChange({ ...scoreboard, [`${side}_name`]: value })}
                   onScore={(field, value) => { if (currentScoreClip) updateScore(currentScoreClip.clipId, field, value); }}
                   onWinner={side => { if (currentScoreClip) updateWinner(currentScoreClip.clipId, side); }} />
