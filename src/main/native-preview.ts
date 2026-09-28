@@ -140,7 +140,7 @@ export class NativePreviewSession {
     } else if (value.type === 'error') {
       if (this.mode === 'direct' && this.initialized) this.recoverSoftware();
       else this.fail(String(value.message));
-    } else if (value.type === 'pointer' || value.type === 'key') {
+    } else if (value.type === 'pointer' || value.type === 'key' || value.type === 'wheel' || value.type === 'scoreboard-edit') {
       this.publish(value as NativePreviewEvent);
     }
   }
@@ -198,6 +198,7 @@ export class NativePreviewSession {
     if (this.closed) return;
     if (command.type === 'bounds') { this.bounds = command.bounds; this.updateBounds(); }
     else if (command.type === 'scoreboard') { this.scoreboard = command.scoreboard; this.send({ op: 'overlay', scoreboard: command.scoreboard }); }
+    else if (command.type === 'scoreboard-edit') { this.send({ op: 'overlay-edit', field: command.field, clipId: command.clipId }); }
     else if (command.type === 'pause') { this.paused = command.paused; this.send({ op: 'pause', paused: command.paused }); }
     else if (command.type === 'seek') {
       this.target = this.duration > 0 ? Math.min(command.time, this.duration) : command.time;

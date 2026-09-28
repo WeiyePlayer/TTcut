@@ -48,14 +48,14 @@ it.skipIf(process.platform !== 'win32' || !existsSync(ffmpeg))('burns different 
     const manifest = path.join(directory, 'segments.ffconcat');
     writeFileSync(manifest, buildConcatManifest(['first.mp4', 'second.mp4']));
     run(buildConcatArgs(manifest, output, metadata));
-    const frame = (time: number) => run(['-hide_banner', '-loglevel', 'error', '-ss', String(time), '-i', output, '-frames:v', '1', '-vf', 'crop=122:46:498:14', '-pix_fmt', 'gray', '-f', 'rawvideo', 'pipe:1']);
+    const frame = (time: number) => run(['-hide_banner', '-loglevel', 'error', '-ss', String(time), '-i', output, '-frames:v', '1', '-vf', 'crop=180:34:460:14', '-pix_fmt', 'gray', '-f', 'rawvideo', 'pipe:1']);
     const before = frame(0.5);
     const after = frame(1.5);
-    expect(before.length).toBe(122 * 46);
+    expect(before.length).toBe(180 * 34);
     expect(after.length).toBe(before.length);
     expect(before.equals(after)).toBe(false);
-    expect(before[20 * 122 + 110]).toBeLessThan(100);
-    expect(after[20 * 122 + 110]).toBeGreaterThan(110);
+    expect(before[12 * 180 + 12]).toBeLessThan(100);
+    expect(after[12 * 180 + 12]).toBeGreaterThan(110);
     expect(readFileSync(output).length).toBeGreaterThan(1024);
   } finally {
     rmSync(directory, { recursive: true, force: true });

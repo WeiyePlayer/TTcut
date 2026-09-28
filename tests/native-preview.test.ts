@@ -36,6 +36,16 @@ beforeEach(() => {
 afterEach(async () => { await session.close(); vi.useRealTimers(); });
 
 describe('native playback session', () => {
+  it('validates and forwards scoreboard editing, games and native wheel input', () => {
+    child.event({ type: 'initialized' });
+    session.command(nativePreviewCommandSchema.parse({ type: 'scoreboard', scoreboard: { enabled: true, x: .1, y: .1, scale: 1, aspect: 2, left: 4, right: 3, leftGames: 2, rightGames: 0, leftName: '张三', rightName: 'B', clipId: 'rally', winner: 'left' } }));
+    expect(child.commands.at(-1)).toMatchObject({ op: 'overlay', scoreboard: { leftGames: 2, winner: 'left' } });
+    session.command(nativePreviewCommandSchema.parse({ type: 'scoreboard-edit', field: 'leftGames', clipId: 'rally' }));
+    expect(child.commands.at(-1)).toEqual({ op: 'overlay-edit', field: 'leftGames', clipId: 'rally' });
+    child.event({ type: 'wheel', delta: 120, x: 100, y: 50, width: 800, height: 450 });
+    expect(send).toHaveBeenLastCalledWith('preview:native-event', expect.objectContaining({ type: 'wheel', delta: 120 }));
+    expect(nativePreviewCommandSchema.safeParse({ type: 'scoreboard-edit', field: 'unknown', clipId: 'rally' }).success).toBe(false);
+  });
   it('opens the original file without any proxy preparation and positions the native child at physical DPI', () => {
     child.event({ type: 'initialized', version: 'test' });
     expect(child.commands).toContainEqual({ op: 'bounds', x: 18, y: 35, width: 1400, height: 788, visible: true });

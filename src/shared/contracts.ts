@@ -816,6 +816,8 @@ export const customExportSegmentInputSchema = z.union([
 export const scoreboardScoreSchema = z.object({
   left: z.number().int().min(0).max(999),
   right: z.number().int().min(0).max(999),
+  left_games: z.number().int().min(0).max(999).optional(),
+  right_games: z.number().int().min(0).max(999).optional(),
 }).strict();
 
 export const scoreboardPositionSchema = z.object({
@@ -905,6 +907,7 @@ export const customRallyClipSchema = z.object({
   end: finiteNumber.positive(),
   selected: z.boolean(),
   score: scoreboardScoreSchema.optional(),
+  winner: z.enum(['left', 'right']).optional(),
 }).strict();
 
 export const customEditorDraftSchema = z.object({

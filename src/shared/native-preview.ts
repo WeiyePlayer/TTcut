@@ -10,12 +10,17 @@ export const previewScoreboardSchema = z.object({
   scale: z.number().min(0.5).max(3), aspect: z.number().positive().max(100),
   left: z.number().int().min(0).max(999), right: z.number().int().min(0).max(999),
   leftName: z.string().max(100), rightName: z.string().max(100),
+  leftGames: z.number().int().min(0).max(999).optional(), rightGames: z.number().int().min(0).max(999).optional(),
+  clipId: z.string().max(200).optional(), winner: z.enum(['left', 'right']).optional(),
 }).strict();
+export const scoreboardFieldSchema = z.enum(['leftName', 'rightName', 'left', 'right', 'leftGames', 'rightGames']);
+export type ScoreboardField = z.infer<typeof scoreboardFieldSchema>;
 export const nativePreviewCommandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('bounds'), bounds: previewBoundsSchema }).strict(),
   z.object({ type: z.literal('seek'), time: z.number().finite().min(0), playing: z.boolean(), exact: z.boolean(), sequence: z.number().int().nonnegative() }).strict(),
   z.object({ type: z.literal('pause'), paused: z.boolean() }).strict(),
   z.object({ type: z.literal('scoreboard'), scoreboard: previewScoreboardSchema }).strict(),
+  z.object({ type: z.literal('scoreboard-edit'), field: scoreboardFieldSchema, clipId: z.string().max(200) }).strict(),
   z.object({ type: z.literal('retry') }).strict(),
 ]);
 export const nativePreviewOpenSchema = z.object({
@@ -33,4 +38,6 @@ export type NativePreviewEvent = {
   | { type: 'error'; message: string }
   | { type: 'pointer'; action: 'down' | 'move' | 'up' | 'cancel'; x: number; y: number; width: number; height: number }
   | { type: 'key'; key: string; shift: boolean }
+  | { type: 'wheel'; delta: number; x: number; y: number; width: number; height: number }
+  | { type: 'scoreboard-edit'; field: ScoreboardField; value: string; clipId: string }
 );

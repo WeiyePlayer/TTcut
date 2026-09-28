@@ -26,6 +26,11 @@ static bool ready = false, seeking = false;
 static bool desiredPaused = true;
 static double lastPts = -1;
 static json overlay;
+static HWND editor = nullptr;
+static HFONT editorFont = nullptr;
+static WNDPROC editorProc = nullptr;
+static std::string editField, editClipId;
+static bool editComposing = false, normalizingScore = false;
 #define MPV_API(X) X(mpv_create) X(mpv_initialize) X(mpv_set_option_string) X(mpv_set_property_string) X(mpv_get_property) X(mpv_get_property_string) X(mpv_free) X(mpv_command) X(mpv_command_async) X(mpv_wait_event) X(mpv_terminate_destroy) X(mpv_error_string) X(mpv_request_log_messages)
 #define DECLARE(name) static decltype(&name) api_##name;
 MPV_API(DECLARE)
@@ -60,6 +65,59 @@ static std::string assEscape(std::string value) {
   return result;
 }
 static std::string f(double value) { return std::to_string(value); }
+static std::wstring wide(const std::string& value) {
+  std::wstring result(MultiByteToWideChar(CP_UTF8, 0, value.data(), int(value.size()), nullptr, 0), L'\0');
+  MultiByteToWideChar(CP_UTF8, 0, value.data(), int(value.size()), result.data(), int(result.size())); return result;
+}
+static std::string utf8(const std::wstring& value) {
+  std::string result(WideCharToMultiByte(CP_UTF8, 0, value.data(), int(value.size()), nullptr, 0, nullptr, nullptr), '\0');
+  WideCharToMultiByte(CP_UTF8, 0, value.data(), int(value.size()), result.data(), int(result.size()), nullptr, nullptr); return result;
+}
+struct BoardRect { double x, y, w, h; };
+static BoardRect boardRect() {
+  RECT bounds; GetClientRect(host, &bounds);
+  const double aspect = overlay.value("aspect", 16.0 / 9.0);
+  const double vw = std::min(double(bounds.right), bounds.bottom * aspect), vh = vw / aspect;
+  const double bw = vw * .28 * overlay.value("scale", 1.0);
+  return {(bounds.right - vw) / 2 + overlay.value("x", 0.0) * vw, (bounds.bottom - vh) / 2 + overlay.value("y", 0.0) * vh, bw, bw / 5.2};
+}
+static void finishEdit(bool commit) {
+  if (!editor) return;
+  const HWND window = editor; editor = nullptr;
+  std::wstring value(GetWindowTextLengthW(window) + 1, L'\0');
+  value.resize(GetWindowTextW(window, value.data(), int(value.size())));
+  if (commit) emit({{"type", "scoreboard-edit"}, {"field", editField}, {"clipId", editClipId}, {"value", utf8(value)}});
+  DestroyWindow(window); if (editorFont) { DeleteObject(editorFont); editorFont = nullptr; }
+}
+static LRESULT CALLBACK editProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
+  if (message == WM_IME_STARTCOMPOSITION) editComposing = true;
+  if (message == WM_IME_ENDCOMPOSITION) editComposing = false;
+  if (message == WM_KEYDOWN) {
+    if (!editComposing && (wp == VK_RETURN || wp == VK_ESCAPE)) { finishEdit(wp == VK_RETURN); SetFocus(host); return 0; }
+    if (wp == 'A' && (GetKeyState(VK_CONTROL) & 0x8000)) { SendMessageW(window, EM_SETSEL, 0, -1); return 0; }
+  }
+  if (message == WM_KILLFOCUS) { finishEdit(true); return 0; }
+  return CallWindowProcW(editorProc, window, message, wp, lp);
+}
+static void beginEdit(const json& value) {
+  finishEdit(true);
+  if (!overlay.value("enabled", false)) return;
+  editField = value.at("field").get<std::string>(); editClipId = value.value("clipId", std::string());
+  editComposing = false;
+  const bool name = editField == "leftName" || editField == "rightName";
+  if (!name && (editClipId.empty() || editClipId != overlay.value("clipId", std::string()))) return;
+  const bool games = editField == "leftGames" || editField == "rightGames";
+  const bool bottom = editField.rfind("right", 0) == 0;
+  const auto b = boardRect();
+  const auto text = wide(name ? overlay.value(editField, std::string()) : std::to_string(overlay.value(editField, 0)));
+  editor = CreateWindowExW(0, L"EDIT", text.c_str(), WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | (name ? ES_LEFT : ES_CENTER | ES_NUMBER),
+    int(b.x + b.w * (name ? .025 : games ? .76 : .88)), int(b.y + b.h * (bottom ? .5 : 0)), int(b.w * (name ? .71 : .12)), int(b.h * .5), host, nullptr, GetModuleHandleW(nullptr), nullptr);
+  editorFont = CreateFontW(-int(b.h * .32), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Microsoft YaHei");
+  SendMessageW(editor, WM_SETFONT, reinterpret_cast<WPARAM>(editorFont), TRUE);
+  SendMessageW(editor, EM_SETLIMITTEXT, name ? 24 : 3, 0);
+  editorProc = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(editor, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(editProc)));
+  SetWindowPos(editor, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE); SetFocus(editor); SendMessageW(editor, EM_SETSEL, 0, -1);
+}
 static void drawOverlay() {
   if (!player || overlay.is_null()) return;
   RECT bounds; GetClientRect(host, &bounds);
@@ -67,22 +125,28 @@ static void drawOverlay() {
   if (w < 1 || h < 1) return;
   std::string ass;
   if (overlay.value("enabled", false)) {
-    const double aspect = overlay.value("aspect", 16.0 / 9.0);
-    const double vw = std::min(w, h * aspect), vh = vw / aspect;
-    const double bw = vw * .19 * overlay.value("scale", 1.0), bh = bw / 2.6;
-    const double x = (w - vw) / 2 + overlay.value("x", 0.0) * vw;
-    const double y = (h - vh) / 2 + overlay.value("y", 0.0) * vh;
+    const auto b = boardRect(); const double x = b.x, y = b.y, bw = b.w, bh = b.h;
     auto rect = [&](double rx, double ry, double rw, double rh, const char* color) {
       ass += "{\\an7\\pos(" + f(rx) + "," + f(ry) + ")\\bord0\\shad0\\1c&H" + color + "&\\p1}m 0 0 l " + f(rw) + " 0 " + f(rw) + " " + f(rh) + " 0 " + f(rh) + "{\\p0}\n";
     };
-    rect(x, y, bw, bh, "292929"); rect(x + bw * .74, y, bw * .26, bh, "333333");
+    rect(x, y, bw, bh, "292929"); rect(x + bw * .76, y, bw * .12, bh, "F7833A"); rect(x + bw * .88, y, bw * .12, bh, "333333");
     rect(x, y + bh / 2, bw, 1, "777777");
     for (int row = 0; row < 2; row++) {
       const std::string name = overlay.value(row == 0 ? "leftName" : "rightName", std::string(row == 0 ? "A" : "B"));
       const int score = overlay.value(row == 0 ? "left" : "right", 0);
-      const double fs = std::min(bh * .32, bw * .60 / std::max(1.0, double(name.size()) * .58));
-      ass += "{\\an4\\pos(" + f(x + bw * .05) + "," + f(y + bh * (.25 + row * .5)) + ")\\fnMicrosoft YaHei\\fs" + f(fs) + "\\bord0\\shad0\\1c&HFFFFFF&}" + assEscape(name) + "\n";
-      ass += "{\\an5\\pos(" + f(x + bw * .87) + "," + f(y + bh * (.25 + row * .5)) + ")\\fs" + f(bh * .36) + "\\b1\\bord0\\shad0\\1c&HFFFFFF&}" + std::to_string(score) + "\n";
+      double units = 0; for (const auto c : wide(name)) units += c < 128 ? .62 : 1.0;
+      const double fs = std::min(bh * .32, bw * .70 / std::max(1.0, units));
+      const double cy = y + bh * (.25 + row * .5);
+      ass += "{\\an4\\pos(" + f(x + bw * .03) + "," + f(cy) + ")\\fnMicrosoft YaHei\\fs" + f(fs) + "\\b1\\bord0\\shad0\\1c&HFFFFFF&}" + assEscape(name) + "\n";
+      for (int column = 0; column < 2; column++) {
+        const int value = column == 0 ? overlay.value(row == 0 ? "leftGames" : "rightGames", 0) : score;
+        ass += "{\\an5\\pos(" + f(x + bw * (column == 0 ? .82 : .94)) + "," + f(cy) + ")\\fnMicrosoft YaHei\\fs" + f(bh * .32) + "\\b1\\bord0\\shad0\\1c&HFFFFFF&}" + std::to_string(value) + "\n";
+      }
+      rect(x + bw * 1.02, y + bh * row * .5 + 1, bw * .12, bh * .5 - 2, "292929");
+      const bool checked = overlay.value("winner", std::string()) == (row == 0 ? "left" : "right");
+      const auto symbol = checked ? "\xE2\x9C\x93" : "+";
+      const auto color = overlay.value("clipId", std::string()).empty() ? "777777" : checked ? "FFA671" : "FFFFFF";
+      ass += "{\\an5\\pos(" + f(x + bw * 1.08) + "," + f(cy) + ")\\fnSegoe UI Symbol\\fs" + f(bh * .38) + "\\b0\\bord0\\shad0\\1c&H" + color + "&}" + symbol + "\n";
     }
     for (const double rx : {x, x + bw}) for (const double ry : {y, y + bh}) rect(rx - 3, ry - 3, 6, 6, "FFFFFF");
   }
@@ -91,8 +155,26 @@ static void drawOverlay() {
 }
 static LRESULT CALLBACK inputProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
   auto previous = reinterpret_cast<WNDPROC>(GetPropW(window, L"TTcutOriginalProc"));
+  if (message == WM_COMMAND && HIWORD(wp) == EN_CHANGE && reinterpret_cast<HWND>(lp) == editor && editor && !normalizingScore && editField != "leftName" && editField != "rightName") {
+    wchar_t text[16]{}; GetWindowTextW(editor, text, 16);
+    const std::wstring raw(text); const auto first = raw.find_first_not_of(L'0');
+    const std::wstring normalized = first == std::wstring::npos ? L"0" : raw.substr(first);
+    if (raw != normalized) { normalizingScore = true; SetWindowTextW(editor, normalized.c_str()); SendMessageW(editor, EM_SETSEL, normalized == L"0" ? 0 : -1, -1); normalizingScore = false; }
+    return 0;
+  }
   if (message == WM_SYSKEYDOWN && wp == VK_F4) {
     PostMessageW(GetAncestor(host, GA_ROOT), WM_CLOSE, 0, 0); return 0;
+  }
+  if (message == WM_MOUSEWHEEL) {
+    POINT point{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)}; ScreenToClient(host, &point);
+    RECT rect; GetClientRect(host, &rect);
+    emit({{"type", "wheel"}, {"delta", GET_WHEEL_DELTA_WPARAM(wp)}, {"x", point.x}, {"y", point.y}, {"width", rect.right}, {"height", rect.bottom}}); return 0;
+  }
+  if (message == WM_SETCURSOR && !overlay.is_null() && overlay.value("enabled", false)) {
+    POINT point; GetCursorPos(&point); ScreenToClient(host, &point); const auto b = boardRect();
+    const bool left = std::abs(point.x - b.x) < 7, right = std::abs(point.x - b.x - b.w) < 7;
+    const bool top = std::abs(point.y - b.y) < 7, bottom = std::abs(point.y - b.y - b.h) < 7;
+    if ((left || right) && (top || bottom)) { SetCursor(LoadCursor(nullptr, (left == top) ? IDC_SIZENWSE : IDC_SIZENESW)); return TRUE; }
   }
   if (message == WM_LBUTTONDOWN || message == WM_MOUSEMOVE || message == WM_LBUTTONUP || message == WM_CAPTURECHANGED) {
     if (message != WM_MOUSEMOVE || (wp & MK_LBUTTON)) {
@@ -113,6 +195,7 @@ static LRESULT CALLBACK inputProc(HWND window, UINT message, WPARAM wp, LPARAM l
   return previous ? CallWindowProcW(previous, window, message, wp, lp) : DefWindowProcW(window, message, wp, lp);
 }
 static BOOL CALLBACK attachInput(HWND window, LPARAM) {
+  if (window == editor) return TRUE;
   // mpv disables its embedded HWND (w32_common.c). This process owns input,
   // so enable the video child before installing TTcut's input subclass.
   if (!IsWindowEnabled(window)) EnableWindow(window, TRUE);
@@ -128,6 +211,7 @@ static bool execute(const json& value) {
   if (op == "quit") return false;
   if (op == "bounds") {
     const bool visible = value.value("visible", false);
+    if (!visible) finishEdit(true);
     SetWindowPos(host, HWND_TOP, value.value("x", 0), value.value("y", 0), std::max(1, value.value("width", 1)), std::max(1, value.value("height", 1)), SWP_NOACTIVATE | (visible ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
     const int radius = MulDiv(16, GetDpiForWindow(host), 96);
     SetWindowRgn(host, CreateRoundRectRgn(0, 0, std::max(1, value.value("width", 1)) + 1, std::max(1, value.value("height", 1)) + 1, radius, radius), TRUE);
@@ -150,7 +234,10 @@ static bool execute(const json& value) {
     desiredPaused = value.at("paused").get<bool>();
     api_mpv_set_property_string(player, "pause", desiredPaused ? "yes" : "no");
   } else if (op == "overlay") {
+    if (editor && (!value.at("scoreboard").value("enabled", false) || value.at("scoreboard").value("clipId", std::string()) != overlay.value("clipId", std::string()))) finishEdit(true);
     overlay = value.at("scoreboard"); drawOverlay();
+  } else if (op == "overlay-edit") {
+    beginEdit(value);
   } else if (op == "screenshot") {
     // Main-process acceptance harness only; never exposed through renderer IPC.
     const int result = command({"screenshot-to-file", value.at("path").get<std::string>(), "window"});

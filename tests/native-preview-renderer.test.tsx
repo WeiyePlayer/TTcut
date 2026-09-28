@@ -1,9 +1,34 @@
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { useNativePreview } from '../src/renderer/use-native-preview';
+import { NativePreviewSurface } from '../src/renderer/NativePreviewSurface';
+import type { NativePreviewEvent, PreviewScoreboard } from '../src/shared/native-preview';
 let preview: ReturnType<typeof useNativePreview>;
 function Harness(){preview=useNativePreview('ttcut-media://media/test',true);return <div ref={preview.surfaceRef}/>;}
 afterEach(()=>{cleanup();vi.unstubAllGlobals();vi.useRealTimers();});
+it('routes native winner, wheel and inline edits to the rally captured at pointer down', () => {
+  const input = { current: null as ((event: NativePreviewEvent) => void) | null };
+  const send = vi.fn(), onWinner = vi.fn(), onEdit = vi.fn(), onToggle = vi.fn();
+  const native = { send, status: 'ready', onInput: input, surfaceRef: { current: null } } as unknown as ReturnType<typeof useNativePreview>;
+  let board: PreviewScoreboard = { enabled: true, x: .1, y: .1, scale: 1, aspect: 2, left: 4, right: 3, leftGames: 2, rightGames: 1, leftName: 'A', rightName: 'B', clipId: 'first' };
+  const ui = () => <NativePreviewSurface preview={native} scoreboard={board} onPosition={vi.fn()} onWinner={onWinner} onEdit={onEdit} onToggle={onToggle} label="Preview" />;
+  const view = render(ui());
+  const point = (rx: number, ry: number) => ({ x: 100 + 280 * rx, y: 50 + 280 / 5.2 * ry, width: 1000, height: 500 });
+  const pointer = (action: 'down' | 'up', rx: number, ry: number) => input.current!({ sessionId: 'test', type: 'pointer', action, ...point(rx, ry) });
+  pointer('down', 1.08, .25);
+  board = { ...board, clipId: 'next' }; view.rerender(ui());
+  pointer('up', 1.08, .25);
+  expect(onWinner).toHaveBeenCalledWith('first', 'left');
+  expect(onToggle).not.toHaveBeenCalled();
+  input.current!({ sessionId: 'test', type: 'wheel', delta: 120, ...point(.82, .75) });
+  expect(onEdit).toHaveBeenLastCalledWith('next', 'rightGames', '2');
+  input.current!({ sessionId: 'test', type: 'wheel', delta: -120, ...point(.94, .25) });
+  expect(onEdit).toHaveBeenLastCalledWith('next', 'left', '3');
+  pointer('down', .3, .25); pointer('up', .3, .25); pointer('down', .3, .25); pointer('up', .3, .25);
+  expect(send).toHaveBeenLastCalledWith({ type: 'scoreboard-edit', field: 'leftName', clipId: 'next' });
+  input.current!({ sessionId: 'test', type: 'scoreboard-edit', field: 'left', clipId: 'first', value: '8' });
+  expect(onEdit).toHaveBeenLastCalledWith('first', 'left', '8');
+});
 it('keeps displaying coalesced keyframes during continuous drag, then sends only the final exact seek',async()=>{
   vi.useFakeTimers();const command=vi.fn().mockResolvedValue(undefined),close=vi.fn().mockResolvedValue(undefined);
   vi.stubGlobal('ResizeObserver',class{observe(){}disconnect(){}});
