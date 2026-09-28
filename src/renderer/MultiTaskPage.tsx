@@ -33,7 +33,7 @@ type BatchItem = {
   additionOrder: number;
   video: SelectedVideo;
   previewVideo: SelectedVideo | null;
-  metadata: VideoMetadata;
+  metadata: VideoMetadata | null;
   mode: BatchMode;
   threshold: 3 | 5 | 7;
   durationTier: DurationHighlightTier;
@@ -69,28 +69,34 @@ function makeId(video: SelectedVideo): string {
 }
 
 async function createItems(videos: SelectedVideo[], firstOrder = 0): Promise<BatchItem[]> {
-  return Promise.all(videos.map(async (video, index) => ({
-    id: makeId(video),
-    additionOrder: firstOrder + index,
-    video,
-    previewVideo: null,
-    metadata: await window.ttcut.probeVideo(video.path),
-    mode: 'all' as const,
-    threshold: 5 as const,
-    durationTier: 'rally' as const,
-    calibrationStatus: 'pending' as const,
-    processingStatus: 'waiting' as const,
-    progress: 0,
-    calibration: null,
-    tableAnalysis: null,
-    analysisId: null,
-    analysis: null,
-    outputPath: null,
-    outputMediaUrl: null,
-    recoveredOutputPath: null,
-    exportWarning: null,
-    error: null,
-  })));
+  return Promise.all(videos.map(async (video, index): Promise<BatchItem> => {
+    let metadata: VideoMetadata | null = null;
+    let error: string | null = null;
+    try { metadata = await window.ttcut.probeVideo(video.path); }
+    catch (caught) { error = caught instanceof Error ? caught.message : String(caught); }
+    return {
+      id: makeId(video),
+      additionOrder: firstOrder + index,
+      video,
+      previewVideo: null,
+      metadata,
+      mode: 'all',
+      threshold: 5,
+      durationTier: 'rally',
+      calibrationStatus: metadata ? 'pending' : 'error',
+      processingStatus: 'waiting',
+      progress: 0,
+      calibration: null,
+      tableAnalysis: null,
+      analysisId: null,
+      analysis: null,
+      outputPath: null,
+      outputMediaUrl: null,
+      recoveredOutputPath: null,
+      exportWarning: null,
+      error,
+    };
+  }));
 }
 
 function modeLabel(item: BatchItem, rallyRecognitionMethod: RallyRecognitionMethod): string {
@@ -426,8 +432,8 @@ export function MultiTaskPage({
       setItems(created);
       setInitialized(true);
       setTimeout(() => scheduleRef.current(), 0);
-    }).catch(() => {
-      if (!cancelled) setInitialized(true);
+    }).catch((error) => {
+      if (!cancelled) { setSystemNotice(String(error)); setInitialized(true); }
     });
     return () => { cancelled = true; };
   }, [initialVideos]);
@@ -543,7 +549,7 @@ export function MultiTaskPage({
         autoCalibrationAvailableRef.current = false;
         setSystemNotice(text.modelUnavailable);
         replaceItems((current) => current.map((item) => (
-          item.calibrationStatus !== 'ready'
+          item.metadata && item.calibrationStatus !== 'ready'
             ? { ...item, calibrationStatus: 'manual-required', error: null }
             : item
         )));
@@ -599,7 +605,7 @@ export function MultiTaskPage({
       if (batchExportRef.current) return;
       const added = autoCalibrationAvailableRef.current
         ? created
-        : created.map((item) => ({ ...item, calibrationStatus: 'manual-required' as const }));
+        : created.map((item) => item.metadata ? { ...item, calibrationStatus: 'manual-required' as const } : item);
       invalidateMergedOutput();
       replaceItems((current) => {
         const currentPaths = new Set(current.map((item) => item.video.path.toLowerCase()));
@@ -686,7 +692,7 @@ export function MultiTaskPage({
 
   const manualItem = items.find((item) => item.id === manualItemId) ?? null;
   const manualAllPoints = pointOrder.every((name) => manualPoints[name]);
-  const manualCalibration: Calibration | null = manualItem && manualAllPoints
+  const manualCalibration: Calibration | null = manualItem?.metadata && manualAllPoints
     ? {
       video_width: manualItem.metadata.width,
       video_height: manualItem.metadata.height,
@@ -712,7 +718,7 @@ export function MultiTaskPage({
     setTimeout(() => scheduleRef.current(), 0);
   };
 
-  if (manualItem) {
+  if (manualItem?.metadata) {
     return (
       <section className="page multi-task-page multi-calibration-page">
         <div className="multi-header">
@@ -777,6 +783,7 @@ export function MultiTaskPage({
               <button
                 className={`batch-cover ${active ? 'processing' : ''} ${active && activePhase === 'calibration' ? 'calibrating' : ''} ${manualRequired ? 'calibration-failed-cover' : ''}`}
                 type="button"
+                disabled={!item.metadata}
                 aria-disabled={active && activePhase === 'calibration' ? 'true' : undefined}
                 aria-label={manualRequired
                   ? `${item.video.name} ${text.calibrateManually}`
@@ -794,9 +801,9 @@ export function MultiTaskPage({
                       : setPreview({
                         source: (item.previewVideo ?? item.video).mediaUrl,
                         name: item.video.name,
-                        hdr: Boolean(item.metadata.native_video && item.metadata.native_video.hdr !== 'sdr'),
-                        width: item.metadata.width,
-                        height: item.metadata.height,
+                        hdr: Boolean(item.metadata?.native_video && item.metadata.native_video.hdr !== 'sdr'),
+                        width: item.metadata?.width ?? 0,
+                        height: item.metadata?.height ?? 0,
                       })}
               >
                 <video src={(item.previewVideo ?? item.video).mediaUrl} preload="metadata" muted playsInline />
@@ -806,7 +813,7 @@ export function MultiTaskPage({
               </button>
               <div className="batch-info">
                 <strong title={item.video.name}>{item.video.name}</strong>
-                <span>{formatTimestamp(item.metadata.duration_seconds)} · {item.metadata.width} × {item.metadata.height} · {item.metadata.fps.toFixed(3)} fps</span>
+                {item.metadata && <span>{formatTimestamp(item.metadata.duration_seconds)} · {item.metadata.width} × {item.metadata.height} · {item.metadata.fps.toFixed(3)} fps</span>}
                 {mergeWorkflow && done && item.mode !== 'analyze-only' && batchExport.status !== 'done' && <span>{text.mergeWaiting}</span>}
                 {item.error && !manualRequired && <small>{item.error}</small>}
                 {item.exportWarning && (
@@ -821,9 +828,9 @@ export function MultiTaskPage({
                   <button className="secondary" type="button" disabled={!item.outputMediaUrl && batchTaskActive} onClick={() => item.outputMediaUrl ? setPreview({
                     source: item.outputMediaUrl,
                     name: item.video.name,
-                    hdr: Boolean(item.metadata.native_video && item.metadata.native_video.hdr !== 'sdr'),
-                    width: item.metadata.width,
-                    height: item.metadata.height,
+                    hdr: Boolean(item.metadata?.native_video && item.metadata.native_video.hdr !== 'sdr'),
+                    width: item.metadata?.width ?? 0,
+                    height: item.metadata?.height ?? 0,
                   }) : item.analysisId && onOpenAnalysis(item.analysisId)}>{item.outputPath ? '预览输出' : '查看分析'}</button>
                   <button className="secondary" type="button" onClick={() => void window.ttcut.revealOutput(item.outputPath ?? item.video.path)}>打开文件夹</button>
                 </div>

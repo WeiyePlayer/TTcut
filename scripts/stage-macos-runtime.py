@@ -10,6 +10,10 @@ ball_metadata = json.loads((NATIVE / 'Resources/Models/compiled/BlurBall.mlmodel
 if len(ball_metadata) != 1 or 'Float16' not in ball_metadata[0].get('computePrecision', ''):
  raise RuntimeError('BlurBall must be converted and compiled as FP16; see macos/ELECTRON.md')
 def run(*args): return subprocess.check_output(list(map(str,args)),text=True).strip()
+# Reject stale pre-scoreboard builds before replacing the staged runtime.
+decoders = run(NATIVE/'Vendor/native/bin/ffmpeg', '-hide_banner', '-decoders')
+if not any(len(line.split()) > 1 and line.split()[1] == 'png' for line in decoders.splitlines()):
+ raise RuntimeError('PNG decoder required for scoreboards; run macos/scripts/build_native_dependencies.py')
 def digest(p):
  h=hashlib.sha256()
  with p.open('rb') as f:

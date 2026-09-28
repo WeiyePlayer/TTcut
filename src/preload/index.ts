@@ -30,6 +30,7 @@ const api: TTcutApi = {
   startBatchExport: (input) => ipcRenderer.invoke(IPC.batchExportStart, input),
   listHistory: () => ipcRenderer.invoke(IPC.historyList),
   openHistory: (id: string) => ipcRenderer.invoke(IPC.historyOpen, id),
+  saveCustomEditorDraft: (id, draft) => ipcRenderer.invoke(IPC.customEditorDraftSave, id, draft),
   deleteHistory: (id: string) => ipcRenderer.invoke(IPC.historyDelete, id),
   deleteAnalysis: (id: string) => ipcRenderer.invoke(IPC.analysisDelete, id),
   clearHistory: () => ipcRenderer.invoke(IPC.historyClear),

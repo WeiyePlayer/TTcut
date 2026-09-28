@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { useState } from 'react';
+import { useLayoutEffect, useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { calculateRallyPlaybackScrollTop, CustomCutPage, findPlaybackTargetClip } from '../src/renderer/CustomCutPage';
 import type { AnalysisResultV1, ExportRequest } from '../src/shared/contracts';
@@ -61,6 +61,16 @@ function PlaybackHarness({ clips = playbackClips }: { clips?: CustomRallyClip[] 
   return <CustomCutPage video={video} analysis={analysis} clips={currentClips} playbackMode={playbackMode} onPlaybackModeChange={setPlaybackMode} translations={messages('en')} mediaAvailable onClipsChange={setCurrentClips} onToggleAll={vi.fn()} outputs={outputs} onOutputsChange={setOutputs} onExport={vi.fn()} />;
 }
 
+function ScoreboardHarness({ language = 'en' }: { language?: 'en' | 'zh-CN' }) {
+  useLayoutEffect(() => {
+    const monitor = document.querySelector('.custom-monitor video')!;
+    Object.defineProperties(monitor, { readyState: { configurable: true, value: 4 }, paused: { configurable: true, value: false }, videoWidth: { configurable: true, value: 1280 }, videoHeight: { configurable: true, value: 720 } });
+  }, []);
+  const [clips, setClips] = useState(playbackClips);
+  const [scoreboard, setScoreboard] = useState({ enabled: false, x: 0.78, y: 0.04 });
+  return <CustomCutPage video={video} analysis={analysis} clips={clips} scoreboard={scoreboard} onScoreboardChange={setScoreboard} playbackMode="source" onPlaybackModeChange={vi.fn()} translations={messages(language)} mediaAvailable onClipsChange={setClips} onToggleAll={vi.fn()} outputs={{ combined_video: true, rally_videos: false, premiere_xml: false }} onOutputsChange={vi.fn()} onExport={vi.fn()} />;
+}
+
 function ContinuousBoardHarness() {
   const [clips, setClips] = useState<CustomRallyClip[]>([{ ...initialClips[0]!, bounceCount: 2 }]);
   const [playbackMode, setPlaybackMode] = useState<CustomPlaybackMode>('source');
@@ -98,6 +108,195 @@ function mockRallyListGeometry() {
 
 afterEach(() => cleanup());
 
+function scoreCell(side: 'A' | 'B', kind: 'points' | 'games' = 'points') {
+return screen.getByLabelText(`${side} ${kind} (scroll to adjust, double-click to edit)`, { selector: 'span' });
+}
+function editCell(cell: HTMLElement, value: string) {
+  fireEvent.doubleClick(cell);
+  const input = within(cell).getByRole('textbox');
+  fireEvent.change(input, { target: { value } });
+  fireEvent.keyDown(input, { key: 'Enter' });
+}
+function winner(side: 'A' | 'B') {
+  return screen.getByRole('button', { name: `${side} wins this rally; add one point in the next rally` });
+}
+
+it('keeps the normal rally list and selection controls while toggling the overlay', () => {
+  render(<ScoreboardHarness />);
+  const button = screen.getByRole('button', { name: 'Scoreboard' });
+  expect(button.querySelector('svg path')).toBeInTheDocument();
+  expect(button.compareDocumentPosition(screen.getByRole('button', { name: 'Sequential playback' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  fireEvent.click(button);
+  expect(button).toHaveAttribute('aria-pressed', 'true');
+  expect(document.querySelectorAll('.custom-rally-table tbody tr')).toHaveLength(4);
+  expect(screen.getByRole('checkbox', { name: 'Rally 3' })).not.toBeChecked();
+  expect(screen.getByRole('button', { name: 'Multi-select' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Clear all' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Scoreboard settings' })).toBeNull();
+  expect(document.querySelector('.custom-rally-table input[type="text"]')).toBeNull();
+  expect(screen.getByRole('button', { name: /Drag the scoreboard/ })).toBeInTheDocument();
+  expect(winner('A')).toBeDisabled();
+  fireEvent.click(button);
+  expect(screen.queryByRole('button', { name: /Drag the scoreboard/ })).toBeNull();
+  expect(screen.getByRole('checkbox', { name: 'Rally 3' })).not.toBeChecked();
+});
+
+it('scores and plays the next selected rally, replacing prior choices without double counting and staying on the last rally', () => {
+  render(<ScoreboardHarness />);
+  fireEvent.click(screen.getByRole('button', { name: 'Scoreboard' }));
+  const monitor = document.querySelector<HTMLVideoElement>('.custom-monitor video')!;
+  setVideoTime(monitor, 1.5);
+  fireEvent.click(winner('A'));
+  expect(monitor.currentTime).toBe(4);
+  expect(scoreCell('A')).toHaveTextContent('1');
+  setVideoTime(monitor, 1.5);
+  expect(winner('A')).toHaveAttribute('aria-pressed', 'true');
+  expect(scoreCell('A')).toHaveTextContent('0');
+  fireEvent.click(winner('A'));
+  expect(monitor.currentTime).toBe(4);
+  expect(scoreCell('A')).toHaveTextContent('1');
+  expect(scoreCell('B')).toHaveTextContent('0');
+  setVideoTime(monitor, 1.5);
+  fireEvent.click(winner('B'));
+  expect(monitor.currentTime).toBe(4);
+  setVideoTime(monitor, 1.5);
+  expect(winner('A')).toHaveAttribute('aria-pressed', 'false');
+  expect(winner('B')).toHaveAttribute('aria-pressed', 'true');
+  setVideoTime(monitor, 4.5);
+  expect(scoreCell('A')).toHaveTextContent('0');
+  expect(scoreCell('B')).toHaveTextContent('1');
+  fireEvent.click(winner('A'));
+  expect(monitor.currentTime).toBe(9);
+  expect(scoreCell('A')).toHaveTextContent('1');
+  expect(scoreCell('B')).toHaveTextContent('1');
+  fireEvent.click(winner('B'));
+  expect(monitor.currentTime).toBe(9);
+  expect(scoreCell('B')).toHaveTextContent('1');
+});
+
+it('edits all four numbers before the first rally, between rallies, and after the final rally', () => {
+  render(<ScoreboardHarness />);
+  fireEvent.click(screen.getByRole('button', { name: 'Scoreboard' }));
+  const monitor = document.querySelector<HTMLVideoElement>('.custom-monitor video')!;
+  // The editor initially opens at zero, outside the first selected rally.
+  editCell(scoreCell('A', 'games'), '1');
+  editCell(scoreCell('B', 'games'), '2');
+  editCell(scoreCell('A'), '4');
+  editCell(scoreCell('B'), '3');
+  expect(winner('A')).toBeDisabled();
+  setVideoTime(monitor, 1.5);
+  expect(scoreCell('A', 'games')).toHaveTextContent('1');
+  expect(scoreCell('B', 'games')).toHaveTextContent('2');
+  expect(scoreCell('A')).toHaveTextContent('4');
+  expect(scoreCell('B')).toHaveTextContent('3');
+  setVideoTime(monitor, 3);
+  editCell(scoreCell('A'), '6');
+  setVideoTime(monitor, 4.5);
+  expect(scoreCell('A')).toHaveTextContent('6');
+  setVideoTime(monitor, 1.5);
+  expect(scoreCell('A')).toHaveTextContent('4');
+  // An unselected rally must not receive the correction intended for the next selected one.
+  setVideoTime(monitor, 7.5);
+  editCell(scoreCell('B'), '8');
+  setVideoTime(monitor, 10);
+  expect(scoreCell('B')).toHaveTextContent('8');
+  editCell(scoreCell('A'), '9');
+  setVideoTime(monitor, 9.5);
+  expect(scoreCell('A')).toHaveTextContent('9');
+});
+
+it('pauses on double-click so a playing rally cannot remove the score editor', () => {
+  render(<ScoreboardHarness />);
+  fireEvent.click(screen.getByRole('button', { name: 'Scoreboard' }));
+  const monitor = document.querySelector<HTMLVideoElement>('.custom-monitor video')!;
+  setVideoTime(monitor, 1.9);
+  const pause = vi.spyOn(monitor, 'pause');
+  fireEvent.doubleClick(scoreCell('A'));
+  expect(pause).toHaveBeenCalled();
+  const input = within(scoreCell('A')).getByRole('textbox');
+  fireEvent.change(input, { target: { value: '9' } });
+  fireEvent.keyDown(input, { key: 'Escape' });
+  expect(scoreCell('A')).toHaveTextContent('0');
+  pause.mockRestore();
+});
+
+it('continues from manual scores and adjusts both columns by wheel without automatic game rules', () => {
+  render(<ScoreboardHarness />);
+  fireEvent.click(screen.getByRole('button', { name: 'Scoreboard' }));
+  const monitor = document.querySelector<HTMLVideoElement>('.custom-monitor video')!;
+  setVideoTime(monitor, 1.5);
+  editCell(scoreCell('A'), '11');
+  editCell(scoreCell('B'), '3');
+  fireEvent.wheel(scoreCell('A', 'games'), { deltaY: -100 });
+  fireEvent.wheel(scoreCell('B', 'games'), { deltaY: 100 });
+  fireEvent.click(winner('A'));
+  setVideoTime(monitor, 4.5);
+  expect(scoreCell('A')).toHaveTextContent('12');
+  expect(scoreCell('B')).toHaveTextContent('3');
+  expect(scoreCell('A', 'games')).toHaveTextContent('1');
+  expect(scoreCell('B', 'games')).toHaveTextContent('0');
+  fireEvent.wheel(scoreCell('A'), { deltaY: 100 });
+  fireEvent.click(winner('B'));
+  setVideoTime(monitor, 9.5);
+  expect(scoreCell('A')).toHaveTextContent('11');
+  expect(scoreCell('B')).toHaveTextContent('4');
+  // An earlier correction does not overwrite a later explicit score anchor.
+  setVideoTime(monitor, 1.5);
+  editCell(scoreCell('A'), '8');
+  setVideoTime(monitor, 9.5);
+  expect(scoreCell('A')).toHaveTextContent('11');
+});
+
+it('edits Unicode names on the overlay and normalizes leading zeros and empty scores', () => {
+  render(<ScoreboardHarness />);
+  fireEvent.click(screen.getByRole('button', { name: 'Scoreboard' }));
+  setVideoTime(document.querySelector<HTMLVideoElement>('.custom-monitor video')!, 1.5);
+  fireEvent.doubleClick(scoreCell('A'));
+  const input = within(scoreCell('A')).getByRole<HTMLInputElement>('textbox');
+  expect(input.selectionStart).toBe(0);
+  expect(input.selectionEnd).toBe(1);
+  fireEvent.change(input, { target: { value: '01' } });
+  expect(input).toHaveValue('1');
+  fireEvent.change(input, { target: { value: '' } });
+  fireEvent.keyDown(input, { key: 'Enter' });
+  expect(scoreCell('A')).toHaveTextContent('0');
+  editCell(scoreCell('A'), '2');
+  expect(scoreCell('A')).toHaveTextContent('2');
+  editCell(screen.getByLabelText('A name (double-click to edit)'), '王楚钦 Wang');
+  expect(screen.getByLabelText('王楚钦 Wang name (double-click to edit)')).toHaveTextContent('王楚钦 Wang');
+});
+
+it('moves the scoreboard within the video frame when dragged', () => {
+  render(<ScoreboardHarness />);
+  fireEvent.click(screen.getByRole('button', { name: 'Scoreboard' }));
+  setVideoTime(document.querySelector<HTMLVideoElement>('.custom-monitor video')!, 1.5);
+  const board = screen.getByRole('button', { name: /Drag the scoreboard/ });
+  const plane = document.querySelector<HTMLDivElement>('.custom-scoreboard-plane')!;
+  vi.spyOn(plane, 'getBoundingClientRect').mockReturnValue({ width: 1000, height: 500 } as DOMRect);
+  Object.defineProperty(board, 'setPointerCapture', { value: vi.fn() });
+  fireEvent.pointerDown(board, { pointerId: 1, clientX: 100, clientY: 100 });
+  fireEvent.pointerMove(board, { pointerId: 1, clientX: 120, clientY: 120 });
+  expect(parseFloat(board.style.left)).toBeCloseTo(68.08, 2);
+  expect(board).toHaveStyle({ top: '8%' });
+});
+
+it('resizes the scoreboard proportionally from a corner', () => {
+  render(<ScoreboardHarness />);
+  fireEvent.click(screen.getByRole('button', { name: 'Scoreboard' }));
+  setVideoTime(document.querySelector<HTMLVideoElement>('.custom-monitor video')!, 1.5);
+  const board = screen.getByRole('button', { name: /Drag the scoreboard/ });
+  const handle = board.querySelector<HTMLElement>('.custom-scoreboard-resize-handle.is-bottom-right')!;
+  const plane = document.querySelector<HTMLDivElement>('.custom-scoreboard-plane')!;
+  vi.spyOn(plane, 'getBoundingClientRect').mockReturnValue({ width: 1000, height: 500 } as DOMRect);
+  Object.defineProperty(handle, 'setPointerCapture', { value: vi.fn() });
+  fireEvent.pointerDown(handle, { pointerId: 2, clientX: 100, clientY: 100 });
+  fireEvent.pointerMove(handle, { pointerId: 2, clientX: 62, clientY: 87 });
+  const scale = Number(board.style.transform.match(/scale\(([^)]+)\)/)?.[1]);
+  expect(scale).toBeCloseTo(0.85, 1);
+  expect(parseFloat(board.style.left)).toBeCloseTo(68.08, 2);
+  expect(board).toHaveStyle({ top: '4%' });
+});
+
 it.each(['.custom-rally-table tr', '.custom-rally-table input', '.playback-mode-toggle', '.custom-monitor video', '.floating-launch-start', '.custom-multi-select button'])('reserves Space for transport while focused on %s', async (selector) => {
   render(<Harness />);
   const monitor = document.querySelector<HTMLVideoElement>('.custom-monitor video')!;
@@ -125,9 +324,32 @@ it.each(['.custom-rally-table tr', '.custom-rally-table input', '.playback-mode-
     expect(monitor.currentTime).toBe(3.5);
     expect(play).toHaveBeenCalledTimes(2);
     expect(screen.getByRole('checkbox', { name: 'Rally 1' })).toBeChecked();
-    expect(screen.getByRole('button', { name: 'Source playback' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sequential playback' })).toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: 'Multi-select options' })).toBeNull();
   } finally { play.mockRestore(); pause.mockRestore(); }
+});
+
+it('cycles icon-only playback modes and marks the chosen loop clip only in the list', () => {
+  render(<PlaybackHarness />);
+  const button = screen.getByRole('button', { name: 'Sequential playback' });
+  expect(button).toHaveAttribute('title', 'Switch to rally playback and skip gaps');
+  expect(button).not.toHaveAttribute('aria-pressed');
+  expect(button).toHaveTextContent('');
+  expect(button.querySelector('svg')).toBeInTheDocument();
+  fireEvent.click(button);
+  expect(button).toHaveAccessibleName('Rally playback');
+  fireEvent.click(button);
+  expect(button).toHaveAccessibleName('Loop playback');
+  expect(button).toHaveAttribute('title', 'Switch to sequential playback');
+  expect(document.querySelector('.custom-rally-table tr[data-loop-target="true"]')).toBe(document.querySelectorAll('.custom-rally-table tr')[0]);
+  expect(document.querySelector('.timeline-clip[data-loop-target="true"]')).toBeNull();
+  fireEvent.click(document.querySelectorAll('.custom-rally-table tr')[2]!);
+  expect(document.querySelector('.custom-rally-table tr[data-loop-target="true"]')).toBe(document.querySelectorAll('.custom-rally-table tr')[2]);
+  expect(document.querySelector('.timeline-clip[data-loop-target="true"]')).toBeNull();
+  expect(screen.getByRole('checkbox', { name: 'Rally 3' })).not.toBeChecked();
+  fireEvent.pointerDown(document.querySelector('.timeline-clip[data-clip-id="rally_002"]')!, { button: 0 });
+  expect(document.querySelector('.custom-rally-table tr[data-loop-target="true"]')).toBe(document.querySelectorAll('.custom-rally-table tr')[1]);
+  expect(document.querySelector('.timeline-clip[data-loop-target="true"]')).toBeNull();
 });
 
 it('does not intercept composing Space and preserves Enter rally activation', async () => {
@@ -564,7 +786,8 @@ describe('manual timeline tools', () => {
       const viewport = document.querySelector<HTMLElement>('.timeline-viewport')!;
       const surface = document.querySelector(target)!;
       const zoom = screen.getByRole('button', { name: 'Zoom timeline' });
-      expect(zoom.nextElementSibling).toBe(screen.getByRole('button', { name: 'Source playback' }));
+      expect(zoom.nextElementSibling).toBe(screen.getByRole('button', { name: 'Scoreboard' }));
+      expect(zoom.nextElementSibling?.nextElementSibling).toBe(screen.getByRole('button', { name: 'Sequential playback' }));
       fireEvent.wheel(surface, { deltaY: -120, clientX: 50 });
       expect(Number(viewport.dataset.zoom)).toBe(1);
       fireEvent.click(zoom);
@@ -598,7 +821,7 @@ describe('manual timeline tools', () => {
     expect(zoom).toHaveAttribute('aria-pressed', 'false');
     fireEvent.click(zoom);
     expect(remove).toHaveAttribute('aria-pressed', 'false');
-    fireEvent.click(screen.getByRole('button', { name: 'Source playback' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sequential playback' }));
     expect(zoom).toHaveAttribute('aria-pressed', 'true');
     const monitor = document.querySelector('.custom-monitor video') as HTMLVideoElement;
     setVideoTime(monitor, 1.4);
@@ -609,7 +832,7 @@ describe('manual timeline tools', () => {
       expect(zoom).toHaveAttribute('aria-pressed', 'false');
       expect(monitor.currentTime).toBe(1.4);
       expect(screen.getByRole('slider', { name: 'Resize clip start 1' })).toHaveAttribute('aria-valuenow', '3');
-      expect(screen.getByRole('button', { name: 'Rally playback' })).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.getByRole('button', { name: 'Rally playback' })).not.toHaveAttribute('aria-pressed');
     }
   });
 

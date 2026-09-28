@@ -1,11 +1,14 @@
 import { CompatibleVideo } from './CompatibleVideo';
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { ScoreboardFields } from './ScoreboardFields';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { SelectedVideo } from '../shared/api';
-import { hasBounceCounts, type AnalysisResultV1, type ExportRequest } from '../shared/contracts';
+import { hasBounceCounts, type AnalysisResultV1, type ExportRequest, type ScoreboardPosition, type ScoreboardScore } from '../shared/contracts';
+import { SCOREBOARD_MAX_SCALE, SCOREBOARD_MIN_SCALE, SCOREBOARD_WIDTH_FRACTION, SCOREBOARD_PREVIEW_WIDTH_FRACTION, scoreboardHeightFraction, scoreboardDisplayDimensions, scoreboardName } from '../domain/scoreboard';
 import {
   createManualCustomClip,
   deleteCustomClip,
   resizeCustomClip,
+  resolvedSelectedClipScores,
   selectCustomClipsByBounceCount,
   setCustomClipSelected,
   type CustomRallyClip,
@@ -55,6 +58,16 @@ type PlaybackCue = {
   sequence: number;
 };
 
+type ScoreboardDrag = {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  x: number;
+  y: number;
+  scale: number;
+  corner: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | null;
+};
+
 export function formatCustomClipTime(seconds: number): string {
   const safeSeconds = Math.max(0, Number.isFinite(seconds) ? seconds : 0);
   const totalTenths = Math.round(safeSeconds * 10);
@@ -88,6 +101,21 @@ function TrashIcon() {
 
 function ZoomIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="6" /><path d="m14.5 14.5 5.5 5.5M7 10h6M10 7v6" /></svg>;
+}
+
+function PlaybackModeIcon({ mode }: { mode: CustomPlaybackMode }) {
+  if (mode === 'source') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M2 5h18m-3-3 3 3-3 3M2 12h18m-3-3 3 3-3 3M2 19h18m-3-3 3 3-3 3" /></svg>;
+  if (mode === 'rallies') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M2 5h7M6 2l3 3-3 3m3 4h7m-3-3 3 3-3 3m3 4h6m-3-3 3 3-3 3" /></svg>;
+  return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 10a8 8 0 1 0-2 7M18 17l1-9-3 3M12 8v8" /></svg>;
+}
+
+function ScoreboardIcon() {
+  return (
+    <svg className="scoreboard-tool-icon" viewBox="0 0 28 24" aria-hidden="true" focusable="false">
+      <path d="M3 6h3a3 3 0 0 1 0 6H4m2 0a3 3 0 0 1 0 6H3M21 8l3-2v12" />
+      <circle cx="15" cy="9" r="1" fill="currentColor" stroke="none" /><circle cx="15" cy="15" r="1" fill="currentColor" stroke="none" />
+    </svg>
+  );
 }
 
 function manualClipId(): string | null {
@@ -155,6 +183,8 @@ export function CustomCutPage({
   video,
   analysis,
   clips,
+  scoreboard = { enabled: false, x: 0.78, y: 0.04 },
+  onScoreboardChange = () => undefined,
   playbackMode,
   onPlaybackModeChange,
   translations,
@@ -164,10 +194,15 @@ export function CustomCutPage({
   outputs,
   onOutputsChange,
   onExport,
+  onReset,
+  saveError = false,
+  onRetrySave,
 }: {
   video: SelectedVideo;
   analysis: AnalysisResultV1;
   clips: readonly CustomRallyClip[];
+  scoreboard?: ScoreboardPosition & { enabled: boolean };
+  onScoreboardChange?: (value: ScoreboardPosition & { enabled: boolean }) => void;
   playbackMode: CustomPlaybackMode;
   onPlaybackModeChange: (mode: CustomPlaybackMode) => void;
   translations: Messages;
@@ -177,8 +212,13 @@ export function CustomCutPage({
   outputs: NonNullable<ExportRequest['outputs']>;
   onOutputsChange: (outputs: NonNullable<ExportRequest['outputs']>) => void;
   onExport: (outputs: NonNullable<ExportRequest['outputs']>) => void;
+  onReset?: () => void;
+  saveError?: boolean;
+  onRetrySave?: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const scoreboardPlaneRef = useRef<HTMLDivElement>(null);
+  const scoreboardDragRef = useRef<ScoreboardDrag | null>(null);
   const rallyScrollRef = useRef<HTMLDivElement>(null);
   const rallyTableRef = useRef<HTMLTableElement>(null);
   const rallyRowRefs = useRef(new Map<string, HTMLTableRowElement>());
@@ -195,6 +235,12 @@ export function CustomCutPage({
   const playbackTickRef = useRef<() => void>(() => undefined);
   const currentTimeRef = useRef(0);
   const previewMetadata = analysis.source_video?.path === video.path ? analysis.source_video : analysis.video;
+  const displayDimensions = scoreboardDisplayDimensions(previewMetadata);
+  const previewAspect = displayDimensions.width / displayDimensions.height;
+  const scoreboardScale = scoreboard.scale ?? 1;
+  const scoreboardBaseHeight = scoreboardHeightFraction(previewAspect);
+  const scoreboardMaxX = Math.max(0, 1 - SCOREBOARD_PREVIEW_WIDTH_FRACTION * scoreboardScale);
+  const scoreboardMaxY = Math.max(0, 1 - scoreboardBaseHeight * scoreboardScale);
   const preview = useCompatiblePreview(videoRef, video.mediaUrl, previewMetadata.video_codec);
   const [currentTime, setCurrentTime] = useState(0);
   const [currentEditingClipId, setCurrentEditingClipId] = useState<string | null>(null);
@@ -203,8 +249,27 @@ export function CustomCutPage({
   const [exportOptionsOpen, setExportOptionsOpen] = useState(false);
   const [multiSelectOpen, setMultiSelectOpen] = useState(false);
   const [bounceFilterValue, setBounceFilterValue] = useState('');
+  const [resetConfirmation, setResetConfirmation] = useState(false);
   const selectedCount = clips.filter((clip) => clip.selected).length;
+  const visibleClips = clips;
+  const selectedScores = useMemo(() => resolvedSelectedClipScores(clips), [clips]);
+  const selectedScoreClips = clips.filter((clip) => clip.selected);
+  const activeScoreClip = selectedScoreClips.find((clip) => currentTime >= clip.start && currentTime < clip.end);
+  // Outside a rally, show/edit the next selected rally's starting score (or the
+  // final selected rally after the end). Opening at time zero must allow edits.
+  const currentScoreClip = activeScoreClip
+    ?? selectedScoreClips.find((clip) => clip.start > currentTime)
+    ?? selectedScoreClips.at(-1);
+  const currentScore = currentScoreClip ? selectedScores.get(currentScoreClip.clipId) : null;
+  const leftName = scoreboardName(scoreboard.left_name, 'A');
+  const rightName = scoreboardName(scoreboard.right_name, 'B');
   const showBounceCounts = hasBounceCounts(analysis);
+
+  useEffect(() => {
+    if (scoreboard.enabled && (scoreboard.x > scoreboardMaxX || scoreboard.y > scoreboardMaxY)) {
+      onScoreboardChange({ ...scoreboard, x: Math.min(scoreboard.x, scoreboardMaxX), y: Math.min(scoreboard.y, scoreboardMaxY) });
+    }
+  }, [scoreboard, scoreboardMaxX, scoreboardMaxY, onScoreboardChange]);
 
   useEffect(() => {
     if (!multiSelectOpen) return;
@@ -262,10 +327,10 @@ export function CustomCutPage({
     const sequence = playbackLocationSequenceRef.current;
     const scroll = rallyScrollRef.current;
     const targetRow = rallyRowRefs.current.get(clipId);
-    const targetIndex = clips.findIndex((clip) => clip.clipId === clipId);
+    const targetIndex = visibleClips.findIndex((clip) => clip.clipId === clipId);
     if (!scroll || !targetRow || targetIndex < 0) return;
 
-    const rowOffsets = clips.map((clip) => rallyRowRefs.current.get(clip.clipId)?.offsetTop ?? 0);
+    const rowOffsets = visibleClips.map((clip) => rallyRowRefs.current.get(clip.clipId)?.offsetTop ?? 0);
     const targetScrollTop = calculateRallyPlaybackScrollTop(
       targetIndex,
       rowOffsets,
@@ -319,7 +384,7 @@ export function CustomCutPage({
     };
     playbackScrollFrameRef.current = window.requestAnimationFrame(checkScroll);
     playbackScrollTimeoutRef.current = window.setTimeout(finish, PLAYBACK_SCROLL_TIMEOUT_MS);
-  }, [cancelPlaybackLocation, clearPlaybackScrollWait, clips, showPlaybackCue]);
+  }, [cancelPlaybackLocation, clearPlaybackScrollWait, visibleClips, showPlaybackCue]);
 
   const locatePlaybackClip = useCallback((time: number, reason: 'continuous' | 'commit') => {
     const target = findPlaybackTargetClip(clips, time);
@@ -439,6 +504,8 @@ export function CustomCutPage({
 
   useEffect(() => {
     const handleSpace = (event: KeyboardEvent) => {
+      if (resetConfirmation) return;
+      if (event.target instanceof HTMLElement && event.target.closest('.custom-scoreboard input')) return;
       if (event.isComposing || (event.code !== 'Space' && event.key !== ' ')) return;
       // Own Space before row handlers and native button/checkbox activation.
       // Consume keyup and repeats too: neither should activate a focused tool.
@@ -452,10 +519,11 @@ export function CustomCutPage({
       window.removeEventListener('keydown', handleSpace, true);
       window.removeEventListener('keyup', handleSpace, true);
     };
-  }, [togglePlayback]);
+  }, [togglePlayback, resetConfirmation]);
 
   useEffect(() => {
     const handleBoundaryShortcut = (event: KeyboardEvent) => {
+      if (resetConfirmation) return;
       if (event.isComposing || event.repeat || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey
         || isEditableShortcutTarget(event.target)
         || (event.code !== 'KeyA' && event.code !== 'KeyD')
@@ -475,7 +543,7 @@ export function CustomCutPage({
     };
     window.addEventListener('keydown', handleBoundaryShortcut, true);
     return () => window.removeEventListener('keydown', handleBoundaryShortcut, true);
-  }, [addManualAt, currentEditingClipId, resizeClipAt, toolMode]);
+  }, [addManualAt, currentEditingClipId, resizeClipAt, toolMode, resetConfirmation]);
 
   const toggleTool = (nextTool: Exclude<TimelineToolMode, null>) => {
     setToolMode((active) => active === nextTool ? null : nextTool);
@@ -484,15 +552,66 @@ export function CustomCutPage({
   const updateExportOutputs = (nextOutputs: NonNullable<ExportRequest['outputs']>) => {
     cancelExportClose();
     setExportOptionsOpen(true);
-    onOutputsChange(nextOutputs);
+    onOutputsChange({ ...nextOutputs, combined_video: !nextOutputs.rally_videos && !nextOutputs.premiere_xml });
+  };
+
+  const updateScore = (clipId: string, side: keyof ScoreboardScore, value: number) => {
+    if (!Number.isInteger(value) || value < 0 || value > 999) return;
+    const inherited = selectedScores.get(clipId) ?? { left: 0, right: 0 };
+    onClipsChange(clips.map((clip) => clip.clipId === clipId
+      ? { ...clip, score: { ...inherited, [side]: value } }
+      : clip));
+  };
+
+  const updateWinner = (clipId: string, winner: 'left' | 'right') => {
+    const index = clips.findIndex(clip => clip.clipId === clipId);
+    if (index < 0) return;
+    if (clips[index]?.winner !== winner) onClipsChange(clips.map(clip => clip.clipId === clipId ? { ...clip, winner } : clip));
+    const next = clips.slice(index + 1).find(clip => clip.selected);
+    if (next) playClip(next);
+  };
+
+  const moveScoreboard = (event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = scoreboardDragRef.current;
+    const plane = scoreboardPlaneRef.current;
+    if (!drag || drag.pointerId !== event.pointerId || !plane) return;
+    const bounds = plane.getBoundingClientRect();
+    if (!bounds.width || !bounds.height) return;
+    const deltaX = (event.clientX - drag.startX) / bounds.width;
+    const deltaY = (event.clientY - drag.startY) / bounds.height;
+    if (!drag.corner) {
+      onScoreboardChange({ ...scoreboard,
+        x: Math.max(0, Math.min(1 - SCOREBOARD_PREVIEW_WIDTH_FRACTION * drag.scale, drag.x + deltaX)),
+        y: Math.max(0, Math.min(1 - scoreboardBaseHeight * drag.scale, drag.y + deltaY)),
+      });
+      return;
+    }
+    const fromRight = drag.corner.endsWith('right');
+    const fromBottom = drag.corner.startsWith('bottom');
+    const anchorX = fromRight ? drag.x : drag.x + SCOREBOARD_WIDTH_FRACTION * drag.scale;
+    const anchorY = fromBottom ? drag.y : drag.y + scoreboardBaseHeight * drag.scale;
+    const vectorX = (fromRight ? 1 : -1) * SCOREBOARD_WIDTH_FRACTION;
+    const vectorY = (fromBottom ? 1 : -1) * scoreboardBaseHeight;
+    const requestedScale = drag.scale + (deltaX * vectorX + deltaY * vectorY) / (vectorX * vectorX + vectorY * vectorY);
+    const maxScale = Math.min(
+      SCOREBOARD_MAX_SCALE,
+      (fromRight ? 1 - anchorX : anchorX) / SCOREBOARD_WIDTH_FRACTION,
+      (fromBottom ? 1 - anchorY : anchorY) / scoreboardBaseHeight,
+    );
+    const scale = Math.max(SCOREBOARD_MIN_SCALE, Math.min(maxScale, requestedScale));
+    onScoreboardChange({ ...scoreboard, scale,
+      x: Math.max(0, Math.min(1 - SCOREBOARD_PREVIEW_WIDTH_FRACTION * scale, fromRight ? anchorX : anchorX - SCOREBOARD_WIDTH_FRACTION * scale)),
+      y: fromBottom ? anchorY : anchorY - scoreboardBaseHeight * scale,
+    });
   };
 
   return (
     <div className="custom-cut-page">
+      {saveError && <div className="notice" role="alert">{translations.customSaveFailed}<button className="text-button" type="button" onClick={onRetrySave}>{translations.retry}</button></div>}
       <div className="custom-workspace" onContextMenu={(event) => { event.preventDefault(); setToolMode(null); }}>
         <section className="custom-rally-list" aria-label={translations.rally}>
           <div className="table-tools">
-            <div className="custom-list-selection"><strong>{selectedCount} / {clips.length}</strong><span>{translations.rally}</span></div>
+            <div className="custom-list-selection"><strong>{`${selectedCount} / ${clips.length}`}</strong><span>{translations.rally}</span></div>
             <div className="custom-list-actions">
               <div ref={multiSelectRef} className="custom-multi-select" onBlur={(event) => {
                 if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setMultiSelectOpen(false);
@@ -528,12 +647,13 @@ export function CustomCutPage({
           </div>
           <div className="custom-rally-scroll-shell">
             <div ref={rallyScrollRef} id="custom-rally-scroll" className="table-scroll">
-              <table ref={rallyTableRef} className="custom-rally-table"><tbody>{clips.map((clip) => (
+              <table ref={rallyTableRef} className="custom-rally-table"><tbody>{visibleClips.map((clip) => (
                 <tr
                   key={clip.clipId}
                   ref={(row) => { if (row) rallyRowRefs.current.set(clip.clipId, row); else rallyRowRefs.current.delete(clip.clipId); }}
-                  className={playbackCue?.clipId === clip.clipId ? `is-playback-cue playback-cue-${playbackCue.sequence % 2 === 0 ? 'even' : 'odd'}` : undefined}
+                  className={[playbackMode === 'loop' && playback.loopClipId === clip.clipId ? 'is-loop-target' : '', playbackCue?.clipId === clip.clipId ? `is-playback-cue playback-cue-${playbackCue.sequence % 2 === 0 ? 'even' : 'odd'}` : ''].filter(Boolean).join(' ') || undefined}
                   data-playback-cue={playbackCue?.clipId === clip.clipId ? 'true' : undefined}
+                  data-loop-target={playbackMode === 'loop' && playback.loopClipId === clip.clipId ? 'true' : undefined}
                   tabIndex={0}
                   onClick={() => playClip(clip)}
                   onKeyDown={(event) => {
@@ -569,7 +689,33 @@ export function CustomCutPage({
               <span>{preview.status === 'preparing' ? translations.previewPreparing : `${translations.previewFailed}${preview.error ? ` (${preview.error})` : ''}`}</span>
               {preview.status === 'failed' && <button type="button" onClick={preview.retry}>{translations.previewRetry}</button>}
             </div>}
-            <CompatibleVideo hdr={Boolean(analysis.video.native_video && analysis.video.native_video.hdr !== 'sdr')} ref={videoRef} src={preview.url} controls={false} preload={preview.url === video.mediaUrl ? 'metadata' : 'auto'} playsInline tabIndex={0} aria-label={translations.togglePlayback} onClick={togglePlayback} onLoadedMetadata={() => { lastPlaybackClipIdRef.current = null; playback.tick(); }} onPlay={() => { playback.tick(); startVideoFrameTracking(); }} onPause={stopVideoFrameTracking} onEnded={stopVideoFrameTracking} onTimeUpdate={() => playback.tick()} onSeeked={() => playback.tick()} />
+            <CompatibleVideo hdr={Boolean(analysis.video.native_video && analysis.video.native_video.hdr !== 'sdr')} ref={videoRef} src={preview.url} controls={false} preload={preview.url === video.mediaUrl ? 'metadata' : 'auto'} playsInline tabIndex={0} aria-label={translations.togglePlayback} onClick={togglePlayback} onLoadedMetadata={() => { lastPlaybackClipIdRef.current = null; playback.tick(); }} onPlay={() => { playback.tick(); startVideoFrameTracking(); }} onPause={stopVideoFrameTracking} onEnded={() => { stopVideoFrameTracking(); playback.ended(); }} onTimeUpdate={() => playback.tick()} onSeeked={() => playback.tick()} />
+            {scoreboard.enabled && <div ref={scoreboardPlaneRef} className="custom-scoreboard-plane" style={{ '--source-aspect': String(previewAspect) } as React.CSSProperties}>
+              <div className="custom-scoreboard" role="button" tabIndex={0} aria-label={translations.dragScoreboard} title={translations.dragScoreboard} style={{ left: `${scoreboard.x * 100}%`, top: `${scoreboard.y * 100}%`, transform: `scale(${scoreboardScale})` }} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => {
+                event.preventDefault(); event.stopPropagation(); (event.target as HTMLElement).setPointerCapture(event.pointerId);
+                scoreboardDragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, x: scoreboard.x, y: scoreboard.y, scale: scoreboardScale, corner: null };
+              }} onPointerMove={moveScoreboard} onPointerUp={(event) => { if (scoreboardDragRef.current?.pointerId === event.pointerId) scoreboardDragRef.current = null; }} onPointerCancel={() => { scoreboardDragRef.current = null; }} onLostPointerCapture={() => { scoreboardDragRef.current = null; }} onKeyDown={(event) => {
+                const delta = event.shiftKey ? 0.05 : 0.01;
+                const next = { ...scoreboard };
+                if (event.key === 'ArrowLeft') next.x = Math.max(0, next.x - delta);
+                else if (event.key === 'ArrowRight') next.x = Math.min(scoreboardMaxX, next.x + delta);
+                else if (event.key === 'ArrowUp') next.y = Math.max(0, next.y - delta);
+                else if (event.key === 'ArrowDown') next.y = Math.min(scoreboardMaxY, next.y + delta);
+                else return;
+                event.preventDefault(); event.stopPropagation(); onScoreboardChange(next);
+              }}>
+                <ScoreboardFields key={currentScoreClip?.clipId ?? 'gap'} names={[leftName, rightName]} score={currentScore ?? { left: 0, right: 0 }} winner={currentScoreClip?.winner} enabled={Boolean(currentScoreClip)} winnerEnabled={Boolean(activeScoreClip)}
+                  labels={{ name: translations.scoreboardEditName, games: translations.scoreboardGames, points: translations.scoreboardPoints, winner: translations.scoreboardWinner }}
+                  onEditStart={() => preview.seekTo(currentTimeRef.current, false)}
+                  onName={(side, value) => onScoreboardChange({ ...scoreboard, [`${side}_name`]: value })}
+                  onScore={(field, value) => { if (currentScoreClip) updateScore(currentScoreClip.clipId, field, value); }}
+                  onWinner={side => { if (currentScoreClip) updateWinner(currentScoreClip.clipId, side); }} />
+                {(['top-left', 'top-right', 'bottom-left', 'bottom-right'] as const).map((corner) => <span key={corner} className={`custom-scoreboard-resize-handle is-${corner}`} role="button" tabIndex={-1} aria-label={`${translations.resizeScoreboard} ${corner}`} onPointerDown={(event) => {
+                  event.preventDefault(); event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId);
+                  scoreboardDragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, x: scoreboard.x, y: scoreboard.y, scale: scoreboardScale, corner };
+                }} />)}
+              </div>
+            </div>}
           </div></div>
 
           <CustomTimeline clips={clips} duration={analysis.video.duration_seconds} fps={analysis.video.fps} currentTime={currentTime} currentEditingClipId={currentEditingClipId} timelineLabel={translations.timeline} resizeStartLabel={translations.resizeStart} resizeEndLabel={translations.resizeEnd} toolMode={toolMode} onSeek={seek} onScrubCancel={playback.cancelScrub} onPlayClip={playClip} onAddAt={addManualAt} onDeleteClip={(clipId) => onClipsChange(deleteCustomClip(clips, clipId))} onResize={resizeClipAt} />
@@ -579,7 +725,11 @@ export function CustomCutPage({
               <button className={`timeline-tool${toolMode === 'add' ? ' is-active' : ''}`} type="button" aria-label={translations.addManualRally} title={translations.addManualRally} aria-pressed={toolMode === 'add'} onClick={() => toggleTool('add')}><PlusIcon /></button>
               <button className={`timeline-tool${toolMode === 'delete' ? ' is-active' : ''}`} type="button" aria-label={translations.deleteRally} title={translations.deleteRally} aria-pressed={toolMode === 'delete'} onClick={() => toggleTool('delete')}><TrashIcon /></button>
               <button className={`timeline-tool${toolMode === 'zoom' ? ' is-active' : ''}`} type="button" aria-label={translations.zoomTimeline} title={translations.zoomTimelineHint} aria-pressed={toolMode === 'zoom'} onClick={() => toggleTool('zoom')}><ZoomIcon /></button>
-              <button className={`timeline-tool playback-mode-toggle${playbackMode === 'rallies' ? ' is-active' : ''}`} type="button" aria-pressed={playbackMode === 'rallies'} title={playbackMode === 'rallies' ? translations.switchToSourcePlayback : translations.switchToRallyPlayback} onClick={playback.switchMode}>{playbackMode === 'rallies' ? translations.rallyPlayback : translations.sourcePlayback}</button>
+              <button className={`timeline-tool scoreboard-tool${scoreboard.enabled ? ' is-active' : ''}`} type="button" aria-label={translations.addScoreboard} aria-pressed={scoreboard.enabled} title={translations.addScoreboard} onClick={() => onScoreboardChange({ ...scoreboard, enabled: !scoreboard.enabled })}><ScoreboardIcon /></button>
+              <button className="timeline-tool playback-mode-toggle" type="button" aria-label={playbackMode === 'source' ? translations.sourcePlayback : playbackMode === 'rallies' ? translations.rallyPlayback : translations.loopPlayback} title={playbackMode === 'source' ? translations.switchToRallyPlayback : playbackMode === 'rallies' ? translations.switchToLoopPlayback : translations.switchToSourcePlayback} onClick={playback.switchMode}><PlaybackModeIcon mode={playbackMode} /></button>
+              {onReset && <button className="timeline-tool" type="button" aria-label={translations.resetCustomEdits} title={translations.resetCustomEdits} onClick={() => setResetConfirmation(true)}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 7v5h-5M20 12a8 8 0 1 0-2.3 5.7" /></svg>
+              </button>}
             </div>
             <div className={`custom-export-launcher floating-launcher${exportOptionsOpen ? ' is-open' : ''}`} onPointerLeave={scheduleExportClose}>
               <div className="custom-export-options floating-launch-options" role="group" aria-label={translations.customExportOptions} onPointerEnter={cancelExportClose} onPointerLeave={scheduleExportClose}>
@@ -594,11 +744,18 @@ export function CustomCutPage({
                   <span className="export-checkbox-text">{translations.exportPremiereXml}</span>
                 </label>
               </div>
-              <button className="primary floating-launch-start" type="button" disabled={preview.status === 'preparing' || !selectedCount || (!outputs.premiere_xml && !outputs.rally_videos && !mediaAvailable)} onPointerEnter={() => { cancelExportClose(); setExportOptionsOpen(true); }} onFocus={() => { cancelExportClose(); setExportOptionsOpen(true); }} onClick={() => onExport({ combined_video: !outputs.rally_videos && !outputs.premiere_xml, rally_videos: outputs.rally_videos, premiere_xml: outputs.premiere_xml })}>{translations.startCutting}</button>
+              <button className="primary floating-launch-start" type="button" disabled={!selectedCount || (!outputs.premiere_xml && !outputs.rally_videos && !mediaAvailable)} onPointerEnter={() => { cancelExportClose(); setExportOptionsOpen(true); }} onFocus={() => { cancelExportClose(); setExportOptionsOpen(true); }} onClick={() => onExport({ combined_video: !outputs.rally_videos && !outputs.premiere_xml, rally_videos: outputs.rally_videos, premiere_xml: outputs.premiere_xml })}>{translations.startCutting}</button>
             </div>
           </div>
         </div>
       </div>
+      {resetConfirmation && <div className="modal-backdrop" onKeyDown={(event) => { if (event.key === 'Escape') setResetConfirmation(false); }}>
+        <div className="modal" role="dialog" aria-modal="true" aria-labelledby="custom-reset-title">
+          <h2 id="custom-reset-title">{translations.resetCustomEdits}</h2>
+          <p>{translations.resetCustomEditsConfirm}</p>
+          <div><button className="secondary" type="button" autoFocus onClick={() => setResetConfirmation(false)}>{translations.cancel}</button><button className="primary" type="button" onClick={() => { setResetConfirmation(false); onReset?.(); }}>{translations.confirmReset}</button></div>
+        </div>
+      </div>}
     </div>
   );
 }

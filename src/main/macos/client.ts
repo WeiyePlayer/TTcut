@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, rename, rm, access } from 'node:fs/promises';
 import { nativeVideoSchema, type NativeEvent } from '../../shared/native-contracts';
 import { type VideoMetadata, videoMetadataSchema } from '../../shared/contracts';
+import type { ScoreboardAsset } from '../media-plan';
 import { getTaskController, spawnTracked, terminateChild, trackBackgroundProcess } from '../processes';
 import { logLine } from '../logger';
 import { macRuntimeRoot, verifyMacRuntime } from './runtime';
@@ -62,12 +63,12 @@ export async function probeMacVideo(sourcePath: string, signal?: AbortSignal): P
   const result = await callNative('TTcutMediaWorker', { operation: 'probe', sourcePath }, { signal });
   return fromNativeVideo(result.video);
 }
-export async function renderMacMedia(taskId: string, operation: 'export' | 'normalize' | 'preview' | 'cover', sourcePath: string, destination: string, ranges: readonly { start: number; end: number }[] = [], onProgress: (percent: number) => void = () => {}): Promise<VideoMetadata | null> {
+export async function renderMacMedia(taskId: string, operation: 'export' | 'normalize' | 'preview' | 'cover', sourcePath: string, destination: string, ranges: readonly { start: number; end: number }[] = [], onProgress: (percent: number) => void = () => {}, scoreboards?: readonly ScoreboardAsset[]): Promise<VideoMetadata | null> {
   await mkdir(path.dirname(destination), { recursive: true });
   const staging = await mkdtemp(path.join(path.dirname(destination), `.ttcut-native-${taskId}-`));
   const partial = path.join(staging, path.basename(destination));
   try {
-    const result = await callNative('TTcutMediaWorker', { operation, sourcePath, destination: partial, ranges: ranges.map(({ start, end }) => ({ start, end, clipIDs: [] })), strategy: 'fastSegmented' }, {
+    const result = await callNative('TTcutMediaWorker', { operation, sourcePath, destination: partial, ranges: ranges.map(({ start, end }) => ({ start, end, clipIDs: [] })), strategy: 'fastSegmented', ...(scoreboards ? { scoreboards } : {}) }, {
       taskId, onProgress: (event) => onProgress(event.total ? event.current! / event.total * 100 : 0),
     });
     if (result.outputPath !== partial) throw new Error('NATIVE_DESTINATION_MISMATCH');

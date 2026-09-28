@@ -11,6 +11,7 @@ struct Request: Decodable {
   let destination: String?
   let ranges: [CutRange]?
   let strategy: ExportStrategy?
+  let scoreboards: [ScoreboardOverlay]?
 }
 struct Event: Encodable {
   let schemaVersion = 1
@@ -82,7 +83,7 @@ func emit(_ event: Event) {
       guard let ranges = request.ranges, !ranges.isEmpty,
         ranges.allSatisfy({ $0.start.isFinite && $0.end.isFinite && $0.start >= 0 && $0.end > $0.start && $0.end <= video.duration + 1e-6 }),
         zip(ranges, ranges.dropFirst()).allSatisfy({ $0.end <= $1.start + 1e-6 }) else { throw TTError("INVALID_RANGES") }
-      try await exporter.merged(video: video, ranges: ranges, destination: destination, strategy: request.strategy ?? .fastSegmented, progress: progress)
+      try await exporter.merged(video: video, ranges: ranges, destination: destination, strategy: request.strategy ?? .fastSegmented, scoreboards: request.scoreboards, progress: progress)
     default: throw TTError("INVALID_OPERATION")
     }
     try Task.checkCancellation()

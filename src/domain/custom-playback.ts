@@ -1,6 +1,6 @@
 import type { CustomRallyClip } from './custom-clips';
 
-export type CustomPlaybackMode = 'source' | 'rallies';
+export type CustomPlaybackMode = 'source' | 'rallies' | 'loop';
 export type PlaybackReason = 'advance' | 'play' | 'reconcile';
 export type CustomPlaybackDecision = {
   action: 'continue' | 'seek' | 'pause';
@@ -16,7 +16,7 @@ export function resolveCustomPlayback(
   reason: PlaybackReason,
   temporaryClipId: string | null = null,
 ): CustomPlaybackDecision {
-  if (mode === 'source' || !Number.isFinite(time)) return { action: 'continue', time, temporaryClipId: null };
+  if (mode !== 'rallies' || !Number.isFinite(time)) return { action: 'continue', time, temporaryClipId: null };
   const valid = clips.filter((clip) => Number.isFinite(clip.start) && Number.isFinite(clip.end) && clip.end > clip.start);
   const selected = valid.filter((clip) => clip.selected).sort((left, right) => left.start - right.start);
   if (selected.length === 0) {
@@ -37,4 +37,29 @@ export function resolveCustomPlayback(
     time: reason === 'advance' ? temporary?.end ?? selected.at(-1)!.end : time,
     temporaryClipId: null,
   };
+}
+
+export function validPlaybackClip(clip: CustomRallyClip): boolean {
+  return Number.isFinite(clip.start) && Number.isFinite(clip.end) && clip.end > clip.start;
+}
+
+/** Pick an explicit loop target without changing the draft's export selection. */
+export function chooseLoopTarget(clips: readonly CustomRallyClip[], time: number): string | null {
+  if (!Number.isFinite(time)) return null;
+  const valid = clips.filter(validPlaybackClip);
+  const selected = valid.filter((clip) => clip.selected).sort((left, right) => left.start - right.start);
+  if (selected.length === 0) return null;
+  const containing = valid.filter((clip) => time >= clip.start && time < clip.end);
+  if (containing.length > 0) return (containing.find((clip) => clip.selected) ?? containing[0]!).clipId;
+  return (selected.find((clip) => clip.start > time) ?? selected[0]!).clipId;
+}
+
+export function loopPlaybackDecision(
+  clips: readonly CustomRallyClip[], time: number, loopClipId: string | null,
+): { action: 'continue' | 'seek'; time: number } {
+  const target = clips.find((clip) => clip.clipId === loopClipId && validPlaybackClip(clip));
+  if (!target || !Number.isFinite(time) || (time >= target.start && time < target.end)) {
+    return { action: 'continue', time };
+  }
+  return { action: 'seek', time: target.start };
 }

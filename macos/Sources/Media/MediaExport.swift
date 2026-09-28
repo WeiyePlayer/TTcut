@@ -1,6 +1,19 @@
 import Foundation
 import TTcutCore
 
+public struct ScoreboardOverlay: Codable, Sendable {
+  public let x: Double
+  public let y: Double
+  public let scale: Double?
+  public let imagePath: String
+
+  public var isValid: Bool {
+    x.isFinite && y.isFinite && (0...1).contains(x) && (0...1).contains(y)
+      && (scale == nil || (scale!.isFinite && (0.5...3).contains(scale!)))
+      && !imagePath.isEmpty
+  }
+}
+
 public struct MediaExporter: Sendable {
   public let paths: RuntimePaths
   public init(paths: RuntimePaths) { self.paths = paths }
@@ -72,7 +85,17 @@ public struct MediaExporter: Sendable {
       })
   }
   /// Timestamp normalization uses a common video origin for both streams; resampling fills missing audio with silence.
-  func filter(video: VideoInfo, ranges: [CutRange], normalizeFPS: Bool = false) -> (
+  static func scoreboardFilter(video: VideoInfo, score: ScoreboardOverlay) -> String {
+    // MediaProbe already returns display-oriented dimensions.
+    let width = Double(video.width)
+    let height = Double(video.height)
+    let boardWidth = max(1, Int((width * 0.28 * (score.scale ?? 1)).rounded()))
+    let boardHeight = min(Int(height), max(1, Int((Double(boardWidth) / 5.2).rounded())))
+    let x = Int((max(0, min(1 - Double(boardWidth) / width, score.x)) * width).rounded())
+    let y = Int((max(0, min(1 - Double(boardHeight) / height, score.y)) * height).rounded())
+    return "overlay=x=\(x):y=\(y):shortest=1:format=auto"
+  }
+  func filter(video: VideoInfo, ranges: [CutRange], normalizeFPS: Bool = false, scoreboards: [ScoreboardOverlay]? = nil) -> (
     String, [String]
   ) {
     let origin = Self.decimal(video.videoStart)
@@ -95,8 +118,12 @@ public struct MediaExporter: Sendable {
       let vinput = ranges.count > 1 ? "[vs\(i)]" : "[0:v:0]setpts=PTS-\(origin)/TB,"
       let ainput = ranges.count > 1 ? "[as\(i)]" : "[0:a:0]asetpts=PTS-\(origin)/TB,"
       let fps = normalizeFPS ? ",fps=\(video.frameRate)" : ""
+      let videoLabel = scoreboards == nil ? "v\(i)" : "vbase\(i)"
       parts.append(
-        vinput + "trim=start=\(start):end=\(end),setpts=PTS-STARTPTS:strip_fps=1\(fps)[v\(i)]")
+        vinput + "trim=start=\(start):end=\(end),setpts=PTS-STARTPTS:strip_fps=1\(fps)[\(videoLabel)]")
+      if let scoreboards {
+        parts.append("[vbase\(i)][\(i + 1):v:0]" + Self.scoreboardFilter(video: video, score: scoreboards[i]) + "[v\(i)]")
+      }
       if video.hasAudio {
         parts.append(
           ainput
@@ -122,6 +149,7 @@ public struct MediaExporter: Sendable {
     video: VideoInfo, ranges: [CutRange], destination: URL, normalizeFPS: Bool = false,
     disableBFrames: Bool = false,
     seekStart: Double? = nil,
+    scoreboards: [ScoreboardOverlay]? = nil,
     progress: @escaping @Sendable (Double) -> Void = { _ in }
   ) async throws {
     guard !ranges.isEmpty,
@@ -130,15 +158,19 @@ public struct MediaExporter: Sendable {
           && $0.end <= video.duration + 1e-6
       })
     else { throw TTError("INVALID_EXPORT_RANGES") }
+    guard scoreboards == nil || (scoreboards!.count == ranges.count && scoreboards!.allSatisfy(\.isValid)) else {
+      throw TTError("INVALID_SCOREBOARD")
+    }
     try video.validate()
-    let (graph, maps) = filter(video: video, ranges: ranges, normalizeFPS: normalizeFPS)
+    let (graph, maps) = filter(video: video, ranges: ranges, normalizeFPS: normalizeFPS, scoreboards: scoreboards)
     // x265's reorder delay can produce an invalid DTS when fewer than five frames are flushed.
     // Keep the same choice for every independently encoded segment in a concatenated output.
     let shortHEVC =
       video.encoder == "libx265"
       && (disableBFrames || ranges.reduce(0) { $0 + $1.duration } * video.fps < 5)
+    let overlayInputs = scoreboards?.flatMap { ["-loop", "1", "-i", $0.imagePath] } ?? []
     let args =
-      Self.inputArguments(video, seekStart: seekStart) + ["-filter_complex", graph] + maps
+      Self.inputArguments(video, seekStart: seekStart) + overlayInputs + ["-filter_complex", graph] + maps
       + (try Self.encoding(video)) + (shortHEVC ? ["-bf", "0"] : []) + [destination.path]
     try await run(args, duration: ranges.reduce(0) { $0 + $1.duration }, progress: progress)
   }
@@ -184,12 +216,16 @@ public struct MediaExporter: Sendable {
   }
   public func merged(
     video: VideoInfo, ranges: [CutRange], destination: URL, strategy: ExportStrategy,
+    scoreboards: [ScoreboardOverlay]? = nil,
     progress: @escaping @Sendable (Double) -> Void = { _ in }
   ) async throws {
+    guard scoreboards == nil || (scoreboards!.count == ranges.count && scoreboards!.allSatisfy(\.isValid)) else {
+      throw TTError("INVALID_SCOREBOARD")
+    }
     let duration = ranges.reduce(0) { $0 + $1.duration }
     let probe = MediaProbe(paths: paths)
     // Copy is an optimization with validation, not a replacement for either clipping strategy.
-    if strategy == .fastSegmented, ranges.count == 1 {
+    if scoreboards == nil && strategy == .fastSegmented, ranges.count == 1 {
       let boundaries = try await probe.withBoundaries(video, ranges: ranges)
       if Segments.canCopy(ranges, video: boundaries), video.videoCodec == video.outputCodec {
         do {
@@ -207,10 +243,10 @@ public struct MediaExporter: Sendable {
       }
     }
     if strategy == .compatible {
-      try await encode(video: video, ranges: ranges, destination: destination, progress: progress)
+      try await encode(video: video, ranges: ranges, destination: destination, scoreboards: scoreboards, progress: progress)
     } else if ranges.count == 1 {
       try await encode(
-        video: video, ranges: ranges, destination: destination, seekStart: ranges[0].start,
+        video: video, ranges: ranges, destination: destination, seekStart: ranges[0].start, scoreboards: scoreboards,
         progress: progress)
     } else {
       let work = destination.deletingLastPathComponent().appendingPathComponent(
@@ -224,7 +260,7 @@ public struct MediaExporter: Sendable {
         let segment = work.appendingPathComponent("\(index).mp4")
         try await encode(
           video: video, ranges: [range], destination: segment, disableBFrames: shortSegment,
-          seekStart: range.start
+          seekStart: range.start, scoreboards: scoreboards.map { [$0[index]] }
         ) { part in
           progress((Double(index) + part) / Double(ranges.count + 1))
         }

@@ -28,8 +28,9 @@ async function executeBatchExport(window: BrowserWindow, taskId: string, request
     signal.throwIfAborted();
     // Cached analyses from an earlier failed individual export may still be deferred.
     // Retain them as analysis history, without attaching the batch video to each source.
-    await Promise.all(records.filter((record) => record.visible_in_history === false)
-      .map((record) => getHistoryStore().markVisible(record.id, 'analysis')));
+    for (const record of records.filter((record) => record.visible_in_history === false)) {
+      await getHistoryStore().markVisible(record.id, 'analysis');
+    }
     const skippedAnalysisIds: string[] = [];
     const segments: Array<{ video: VideoMetadata; group: CutGroup }> = [];
     records.forEach((record, index) => {
