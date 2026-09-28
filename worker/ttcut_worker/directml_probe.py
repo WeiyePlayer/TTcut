@@ -13,15 +13,15 @@ import time
 import numpy as np
 
 from .errors import DirectMLFallbackRequired
-from .onnx_models import LoadedBlurBall, _ort, create_session, model_sha256
+from .onnx_models import DIRECTML_BATCH_SIZES, LoadedBlurBall, _ort, create_session, model_sha256
 
-BATCHES = (16, 8, 4, 2, 1)
+BATCHES = DIRECTML_BATCH_SIZES
 CACHE_SECONDS = 3600
 
 
 def device_identity() -> list:
-    # DML uses adapter 0 by default. Include every adapter and driver so a
-    # driver upgrade or GPU change invalidates even a cached CPU fallback.
+    # ORT 1.24.3's Python provider uses DXCore's high-performance GPU order.
+    # Include every adapter and driver to invalidate cached CPU fallbacks.
     if sys.platform != "win32":
         return [platform.platform()]
     import winreg
@@ -45,8 +45,8 @@ def device_identity() -> list:
 
 def cache_path(model: Path) -> Path | None:
     try:
-        identity = [2, model_sha256(model), _ort().__version__, sys.executable,
-                    platform.version(), device_identity(), "ORT_DISABLE_ALL", "adapter0"]
+        identity = [4, model_sha256(model), _ort().__version__, sys.executable,
+                    platform.version(), device_identity(), "ORT_DISABLE_ALL", "dxcore-default-gpu"]
         key = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
         root = Path(os.environ.get("TTCUT_DIRECTML_CACHE_DIR") or
                     str(Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())) / "TTcut" / "directml-probes"))
@@ -91,7 +91,24 @@ def remember_failure(model: str | Path, reason: str) -> None:
         write_cache(cache_path(Path(model)), {"provider": "cpu", "reason": reason})
 
 
-def select_configuration(model: str | Path, width: int = 512, height: int = 288) -> dict:
+def remember_configuration(model: Path, width: int, height: int, batch: int) -> None:
+    if not model.is_file():
+        return
+    path = cache_path(model)
+    shapes = read_cache(path).get("shapes", {})
+    shapes = shapes if isinstance(shapes, dict) else {}
+    write_cache(path, {"provider": "directml", "shapes": {**shapes, f"{width}x{height}": batch}})
+
+
+def select_configuration(
+    model: str | Path, width: int = 512, height: int = 288, *, retain_session: bool = False,
+) -> dict:
+    """Optionally transfer the successful live session to the analysis caller.
+
+    Component checks receive only JSON-compatible configuration. Analysis must
+    validate a live session even on a cache hit, and use that very same session
+    instead of destroying it and initializing DirectML again.
+    """
     model = Path(model)
     path = cache_path(model)
     cached = read_cache(path)
@@ -99,27 +116,40 @@ def select_configuration(model: str | Path, width: int = 512, height: int = 288)
     if cached.get("provider") == "cpu":
         return {"provider": "cpu", "batch_size": 4, "reason": str(cached.get("reason", "Cached DirectML failure"))}
     batches = cached.get("shapes", {})
+    candidates = BATCHES
     if isinstance(batches, dict) and batches.get(shape) in BATCHES:
-        return {"provider": "directml", "batch_size": batches[shape], "reason": ""}
+        if not retain_session:
+            return {"provider": "directml", "batch_size": batches[shape], "reason": ""}
+        candidates = BATCHES[BATCHES.index(batches[shape]):]
     failures = []
     # A killed/native-crashed probe leaves a short-lived CPU marker instead of
     # causing every subsequent task to crash on the same driver/model.
     write_cache(path, {"provider": "cpu", "reason": "DirectML probe did not complete"})
-    for batch in BATCHES:
+    for batch in candidates:
         loaded = inputs = output = None
         try:
-            loaded = LoadedBlurBall(create_session(model, "directml"), "directml", model)
+            loaded = LoadedBlurBall(create_session(model, "directml", input_shape=(batch, 9, height, width)), "directml", model)
             # Three RGB frames, with nonconstant normalized image values. Use
             # the real ROI dimensions, not a tiny shape that bypasses Resize.
             sample = np.linspace(-2.0, 2.5, 9 * height * width, dtype=np.float32).reshape(1, 9, height, width)
             inputs = np.repeat(sample, batch, axis=0)
-            output = loaded.run(inputs)
-            if output.shape != (batch, 3, height, width):
-                raise DirectMLFallbackRequired(f"Unexpected BlurBall output shape: {output.shape}", retry_smaller_batch=False)
+            # One successful warm-up did not predict the first real batch's
+            # reliability. Exercise repeated runs with changing input buffers.
+            for iteration in range(3):
+                if iteration:
+                    inputs = np.roll(inputs, 1, axis=-1)
+                output = loaded.run(inputs)
+                if output.shape != (batch, 3, height, width):
+                    raise DirectMLFallbackRequired(f"Unexpected BlurBall output shape: {output.shape}", retry_smaller_batch=False)
+                del output
+                output = None
             shapes = batches if isinstance(batches, dict) else {}
             write_cache(path, {"provider": "directml", "shapes": {**shapes, shape: batch}})
-            print(f"DirectML model probe passed: {shape}, batch={batch}", file=sys.stderr)
-            return {"provider": "directml", "batch_size": batch, "reason": "; ".join(failures)}
+            print(f"DirectML model probe passed: {shape}, batch={batch}, fixed_shape=true, runs=3", file=sys.stderr)
+            return {
+                "provider": "directml", "batch_size": batch, "reason": "; ".join(failures),
+                **({"session": loaded.session} if retain_session else {}),
+            }
         except (DirectMLFallbackRequired, MemoryError) as error:
             failures.append(f"DirectML batch {batch}: {error}; cause={error.__cause__}")
             print(failures[-1], file=sys.stderr)

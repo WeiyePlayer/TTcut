@@ -14,8 +14,8 @@ from ttcut_worker import directml_probe, onnx_models, worker
 @pytest.mark.parametrize(
     ("failure", "expected_batches", "exit_code"),
     [
-        ("initialization", [16, None], 0),
-        ("inference", [16, None], 0),
+        ("initialization", [4, None], 0),
+        ("inference", [4, None], 0),
         ("cpu_initialization", [None], 2),
     ],
 )
@@ -62,7 +62,7 @@ def test_ort_failures_preserve_worker_jsonl_and_explicit_fallback(
     monkeypatch.setattr(ort.InferenceSession, "_create_inference_session", create_native_session)
     monkeypatch.setattr(ort, "get_available_providers", lambda: ["DmlExecutionProvider", "CPUExecutionProvider"])
     monkeypatch.setattr(onnx_models, "_ort", lambda: ort)
-    monkeypatch.setattr(directml_probe, "select_configuration", lambda *args: {"provider": "directml", "batch_size": 16, "reason": ""})
+    monkeypatch.setattr(directml_probe, "select_configuration", lambda *args, **kwargs: {"provider": "directml", "batch_size": 4, "reason": ""})
     monkeypatch.delenv("TTCUT_FORCE_ONNX_CPU", raising=False)
     monkeypatch.delenv("TTCUT_DIRECTML_FALLBACK_REASON", raising=False)
     request = {

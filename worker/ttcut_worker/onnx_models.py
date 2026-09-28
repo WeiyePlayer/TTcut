@@ -9,6 +9,15 @@ import numpy as np
 
 from .errors import DirectMLFallbackRequired, InferenceError, ModelResourceError
 
+DIRECTML_BATCH_SIZES = (4, 2, 1)
+
+
+def native_error_detail(error: Exception) -> str:
+    if isinstance(error, UnicodeDecodeError):
+        encoding = "mbcs" if os.name == "nt" else "utf-8"
+        return f"Native error: {error.object.decode(encoding, errors='replace')[:4096]}"
+    return f"{type(error).__name__}: {error}"
+
 
 def model_sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -26,7 +35,7 @@ def _ort():
     return ort
 
 
-def session_options(provider: str):
+def session_options(provider: str, input_shape: tuple[int, int, int, int] | None = None):
     ort = _ort()
     options = ort.SessionOptions()
     options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
@@ -35,10 +44,13 @@ def session_options(provider: str):
         # ORT 1.24.3's DML fusion can produce an invalid two-input
         # DmlFusedGemm for the model's bias-free squeeze/excitation layers.
         options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_DISABLE_ALL
+        if input_shape is not None:
+            for name, value in zip(("batch", "height", "width"), (input_shape[0], *input_shape[2:])):
+                options.add_free_dimension_override_by_name(name, value)
     return options
 
 
-def create_session(path: str | Path, provider: str):
+def create_session(path: str | Path, provider: str, *, input_shape: tuple[int, int, int, int] | None = None):
     model = Path(path)
     if not model.is_file():
         raise ModelResourceError(f"Bundled ONNX model is missing: {model}")
@@ -52,7 +64,7 @@ def create_session(path: str | Path, provider: str):
     try:
         return ort.InferenceSession(
             str(model),
-            sess_options=session_options(provider),
+            sess_options=session_options(provider, input_shape),
             providers=providers,
             # ORT's automatic fallback prints plain text to stdout, corrupting
             # the Worker's JSONL, and can silently switch a DirectML session to
@@ -63,8 +75,10 @@ def create_session(path: str | Path, provider: str):
     except Exception as exc:
         if provider == "directml":
             raise DirectMLFallbackRequired(
-                "DirectML session initialization failed.",
-                retry_smaller_batch=False,
+                f"DirectML session initialization failed. {native_error_detail(exc)}",
+                # A fixed-shape graph allocates/compiles during initialization;
+                # a smaller batch may fit even when that initialization fails.
+                retry_smaller_batch=input_shape is not None,
             ) from exc
         raise ModelResourceError(f"Bundled ONNX model is invalid: {model}") from exc
 
@@ -84,7 +98,9 @@ class LoadedBlurBall:
             logits = self.session.run(["logits"], {"input": inputs})[0]
         except Exception as exc:
             if self.provider == "directml":
-                raise DirectMLFallbackRequired("DirectML inference failed.") from exc
+                raise DirectMLFallbackRequired(
+                    f"DirectML inference failed, input_shape={tuple(inputs.shape)}. {native_error_detail(exc)}",
+                ) from exc
             raise InferenceError("BlurBall ONNX inference failed.") from exc
         if not np.isfinite(logits).all():
             if self.provider == "directml":
@@ -106,13 +122,17 @@ def load_blurball(weight_value: str | Path, requested_device: str, dimensions: t
     path = Path(weight_value)
     provider = requested_onnx_provider(requested_device)
     batch_size = None
+    session = None
     if provider == "directml":
         from .directml_probe import select_configuration
-        configuration = select_configuration(path, *dimensions)
+        configuration = select_configuration(path, *dimensions, retain_session=True)
         provider, batch_size = configuration["provider"], configuration["batch_size"]
+        session = configuration.get("session")
         if configuration["reason"]:
             os.environ["TTCUT_DIRECTML_FALLBACK_REASON"] = configuration["reason"]
-    return LoadedBlurBall(create_session(path, provider), provider, path, model_sha256(path), _ort().__version__, batch_size=batch_size)
+    if session is None:
+        session = create_session(path, provider)
+    return LoadedBlurBall(session, provider, path, model_sha256(path), _ort().__version__, batch_size=batch_size)
 
 
 def load_table_session(weight_value: str | Path):

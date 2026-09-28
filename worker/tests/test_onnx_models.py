@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 import io
 import sys
 
@@ -13,7 +14,7 @@ from ttcut_worker.blurball_predictor import (
 )
 from ttcut_worker.errors import DirectMLFallbackRequired, InferenceError
 from ttcut_worker.onnx_models import LoadedBlurBall, requested_onnx_provider
-from ttcut_worker import worker
+from ttcut_worker import onnx_models, worker
 
 
 class _Session:
@@ -50,6 +51,24 @@ def test_cpu_failure_stays_an_inference_error():
     loaded = LoadedBlurBall(_Session(error=RuntimeError("bad graph")), "cpu", Path("model.onnx"))
     with pytest.raises(InferenceError, match="BlurBall ONNX inference failed"):
         loaded.run(np.zeros((4, 9, 8, 8), dtype=np.float32))
+
+
+def test_directml_initialization_preserves_native_text_hidden_by_unicode_error(monkeypatch, tmp_path):
+    model = tmp_path / "model.onnx"
+    model.touch()
+    native = b"HRESULT 0x8007000E: allocation failed \xb2"
+
+    def fail(*args, **kwargs):
+        native.decode("utf-8")
+
+    monkeypatch.setattr(onnx_models, "_ort", lambda: SimpleNamespace(
+        get_available_providers=lambda: ["DmlExecutionProvider"], InferenceSession=fail,
+    ))
+    monkeypatch.setattr(onnx_models, "session_options", lambda *args: None)
+    with pytest.raises(DirectMLFallbackRequired, match="HRESULT 0x8007000E: allocation failed") as error:
+        onnx_models.create_session(model, "directml")
+    assert isinstance(error.value.__cause__, UnicodeDecodeError)
+    assert not error.value.retry_smaller_batch
 
 
 @pytest.mark.parametrize("batch_size", BLURBALL_DIRECTML_BATCH_SIZES)
@@ -104,12 +123,12 @@ def test_worker_discards_late_directml_failure_and_restarts_only_once_on_cpu(mon
             worker.os.environ.get("TTCUT_FORCE_ONNX_CPU"),
             worker.os.environ.get("TTCUT_DIRECTML_FALLBACK_REASON"),
         ))
-        if directml_batch_size == 16:
+        if directml_batch_size == 4:
             raise DirectMLFallbackRequired("injected allocation failure")
         return {"provider": "cpu", "batch_size": directml_batch_size}
 
     events = run_worker_with(monkeypatch, request, fake_analyze)
-    assert [(item[1], item[2]) for item in attempts] == [(16, None), (None, "1")]
+    assert [(item[1], item[2]) for item in attempts] == [(4, None), (None, "1")]
     assert "injected allocation failure" in attempts[1][3]
     assert [event["stage"] for event in events if event["type"] == "progress"] == [
         "provider_fallback",
@@ -133,11 +152,11 @@ def test_worker_does_not_retry_smaller_batches_after_analysis_started(monkeypatc
         }
 
     events = run_worker_with(monkeypatch, request, fake_analyze)
-    assert attempts == [(16, None), (None, "1")]
+    assert attempts == [(4, None), (None, "1")]
     assert [event["stage"] for event in events if event["type"] == "progress"] == [
         "provider_fallback",
     ]
-    assert "batch 16 failed" in events[-1]["data"]["reason"]
+    assert "batch 4 failed" in events[-1]["data"]["reason"]
 
 
 def test_worker_does_not_retry_even_when_a_smaller_batch_might_fit(monkeypatch):
@@ -150,7 +169,7 @@ def test_worker_does_not_retry_even_when_a_smaller_batch_might_fit(monkeypatch):
         return {"provider": "directml" if directml_batch_size else "cpu"}
 
     events = run_worker_with(monkeypatch, worker_request(), fake_analyze)
-    assert attempts == [(16, None), (None, "1")]
+    assert attempts == [(4, None), (None, "1")]
     assert events[-1]["data"] == {"provider": "cpu"}
 
 
@@ -168,7 +187,7 @@ def test_worker_skips_smaller_batches_when_directml_cannot_initialize(monkeypatc
         return {"provider": "cpu"}
 
     events = run_worker_with(monkeypatch, request, fake_analyze)
-    assert attempts == [(16, None), (None, "1")]
+    assert attempts == [(4, None), (None, "1")]
     assert [event["stage"] for event in events if event["type"] == "progress"] == [
         "provider_fallback",
     ]
