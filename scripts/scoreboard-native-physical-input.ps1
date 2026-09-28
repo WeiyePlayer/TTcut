@@ -102,4 +102,3 @@ $appRect=[Physical+Rect]::new();[Physical]::GetWindowRect($parent,[ref]$appRect)
 $result=@{tree=$tree;appRect=$appRect;whitePixels=$whitePixels;whiteFraction=$whiteFraction;point=@($px,$py);hit=@{handle=$target.ToInt64();class=[Physical]::Class($target)};gui=$gui;focusText=[Physical]::Text($gui.Focus);focusClass=[Physical]::Class($gui.Focus)}
 if($Action -eq 'liveEdit' -and [Physical]::GetAncestor($gui.Focus,2) -eq $parent){[Physical]::Key(13);[Physical]::Key(13,$true)}
 $result|ConvertTo-Json -Depth 5 -Compress
-

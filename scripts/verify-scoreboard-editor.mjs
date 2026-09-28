@@ -70,4 +70,3 @@ console.log(JSON.stringify({passed,run,checks:report.checks,error:report.error})
 if(page&&!page.isClosed())await page.evaluate(()=>window.ttcut.confirmClose('exit')).catch(()=>undefined);
 await Promise.race([once(child,'exit'),delay(6000)]);if(child.exitCode===null){child.kill();passed=false;}await browser?.close().catch(()=>undefined);
 if(!passed)process.exitCode=1;
-
