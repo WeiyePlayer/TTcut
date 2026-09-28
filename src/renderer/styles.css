@@ -274,34 +274,34 @@ td input { accent-color: var(--blue); }
   object-fit: contain; object-position: center center; background-color: #000;
 }
 .custom-scoreboard-plane { position: absolute; z-index: 2; left: 50%; top: 50%; width: min(100cqw, calc(100cqh * var(--source-aspect))); max-height: 100%; aspect-ratio: var(--source-aspect); transform: translate(-50%, -50%); pointer-events: none; container-type: inline-size; }
-.custom-scoreboard { position: absolute; box-sizing: border-box; display: grid; grid-template-rows: 1fr 1fr; width: 19%; height: auto; aspect-ratio: 2.6; transform-origin: top left; padding: .5% 1%; border: 1px solid rgba(255,255,255,.7); border-radius: 5px; background: rgba(10,17,29,.82); color: white; font: 700 clamp(7px, 2.8cqw, 26px)/1.1 "Noto Sans SC Variable", "Microsoft YaHei", sans-serif; font-variant-numeric: tabular-nums; cursor: grab; touch-action: none; user-select: none; pointer-events: auto; }
+.custom-scoreboard { position: absolute; box-sizing: border-box; display: grid; grid-template-rows: 1fr 1fr; width: 28%; height: auto; aspect-ratio: 5.2; transform-origin: top left; background: #292929; color: white; font: 700 1.72cqw/1.1 "Noto Sans SC Variable", "Microsoft YaHei", sans-serif; font-variant-numeric: tabular-nums; cursor: grab; touch-action: none; user-select: none; pointer-events: auto; }
 .custom-scoreboard:active { cursor: grabbing; }
-.custom-scoreboard > span:not(.custom-scoreboard-resize-handle) { display: flex; align-items: center; justify-content: space-between; min-width: 0; }
-.custom-scoreboard-name { min-width: 0; margin-right: 5%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.custom-scoreboard strong { flex: 0 0 auto; color: #fff; font-weight: 800; }
+.custom-scoreboard-row { display: grid; position: relative; grid-template-columns: 76% 12% 12%; min-height: 0; }
+.custom-scoreboard-row + .custom-scoreboard-row { border-top: 1px solid #777; }
+.custom-scoreboard-name, .custom-scoreboard-games, .custom-scoreboard-points { display: flex; align-items: center; min-width: 0; overflow: hidden; white-space: nowrap; }
+.custom-scoreboard-name { padding: 0 4%; text-align: left; }
+.custom-scoreboard-games, .custom-scoreboard-points { justify-content: center; }
+.custom-scoreboard-games { background: #3a83f7; }
+.custom-scoreboard-points { background: #333; }
+.custom-scoreboard input { box-sizing: border-box; width: 100%; min-width: 0; padding: 0; border: 0; outline: 1px solid white; color: inherit; background: transparent; font: inherit; text-align: inherit; }
+.custom-scoreboard-games input, .custom-scoreboard-points input { text-align: center; }
+.custom-scoreboard-winner { position: absolute; left: 102%; top: 0; width: 12%; height: 100%; display: grid; place-items: center; padding: 0; border: 1px solid #777; border-radius: 3px; background: #292929; color: white; cursor: pointer; }
+.custom-scoreboard-winner[aria-pressed="true"] { color: #71a6ff; }
+.custom-scoreboard-winner:disabled { opacity: .5; cursor: default; }
+.custom-scoreboard-winner svg { width: 65%; height: 70%; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .custom-scoreboard-resize-handle { position: absolute; z-index: 1; width: 14px; height: 14px; border: 2px solid #fff; border-radius: 3px; background: var(--blue); box-shadow: 0 1px 5px rgba(0,0,0,.5); opacity: 0; transition: opacity 120ms ease; }
 .custom-scoreboard:hover .custom-scoreboard-resize-handle { opacity: 1; }
 .custom-scoreboard-resize-handle.is-top-left { top: -7px; left: -7px; cursor: nwse-resize; }
 .custom-scoreboard-resize-handle.is-top-right { top: -7px; right: -7px; cursor: nesw-resize; }
 .custom-scoreboard-resize-handle.is-bottom-left { bottom: -7px; left: -7px; cursor: nesw-resize; }
 .custom-scoreboard-resize-handle.is-bottom-right { bottom: -7px; right: -7px; cursor: nwse-resize; }
-.custom-score-inputs { display: flex; align-items: center; justify-content: space-between; gap: 4px; margin-top: 8px; color: var(--muted); font-size: 11px; }
-.custom-score-editor { display: flex; flex: 1 1 0; align-items: center; min-width: 0; gap: 4px; }
-.custom-score-input-name { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.custom-score-control { display: flex; flex: 0 0 auto; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 6px; background: #fff; }
-.custom-score-control:focus-within { outline: 2px solid rgba(58,131,247,.4); outline-offset: 1px; }
-.custom-score-control input { width: 35px; height: 29px; padding: 2px 3px; border: 0; outline: 0; color: var(--text); font: 600 12px Inter, sans-serif; text-align: center; }
-.custom-score-control button { display: grid; place-items: center; width: 28px; height: 29px; padding: 0; border: 0; border-left: 1px solid var(--line-strong); background: #f4f7fb; color: #68788d; cursor: pointer; }
-.custom-score-control button:hover:not(:disabled) { background: #e7f0ff; color: var(--blue); }
-.custom-score-control button:disabled { opacity: .45; cursor: default; }
-.custom-score-control button svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
 .custom-timeline { position: relative; width: 100%; min-width: 0; user-select: none; }
 .timeline-viewport {
   position: relative; width: 100%; min-width: 0; max-width: 100%; height: 78px; overflow-x: auto; overflow-y: hidden;
   background: transparent; overscroll-behavior: none; scrollbar-width: none; -ms-overflow-style: none;
 }
 .timeline-viewport::-webkit-scrollbar { display: none; width: 0; height: 0; }
-.timeline-content { position: relative; min-width: 100%; height: 78px; }
+.timeline-content { position: relative; min-width: 100%; height: 78px; overflow: clip; }
 .timeline-ruler { position: absolute; z-index: 3; inset: 0 0 auto; height: 34px; cursor: crosshair; background: transparent; }
 .timeline-ruler canvas { position: absolute; left: 0; top: 0; pointer-events: none; }
 .timeline-track-window {
@@ -374,9 +374,6 @@ td input { accent-color: var(--blue); }
 }
 .custom-multi-select-all { width: 100%; padding: 9px 10px; border: 0; border-radius: 6px; background: transparent; text-align: left; font-size: 12px; cursor: pointer; }
 .custom-multi-select-all:hover { background: #f0f5ff; color: var(--blue); }
-.custom-scoreboard-settings-card { display: grid; gap: 8px; padding: 12px; }
-.custom-scoreboard-settings-card label { display: grid; gap: 4px; color: var(--muted); font-size: 11px; }
-.custom-scoreboard-settings-card input { min-width: 0; height: 30px; padding: 4px 8px; border: 1px solid var(--line-strong); border-radius: 5px; color: var(--text); font: 600 12px Inter, sans-serif; }
 .custom-bounce-filter { margin-top: 4px; padding: 10px; border-top: 1px solid var(--line); }
 .custom-bounce-filter label { display: flex; align-items: center; gap: 8px; font-size: 12px; white-space: nowrap; }
 .custom-bounce-filter input { width: 48px; min-width: 0; height: 28px; padding: 3px 5px; border: 1px solid var(--line-strong); border-radius: 5px; background: #fff; color: var(--text); text-align: center; font-size: 12px; }
@@ -391,7 +388,6 @@ td input { accent-color: var(--blue); }
   position: relative; display: grid; grid-template-columns: 42px minmax(0, 1fr); align-items: center;
   min-height: 62px; padding: 10px; border-radius: 8px;
 }
-.custom-rally-table.is-scoreboard-mode .custom-rally-row-content { grid-template-columns: minmax(0, 1fr); padding-left: 20px; }
 .custom-rally-table tbody tr + tr { border-top: 1px solid var(--line); }
 .custom-rally-table tbody tr { cursor: pointer; }
 .custom-rally-table tbody tr:hover .custom-rally-row-content { background: #f7faff; }
@@ -444,7 +440,8 @@ td input { accent-color: var(--blue); }
 .timeline-tool:hover { background: var(--secondary-hover); }
 .timeline-tool.is-active { border-color: var(--blue); background: var(--blue); color: white; box-shadow: 0 3px 10px rgba(58,131,247,.22); }
 .timeline-tool svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.timeline-tool .scoreboard-tool-icon { width: 25px; height: 25px; stroke-width: 1.6; }
+.timeline-tool .scoreboard-tool-icon { width: 25px; height: 25px; stroke-width: 1.7; }
+.timeline-tool.scoreboard-tool.is-active { background: #fff; color: var(--blue); border-color: var(--blue); box-shadow: none; }
 .timeline-tool.playback-mode-toggle svg { width: 24px; height: 24px; stroke-width: 1.8; }
 .custom-workspace-right .custom-export-launcher { align-self: end; justify-self: end; }
 

@@ -235,7 +235,7 @@ export function CustomTimeline({
 
   useEffect(() => {
     const viewport = viewportRef.current;
-    if (!viewport || duration <= 0) return;
+    if (!viewport || duration <= 0 || isScrubbing) return;
     const x = currentTime * pixelsPerSecond;
     const margin = Math.min(90, viewport.clientWidth * 0.15);
     if (x < viewport.scrollLeft + margin || x > viewport.scrollLeft + viewport.clientWidth - margin) {
@@ -243,7 +243,7 @@ export function CustomTimeline({
       viewport.scrollLeft = nextScrollLeft;
       setScrollLeft(nextScrollLeft);
     }
-  }, [contentWidth, currentTime, duration, pixelsPerSecond]);
+  }, [contentWidth, currentTime, duration, pixelsPerSecond, isScrubbing]);
 
   const setZoomAnchored = (nextZoom: number, anchorClientX?: number) => {
     const viewport = viewportRef.current;

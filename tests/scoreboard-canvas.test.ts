@@ -17,16 +17,16 @@ it('renders custom Unicode names and scores at the scaled export size', () => {
     set lineWidth(_value: number) {}, set textBaseline(_value: string) {}, set textAlign(_value: string) {},
   } as unknown as CanvasRenderingContext2D);
   vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockImplementation(function (this: HTMLCanvasElement) {
-    expect(this.width).toBe(365);
-    expect(this.height).toBe(140);
+    expect(this.width).toBe(538);
+    expect(this.height).toBe(103);
     return 'data:image/png;base64,AA==';
   });
   const result = renderScoreboardImage(1280, 720, {
     x: 0.6, y: 0.08, scale: 1.5, left_name: '林昀儒', right_name: '张本智和',
-  }, { left: 11, right: 9 });
+  }, { left: 11, right: 9, left_games: 2, right_games: 1 });
   expect(result).toBe('data:image/png;base64,AA==');
-  expect(fillText.mock.calls.map(([text]) => text)).toEqual(['林昀儒', '11', '张本智和', '9']);
-  expect(fonts).toHaveLength(4);
+  expect(fillText.mock.calls.map(([text]) => text)).toEqual(['林昀儒', '2', '11', '张本智和', '1', '9']);
+  expect(fonts).toHaveLength(6);
   expect(fonts.every((value) => value.includes('"Noto Sans SC Variable"'))).toBe(true);
   expect(HTMLCanvasElement.prototype.toDataURL).toHaveBeenCalledOnce();
 });

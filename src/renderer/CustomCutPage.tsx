@@ -1,10 +1,11 @@
 import { CompatibleVideo } from './CompatibleVideo';
 import { NativePreviewSurface } from './NativePreviewSurface';
+import { ScoreboardFields } from './ScoreboardFields';
 import { useNativePreview } from './use-native-preview';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { SelectedVideo } from '../shared/api';
-import { hasBounceCounts, type AnalysisResultV1, type ExportRequest, type ScoreboardPosition } from '../shared/contracts';
-import { SCOREBOARD_MAX_SCALE, SCOREBOARD_MIN_SCALE, SCOREBOARD_WIDTH_FRACTION, scoreboardHeightFraction, scoreboardName } from '../domain/scoreboard';
+import { hasBounceCounts, type AnalysisResultV1, type ExportRequest, type ScoreboardPosition, type ScoreboardScore } from '../shared/contracts';
+import { SCOREBOARD_MAX_SCALE, SCOREBOARD_MIN_SCALE, SCOREBOARD_WIDTH_FRACTION, SCOREBOARD_PREVIEW_WIDTH_FRACTION, scoreboardHeightFraction, scoreboardName } from '../domain/scoreboard';
 import {
   createManualCustomClip,
   deleteCustomClip,
@@ -112,45 +113,11 @@ function PlaybackModeIcon({ mode }: { mode: CustomPlaybackMode }) {
 
 function ScoreboardIcon() {
   return (
-    <svg className="scoreboard-tool-icon" viewBox="0 0 44 38" aria-hidden="true" focusable="false">
-      <path d="M1.5 4.5h41M10.5 4.5V8m23-3.5V8" />
-      <rect x="3" y="8" width="17" height="27" rx="1.5" />
-      <rect x="24" y="8" width="17" height="27" rx="1.5" />
-      <text x="11.5" y="29" textAnchor="middle" fontFamily="Arial, sans-serif" fontSize="22" fontWeight="800" fill="currentColor" stroke="none">3</text>
-      <text x="32.5" y="29" textAnchor="middle" fontFamily="Arial, sans-serif" fontSize="22" fontWeight="800" fill="currentColor" stroke="none">1</text>
+    <svg className="scoreboard-tool-icon" viewBox="0 0 28 24" aria-hidden="true" focusable="false">
+      <path d="M3 6h3a3 3 0 0 1 0 6H4m2 0a3 3 0 0 1 0 6H3M21 8l3-2v12" />
+      <circle cx="15" cy="9" r="1" fill="currentColor" stroke="none" /><circle cx="15" cy="15" r="1" fill="currentColor" stroke="none" />
     </svg>
   );
-}
-
-function ScoreEditor({ label, ariaLabel, incrementLabel, value, onChange }: {
-  label: string;
-  ariaLabel: string;
-  incrementLabel: string;
-  value: number;
-  onChange: (value: number) => void;
-}) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const selectZeroRef = useRef(false);
-  useLayoutEffect(() => {
-    if (!selectZeroRef.current) return;
-    selectZeroRef.current = false;
-    const input = inputRef.current;
-    if (input && document.activeElement === input) input.select();
-  });
-  return <label className="custom-score-editor">
-    <span className="custom-score-input-name" title={label}>{label}</span>
-    <span className="custom-score-control">
-      <input ref={inputRef} type="text" inputMode="numeric" pattern="[0-9]*" maxLength={3} value={String(value)} aria-label={ariaLabel} onFocus={(event) => event.currentTarget.select()} onChange={(event) => {
-        const input = event.currentTarget;
-        const raw = input.value;
-        if (!/^\d{0,3}$/.test(raw)) return;
-        const next = raw === '' ? 0 : Number(raw);
-        selectZeroRef.current = next === 0;
-        onChange(next);
-      }} />
-      <button type="button" disabled={value >= 999} aria-label={incrementLabel} onClick={() => onChange(value + 1)}><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m3 10 5-5 5 5" /></svg></button>
-    </span>
-  </label>;
 }
 
 function manualClipId(): string | null {
@@ -260,9 +227,6 @@ export function CustomCutPage({
   const multiSelectRef = useRef<HTMLDivElement>(null);
   const multiSelectButtonRef = useRef<HTMLButtonElement>(null);
   const multiSelectId = useId();
-  const scoreboardSettingsRef = useRef<HTMLDivElement>(null);
-  const scoreboardSettingsButtonRef = useRef<HTMLButtonElement>(null);
-  const scoreboardSettingsId = useId();
   const exportCloseTimerRef = useRef<number | null>(null);
   const playbackCueTimerRef = useRef<number | null>(null);
   const playbackScrollFrameRef = useRef<number | null>(null);
@@ -278,7 +242,7 @@ export function CustomCutPage({
     : previewMetadata.width / previewMetadata.height;
   const scoreboardScale = scoreboard.scale ?? 1;
   const scoreboardBaseHeight = scoreboardHeightFraction(previewAspect);
-  const scoreboardMaxX = Math.max(0, 1 - SCOREBOARD_WIDTH_FRACTION * scoreboardScale);
+  const scoreboardMaxX = Math.max(0, 1 - SCOREBOARD_PREVIEW_WIDTH_FRACTION * scoreboardScale);
   const scoreboardMaxY = Math.max(0, 1 - scoreboardBaseHeight * scoreboardScale);
   const nativeEnabled = window.ttcut?.platform === 'win32' && Boolean(window.ttcut.nativePreviewOpen);
   const browserPreview = useCompatiblePreview(videoRef, video.mediaUrl, previewMetadata.video_codec, nativeEnabled);
@@ -290,17 +254,22 @@ export function CustomCutPage({
   const [toolMode, setToolMode] = useState<TimelineToolMode>(null);
   const [exportOptionsOpen, setExportOptionsOpen] = useState(false);
   const [multiSelectOpen, setMultiSelectOpen] = useState(false);
-  const [scoreboardSettingsOpen, setScoreboardSettingsOpen] = useState(false);
   const [bounceFilterValue, setBounceFilterValue] = useState('');
   const [resetConfirmation, setResetConfirmation] = useState(false);
   const selectedCount = clips.filter((clip) => clip.selected).length;
-  const visibleClips = useMemo(() => scoreboard.enabled ? clips.filter((clip) => clip.selected) : clips, [clips, scoreboard.enabled]);
+  const visibleClips = clips;
   const selectedScores = useMemo(() => resolvedSelectedClipScores(clips), [clips]);
   const currentScoreClip = clips.find((clip) => clip.selected && currentTime >= clip.start && currentTime < clip.end);
   const currentScore = currentScoreClip ? selectedScores.get(currentScoreClip.clipId) : null;
   const leftName = scoreboardName(scoreboard.left_name, 'A');
   const rightName = scoreboardName(scoreboard.right_name, 'B');
   const showBounceCounts = hasBounceCounts(analysis);
+
+  useEffect(() => {
+    if (scoreboard.enabled && (scoreboard.x > scoreboardMaxX || scoreboard.y > scoreboardMaxY)) {
+      onScoreboardChange({ ...scoreboard, x: Math.min(scoreboard.x, scoreboardMaxX), y: Math.min(scoreboard.y, scoreboardMaxY) });
+    }
+  }, [scoreboard, scoreboardMaxX, scoreboardMaxY, onScoreboardChange]);
 
   useEffect(() => {
     if (!multiSelectOpen) return;
@@ -312,17 +281,6 @@ export function CustomCutPage({
     document.addEventListener('pointerdown', closeOutside);
     return () => document.removeEventListener('pointerdown', closeOutside);
   }, [multiSelectOpen]);
-
-  useEffect(() => {
-    if (!scoreboardSettingsOpen) return;
-    const closeOutside = (event: PointerEvent) => {
-      if (event.target instanceof Node && !scoreboardSettingsRef.current?.contains(event.target)) {
-        setScoreboardSettingsOpen(false);
-      }
-    };
-    document.addEventListener('pointerdown', closeOutside);
-    return () => document.removeEventListener('pointerdown', closeOutside);
-  }, [scoreboardSettingsOpen]);
 
   const applyBounceFilter = () => {
     if (!showBounceCounts || !/^(?:[1-9]|10)$/.test(bounceFilterValue)) return;
@@ -548,6 +506,7 @@ export function CustomCutPage({
   useEffect(() => {
     const handleSpace = (event: KeyboardEvent) => {
       if (resetConfirmation) return;
+      if (event.target instanceof HTMLElement && event.target.closest('.custom-scoreboard input')) return;
       if (event.isComposing || (event.code !== 'Space' && event.key !== ' ')) return;
       // Own Space before row handlers and native button/checkbox activation.
       // Consume keyup and repeats too: neither should activate a focused tool.
@@ -597,12 +556,20 @@ export function CustomCutPage({
     onOutputsChange({ ...nextOutputs, combined_video: !nextOutputs.rally_videos && !nextOutputs.premiere_xml });
   };
 
-  const updateScore = (clipId: string, side: 'left' | 'right', value: number) => {
+  const updateScore = (clipId: string, side: keyof ScoreboardScore, value: number) => {
     if (!Number.isInteger(value) || value < 0 || value > 999) return;
     const inherited = selectedScores.get(clipId) ?? { left: 0, right: 0 };
     onClipsChange(clips.map((clip) => clip.clipId === clipId
       ? { ...clip, score: { ...inherited, [side]: value } }
       : clip));
+  };
+
+  const updateWinner = (clipId: string, winner: 'left' | 'right') => {
+    const index = clips.findIndex(clip => clip.clipId === clipId);
+    if (index < 0) return;
+    if (clips[index]?.winner !== winner) onClipsChange(clips.map(clip => clip.clipId === clipId ? { ...clip, winner } : clip));
+    const next = clips.slice(index + 1).find(clip => clip.selected);
+    if (next) playClip(next);
   };
 
   const moveScoreboard = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -615,7 +582,7 @@ export function CustomCutPage({
     const deltaY = (event.clientY - drag.startY) / bounds.height;
     if (!drag.corner) {
       onScoreboardChange({ ...scoreboard,
-        x: Math.max(0, Math.min(1 - SCOREBOARD_WIDTH_FRACTION * drag.scale, drag.x + deltaX)),
+        x: Math.max(0, Math.min(1 - SCOREBOARD_PREVIEW_WIDTH_FRACTION * drag.scale, drag.x + deltaX)),
         y: Math.max(0, Math.min(1 - scoreboardBaseHeight * drag.scale, drag.y + deltaY)),
       });
       return;
@@ -634,7 +601,7 @@ export function CustomCutPage({
     );
     const scale = Math.max(SCOREBOARD_MIN_SCALE, Math.min(maxScale, requestedScale));
     onScoreboardChange({ ...scoreboard, scale,
-      x: fromRight ? anchorX : anchorX - SCOREBOARD_WIDTH_FRACTION * scale,
+      x: Math.max(0, Math.min(1 - SCOREBOARD_PREVIEW_WIDTH_FRACTION * scale, fromRight ? anchorX : anchorX - SCOREBOARD_WIDTH_FRACTION * scale)),
       y: fromBottom ? anchorY : anchorY - scoreboardBaseHeight * scale,
     });
   };
@@ -645,23 +612,8 @@ export function CustomCutPage({
       <div className="custom-workspace" onContextMenu={(event) => { event.preventDefault(); setToolMode(null); }}>
         <section className="custom-rally-list" aria-label={translations.rally}>
           <div className="table-tools">
-            <div className="custom-list-selection"><strong>{scoreboard.enabled ? visibleClips.length : `${selectedCount} / ${clips.length}`}</strong><span>{translations.rally}</span></div>
+            <div className="custom-list-selection"><strong>{`${selectedCount} / ${clips.length}`}</strong><span>{translations.rally}</span></div>
             <div className="custom-list-actions">
-              {scoreboard.enabled ? <div ref={scoreboardSettingsRef} className="custom-multi-select" onBlur={(event) => {
-                if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setScoreboardSettingsOpen(false);
-              }} onKeyDown={(event) => {
-                if (event.key !== 'Escape') return;
-                event.preventDefault();
-                event.stopPropagation();
-                setScoreboardSettingsOpen(false);
-                scoreboardSettingsButtonRef.current?.focus();
-              }}>
-                <button ref={scoreboardSettingsButtonRef} className="text-button" type="button" aria-haspopup="dialog" aria-expanded={scoreboardSettingsOpen} aria-controls={scoreboardSettingsOpen ? scoreboardSettingsId : undefined} onClick={() => setScoreboardSettingsOpen((open) => !open)}>{translations.scoreboardSettings}</button>
-                {scoreboardSettingsOpen && <div id={scoreboardSettingsId} className="custom-multi-select-card custom-scoreboard-settings-card" role="dialog" aria-label={translations.scoreboardSettings}>
-                  <label>{translations.scoreboardLeftName}<input type="text" maxLength={24} value={scoreboard.left_name ?? 'A'} onChange={(event) => onScoreboardChange({ ...scoreboard, left_name: event.currentTarget.value })} /></label>
-                  <label>{translations.scoreboardRightName}<input type="text" maxLength={24} value={scoreboard.right_name ?? 'B'} onChange={(event) => onScoreboardChange({ ...scoreboard, right_name: event.currentTarget.value })} /></label>
-                </div>}
-              </div> : <>
               <div ref={multiSelectRef} className="custom-multi-select" onBlur={(event) => {
                 if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setMultiSelectOpen(false);
               }} onKeyDown={(event) => {
@@ -692,12 +644,11 @@ export function CustomCutPage({
                 </div>}
               </div>
               <button className="text-button" type="button" onClick={() => { setMultiSelectOpen(false); onToggleAll(false); }}>{translations.clearAll}</button>
-              </>}
             </div>
           </div>
           <div className="custom-rally-scroll-shell">
             <div ref={rallyScrollRef} id="custom-rally-scroll" className="table-scroll">
-              <table ref={rallyTableRef} className={`custom-rally-table${scoreboard.enabled ? ' is-scoreboard-mode' : ''}`}><tbody>{visibleClips.map((clip) => (
+              <table ref={rallyTableRef} className="custom-rally-table"><tbody>{visibleClips.map((clip) => (
                 <tr
                   key={clip.clipId}
                   ref={(row) => { if (row) rallyRowRefs.current.set(clip.clipId, row); else rallyRowRefs.current.delete(clip.clipId); }}
@@ -714,20 +665,15 @@ export function CustomCutPage({
                 >
                   <td colSpan={4} className="custom-rally-cell">
                     <div className="custom-rally-row-content">
-                      {!scoreboard.enabled && <div className="custom-rally-check" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+                      <div className="custom-rally-check" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
                         <label className="rally-checkbox">
                           <input type="checkbox" aria-label={`${translations.rally} ${clip.rallyIndex}`} checked={clip.selected} onChange={(event) => onClipsChange(setCustomClipSelected(clips, clip.clipId, event.currentTarget.checked, analysis.video.duration_seconds, analysis.video.fps))} />
                           <span className="rally-checkbox-control" aria-hidden="true" />
                         </label>
-                      </div>}
+                      </div>
                       <div>
                         <div className="custom-rally-meta"><strong>{translations.rally} {clip.rallyIndex}</strong>{showBounceCounts && <span title={clip.bounceCount === null ? translations.manualBounceUnavailable : undefined}>{translations.strokes} {clip.bounceCount ?? '—'}</span>}</div>
                         <div className="custom-rally-times"><span>{formatCustomClipTime(clip.start)}</span><div className="custom-rally-duration"><strong>{formatCustomClipDuration(clip.start, clip.end)}</strong><i /></div><span>{formatCustomClipTime(clip.end)}</span></div>
-                        {scoreboard.enabled && <div className="custom-score-inputs" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
-                          <ScoreEditor label={leftName} ariaLabel={`${translations.rally} ${clip.rallyIndex} ${leftName}`} incrementLabel={`${translations.rally} ${clip.rallyIndex} ${leftName} ${translations.increaseScore}`} value={selectedScores.get(clip.clipId)?.left ?? 0} onChange={(value) => updateScore(clip.clipId, 'left', value)} />
-                          <span>:</span>
-                          <ScoreEditor label={rightName} ariaLabel={`${translations.rally} ${clip.rallyIndex} ${rightName}`} incrementLabel={`${translations.rally} ${clip.rallyIndex} ${rightName} ${translations.increaseScore}`} value={selectedScores.get(clip.clipId)?.right ?? 0} onChange={(value) => updateScore(clip.clipId, 'right', value)} />
-                        </div>}
                       </div>
                     </div>
                   </td>
@@ -745,12 +691,16 @@ export function CustomCutPage({
               {preview.status === 'failed' && <button type="button" onClick={preview.retry}>{translations.previewRetry}</button>}
             </div>}
             {nativeEnabled ? <NativePreviewSurface preview={nativePreview} label={translations.togglePlayback} onToggle={togglePlayback}
-              scoreboard={{ enabled: scoreboard.enabled && Boolean(currentScoreClip), x: scoreboard.x, y: scoreboard.y, scale: scoreboardScale, aspect: previewAspect, left: currentScore?.left ?? 0, right: currentScore?.right ?? 0, leftName, rightName }}
+              scoreboard={{ enabled: scoreboard.enabled, x: Math.min(scoreboard.x, scoreboardMaxX), y: Math.min(scoreboard.y, scoreboardMaxY), scale: scoreboardScale, aspect: previewAspect, left: currentScore?.left ?? 0, right: currentScore?.right ?? 0, leftGames: currentScore?.left_games ?? 0, rightGames: currentScore?.right_games ?? 0, leftName, rightName, ...(currentScoreClip ? { clipId: currentScoreClip.clipId, ...(currentScoreClip.winner ? { winner: currentScoreClip.winner } : {}) } : {}) }}
+              onWinner={updateWinner} onEdit={(clipId, field, value) => {
+                if (field === 'leftName' || field === 'rightName') onScoreboardChange({ ...scoreboard, [field === 'leftName' ? 'left_name' : 'right_name']: value.replace(/[\x00-\x1f\x7f]/g, '').slice(0, 24).trim() });
+                else updateScore(clipId, field === 'leftGames' ? 'left_games' : field === 'rightGames' ? 'right_games' : field, Number(value));
+              }}
               onPosition={value => onScoreboardChange({ ...scoreboard, ...value })} />
               : <CompatibleVideo hdr={Boolean(analysis.video.native_video && analysis.video.native_video.hdr !== 'sdr')} ref={videoRef} src={preview.url} controls={false} preload={preview.url === video.mediaUrl ? 'metadata' : 'auto'} playsInline tabIndex={0} aria-label={translations.togglePlayback} onClick={togglePlayback} onLoadedMetadata={() => { lastPlaybackClipIdRef.current = null; playback.tick(); }} onPlay={() => { playback.tick(); startVideoFrameTracking(); }} onPause={stopVideoFrameTracking} onEnded={() => { stopVideoFrameTracking(); playback.ended(); }} onTimeUpdate={() => playback.tick()} onSeeked={() => playback.tick()} />}
-            {!nativeEnabled && scoreboard.enabled && currentScoreClip && <div ref={scoreboardPlaneRef} className="custom-scoreboard-plane" style={{ '--source-aspect': String(previewAspect) } as React.CSSProperties}>
+            {!nativeEnabled && scoreboard.enabled && <div ref={scoreboardPlaneRef} className="custom-scoreboard-plane" style={{ '--source-aspect': String(previewAspect) } as React.CSSProperties}>
               <div className="custom-scoreboard" role="button" tabIndex={0} aria-label={translations.dragScoreboard} title={translations.dragScoreboard} style={{ left: `${scoreboard.x * 100}%`, top: `${scoreboard.y * 100}%`, transform: `scale(${scoreboardScale})` }} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => {
-                event.preventDefault(); event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId);
+                event.preventDefault(); event.stopPropagation(); (event.target as HTMLElement).setPointerCapture(event.pointerId);
                 scoreboardDragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, x: scoreboard.x, y: scoreboard.y, scale: scoreboardScale, corner: null };
               }} onPointerMove={moveScoreboard} onPointerUp={(event) => { if (scoreboardDragRef.current?.pointerId === event.pointerId) scoreboardDragRef.current = null; }} onPointerCancel={() => { scoreboardDragRef.current = null; }} onLostPointerCapture={() => { scoreboardDragRef.current = null; }} onKeyDown={(event) => {
                 const delta = event.shiftKey ? 0.05 : 0.01;
@@ -762,8 +712,11 @@ export function CustomCutPage({
                 else return;
                 event.preventDefault(); event.stopPropagation(); onScoreboardChange(next);
               }}>
-                <span><span className="custom-scoreboard-name" style={{ fontSize: `max(7px, ${Math.min(2.8, 12 / Array.from(leftName).length)}cqw)` }}>{leftName}</span><strong>{currentScore?.left ?? 0}</strong></span>
-                <span><span className="custom-scoreboard-name" style={{ fontSize: `max(7px, ${Math.min(2.8, 12 / Array.from(rightName).length)}cqw)` }}>{rightName}</span><strong>{currentScore?.right ?? 0}</strong></span>
+                <ScoreboardFields key={currentScoreClip?.clipId ?? 'gap'} names={[leftName, rightName]} score={currentScore ?? { left: 0, right: 0 }} winner={currentScoreClip?.winner} enabled={Boolean(currentScoreClip)}
+                  labels={{ name: translations.scoreboardEditName, games: translations.scoreboardGames, points: translations.scoreboardPoints, winner: translations.scoreboardWinner }}
+                  onName={(side, value) => onScoreboardChange({ ...scoreboard, [`${side}_name`]: value })}
+                  onScore={(field, value) => { if (currentScoreClip) updateScore(currentScoreClip.clipId, field, value); }}
+                  onWinner={side => { if (currentScoreClip) updateWinner(currentScoreClip.clipId, side); }} />
                 {(['top-left', 'top-right', 'bottom-left', 'bottom-right'] as const).map((corner) => <span key={corner} className={`custom-scoreboard-resize-handle is-${corner}`} role="button" tabIndex={-1} aria-label={`${translations.resizeScoreboard} ${corner}`} onPointerDown={(event) => {
                   event.preventDefault(); event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId);
                   scoreboardDragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, x: scoreboard.x, y: scoreboard.y, scale: scoreboardScale, corner };
@@ -779,7 +732,7 @@ export function CustomCutPage({
               <button className={`timeline-tool${toolMode === 'add' ? ' is-active' : ''}`} type="button" aria-label={translations.addManualRally} title={translations.addManualRally} aria-pressed={toolMode === 'add'} onClick={() => toggleTool('add')}><PlusIcon /></button>
               <button className={`timeline-tool${toolMode === 'delete' ? ' is-active' : ''}`} type="button" aria-label={translations.deleteRally} title={translations.deleteRally} aria-pressed={toolMode === 'delete'} onClick={() => toggleTool('delete')}><TrashIcon /></button>
               <button className={`timeline-tool${toolMode === 'zoom' ? ' is-active' : ''}`} type="button" aria-label={translations.zoomTimeline} title={translations.zoomTimelineHint} aria-pressed={toolMode === 'zoom'} onClick={() => toggleTool('zoom')}><ZoomIcon /></button>
-              <button className={`timeline-tool${scoreboard.enabled ? ' is-active' : ''}`} type="button" aria-label={translations.addScoreboard} aria-pressed={scoreboard.enabled} title={translations.addScoreboard} onClick={() => { setMultiSelectOpen(false); setScoreboardSettingsOpen(false); onScoreboardChange({ ...scoreboard, enabled: !scoreboard.enabled }); }}><ScoreboardIcon /></button>
+              <button className={`timeline-tool scoreboard-tool${scoreboard.enabled ? ' is-active' : ''}`} type="button" aria-label={translations.addScoreboard} aria-pressed={scoreboard.enabled} title={translations.addScoreboard} onClick={() => onScoreboardChange({ ...scoreboard, enabled: !scoreboard.enabled })}><ScoreboardIcon /></button>
               <button className="timeline-tool playback-mode-toggle" type="button" aria-label={playbackMode === 'source' ? translations.sourcePlayback : playbackMode === 'rallies' ? translations.rallyPlayback : translations.loopPlayback} title={playbackMode === 'source' ? translations.switchToRallyPlayback : playbackMode === 'rallies' ? translations.switchToLoopPlayback : translations.switchToSourcePlayback} onClick={playback.switchMode}><PlaybackModeIcon mode={playbackMode} /></button>
               {onReset && <button className="timeline-tool" type="button" aria-label={translations.resetCustomEdits} title={translations.resetCustomEdits} onClick={() => setResetConfirmation(true)}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 7v5h-5M20 12a8 8 0 1 0-2.3 5.7" /></svg>

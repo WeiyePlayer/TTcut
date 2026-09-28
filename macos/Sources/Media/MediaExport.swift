@@ -89,8 +89,8 @@ public struct MediaExporter: Sendable {
     let rotated = abs(video.rotation) % 180 == 90
     let width = Double(rotated ? video.height : video.width)
     let height = Double(rotated ? video.width : video.height)
-    let boardWidth = max(1, Int((width * 0.19 * (score.scale ?? 1)).rounded()))
-    let boardHeight = min(Int(height), max(1, Int((Double(boardWidth) / 2.6).rounded())))
+    let boardWidth = max(1, Int((width * 0.28 * (score.scale ?? 1)).rounded()))
+    let boardHeight = min(Int(height), max(1, Int((Double(boardWidth) / 5.2).rounded())))
     let x = Int((max(0, min(1 - Double(boardWidth) / width, score.x)) * width).rounded())
     let y = Int((max(0, min(1 - Double(boardHeight) / height, score.y)) * height).rounded())
     return "overlay=x=\(x):y=\(y):shortest=1:format=auto"

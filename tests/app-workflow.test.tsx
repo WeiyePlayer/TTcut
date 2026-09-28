@@ -719,7 +719,7 @@ describe('App workflow notices and multi-task entry', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Start cutting' }));
     await waitFor(() => expect(window.ttcut.startExport).toHaveBeenCalledTimes(1));
     const request = vi.mocked(window.ttcut.startExport).mock.calls[0]![0];
-    expect(request.scoreboard?.scores).toEqual([{ clip_id: 'rally_001', left: 0, right: 0, image_data: 'data:image/png;base64,AA==' }]);
+    expect(request.scoreboard?.scores).toEqual([{ clip_id: 'rally_001', left: 0, right: 0, left_games: 0, right_games: 0, image_data: 'data:image/png;base64,AA==' }]);
   });
 
   it('preserves custom edits on export cancellation and back, and resets only after confirmation', async () => {

@@ -38,7 +38,7 @@ function chunk(name: string, data: Buffer): Buffer {
 export function createScoreboardPng(width: number, height: number, score: ScoreboardScore): Buffer {
   if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1
     || !Number.isInteger(score.left) || !Number.isInteger(score.right)
-    || score.left < 0 || score.left > 999 || score.right < 0 || score.right > 999) {
+    || Object.values(score).some(value => value !== undefined && (!Number.isInteger(value) || value < 0 || value > 999))) {
     throw new Error('INVALID_SCOREBOARD');
   }
   const pixels = Buffer.alloc(width * height * 4);
@@ -50,14 +50,11 @@ export function createScoreboardPng(width: number, height: number, score: Scoreb
       }
     }
   };
-  fill(0, 0, width, height, [10, 17, 29, 210]);
-  const border = Math.max(1, Math.round(height * 0.02));
-  fill(0, 0, width, border, [210, 219, 229, 230]);
-  fill(0, height - border, width, border, [210, 219, 229, 230]);
-  fill(0, 0, border, height, [210, 219, 229, 230]);
-  fill(width - border, 0, border, height, [210, 219, 229, 230]);
-  fill(border, Math.floor(height / 2), width - 2 * border, Math.max(1, Math.round(height * 0.01)), [70, 83, 101, 225]);
-  const unit = Math.max(1, Math.floor(height / 18));
+  fill(0, 0, width, height, [41, 41, 41, 255]);
+  fill(Math.round(width * .76), 0, Math.round(width * .12), height, [58, 131, 247, 255]);
+  fill(Math.round(width * .88), 0, width, height, [51, 51, 51, 255]);
+  fill(0, Math.floor(height / 2), width, 1, [119, 119, 119, 255]);
+  const unit = Math.max(1, Math.floor(height / 22));
   const glyph = (letter: string, x: number, y: number) => {
     GLYPHS[letter]?.forEach((line, row) => {
       for (let column = 0; column < line.length; column += 1) {
@@ -65,14 +62,16 @@ export function createScoreboardPng(width: number, height: number, score: Scoreb
       }
     });
   };
-  for (const [row, label, value] of [[0, 'A', score.left], [1, 'B', score.right]] as const) {
+  for (const [row, label, games, value] of [[0, 'A', score.left_games ?? 0, score.left], [1, 'B', score.right_games ?? 0, score.right]] as const) {
     const rowHeight = height / 2;
     const y = Math.round(row * rowHeight + (rowHeight - 7 * unit) / 2);
-    glyph(label, Math.round(width * 0.09), y);
-    const digits = String(value);
-    const digitWidth = (digits.length * 6 - 1) * unit;
-    const startX = width - Math.round(width * 0.09) - digitWidth;
-    for (let index = 0; index < digits.length; index += 1) glyph(digits[index]!, startX + index * 6 * unit, y);
+    glyph(label, Math.round(width * 0.03), y);
+    for (const [center, number] of [[.82, games], [.94, value]]) {
+      const digits = String(number);
+      const digitWidth = (digits.length * 6 - 1) * unit;
+      const startX = Math.round(width * center! - digitWidth / 2);
+      for (let index = 0; index < digits.length; index += 1) glyph(digits[index]!, startX + index * 6 * unit, y);
+    }
   }
   const raw = Buffer.alloc((width * 4 + 1) * height);
   for (let row = 0; row < height; row += 1) pixels.copy(raw, row * (width * 4 + 1) + 1, row * width * 4, (row + 1) * width * 4);

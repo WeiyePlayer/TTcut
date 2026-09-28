@@ -51,7 +51,9 @@ export function useCustomPlayback({ videoRef, preview, clips, mode, duration, on
     const intent = state.preview.getPlaybackIntent();
     // Frame callbacks enforce boundaries without re-rendering the entire editor
     // at the source frame rate. Media timeupdate and jumps publish the playhead.
-    if (publishTime) state.onTime(intent.time);
+    // A preview seek may return a nearby keyframe. While dragging, only the
+    // pointer owns the playhead; decoding must not pull it away from the mouse.
+    if (publishTime && !scrubbing.current) state.onTime(intent.time);
     // Both queued transport and native seeks own their target until ready.
     // Read currentTime here rather than using an older frame callback's timestamp.
     if (scrubbing.current || intent.pending || player?.seeking || intent.seeking) return;
