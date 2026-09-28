@@ -116,6 +116,21 @@ describe('multi-task clipping', () => {
       analysisId: `${index}${'1'.repeat(7)}-1111-4111-8111-111111111111`, calibration, data: analysis(path) }));
   }
 
+  it('keeps good inputs and displays a removable failed probe row', async () => {
+    vi.mocked(window.ttcut.probeVideo).mockImplementation(async (path: string) => {
+      if (path === videos[1]!.path) throw new Error('VIDEO_UNREADABLE');
+      return metadata(path);
+    });
+    render(<MultiTaskPage initialVideos={videos} preRoll={2.5} postRoll={1} onOpenAnalysis={vi.fn()} />);
+    await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledOnce());
+    expect(document.querySelectorAll('.batch-row')).toHaveLength(2);
+    expect(screen.getByText('VIDEO_UNREADABLE')).toBeVisible();
+    expect(startAutoCalibration).toHaveBeenCalledWith(expect.objectContaining({ videoPath: videos[0]!.path }));
+    const failedRow = screen.getByText('VIDEO_UNREADABLE').closest('article')!;
+    fireEvent.click(failedRow.querySelector('button.batch-remove')!);
+    expect(document.querySelectorAll('.batch-row')).toHaveLength(1);
+  });
+
   it('merges in addition order and completes only after the merged result arrives without shutdown', async () => {
     const finished = await prepareMergedBatch();
     fireEvent.click(screen.getByRole('button', { name: '开始分析剪辑' }));

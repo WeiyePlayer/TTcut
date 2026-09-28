@@ -267,19 +267,41 @@ td input { accent-color: var(--blue); }
 .custom-preview-status button { padding: 7px 18px; color: #111; background: #fff; border: 0; border-radius: 7px; }
 .custom-monitor {
   position: relative; width: min(100%, 177.777cqh); height: auto; aspect-ratio: 16 / 9; align-self: center; justify-self: center; min-width: 0; min-height: 0;
-  overflow: hidden; background-color: #000; border: 1px solid #242424; border-radius: 8px;
+  overflow: hidden; background-color: #000; border: 1px solid #242424; border-radius: 8px; container-type: size;
 }
 .custom-monitor video {
   position: absolute; inset: 0; display: block; width: 100%; height: 100%;
   object-fit: contain; object-position: center center; background-color: #000;
 }
+.custom-scoreboard-plane { position: absolute; z-index: 2; left: 50%; top: 50%; width: min(100cqw, calc(100cqh * var(--source-aspect))); max-height: 100%; aspect-ratio: var(--source-aspect); transform: translate(-50%, -50%); pointer-events: none; container-type: inline-size; }
+.custom-scoreboard { position: absolute; box-sizing: border-box; display: grid; grid-template-rows: 1fr 1fr; width: 28%; height: auto; aspect-ratio: 5.2; transform-origin: top left; background: #292929; color: white; font: 700 1.72cqw/1.1 "Noto Sans SC Variable", "Microsoft YaHei", sans-serif; font-variant-numeric: tabular-nums; cursor: grab; touch-action: none; user-select: none; pointer-events: auto; }
+.custom-scoreboard:active { cursor: grabbing; }
+.custom-scoreboard-row { display: grid; position: relative; grid-template-columns: 76% 12% 12%; min-height: 0; }
+.custom-scoreboard-row + .custom-scoreboard-row { border-top: 1px solid #777; }
+.custom-scoreboard-name, .custom-scoreboard-games, .custom-scoreboard-points { display: flex; align-items: center; min-width: 0; overflow: hidden; white-space: nowrap; }
+.custom-scoreboard-name { padding: 0 4%; text-align: left; }
+.custom-scoreboard-games, .custom-scoreboard-points { justify-content: center; }
+.custom-scoreboard-games { background: #3a83f7; }
+.custom-scoreboard-points { background: #333; }
+.custom-scoreboard input { box-sizing: border-box; width: 100%; min-width: 0; padding: 0; border: 0; outline: 1px solid white; color: inherit; background: transparent; font: inherit; text-align: inherit; }
+.custom-scoreboard-games input, .custom-scoreboard-points input { text-align: center; }
+.custom-scoreboard-winner { position: absolute; left: 102%; top: 0; width: 12%; height: 100%; display: grid; place-items: center; padding: 0; border: 1px solid #777; border-radius: 3px; background: #292929; color: white; cursor: pointer; }
+.custom-scoreboard-winner[aria-pressed="true"] { color: #71a6ff; }
+.custom-scoreboard-winner:disabled { opacity: .5; cursor: default; }
+.custom-scoreboard-winner svg { width: 65%; height: 70%; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.custom-scoreboard-resize-handle { position: absolute; z-index: 1; width: 14px; height: 14px; border: 2px solid #fff; border-radius: 3px; background: var(--blue); box-shadow: 0 1px 5px rgba(0,0,0,.5); opacity: 0; transition: opacity 120ms ease; }
+.custom-scoreboard:hover .custom-scoreboard-resize-handle { opacity: 1; }
+.custom-scoreboard-resize-handle.is-top-left { top: -7px; left: -7px; cursor: nwse-resize; }
+.custom-scoreboard-resize-handle.is-top-right { top: -7px; right: -7px; cursor: nesw-resize; }
+.custom-scoreboard-resize-handle.is-bottom-left { bottom: -7px; left: -7px; cursor: nesw-resize; }
+.custom-scoreboard-resize-handle.is-bottom-right { bottom: -7px; right: -7px; cursor: nwse-resize; }
 .custom-timeline { position: relative; width: 100%; min-width: 0; user-select: none; }
 .timeline-viewport {
   position: relative; width: 100%; min-width: 0; max-width: 100%; height: 78px; overflow-x: auto; overflow-y: hidden;
   background: transparent; overscroll-behavior: none; scrollbar-width: none; -ms-overflow-style: none;
 }
 .timeline-viewport::-webkit-scrollbar { display: none; width: 0; height: 0; }
-.timeline-content { position: relative; min-width: 100%; height: 78px; }
+.timeline-content { position: relative; min-width: 100%; height: 78px; overflow: clip; }
 .timeline-ruler { position: absolute; z-index: 3; inset: 0 0 auto; height: 34px; cursor: crosshair; background: transparent; }
 .timeline-ruler canvas { position: absolute; left: 0; top: 0; pointer-events: none; }
 .timeline-track-window {
@@ -384,6 +406,7 @@ td input { accent-color: var(--blue); }
 .custom-rally-duration strong { line-height: 10px; }
 .custom-rally-duration i { display: block; width: 45.333%; height: 2px; min-height: 2px; border-radius: 0; background: var(--blue); }
 .custom-rally-list tbody tr { cursor: pointer; }
+.custom-rally-table tbody tr.is-loop-target .custom-rally-row-content::after,
 .custom-rally-table tbody tr.is-playback-cue .custom-rally-row-content::after {
   content: ""; position: absolute; z-index: 3; inset: 2px; border: 3px solid var(--blue);
   border-radius: 8px; pointer-events: none;
@@ -410,13 +433,16 @@ td input { accent-color: var(--blue); }
   0%, 99.9% { opacity: 1; }
   100% { opacity: 0; }
 }
+.custom-rally-table tbody tr.is-loop-target.is-playback-cue .custom-rally-row-content::after { animation: none; }
 .custom-timeline-actions { min-height: 48px; display: flex; align-items: end; justify-content: space-between; gap: 12px; }
 .timeline-tool-buttons { display: flex; align-items: center; gap: 8px; }
 .timeline-tool { display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 1px solid var(--line-strong); border-radius: 8px; background: white; color: var(--text); cursor: pointer; }
 .timeline-tool:hover { background: var(--secondary-hover); }
 .timeline-tool.is-active { border-color: var(--blue); background: var(--blue); color: white; box-shadow: 0 3px 10px rgba(58,131,247,.22); }
 .timeline-tool svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.timeline-tool.playback-mode-toggle { width: auto; padding: 0 12px; white-space: nowrap; font-size: 12px; }
+.timeline-tool .scoreboard-tool-icon { width: 25px; height: 25px; stroke-width: 1.7; }
+.timeline-tool.scoreboard-tool.is-active { background: #fff; color: var(--blue); border-color: var(--blue); box-shadow: none; }
+.timeline-tool.playback-mode-toggle svg { width: 24px; height: 24px; stroke-width: 1.8; }
 .custom-workspace-right .custom-export-launcher { align-self: end; justify-self: end; }
 
 .success-heading { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }

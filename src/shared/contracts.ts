@@ -849,6 +849,32 @@ export const customExportSegmentInputSchema = z.union([
   legacyCustomExportSegmentSchema,
 ]);
 
+export const scoreboardScoreSchema = z.object({
+  left: z.number().int().min(0).max(999),
+  right: z.number().int().min(0).max(999),
+  left_games: z.number().int().min(0).max(999).optional(),
+  right_games: z.number().int().min(0).max(999).optional(),
+}).strict();
+
+export const scoreboardPositionSchema = z.object({
+  x: finiteNumber.min(0).max(1),
+  y: finiteNumber.min(0).max(1),
+  scale: finiteNumber.min(0.5).max(3).optional(),
+  left_name: z.string().max(24).regex(/^[^\x00-\x1f\x7f]*$/u).optional(),
+  right_name: z.string().max(24).regex(/^[^\x00-\x1f\x7f]*$/u).optional(),
+}).strict();
+
+export const exportScoreboardSchema = scoreboardPositionSchema.extend({
+  scores: z.array(scoreboardScoreSchema.extend({
+    clip_id: z.string().min(1),
+    image_data: z.string().max(2_000_000).optional(),
+  }).strict()).min(1),
+}).strict();
+
+export type ScoreboardScore = z.infer<typeof scoreboardScoreSchema>;
+export type ScoreboardPosition = z.infer<typeof scoreboardPositionSchema>;
+export type ExportScoreboard = z.infer<typeof exportScoreboardSchema>;
+
 const allCutSelectionSchema = z.object({
     mode: z.literal('all'),
     pre_roll_seconds: z.union(PRE_ROLL_VALUES.map((value) => z.literal(value))),
@@ -905,6 +931,33 @@ export const historySourceSchema = z.object({
   modified_time_ms: finiteNumber.nonnegative(),
 }).strict();
 
+export const customRallyClipSchema = z.object({
+  clipId: z.string().min(1),
+  source: z.enum(['detected', 'manual']),
+  sourceRallyId: z.string().min(1).nullable(),
+  rallyIndex: z.number().int().positive(),
+  bounceCount: z.number().int().nonnegative().nullable(),
+  defaultStart: finiteNumber.nonnegative(),
+  defaultEnd: finiteNumber.positive(),
+  start: finiteNumber.nonnegative(),
+  end: finiteNumber.positive(),
+  selected: z.boolean(),
+  score: scoreboardScoreSchema.optional(),
+  winner: z.enum(['left', 'right']).optional(),
+}).strict();
+
+export const customEditorDraftSchema = z.object({
+  schema_version: z.literal(1),
+  clips: z.array(customRallyClipSchema),
+  playbackMode: z.enum(['source', 'rallies', 'loop']),
+  scoreboard: scoreboardPositionSchema.extend({ enabled: z.boolean() }).strict().optional(),
+  outputs: z.object({
+    combined_video: z.boolean(), rally_videos: z.boolean(), premiere_xml: z.boolean(),
+  }).strict(),
+}).strict();
+
+export type CustomEditorDraft = z.infer<typeof customEditorDraftSchema>;
+
 export const historyRecordSchema = z.object({
   schema_version: z.literal(1),
   id: z.string().uuid(),
@@ -915,6 +968,7 @@ export const historyRecordSchema = z.object({
   visible_in_history: z.boolean().default(true),
   completion_kind: z.enum(['analysis', 'export']).default('analysis'),
   output_path: z.string().min(1).nullable().default(null),
+  custom_editor_draft: customEditorDraftSchema.optional(),
 }).strict();
 
 export const historySummarySchema = z.object({
@@ -935,12 +989,16 @@ export const exportRequestSchema = z.object({
   selection: cutSelectionSchema,
   destination: z.enum(['prompt', 'source']),
   mode_label: z.string().min(1).optional(),
+  scoreboard: exportScoreboardSchema.optional(),
   outputs: z.object({
     combined_video: z.boolean(),
     rally_videos: z.boolean(),
     premiere_xml: z.boolean(),
   }).strict().optional(),
 }).strict().superRefine((request, context) => {
+  if (request.scoreboard && request.selection.mode !== 'custom') {
+    context.addIssue({ code: 'custom', message: 'Scoreboards require custom selection', path: ['scoreboard'] });
+  }
   const outputs = request.outputs;
   if (!outputs) return;
   if (!outputs.combined_video && !outputs.rally_videos && !outputs.premiere_xml) {

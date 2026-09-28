@@ -9,6 +9,7 @@ import {
   type Calibration,
   type CutSelectionV1,
   type ExportRequest,
+  type ScoreboardPosition,
   type ExportResult,
   type ExportWarning,
   type HistorySummaryV1,
@@ -20,7 +21,8 @@ import type { AppEvent, BootstrapData, SelectedVideo } from '../shared/api';
 import { DONATION_URL, GITHUB_URL, RELEASES_URL, WEBSITE_URL } from '../shared/urls';
 import { formatTimestamp } from '../domain/time';
 import { exportExclusions } from '../domain/segments';
-import { createCustomClipDraft, customExportSegments, setCustomClipSelected, type CustomRallyClip } from '../domain/custom-clips';
+import { scoreboardDisplayDimensions, scoreboardName } from '../domain/scoreboard';
+import { createCustomClipDraft, customExportSegments, resolvedSelectedClipScores, setCustomClipSelected, type CustomRallyClip } from '../domain/custom-clips';
 import type { CustomPlaybackMode } from '../domain/custom-playback';
 import { normalizeCalibrationPoints, validateCalibration } from '../domain/calibration';
 import { isSupportedVideoFileName } from '../domain/video-input';
@@ -30,6 +32,7 @@ import { MultiTaskPage } from './MultiTaskPage';
 import { CalibrationSurface } from './CalibrationSurface';
 import { SupportPrompt } from './SupportPrompt';
 import { CustomCutPage } from './CustomCutPage';
+import { renderScoreboardImage } from './scoreboard-canvas';
 import { GlassRadioGroup } from './GlassRadioGroup';
 import { UpdatePrompt } from './UpdatePrompt';
 import packageJson from '../../package.json';
@@ -39,6 +42,8 @@ import contactAuthorQr from './assets/contact-author-qr.png';
 
 type View = 'auto' | 'history' | 'settings' | 'multi';
 type Step = 'select' | 'calibrate' | 'analyzing' | 'empty' | 'mode' | 'custom' | 'cutting' | 'complete' | 'error';
+type ScoreboardSetting = ScoreboardPosition & { enabled: boolean };
+const DEFAULT_SCOREBOARD: ScoreboardSetting = { enabled: false, x: 0.78, y: 0.04, scale: 1, left_name: 'A', right_name: 'B' };
 type VideoTaskOwner = 'single' | 'multi' | null;
 type PointName = keyof Calibration['points'];
 
@@ -111,7 +116,11 @@ export function App() {
   const [bounceThreshold, setBounceThreshold] = useState<3 | 5 | 7>(5);
   const [durationTier, setDurationTier] = useState<DurationHighlightTier>('rally');
   const [customDraft, setCustomDraft] = useState<CustomRallyClip[] | null>(null);
+  const [customScoreboard, setCustomScoreboard] = useState<ScoreboardSetting>(DEFAULT_SCOREBOARD);
   const [customPlaybackMode, setCustomPlaybackMode] = useState<CustomPlaybackMode>('source');
+  const [customSaveError, setCustomSaveError] = useState(false);
+  const [customResetVersion, setCustomResetVersion] = useState(0);
+  const customSaveRef = useRef<Promise<void>>(Promise.resolve());
   const [customOutputs, setCustomOutputs] = useState<NonNullable<ExportRequest['outputs']>>({
     combined_video: true,
     rally_videos: false,
@@ -178,6 +187,10 @@ export function App() {
         if (videoTaskOwnerRef.current === 'single') updateVideoTaskOwner(null);
         setAnalysisId(event.analysisId);
         setAnalysis(event.data);
+        setCustomDraft(null);
+        setCustomScoreboard(DEFAULT_SCOREBOARD);
+        setCustomPlaybackMode('source');
+        setCustomOutputs({ combined_video: true, rally_videos: false, premiere_xml: false });
         setAnalysisWarning(event.data.processing?.mode === 'vfr_fallback' && event.data.processing.warning_code
           ? { code: event.data.processing.warning_code, message: event.data.processing.warning_code }
           : null);
@@ -243,6 +256,15 @@ export function App() {
 
   useEffect(() => { settingsRef.current = settings; }, [settings]);
   useEffect(() => {
+    setCustomSaveError(false);
+    if (!analysisId || customDraft === null) return;
+    let current = true;
+    customSaveRef.current = window.ttcut.saveCustomEditorDraft(analysisId, {
+      schema_version: 1, clips: customDraft, playbackMode: customPlaybackMode, scoreboard: customScoreboard, outputs: customOutputs,
+    }).catch(() => { if (current) setCustomSaveError(true); });
+    return () => { current = false; };
+  }, [analysisId, customDraft, customPlaybackMode, customScoreboard, customOutputs]);
+  useEffect(() => {
     if (!toast) return;
     const timeout = window.setTimeout(() => setToast(null), 3_000);
     return () => window.clearTimeout(timeout);
@@ -275,7 +297,7 @@ export function App() {
     setStep('select'); setVideo(null); setMetadata(null); setPoints({}); setAnalysis(null); setAnalysisId(null); setForceManual(false);
     setAnalysisWarning(null);
     setCustomPlaybackMode('source');
-    setMode('all'); setBounceThreshold(5); setDurationTier('rally'); setCustomDraft(null); setCustomOutputs({ combined_video: true, rally_videos: false, premiere_xml: false }); setProgress({ percent: 0, stage: 'probe' });
+    setMode('all'); setBounceThreshold(5); setDurationTier('rally'); setCustomDraft(null); setCustomScoreboard(DEFAULT_SCOREBOARD); setCustomOutputs({ combined_video: true, rally_videos: false, premiere_xml: false }); setProgress({ percent: 0, stage: 'probe' });
     setActiveTask(null); setExportResult(null); setError(null);
     if (videoTaskOwnerRef.current === 'single') updateVideoTaskOwner(null);
   }, [updateVideoTaskOwner]);
@@ -338,7 +360,12 @@ export function App() {
   const openCustomEditor = () => {
     if (!analysis) return;
     setMode('custom');
-    setCustomPlaybackMode('source');
+    if (customDraft === null) resetCustomEditor();
+    setStep('custom');
+  };
+
+  const resetCustomEditor = () => {
+    if (!analysis) return;
     setCustomDraft(createCustomClipDraft(
       analysis.rallies,
       settings.pre_roll_seconds,
@@ -348,8 +375,10 @@ export function App() {
       rallyRecognitionMethod(analysis),
       exportExclusions(analysis),
     ));
+    setCustomPlaybackMode('source');
+    setCustomScoreboard(DEFAULT_SCOREBOARD);
     setCustomOutputs({ combined_video: true, rally_videos: false, premiere_xml: false });
-    setStep('custom');
+    setCustomResetVersion((value) => value + 1);
   };
 
   const startAnalysis = async () => {
@@ -395,10 +424,40 @@ export function App() {
     updateVideoTaskOwner('single');
     setStep('cutting'); setProgress({ percent: 0, stage: 'preparing' });
     try {
+      if (selection.mode === 'custom' && customDraft) {
+        await window.ttcut.saveCustomEditorDraft(analysisId, {
+          schema_version: 1, clips: customDraft, playbackMode: customPlaybackMode, scoreboard: customScoreboard, outputs: outputs ?? customOutputs,
+        });
+      }
+      let scoreboardRequest: ExportRequest['scoreboard'];
+      if (selection.mode === 'custom' && customScoreboard.enabled && customDraft) {
+        if (document.fonts) {
+          const names = `${scoreboardName(customScoreboard.left_name, 'A')}${scoreboardName(customScoreboard.right_name, 'B')}0123456789`;
+          await document.fonts.load('800 24px "Noto Sans SC Variable"', names);
+        }
+        const display = scoreboardDisplayDimensions(analysis.video);
+        const scores = resolvedSelectedClipScores(customDraft);
+        scoreboardRequest = {
+          x: customScoreboard.x,
+          y: customScoreboard.y,
+          scale: customScoreboard.scale,
+          left_name: customScoreboard.left_name,
+          right_name: customScoreboard.right_name,
+          scores: customDraft.filter((clip) => clip.selected).map((clip) => {
+            const score = scores.get(clip.clipId)!;
+            return {
+              clip_id: clip.clipId,
+              ...score,
+              image_data: renderScoreboardImage(display.width, display.height, customScoreboard, score),
+            };
+          }),
+        };
+      }
       setActiveTask(await window.ttcut.startExport({
         analysis_id: analysisId,
         selection,
         destination: 'source',
+        ...(scoreboardRequest ? { scoreboard: scoreboardRequest } : {}),
         ...(outputs ? { outputs } : {}),
       }));
     } catch (caught) {
@@ -448,6 +507,7 @@ export function App() {
   const openHistory = async (id: string) => {
     if (videoTaskOwnerRef.current) return;
     try {
+      await customSaveRef.current;
       const opened = await window.ttcut.openHistory(id);
       setVideo(opened.video);
       setMetadata(opened.analysis.video);
@@ -460,9 +520,10 @@ export function App() {
       setMode('all');
       setBounceThreshold(5);
       setDurationTier('rally');
-      setCustomDraft(null);
-      setCustomPlaybackMode('source');
-      setCustomOutputs({ combined_video: true, rally_videos: false, premiere_xml: false });
+      setCustomDraft(opened.customEditorDraft?.clips ?? null);
+      setCustomScoreboard(opened.customEditorDraft?.scoreboard ?? DEFAULT_SCOREBOARD);
+      setCustomPlaybackMode(opened.customEditorDraft?.playbackMode ?? 'source');
+      setCustomOutputs(opened.customEditorDraft?.outputs ?? { combined_video: true, rally_videos: false, premiere_xml: false });
       setExportResult(null);
       setError(null);
       setStep('mode');
@@ -549,9 +610,6 @@ export function App() {
   };
   const returnToSelection = () => {
     if (view === 'auto' && step === 'custom') {
-      setCustomDraft(null);
-      setCustomPlaybackMode('source');
-      setCustomOutputs({ combined_video: true, rally_videos: false, premiere_xml: false });
       setMode('all');
       setStep('mode');
       return;
@@ -837,9 +895,12 @@ export function App() {
 
             {step === 'custom' && analysis && video && customDraft && (
               <CustomCutPage
+                key={customResetVersion}
                 video={video}
                 analysis={analysis}
                 clips={customDraft}
+                scoreboard={customScoreboard}
+                onScoreboardChange={setCustomScoreboard}
                 playbackMode={customPlaybackMode}
                 onPlaybackModeChange={setCustomPlaybackMode}
                 translations={t}
@@ -847,6 +908,9 @@ export function App() {
                 outputs={customOutputs}
                 onOutputsChange={setCustomOutputs}
                 onClipsChange={setCustomDraft}
+                onReset={resetCustomEditor}
+                saveError={customSaveError}
+                onRetrySave={() => setCustomDraft((current) => current ? [...current] : null)}
                 onToggleAll={(selected) => {
                   if (!selected) {
                     setCustomDraft((current) => current?.map((clip) => ({ ...clip, selected: false })) ?? null);

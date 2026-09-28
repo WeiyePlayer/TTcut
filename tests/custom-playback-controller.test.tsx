@@ -65,21 +65,24 @@ describe('custom playback transport', () => {
     act(() => h.result.current.togglePlayback());
     expect(h.seekTo).toHaveBeenLastCalledWith(1, true);
   });
-  it('switches live in both directions and leaves paused positions unchanged', () => {
+  it('cycles through three modes and leaves paused positions unchanged', () => {
     const h = setup('source');
     h.player.currentTime = 3; h.player.paused = false;
     act(() => h.result.current.switchMode());
     expect(h.player.currentTime).toBe(4);
     act(() => h.result.current.switchMode());
+    expect(h.result.current.loopClipId).toBe('b');
     h.seekTo.mockClear();
     h.tick(5.5);
-    expect(h.seekTo).not.toHaveBeenCalled();
+    expect(h.seekTo).toHaveBeenLastCalledWith(4, true);
     h.player.paused = true;
+    h.seekTo.mockClear();
     act(() => h.result.current.switchMode());
-    expect(h.player.currentTime).toBe(5.5);
+    expect(h.result.current.loopClipId).toBeNull();
+    expect(h.player.currentTime).toBe(4);
     expect(h.seekTo).not.toHaveBeenCalled();
     act(() => h.result.current.togglePlayback());
-    expect(h.player.currentTime).toBe(9);
+    expect(h.player.currentTime).toBe(4);
   });
   it('pauses in place when enabled beyond the last clip', () => {
     const h = setup('source');
@@ -102,6 +105,17 @@ describe('custom playback transport', () => {
     act(() => h.result.current.cancelScrub());
     expect(h.seekTo).toHaveBeenLastCalledWith(4, true);
   });
+  it.each([[.12, 0], [11.9, 10]])('keeps the pointer time %s while preview decoding returns keyframe %s', (target, keyframe) => {
+    const h = setup('source');
+    act(() => h.result.current.seek(target, 'preview'));
+    h.onTime.mockClear();
+    h.tick(keyframe); h.tick(keyframe);
+    expect(h.onTime).not.toHaveBeenCalled();
+    act(() => h.result.current.seek(target, 'commit'));
+    expect(h.onTime).toHaveBeenLastCalledWith(target);
+    h.tick(target);
+    expect(h.onTime).toHaveBeenLastCalledWith(target);
+  });
   it('plays an unselected clip temporarily, including pause/resume, then returns to selected clips', () => {
     const h = setup();
     act(() => h.result.current.playClip(clips[2]!));
@@ -121,8 +135,10 @@ describe('custom playback transport', () => {
     expect(h.player.currentTime).toBe(9);
     act(() => h.result.current.playClip(clips[2]!));
     act(() => h.result.current.switchMode());
+    expect(h.result.current.loopClipId).toBe('hidden');
     act(() => h.result.current.switchMode());
-    expect(h.player.currentTime).toBe(9);
+    expect(h.result.current.loopClipId).toBeNull();
+    expect(h.player.currentTime).toBe(7);
   });
   it('uses changed boundaries, deletion and empty-track fallback during playback', () => {
     const h = setup();
@@ -166,5 +182,91 @@ describe('custom playback transport', () => {
     expect(h.getIntent()).toMatchObject({ time: 7, playing: false });
     act(() => h.ready());
     expect(h.player).toMatchObject({ currentTime: 7, paused: true });
+  });
+  it('loops only the active clip, including an unselected clip, and follows edited boundaries', () => {
+    const h = setup('loop');
+    expect(h.result.current.loopClipId).toBe('a');
+    act(() => h.result.current.togglePlayback());
+    h.tick(2);
+    expect(h.seekTo).toHaveBeenLastCalledWith(1, true);
+    act(() => h.result.current.playClip(clips[2]!));
+    expect(h.result.current.loopClipId).toBe('hidden');
+    h.tick(8);
+    expect(h.seekTo).toHaveBeenLastCalledWith(7, true);
+    h.rerender({ draft: clips.map((clip) => clip.clipId === 'hidden' ? { ...clip, end: 7.5 } : clip) });
+    h.tick(7.6);
+    expect(h.seekTo).toHaveBeenLastCalledWith(7, true);
+    h.rerender({ draft: clips.filter((clip) => clip.clipId !== 'hidden') });
+    expect(h.result.current.loopClipId).toBe('c');
+    expect(h.seekTo).toHaveBeenLastCalledWith(9, true);
+  });
+  it('keeps a paused gap in place and changes loop target on committed seeks', () => {
+    const h = setup('source'); h.player.currentTime = 3;
+    act(() => h.result.current.switchMode());
+    act(() => h.result.current.switchMode());
+    expect(h.result.current.loopClipId).toBe('b');
+    expect(h.player.currentTime).toBe(3);
+    act(() => h.result.current.togglePlayback());
+    expect(h.seekTo).toHaveBeenLastCalledWith(4, true);
+    act(() => h.result.current.seek(7.5, 'commit'));
+    expect(h.result.current.loopClipId).toBe('hidden');
+    h.tick(8);
+    expect(h.seekTo).toHaveBeenLastCalledWith(7, true);
+    act(() => h.result.current.seek(8.5, 'commit'));
+    expect(h.result.current.loopClipId).toBe('c');
+    expect(h.seekTo).toHaveBeenLastCalledWith(9, true);
+  });
+  it('keeps a deselected target and falls back to source only without a target', () => {
+    const h = setup('loop');
+    h.rerender({ draft: clips.map((clip) => ({ ...clip, selected: false })) });
+    expect(h.result.current.loopClipId).toBe('a');
+    act(() => h.result.current.playClip(clips[2]!));
+    h.tick(8);
+    expect(h.seekTo).toHaveBeenLastCalledWith(7, true);
+    h.rerender({ draft: clips.filter((clip) => clip.clipId !== 'hidden').map((clip) => ({ ...clip, selected: false })) });
+    expect(h.result.current.loopClipId).toBeNull();
+    h.seekTo.mockClear(); h.tick(8.5);
+    expect(h.seekTo).not.toHaveBeenCalled();
+  });
+  it('enters an empty track in source fallback until a list clip is clicked', () => {
+    const h = setup('source');
+    h.rerender({ draft: clips.map((clip) => ({ ...clip, selected: false })) });
+    act(() => h.result.current.switchMode());
+    act(() => h.result.current.switchMode());
+    expect(h.result.current.loopClipId).toBeNull();
+    act(() => h.result.current.togglePlayback());
+    expect(h.player.currentTime).toBe(0);
+    h.seekTo.mockClear(); h.tick(7.5);
+    expect(h.seekTo).not.toHaveBeenCalled();
+    act(() => h.result.current.playClip(clips[2]!));
+    expect(h.result.current.loopClipId).toBe('hidden');
+    h.tick(8);
+    expect(h.seekTo).toHaveBeenLastCalledWith(7, true);
+  });
+  it('reselects after deletion without moving a paused playhead', () => {
+    const h = setup('loop'); h.player.currentTime = 1.5;
+    h.rerender({ draft: clips.filter((clip) => clip.clipId !== 'a') });
+    expect(h.result.current.loopClipId).toBe('b');
+    expect(h.player.currentTime).toBe(1.5);
+    act(() => h.result.current.togglePlayback());
+    expect(h.seekTo).toHaveBeenLastCalledWith(4, true);
+  });
+  it('keeps the latest loop target and pause intent through media loading', () => {
+    const h = setup('loop'); h.loading(true);
+    act(() => h.result.current.playClip(clips[0]!));
+    act(() => h.result.current.playClip(clips[2]!));
+    act(() => h.result.current.togglePlayback());
+    expect(h.result.current.loopClipId).toBe('hidden');
+    expect(h.getIntent()).toMatchObject({ time: 7, playing: false, pending: true });
+    act(() => h.ready());
+    expect(h.player).toMatchObject({ currentTime: 7, paused: true });
+  });
+  it('restarts an active loop after the media itself ends', () => {
+    const last = { ...clips[3]!, start: 11, end: 12 };
+    const h = setup('loop'); h.rerender({ draft: [...clips.slice(0, 3), last] });
+    act(() => h.result.current.playClip(last));
+    h.player.currentTime = 12; h.player.paused = true; h.player.ended = true;
+    act(() => h.result.current.ended());
+    expect(h.seekTo).toHaveBeenLastCalledWith(11, true);
   });
 });

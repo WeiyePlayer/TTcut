@@ -4,6 +4,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildHistoryCoverArgs, HistoryStore } from '../src/main/history';
 import type { AnalysisResultV1, Calibration } from '../src/shared/contracts';
+import { createCustomClipDraft } from '../src/domain/custom-clips';
 
 const temporaryDirectories: string[] = [];
 
@@ -63,6 +64,59 @@ async function storeFixture() {
 }
 
 describe('analysis history', () => {
+  it('preserves every index entry when deferred records are promoted concurrently', async () => {
+    const { store, root } = await storeFixture();
+    const records = [];
+    for (let index = 0; index < 8; index++) {
+      const source = path.join(root, `${index}.mp4`);
+      await writeFile(source, 'source');
+      records.push(await store.upsert(analysis(source), calibration, false));
+    }
+    await Promise.all(records.map((record) => store.markVisible(record.id, 'analysis')));
+    expect((await store.list()).map(({ record }) => record.id).sort()).toEqual(records.map((record) => record.id).sort());
+  });
+
+  it('keeps the successful history independent until a pending run completes', async () => {
+    const { store, source } = await storeFixture();
+    const previous = await store.upsert(analysis(source), calibration);
+    const pending = await store.upsert(analysis(source, 2), calibration, false);
+    expect(pending.id).not.toBe(previous.id);
+    expect((await store.list()).map(({ record }) => record.id)).toEqual([previous.id]);
+    expect((await store.open(previous.id)).analysis.rallies).toHaveLength(1);
+    await store.delete(pending.id);
+    expect((await store.list()).map(({ record }) => record.id)).toEqual([previous.id]);
+    const retry = await store.upsert(analysis(source, 2), calibration, false);
+    await store.markVisible(retry.id, 'export', `${source}.output.mp4`);
+    const entries = await store.list();
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.record.id).toBe(retry.id);
+    expect(entries[0]?.record.analysis.rallies).toHaveLength(2);
+  });
+
+  it('persists editor changes across store instances and concurrent export completion', async () => {
+    const { store, root, source } = await storeFixture();
+    const record = await store.upsert(analysis(source), calibration);
+    const clips = createCustomClipDraft(record.analysis.rallies, 1.5, 0.5, 30, 60);
+    clips[0]!.end -= 0.5;
+    clips[0]!.score = { left: 11, right: 9, left_games: 2, right_games: 1 };
+    clips[0]!.winner = 'right';
+    const draft = { schema_version: 1 as const, clips, playbackMode: 'rallies' as const,
+      scoreboard: { enabled: true, x: 0.6, y: 0.08, scale: 1.4, left_name: '林昀儒', right_name: '张本智和' },
+      outputs: { combined_video: false, rally_videos: true, premiere_xml: false } };
+    await Promise.all([store.saveCustomEditorDraft(record.id, draft), store.markVisible(record.id, 'export', 'output.mp4')]);
+    const reopened = await new HistoryStore(path.join(root, 'history')).open(record.id);
+    expect(reopened.custom_editor_draft).toEqual(draft);
+    await store.saveCustomEditorDraft(record.id, { ...draft, playbackMode: 'loop' });
+    expect((await store.open(record.id)).custom_editor_draft?.playbackMode).toBe('loop');
+    expect(reopened.output_path).toBe('output.mp4');
+    await expect(store.saveCustomEditorDraft(record.id, { ...draft, clips: [{ ...clips[0], end: 100 }] })).rejects.toThrow();
+    expect((await store.open(record.id)).custom_editor_draft).toEqual({ ...draft, playbackMode: 'loop' });
+    await store.saveCustomEditorDraft(record.id, { ...draft, clips: [] });
+    expect((await store.open(record.id)).custom_editor_draft?.clips).toEqual([]);
+    await store.flush();
+    expect(store.hasPendingWrites()).toBe(false);
+  });
+
   it('extracts the first decoded frame without seeking or representative-frame filtering', () => {
     const args = buildHistoryCoverArgs('D:/比赛/输入.mp4', 'D:/缓存/封面.jpg');
     expect(args[args.indexOf('-frames:v') + 1]).toBe('1');

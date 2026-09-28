@@ -1,5 +1,8 @@
-import type { CutGroup, VideoMetadata } from '../shared/contracts';
+import type { CutGroup, ScoreboardPosition, VideoMetadata } from '../shared/contracts';
 import type { MediaEncoder } from './components';
+import { scoreboardDimensions, scoreboardDisplayDimensions } from './scoreboard-image';
+
+export type ScoreboardAsset = ScoreboardPosition & { imagePath: string };
 
 const TIME_EPSILON = 0.000_001;
 
@@ -269,17 +272,19 @@ export function buildTrimFilter(
   groups: readonly CutGroup[],
   hasAudio: boolean,
   metadata: Pick<VideoMetadata,
-    'sample_aspect_ratio' | 'color_range' | 'color_primaries' | 'color_transfer' | 'color_space'>,
+    'width' | 'height' | 'rotation' | 'sample_aspect_ratio' | 'color_range' | 'color_primaries' | 'color_transfer' | 'color_space'>,
+  scoreboard?: ScoreboardAsset,
 ): { filter: string; maps: string[] } {
   const parts: string[] = [];
   const sar = normalizedSar(metadata.sample_aspect_ratio);
   const colorSetParams = buildColorSetParams(metadata);
   const outputFrameFilters = `setsar=sar=${sar}${colorSetParams ? `,${colorSetParams}` : ''}`;
+  if (scoreboard && groups.length !== 1) throw new Error('INVALID_SCOREBOARD');
   if (groups.length === 1) {
     const group = groups[0]!;
     parts.push(
       `[0:v:0]trim=start=${group.start.toFixed(6)}:end=${group.end.toFixed(6)},`
-      + `setpts=PTS-STARTPTS:strip_fps=1,${outputFrameFilters}[vout]`,
+      + `setpts=PTS-STARTPTS:strip_fps=1,${outputFrameFilters}[${scoreboard ? 'vbase' : 'vout'}]`,
     );
     if (hasAudio) {
       parts.push(
@@ -316,10 +321,25 @@ export function buildTrimFilter(
     }
     parts.push(`[vcat]${outputFrameFilters}[vout]`);
   }
+  if (scoreboard) {
+    const display = scoreboardDisplayDimensions(metadata);
+    parts.push(`[vbase][1:v]${buildScoreboardFilter(display.width, display.height, scoreboard)}[vout]`);
+  }
   return {
     filter: parts.join(';'),
     maps: ['-map', '[vout]', ...(hasAudio ? ['-map', '[aout]'] : [])],
   };
+}
+
+export function buildScoreboardFilter(
+  width: number,
+  height: number,
+  scoreboard: ScoreboardAsset,
+): string {
+  const { width: boardWidth, height: boardHeight } = scoreboardDimensions(width, height, scoreboard.scale ?? 1);
+  const x = Math.round(Math.max(0, Math.min(1 - boardWidth / width, scoreboard.x)) * width);
+  const y = Math.round(Math.max(0, Math.min(1 - boardHeight / height, scoreboard.y)) * height);
+  return `overlay=x=${x}:y=${y}:shortest=1:format=auto`;
 }
 
 export function buildReencodeArgs(
@@ -400,6 +420,7 @@ export function buildSegmentReencodeArgs(
   seekStart: number,
   metadata: VideoMetadata,
   encoder: MediaEncoder = 'libx264',
+  scoreboard?: ScoreboardAsset,
 ): string[] {
   const safeSeekStart = Math.max(0, Math.min(seekStart, group.start));
   const relativeStart = group.start - safeSeekStart;
@@ -410,12 +431,13 @@ export function buildSegmentReencodeArgs(
     end: relativeEnd,
   };
   const hasAudio = metadata.audio_codec !== null;
-  const filter = buildTrimFilter([relativeGroup], hasAudio, metadata);
+  const filter = buildTrimFilter([relativeGroup], hasAudio, metadata, scoreboard);
   const args = [
     '-hide_banner', '-y', '-autorotate',
     '-ss', safeSeekStart.toFixed(6),
     '-t', relativeEnd.toFixed(6),
     '-i', input,
+    ...(scoreboard ? ['-loop', '1', '-i', scoreboard.imagePath] : []),
     '-filter_complex', filter.filter, ...filter.maps,
   ];
   appendMediaOutputOptions(args, metadata, encoder, hasAudio);

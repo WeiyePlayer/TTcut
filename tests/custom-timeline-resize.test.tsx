@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CustomTimeline } from '../src/renderer/CustomTimeline';
 import type { CustomRallyClip } from '../src/domain/custom-clips';
@@ -32,6 +33,28 @@ function setup(gap = 0, currentTime = 0) {
 }
 
 describe('adjacent timeline handles', () => {
+  it.each([10, 990])('does not auto-scroll under the pointer while scrubbing at viewport x=%s', (clientX) => {
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => { callback(0); return 1; });
+    function Harness() {
+      const [time, setTime] = useState(5);
+      return <CustomTimeline clips={[]} duration={10} fps={30} currentTime={time} currentEditingClipId={null}
+        timelineLabel="Timeline" resizeStartLabel="Start" resizeEndLabel="End" toolMode={null}
+        onSeek={setTime} onScrubCancel={vi.fn()} onPlayClip={vi.fn()} onResize={(_id, _edge, value) => value} onAddAt={() => false} onDeleteClip={vi.fn()} />;
+    }
+    const view = render(<Harness />);
+    const viewport = view.container.querySelector<HTMLElement>('.timeline-viewport')!;
+    const ruler = view.container.querySelector<HTMLElement>('.timeline-ruler')!;
+    ruler.setPointerCapture = vi.fn();
+    for (let i = 0; i < 8; i++) fireEvent.wheel(ruler, { clientX: 500, deltaY: -100, ctrlKey: true });
+    viewport.scrollLeft = 500;
+    fireEvent.scroll(viewport);
+    const handle = screen.getByRole('slider', { name: 'Timeline' });
+    handle.setPointerCapture = vi.fn();
+    fireEvent.pointerDown(handle, { clientX });
+    fireEvent.pointerMove(handle, { clientX: clientX + 1 });
+    expect(viewport.scrollLeft).toBe(500);
+    fireEvent.pointerUp(handle, { clientX: clientX + 1 });
+  });
   it.each(['End 1', 'Start 2'])('resolves both directions regardless of hit target %s', (name) => {
     const { handle, onResize, onPlayClip } = setup();
     const target = handle(name);
