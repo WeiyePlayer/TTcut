@@ -27,5 +27,5 @@ For Windows x64 and macOS 15+ on Apple Silicon, adding persistent editing drafts
 ## Verification scope
 
 - Windows preparation records report successful type checking, 510 project tests with 25 skipped, and 259 Python tests with three skipped; five original-preview and eight scoreboard checks passed, along with automated package-signature and update-manifest verification.
-- Existing macOS port acceptance covers actual scoreboard output, decoded loop playback, draft restoration after restart, and batch tasks. Final release archives are checked separately.
+- macOS release checks passed type checking and 85 relevant regression tests, plus 11 packaged editing/export checks covering score input, decoded loop playback, draft restoration after restart, and actual scoreboard output. DMG mounting, dependencies for 29 arm64 native files, signature integrity, and archive SHA-256 verification passed.
 - No manual Windows installer run or real-match analysis-accuracy comparison was performed. Signature-integrity checks are not Apple notarization.
