@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveCustomPlayback } from '../src/domain/custom-playback';
+import { chooseLoopTarget, loopPlaybackDecision, resolveCustomPlayback } from '../src/domain/custom-playback';
 import type { CustomRallyClip } from '../src/domain/custom-clips';
 
 const clip = (clipId: string, start: number, end: number, selected = true): CustomRallyClip => ({
@@ -47,5 +47,20 @@ describe('custom playback decisions', () => {
   it('uses edits and removal immediately instead of a captured queue', () => {
     expect(resolveCustomPlayback([clip('a', 1, 1.5), clip('b', 4, 6)], 'rallies', 1.6, 'reconcile')).toMatchObject({ action: 'seek', time: 4 });
     expect(resolveCustomPlayback(clips.filter((item) => item.clipId !== 'hidden'), 'rallies', 7.5, 'advance', 'hidden')).toMatchObject({ action: 'seek', time: 9, temporaryClipId: null });
+  });
+  it('chooses the clip under the playhead, then the next selected clip with wraparound', () => {
+    expect(chooseLoopTarget(clips, 7.5)).toBe('hidden');
+    expect(chooseLoopTarget(clips, 2.5)).toBe('b');
+    expect(chooseLoopTarget(clips, 11)).toBe('a');
+    expect(chooseLoopTarget(clips.map((item) => ({ ...item, selected: false })), 7.5)).toBeNull();
+    expect(chooseLoopTarget([clip('selected', 5, 9), clip('hidden', 4, 7, false)], 6)).toBe('selected');
+  });
+  it('loops the chosen edited interval without advancing to another rally', () => {
+    expect(loopPlaybackDecision(clips, 1.5, 'a')).toEqual({ action: 'continue', time: 1.5 });
+    expect(loopPlaybackDecision(clips, 2, 'a')).toEqual({ action: 'seek', time: 1 });
+    expect(loopPlaybackDecision(clips, 9.5, 'hidden')).toEqual({ action: 'seek', time: 7 });
+    expect(loopPlaybackDecision(clips.map((item) => item.clipId === 'a' ? { ...item, start: 1.2, end: 1.7 } : item), 1.8, 'a'))
+      .toEqual({ action: 'seek', time: 1.2 });
+    expect(loopPlaybackDecision(clips.filter((item) => item.clipId !== 'a'), 2, 'a').action).toBe('continue');
   });
 });

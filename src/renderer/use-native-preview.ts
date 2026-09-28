@@ -5,7 +5,7 @@ import type { PreviewController } from './preview-controller';
 export function useNativePreview(source: string, enabled: boolean) {
   const surfaceRef = useRef<HTMLDivElement>(null);
   const session = useRef<string | null>(null);
-  const onFrame = useRef<() => void>(() => undefined);
+  const onFrame = useRef<(event: Extract<NativePreviewEvent, { type: 'state' }>) => void>(() => undefined);
   const onInput = useRef<(event: NativePreviewEvent) => void>(() => undefined);
   const [status, setStatus] = useState<PreviewController['status']>('preparing');
   const [error, setError] = useState<string | null>(null);
@@ -78,7 +78,7 @@ export function useNativePreview(source: string, enabled: boolean) {
         setStatus('ready');
         actual.current = { time: event.time, playing: !event.paused && !event.ended, seeking: event.seeking, sequence: event.sequence };
         if (intent.current && event.sequence >= intent.current.sequence && !event.seeking) intent.current = null;
-        onFrame.current();
+        onFrame.current(event);
       } else onInput.current(event);
     });
     void window.ttcut.nativePreviewOpen!({ sessionId: id, mediaUrl: source, bounds: bounds() }).then(() => { opened = true; update(); }).catch(failure);

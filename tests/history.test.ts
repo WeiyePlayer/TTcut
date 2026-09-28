@@ -105,9 +105,11 @@ describe('analysis history', () => {
     await Promise.all([store.saveCustomEditorDraft(record.id, draft), store.markVisible(record.id, 'export', 'output.mp4')]);
     const reopened = await new HistoryStore(path.join(root, 'history')).open(record.id);
     expect(reopened.custom_editor_draft).toEqual(draft);
+    await store.saveCustomEditorDraft(record.id, { ...draft, playbackMode: 'loop' });
+    expect((await store.open(record.id)).custom_editor_draft?.playbackMode).toBe('loop');
     expect(reopened.output_path).toBe('output.mp4');
     await expect(store.saveCustomEditorDraft(record.id, { ...draft, clips: [{ ...clips[0], end: 100 }] })).rejects.toThrow();
-    expect((await store.open(record.id)).custom_editor_draft).toEqual(draft);
+    expect((await store.open(record.id)).custom_editor_draft).toEqual({ ...draft, playbackMode: 'loop' });
     await store.saveCustomEditorDraft(record.id, { ...draft, clips: [] });
     expect((await store.open(record.id)).custom_editor_draft?.clips).toEqual([]);
     await store.flush();

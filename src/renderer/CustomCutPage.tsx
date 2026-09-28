@@ -104,6 +104,12 @@ function ZoomIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="6" /><path d="m14.5 14.5 5.5 5.5M7 10h6M10 7v6" /></svg>;
 }
 
+function PlaybackModeIcon({ mode }: { mode: CustomPlaybackMode }) {
+  if (mode === 'source') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M2 5h18m-3-3 3 3-3 3M2 12h18m-3-3 3 3-3 3M2 19h18m-3-3 3 3-3 3" /></svg>;
+  if (mode === 'rallies') return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M2 5h7M6 2l3 3-3 3m3 4h7m-3-3 3 3-3 3m3 4h6m-3-3 3 3-3 3" /></svg>;
+  return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 10a8 8 0 1 0-2 7M18 17l1-9-3 3M12 8v8" /></svg>;
+}
+
 function ScoreboardIcon() {
   return (
     <svg className="scoreboard-tool-icon" viewBox="0 0 44 38" aria-hidden="true" focusable="false">
@@ -471,7 +477,7 @@ export function CustomCutPage({
     onModeChange: onPlaybackModeChange, onTime: updatePlaybackTime, onLocate: locatePlaybackClip,
   });
   playbackTickRef.current = () => playback.tick(false);
-  nativePreview.onFrame.current = () => playback.tick();
+  nativePreview.onFrame.current = (event) => { playback.tick(); if (event.ended) playback.ended(); };
 
   const cancelExportClose = useCallback(() => {
     if (exportCloseTimerRef.current === null) return;
@@ -695,8 +701,9 @@ export function CustomCutPage({
                 <tr
                   key={clip.clipId}
                   ref={(row) => { if (row) rallyRowRefs.current.set(clip.clipId, row); else rallyRowRefs.current.delete(clip.clipId); }}
-                  className={playbackCue?.clipId === clip.clipId ? `is-playback-cue playback-cue-${playbackCue.sequence % 2 === 0 ? 'even' : 'odd'}` : undefined}
+                  className={[playbackMode === 'loop' && playback.loopClipId === clip.clipId ? 'is-loop-target' : '', playbackCue?.clipId === clip.clipId ? `is-playback-cue playback-cue-${playbackCue.sequence % 2 === 0 ? 'even' : 'odd'}` : ''].filter(Boolean).join(' ') || undefined}
                   data-playback-cue={playbackCue?.clipId === clip.clipId ? 'true' : undefined}
+                  data-loop-target={playbackMode === 'loop' && playback.loopClipId === clip.clipId ? 'true' : undefined}
                   tabIndex={0}
                   onClick={() => playClip(clip)}
                   onKeyDown={(event) => {
@@ -740,7 +747,7 @@ export function CustomCutPage({
             {nativeEnabled ? <NativePreviewSurface preview={nativePreview} label={translations.togglePlayback} onToggle={togglePlayback}
               scoreboard={{ enabled: scoreboard.enabled && Boolean(currentScoreClip), x: scoreboard.x, y: scoreboard.y, scale: scoreboardScale, aspect: previewAspect, left: currentScore?.left ?? 0, right: currentScore?.right ?? 0, leftName, rightName }}
               onPosition={value => onScoreboardChange({ ...scoreboard, ...value })} />
-              : <CompatibleVideo hdr={Boolean(analysis.video.native_video && analysis.video.native_video.hdr !== 'sdr')} ref={videoRef} src={preview.url} controls={false} preload={preview.url === video.mediaUrl ? 'metadata' : 'auto'} playsInline tabIndex={0} aria-label={translations.togglePlayback} onClick={togglePlayback} onLoadedMetadata={() => { lastPlaybackClipIdRef.current = null; playback.tick(); }} onPlay={() => { playback.tick(); startVideoFrameTracking(); }} onPause={stopVideoFrameTracking} onEnded={stopVideoFrameTracking} onTimeUpdate={() => playback.tick()} onSeeked={() => playback.tick()} />}
+              : <CompatibleVideo hdr={Boolean(analysis.video.native_video && analysis.video.native_video.hdr !== 'sdr')} ref={videoRef} src={preview.url} controls={false} preload={preview.url === video.mediaUrl ? 'metadata' : 'auto'} playsInline tabIndex={0} aria-label={translations.togglePlayback} onClick={togglePlayback} onLoadedMetadata={() => { lastPlaybackClipIdRef.current = null; playback.tick(); }} onPlay={() => { playback.tick(); startVideoFrameTracking(); }} onPause={stopVideoFrameTracking} onEnded={() => { stopVideoFrameTracking(); playback.ended(); }} onTimeUpdate={() => playback.tick()} onSeeked={() => playback.tick()} />}
             {!nativeEnabled && scoreboard.enabled && currentScoreClip && <div ref={scoreboardPlaneRef} className="custom-scoreboard-plane" style={{ '--source-aspect': String(previewAspect) } as React.CSSProperties}>
               <div className="custom-scoreboard" role="button" tabIndex={0} aria-label={translations.dragScoreboard} title={translations.dragScoreboard} style={{ left: `${scoreboard.x * 100}%`, top: `${scoreboard.y * 100}%`, transform: `scale(${scoreboardScale})` }} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => {
                 event.preventDefault(); event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId);
@@ -773,7 +780,7 @@ export function CustomCutPage({
               <button className={`timeline-tool${toolMode === 'delete' ? ' is-active' : ''}`} type="button" aria-label={translations.deleteRally} title={translations.deleteRally} aria-pressed={toolMode === 'delete'} onClick={() => toggleTool('delete')}><TrashIcon /></button>
               <button className={`timeline-tool${toolMode === 'zoom' ? ' is-active' : ''}`} type="button" aria-label={translations.zoomTimeline} title={translations.zoomTimelineHint} aria-pressed={toolMode === 'zoom'} onClick={() => toggleTool('zoom')}><ZoomIcon /></button>
               <button className={`timeline-tool${scoreboard.enabled ? ' is-active' : ''}`} type="button" aria-label={translations.addScoreboard} aria-pressed={scoreboard.enabled} title={translations.addScoreboard} onClick={() => { setMultiSelectOpen(false); setScoreboardSettingsOpen(false); onScoreboardChange({ ...scoreboard, enabled: !scoreboard.enabled }); }}><ScoreboardIcon /></button>
-              <button className={`timeline-tool playback-mode-toggle${playbackMode === 'rallies' ? ' is-active' : ''}`} type="button" aria-pressed={playbackMode === 'rallies'} title={playbackMode === 'rallies' ? translations.switchToSourcePlayback : translations.switchToRallyPlayback} onClick={playback.switchMode}>{playbackMode === 'rallies' ? translations.rallyPlayback : translations.sourcePlayback}</button>
+              <button className="timeline-tool playback-mode-toggle" type="button" aria-label={playbackMode === 'source' ? translations.sourcePlayback : playbackMode === 'rallies' ? translations.rallyPlayback : translations.loopPlayback} title={playbackMode === 'source' ? translations.switchToRallyPlayback : playbackMode === 'rallies' ? translations.switchToLoopPlayback : translations.switchToSourcePlayback} onClick={playback.switchMode}><PlaybackModeIcon mode={playbackMode} /></button>
               {onReset && <button className="timeline-tool" type="button" aria-label={translations.resetCustomEdits} title={translations.resetCustomEdits} onClick={() => setResetConfirmation(true)}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 7v5h-5M20 12a8 8 0 1 0-2.3 5.7" /></svg>
               </button>}

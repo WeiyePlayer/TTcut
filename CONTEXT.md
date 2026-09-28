@@ -93,6 +93,13 @@ current playback time. At most one Playback Target Clip exists at a time; a
 gap or an unselected clip has no target.
 _Avoid_: current selection, active Rally
 
+## Loop Target Clip
+
+The one Custom Rally Clip currently repeated in Loop Playback. It may be
+unselected and stays the target through selection or boundary edits until
+another clip is chosen, it is removed, or the playback mode changes.
+_Avoid_: Playback Target Clip, Current Editing Rally, export selection
+
 ## Current Editing Rally
 
 The selected Custom Rally Clip most recently entered by the timeline playhead,
@@ -112,6 +119,7 @@ _Avoid_: persistent active row, selected Rally
 
 The custom editor's preview mode covering the source video's full timeline,
 including the gaps between selected Custom Rally Clips.
+_UI_: 顺序播放
 _Avoid_: export mode, all rallies
 
 ## Rally Playback
@@ -119,6 +127,14 @@ _Avoid_: export mode, all rallies
 The custom editor's preview mode covering the selected Custom Rally Clips in
 time order. An empty track has the same playback coverage as Source Playback.
 _Avoid_: highlight mode, export selection
+
+## Loop Playback
+
+The custom editor's preview mode repeatedly playing one Custom Rally Clip's
+current edited interval. Its target may be unselected; the target does not
+change export selection and is kept only while the editor page is open.
+_UI_: 循环播放
+_Avoid_: Rally Playback, export selection, Current Editing Rally
 
 ## Temporary Rally Preview
 
