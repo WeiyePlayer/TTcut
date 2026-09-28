@@ -8,7 +8,7 @@ TTcut is a local automatic table-tennis video cutter for players and enthusiasts
 
 Videos, analysis results, and history stay on the local computer. TTcut requires no account, uploads no video, and collects no telemetry. The Windows full installer and macOS packages include their runtime resources. Analysis, preview, and cutting can run offline after setup.
 
-> The current stable Windows release is `v1.3.7`; the current stable macOS 15+ Apple Silicon release is `v1.3.4`.
+> Windows `v1.3.8` is prepared as a stable release draft and is not publicly available yet. The current downloadable stable releases are `v1.3.7` for Windows and `v1.3.4` for macOS 15+ Apple Silicon.
 
 ## Download and installation
 
@@ -19,13 +19,14 @@ Videos, analysis results, and history stay on the local computer. TTcut requires
 
 TTcut detects an NVIDIA GPU automatically and falls back to CPU if accelerated setup or its self-test fails. Its video-processing capability reads media information, cuts and joins segments, and validates exported files.
 
-## What's new in v1.3.7
+## What's new in v1.3.8
 
-- Hardware-accelerated analysis now recovers from batch-size or GPU-memory limits more reliably.
-- Fixed custom-cut preview seeking and aligned hybrid rally boundaries with the original video's timeline.
-- The full installer now includes the required system runtime and clearer runtime-resource diagnostics.
+- Custom cutting saves and restores editing drafts, with a new single-rally loop mode and a highlighted loop target.
+- Per-rally scoreboards support player names, editable scores, advancing after choosing the rally winner, and overlays in exported videos.
+- Native Windows preview improves original-media playback, pausing, seeking, and timeline scrubbing in custom cutting.
+- Validated hardware-acceleration sessions are reused, with smaller-batch recovery to improve repeated analysis reliability.
 
-See the [v1.3.7 release notes](docs/release-notes-v1.3.7.en.md) for the complete details.
+See the [v1.3.8 release notes](docs/release-notes-v1.3.8.en.md) for the complete details.
 
 ## Contact the author on WeChat: m2924931661
 

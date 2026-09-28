@@ -85,6 +85,28 @@ async function auditRuntime(directory, label) {
   }
 }
 
+async function auditPreview(directory, label, stagedManifest = null) {
+  for (const name of ['ttcut-preview.exe', 'libmpv-2.dll', 'manifest.json', 'libmpv.json',
+    'licenses/NOTICE.txt', 'licenses/GPL-2.0.txt', 'licenses/LGPL-2.1.txt']) {
+    check(existsSync(path.join(directory, name)), `${label} is missing ${name}.`);
+  }
+  if (!existsSync(path.join(directory, 'manifest.json'))) return null;
+  const value = JSON.parse(await readFile(path.join(directory, 'manifest.json'), 'utf8'));
+  const spec = JSON.parse(await readFile(path.join(root, 'resources', 'libmpv.json'), 'utf8'));
+  check(value.version === spec.version && value.archiveSha256 === spec.sha256, `${label} has the wrong pinned preview build.`);
+  for (const [file, key] of [['ttcut-preview.exe', 'exeSha256'], ['libmpv-2.dll', 'dllSha256']]) {
+    if (existsSync(path.join(directory, file))) {
+      check(await sha256(path.join(directory, file)) === value[key], `${label}/${file} hash mismatch.`);
+    }
+  }
+  if (stagedManifest) {
+    check(value.buildHash === stagedManifest.buildHash
+      && (value.unsignedExeSha256 ?? value.exeSha256) === stagedManifest.exeSha256
+      && value.dllSha256 === stagedManifest.dllSha256, `${label} does not match the staged preview build.`);
+  }
+  return value;
+}
+
 const manifest = JSON.parse(await readFile(path.join(root, 'resources', 'model-manifest.json'), 'utf8'));
 check(manifest.schema_version === 2 && manifest.opset === 20, 'Model manifest must be schema v2/opset 20.');
 check(JSON.stringify(manifest.models.map((model) => model.filename).sort()) === JSON.stringify(['blurball_best.onnx', 'table_analyze.onnx']), 'Model manifest must contain exactly the two production ONNX files.');
@@ -105,6 +127,7 @@ for (const token of ['component:install', 'component:import', 'component:open-do
 await auditModels(path.join(root, '.runtime', 'resources'), 'staged resources', manifest);
 await auditWorker(path.join(root, '.runtime', 'worker'), 'staged Worker');
 await auditRuntime(path.join(root, '.runtime', 'windows'), 'staged Windows runtime');
+const previewManifest = await auditPreview(path.join(root, '.runtime', 'libmpv'), 'staged native preview');
 
 const packageRoot = path.join(root, 'out', 'TTcut-win32-x64');
 if (existsSync(packageRoot)) {
@@ -112,6 +135,7 @@ if (existsSync(packageRoot)) {
   await auditModels(path.join(resources, 'resources'), 'packaged resources', manifest);
   await auditWorker(path.join(resources, 'worker'), 'packaged Worker');
   await auditRuntime(path.join(resources, 'windows'), 'packaged Windows runtime');
+  await auditPreview(path.join(resources, 'libmpv'), 'packaged native preview', previewManifest);
   const allFiles = (await walk(resources)).map((file) => path.relative(resources, file).replaceAll('\\', '/'));
   const forbidden = allFiles.filter((name) => /cuda|torch|torchgen|functorch|triton|\.pt$/i.test(name) || /openh264|online-model|download-model/i.test(name));
   check(forbidden.length === 0, `Packaged resources contain forbidden runtime/download files: ${forbidden.slice(0, 20).join(', ')}`);
@@ -140,5 +164,5 @@ if (failures.length) {
   failures.forEach((failure) => console.error(`- ${failure}`));
   process.exitCode = 1;
 } else {
-  console.log('Release verification passed: ONNX models, minimal Worker, bundled DirectML/CPU runtime, and x264-only package contract verified.');
+  console.log('Release verification passed: ONNX models, minimal Worker, bundled DirectML/CPU runtime, native preview, and x264-only package contract verified.');
 }

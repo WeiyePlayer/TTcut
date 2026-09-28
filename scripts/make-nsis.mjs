@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -35,6 +36,17 @@ for (const relative of Object.keys(runtimeManifest.files ?? {}).filter((name) =>
   const segments = relative.split('/');
   await copyFile(path.join(runtimeRoot, ...segments), path.join(packaged, 'resources', 'windows', ...segments));
 }
+// Keep the upstream preview DLL unchanged, and record the signed host hash
+// while retaining its unsigned build identity for provenance.
+const previewStage = path.join(root, '.runtime', 'libmpv');
+const previewPackage = path.join(packaged, 'resources', 'libmpv');
+const previewManifest = JSON.parse(await readFile(path.join(previewStage, 'manifest.json'), 'utf8'));
+await copyFile(path.join(previewStage, 'libmpv-2.dll'), path.join(previewPackage, 'libmpv-2.dll'));
+await writeFile(path.join(previewPackage, 'manifest.json'), JSON.stringify({
+  ...previewManifest,
+  unsignedExeSha256: previewManifest.exeSha256,
+  exeSha256: createHash('sha256').update(await readFile(path.join(previewPackage, 'ttcut-preview.exe'))).digest('hex'),
+}, null, 2));
 if (!independentBeta) {
   await writeFile(path.join(packaged, 'resources', 'app-update.yml'), [
     'provider: github',
