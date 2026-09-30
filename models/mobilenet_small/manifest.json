@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "recorded_date": "2026-09-30",
+  "role": "frozen_selected_finetuned_candidate_and_native_6fps_temporal_refit",
+  "checkpoint": {
+    "path": "huji_student/runs/manual_p3_20260930_epoch1/best.pt",
+    "architecture": "torchvision.mobilenet_v3_small",
+    "size_bytes": 6219031,
+    "sha256": "22f0d7639106e5997c77e76d948f1b11848cd6af7efd6fbf75d3f19e97c982ed",
+    "selected_finetune_epoch": 1,
+    "experiment_settings": "manual_p3_20260930_v2",
+    "parent_sha256": "706ea81e894010be854ec199bf1b7359f3e343a5dd24f0ee645683e92d38e44c",
+    "automatic_weight_fallback": false
+  },
+  "temporal": {
+    "path": "config/rally_decoder_small_epoch1_refit_6fps_20260930_balanced.json",
+    "size_bytes": 11530,
+    "sha256": "47eca8435f29ec56ea0d40ab229b6f7eb3453924ba78d954c1cf6da988bdff17",
+    "model_id": "fde1bc9ab4419b4e",
+    "fit_sampling_fps": 6,
+    "analysis_fps": 6,
+    "checkpoint_calibration_status": "refitted_for_pinned_finetuned_checkpoint",
+    "algorithm": "huji_evidence_refinement_v1",
+    "class_order": ["serve", "play", "other"],
+    "preprocessing": "full_frame_cv2_area_height256_jpeg95_pil_rgb_imagenet_v1"
+  },
+  "data_provenance": {
+    "project_2_export_sha256": "90e1f36231dba9d7c58237b4219178eff4348e718430832aeb5b8bd4d55c2619",
+    "project_3_export_sha256": "3c0986dd8ccd9b1eb9b2d95e096dc3bcf8a34bd125307f9011bb2bedd07bfa7f",
+    "intervals_sha256": "419229bc8079d16aff73504afaece1906fc927948d57f6990e8d01c412d57f43",
+    "splits_sha256": "0c6c545ee82403f4bd2a70604719c9d782e1ef30ba23c4bd71df2d2d3b0ec3d9",
+    "continuous_videos": 16,
+    "short_active_clips": 239,
+    "split_video_counts": {"train": 181, "val": 44, "test": 30},
+    "unknown_time_policy": "unannotated_and_IGNORE_excluded_never_OTHER",
+    "selection": "three_fold_source_session_held_out_predictions_within_train",
+    "evaluation_is_reused_development_set": true,
+    "raw_training_data_included": false
+  },
+  "scope": {
+    "cnn_retrained_during_temporal_refit": false,
+    "uploaded_checkpoint_is_full_binary": true,
+    "local_application_updated_by_this_upload": false
+  }
+}

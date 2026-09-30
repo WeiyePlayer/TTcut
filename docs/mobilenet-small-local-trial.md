@@ -4,6 +4,7 @@
 
 ## 本机依赖
 
+- GitHub 中可下载的完整候选权重、6 fps 参数及拟合源码见 [models/mobilenet_small](../models/mobilenet_small/README.md)。上一轮提交只包含调用适配；本目录补齐原先留在外部训练工程的文件。当前本地应用的运行路径保持不变。
 - TTcut 已具备正常开发依赖和 Windows FFmpeg／FFprobe 资源。
 - 来源项目：`E:\MobileNetV3-Large`，Python：其 `.venv-training\Scripts\python.exe`。
 - 权重：`huji_student/runs/manual_p3_20260930_epoch1/best.pt`，SHA-256：`22f0d7639106e5997c77e76d948f1b11848cd6af7efd6fbf75d3f19e97c982ed`。按用户要求切回此前冻结的一轮微调候选；资源哈希不匹配时分析会报错，不会退回其他权重。

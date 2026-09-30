@@ -1,0 +1,3 @@
+# Keep pinned model artifacts byte-identical across Windows and GitHub checkouts.
+models/mobilenet_small/huji_student/runs/**/*.pt binary
+models/mobilenet_small/config/*.json -text whitespace=cr-at-eol
