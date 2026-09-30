@@ -265,7 +265,8 @@ export function terminateChild(child: ChildProcess): Promise<void> {
       }
       try { process.kill(-pid, 'SIGKILL'); } catch { /* Group already exited. */ }
     } else {
-      child.kill('SIGTERM');
+      // Enumerate the Windows tree while its parent still exists; terminating
+      // Python first can orphan its FFmpeg decoder before taskkill sees it.
       if (process.platform === 'win32' && child.pid) {
         await new Promise<void>((resolve) => {
           const killer = spawn('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], {
@@ -274,6 +275,7 @@ export function terminateChild(child: ChildProcess): Promise<void> {
           killer.once('close', () => resolve()); killer.once('error', () => resolve());
         });
       }
+      if (child.exitCode === null && !child.killed) child.kill('SIGTERM');
     }
   })();
   terminationRequests.set(child, pending);

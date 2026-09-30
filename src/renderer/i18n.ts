@@ -64,6 +64,11 @@ const zh = {
   errorTitle: '无法完成操作', technicalLog: '技术详情已写入本地日志。', retry: '返回',
   invalidFile: '请选择有效的 MP4 或 MOV 视频文件。', genericError: '发生了未预期的错误。',
   errors: {
+    SMALL_LOCAL_ONLY: 'Small 目前仅支持 Windows 开发态或独立 Beta 测试包。',
+    SMALL_RUNTIME_MISSING: 'Small 的本地 Python 环境不可用，请检查 E:\\MobileNetV3-Large\\.venv-training，修复后点击组件完整性检测。',
+    SMALL_RESOURCE_MISSING: 'Small 的来源代码、权重或 v4 配置缺失，请检查 E:\\MobileNetV3-Large 并重新检测组件。',
+    SMALL_RESOURCE_CHANGED: 'Small 权重或 v4 配置与本次冻结版本不一致，请恢复原版本后重试。',
+    SMALL_DEVICE_UNAVAILABLE: 'Small 的 CUDA 设备不可用，请使用自动选择或 CPU。',
     PLATFORM_UNSUPPORTED: '系统版本检测已移除。若仍看到此错误，请更新到最新构建。',
     COMPONENT_IMPORT_NO_FILES: '没有选择组件文件。',
     COMPONENT_IMPORT_UNSUPPORTED_FILE: '选择的文件不是 TTcut 固定组件资产。',
@@ -216,6 +221,11 @@ const en: Messages = {
   invalidFile: 'Choose valid MP4 or MOV video files.', genericError: 'An unexpected error occurred.',
   errors: {
     PLATFORM_UNSUPPORTED: 'OS version gating was removed. If you still see this error, update to a newer build.',
+    SMALL_LOCAL_ONLY: 'Small is available only in the Windows development app or independent Beta test package.',
+    SMALL_RUNTIME_MISSING: 'Small Python environment is unavailable. Check E:\\MobileNetV3-Large\\.venv-training, then check components again.',
+    SMALL_RESOURCE_MISSING: 'Small source code, weights, or v4 configuration is missing. Check E:\\MobileNetV3-Large, then check components again.',
+    SMALL_RESOURCE_CHANGED: 'Small weights or v4 configuration differ from the frozen version. Restore the original files and retry.',
+    SMALL_DEVICE_UNAVAILABLE: 'CUDA is unavailable in the Small environment. Use auto or CPU.',
     COMPONENT_IMPORT_NO_FILES: 'No component files were selected.',
     COMPONENT_IMPORT_UNSUPPORTED_FILE: 'The selected file is not a fixed TTcut component asset.',
     COMPONENT_IMPORT_FILE_NOT_FOUND: 'The selected component file cannot be read.',

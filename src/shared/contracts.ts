@@ -2,8 +2,8 @@ import { z } from 'zod';
 import { nativeVideoSchema, nativeTableSamplesSchema } from './native-contracts';
 
 export const DEVICE_VALUES = ['auto', 'directml', 'cuda', 'cpu'] as const;
-export const PRE_ROLL_VALUES = [1.5, 2.5, 5] as const;
-export const POST_ROLL_VALUES = [0.5, 1, 2, 4] as const;
+export const PRE_ROLL_VALUES = [0, 0.5, 1, 1.5, 2.5, 5] as const;
+export const POST_ROLL_VALUES = [0, 0.5, 1, 2, 4] as const;
 export const HIGHLIGHT_VALUES = [3, 5, 7] as const;
 export const BLURBALL_CONFIDENCE_THRESHOLD_DEFAULT = 0.7;
 export const BLURBALL_STAGE1_CONFIDENCE_THRESHOLD_DEFAULT = 0.3;
@@ -13,7 +13,9 @@ export const BLURBALL_CONFIDENCE_THRESHOLD_STEP = 0.05;
 export const BLURBALL_ANALYSIS_MODE_VALUES = ['full', 'two_stage'] as const;
 export const BLURBALL_ANALYSIS_MODE_DEFAULT = 'full' as const;
 export const BLURBALL_REFINEMENT_EXPANSION_SECONDS = 0.75;
-export const RALLY_RECOGNITION_METHOD_VALUES = ['bounce_events', 'continuous_visibility', 'hybrid_motion_bounce'] as const;
+export const RALLY_RECOGNITION_METHOD_VALUES = ['bounce_events', 'continuous_visibility', 'hybrid_motion_bounce', 'mobilenet_small'] as const;
+export const ANALYSIS_BACKEND_VALUES = ['existing', 'mobilenet_small'] as const;
+export type AnalysisBackend = typeof ANALYSIS_BACKEND_VALUES[number];
 export const RALLY_RECOGNITION_METHOD_DEFAULT = 'hybrid_motion_bounce' as const;
 export const DURATION_HIGHLIGHT_TIER_VALUES = ['short_rally', 'rally', 'long_rally'] as const;
 export const DURATION_HIGHLIGHT_SECONDS = {
@@ -747,7 +749,89 @@ export const hybridAnalysisResultV3Schema = analysisResultBaseSchema.extend({
   }
 });
 
+const smallPhaseSchema = z.object({
+  label: z.enum(['serve', 'play', 'other']),
+  start_frame: z.number().int().positive(),
+  end_frame: z.number().int().positive(),
+  start_sec: finiteNumber.nonnegative(),
+  end_sec: finiteNumber.positive(),
+  duration_sec: finiteNumber.positive(),
+  mean_score: finiteNumber.min(0).max(1),
+}).strict().refine(p => p.end_sec > p.start_sec && p.end_frame >= p.start_frame);
+
+export const smallAnalysisResultSchema = analysisResultBaseSchema.extend({
+  schema_version: z.literal(4),
+  calibration: z.never().optional(),
+  rally_recognition: z.object({ method: z.literal('mobilenet_small'), version: z.literal(4) }).strict(),
+  small_model: z.object({
+    checkpoint_sha256: z.string().regex(/^[a-f0-9]{64}$/),
+    config_sha256: z.string().regex(/^[a-f0-9]{64}$/),
+    decoder_id: z.string().min(1),
+    preprocessing: z.string().min(1),
+    engine: z.literal('pytorch'),
+    device: z.enum(['cuda', 'cpu']),
+    sampling_fps: z.union([z.number().int().min(1).max(12), z.literal(30)]),
+    sampling_frame_count: z.number().int().positive(),
+    base_config_sha256: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+    checkpoint_calibration_status: z.enum(['transferred_from_original_checkpoint_without_refit', 'refitted_for_pinned_finetuned_checkpoint']).optional(),
+    calibration_training_fps: z.union([z.literal(6), z.literal(30)]).optional(),
+    calibration_status: z.enum(['original_30fps', 'transferred_30fps_without_refit', 'refitted_6fps', 'transferred_6fps_without_refit']).optional(),
+    decoder_fps: z.number().int().min(1).max(12).optional(),
+  }).strict(),
+  segments: z.array(smallPhaseSchema),
+  rallies: z.array(z.object({
+    ...continuousVisibilityRallySchema.shape,
+    kind: z.enum(['serve_and_play', 'serve_only', 'play_only']),
+    has_serve: z.boolean(),
+    has_play: z.boolean(),
+    touches_video_start: z.boolean(),
+    touches_video_end: z.boolean(),
+    phases: z.array(smallPhaseSchema).min(1),
+    default_clip_start_time_seconds: finiteNumber.nonnegative().optional(),
+  }).strict()),
+}).superRefine((result, context) => {
+  const model = result.small_model;
+  if (model.checkpoint_calibration_status === 'refitted_for_pinned_finetuned_checkpoint') {
+    const native = model.sampling_fps === 6;
+    if (model.calibration_training_fps !== 6
+      || model.calibration_status !== (native ? 'refitted_6fps' : 'transferred_6fps_without_refit')
+      || model.decoder_fps !== (model.sampling_fps === 30 ? 6 : model.sampling_fps)
+      || !model.base_config_sha256 || (native && model.config_sha256 !== model.base_config_sha256)) {
+      context.addIssue({ code: 'custom', message: 'Refitted Small results require matching checkpoint, sampling and decoder provenance' });
+    }
+  } else if (model.calibration_training_fps === 6 || model.calibration_status === 'refitted_6fps'
+    || model.calibration_status === 'transferred_6fps_without_refit') {
+    context.addIssue({ code: 'custom', message: '6 fps fitted calibration requires explicit refitted checkpoint provenance' });
+  } else if (result.small_model.sampling_fps !== 30 && (
+    result.small_model.calibration_training_fps !== 30
+    || result.small_model.calibration_status !== 'transferred_30fps_without_refit'
+    || result.small_model.decoder_fps !== result.small_model.sampling_fps || !result.small_model.base_config_sha256
+  )) context.addIssue({ code: 'custom', message: 'Reduced fps Small results require explicit transferred calibration provenance' });
+  for (const [i, rally] of result.rallies.entries()) {
+    if (rally.default_clip_start_time_seconds !== undefined
+      && (rally.default_clip_start_time_seconds < Math.max(0, rally.start_time_seconds - 1.5)
+        || rally.default_clip_start_time_seconds >= rally.end_time_seconds)) {
+      context.addIssue({ code: 'custom', message: 'Small clip start must be within 1.5 seconds before its full rally' });
+    }
+    if (rally.end_time_seconds <= rally.start_time_seconds
+      || rally.end_time_seconds > result.video.duration_seconds + 1e-6
+      || (i > 0 && rally.start_time_seconds < result.rallies[i - 1]!.end_time_seconds)) {
+      context.addIssue({ code: 'custom', message: 'Small rallies must be ordered, non-overlapping and media-bound' });
+    }
+  }
+});
+
+export const smallAnalysisRequestSchema = z.object({
+  schema_version: z.literal(6),
+  task_id: z.string().uuid(),
+  video_path: z.string().min(1),
+  video_metadata: videoMetadataSchema,
+  device: z.enum(['auto', 'cuda', 'cpu']),
+  sampling_fps: z.union([z.number().int().min(1).max(12), z.literal(30)]).default(6),
+}).strict();
+
 export const analysisResultSchema = z.union([
+  smallAnalysisResultSchema,
   hybridAnalysisResultV3Schema,
   continuousVisibilityAnalysisResultV3Schema,
   legacyAnalysisResultV1Schema,
@@ -855,8 +939,11 @@ export const cutSelectionSchema = z.union([
 ]);
 
 export const appSettingsSchema = z.object({
+  analysis_backend: z.enum(ANALYSIS_BACKEND_VALUES).default('existing'),
   language: z.enum(['zh-CN', 'en']),
   calibration_method: z.enum(['manual', 'automatic']),
+  small_pre_roll_seconds: z.union(PRE_ROLL_VALUES.map((value) => z.literal(value))).optional(),
+  small_post_roll_seconds: z.union(POST_ROLL_VALUES.map((value) => z.literal(value))).optional(),
   pre_roll_seconds: z.union(PRE_ROLL_VALUES.map((value) => z.literal(value))),
   post_roll_seconds: z.union(POST_ROLL_VALUES.map((value) => z.literal(value))),
   normalize_variable_frame_rate: z.boolean().default(false),
@@ -869,7 +956,7 @@ export const historySourceSchema = z.object({
   modified_time_ms: finiteNumber.nonnegative(),
 }).strict();
 
-export const historyRecordSchema = z.object({
+const legacyHistoryRecordSchema = z.object({
   schema_version: z.literal(1),
   id: z.string().uuid(),
   analyzed_at: z.string().min(1),
@@ -880,6 +967,15 @@ export const historyRecordSchema = z.object({
   completion_kind: z.enum(['analysis', 'export']).default('analysis'),
   output_path: z.string().min(1).nullable().default(null),
 }).strict();
+
+export const historyRecordSchema = z.union([
+  legacyHistoryRecordSchema.refine(record => record.analysis.schema_version !== 4, { message: 'Small history requires schema v2' }),
+  legacyHistoryRecordSchema.extend({
+    schema_version: z.literal(2),
+    calibration: z.never().optional(),
+    analysis: smallAnalysisResultSchema,
+  }),
+]);
 
 export const historySummarySchema = z.object({
   schema_version: z.literal(1),
@@ -991,12 +1087,13 @@ export type RallyRecognitionConfig = z.infer<typeof rallyRecognitionConfigSchema
 export type RallyRecognitionMethod = typeof RALLY_RECOGNITION_METHOD_VALUES[number];
 export type DurationHighlightTier = typeof DURATION_HIGHLIGHT_TIER_VALUES[number];
 export type VideoMetadata = z.infer<typeof videoMetadataSchema>;
-export type Rally = z.infer<typeof rallySchema>;
+export type Rally = z.infer<typeof rallySchema> | SmallAnalysisResult['rallies'][number];
 export type BounceRally = z.infer<typeof bounceRallySchema>;
 export type ContinuousVisibilityRally = z.infer<typeof continuousVisibilityRallySchema>;
 export type ContinuousVisibilityBoardCountRally = z.infer<typeof continuousVisibilityBoardCountRallySchema>;
 export type AnalysisResultV1 = z.infer<typeof analysisResultSchema>;
 export type AnalysisResult = AnalysisResultV1;
+export type SmallAnalysisResult = z.infer<typeof smallAnalysisResultSchema>;
 export type LegacyAnalysisResultV1 = z.infer<typeof legacyAnalysisResultV1Schema>;
 export type BounceAnalysisResultV2 = z.infer<typeof bounceAnalysisResultV2Schema>;
 export type ContinuousVisibilityAnalysisResultV2 = z.infer<typeof continuousVisibilityAnalysisResultV2Schema>;
@@ -1009,7 +1106,11 @@ export function rallyRecognitionMethod(result: AnalysisResultV1): RallyRecogniti
 }
 
 export function hasBounceCounts(result: AnalysisResultV1): result is BounceAnalysisResult {
-  return rallyRecognitionMethod(result) !== 'continuous_visibility' || result.schema_version === 3;
+  return result.schema_version !== 4 && (rallyRecognitionMethod(result) !== 'continuous_visibility' || result.schema_version === 3);
+}
+
+export function usesDurationHighlights(method: RallyRecognitionMethod): boolean {
+  return method === 'continuous_visibility' || method === 'mobilenet_small';
 }
 export type CalibrationResultV1 = z.infer<typeof calibrationResultSchema>;
 export type WorkerEventV1 = z.infer<typeof workerEventSchema>;

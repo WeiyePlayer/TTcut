@@ -15,6 +15,7 @@ import { resolveUsableMediaComponents } from './components';
 import { logLine } from './logger';
 import { runProcess, activeTaskIds } from './processes';
 import { clearProcessingMediaCache, processingCachePath, removeProcessingCache } from './processing-media';
+import { updateSmallHistoryBoundaries } from '../domain/small-history';
 
 const historyIndexSchema = z.object({
   schema_version: z.literal(1),
@@ -95,8 +96,15 @@ export class HistoryStore {
   private async loadRecord(id: string): Promise<HistoryRecordV1 | null> {
     try {
       const migration = removeLegacyTableDetection(JSON.parse(await readFile(this.recordPath(id), 'utf8')));
-      const record = historyRecordSchema.parse(migration.value);
-      if (migration.changed) await this.writeJsonAtomic(this.recordPath(id), record);
+      let record = historyRecordSchema.parse(migration.value);
+      const analysis = updateSmallHistoryBoundaries(record.analysis);
+      if (analysis !== record.analysis) {
+        // Preserve the old round list before applying play eligibility and timing rules.
+        await writeFile(`${this.recordPath(id)}.before-small-play2s-serve1.5s-tail0.5s.bak`, await readFile(this.recordPath(id)), { flag: 'wx' })
+          .catch(error => { if (error.code !== 'EEXIST') throw error; });
+        record = historyRecordSchema.parse({ ...record, analysis });
+        await this.writeJsonAtomic(this.recordPath(id), record);
+      } else if (migration.changed) await this.writeJsonAtomic(this.recordPath(id), record);
       return record;
     } catch (error) {
       await logLine('history', 'WARN', `Ignoring invalid history record ${id}: ${String(error)}`).catch(() => undefined);
@@ -194,19 +202,19 @@ export class HistoryStore {
 
   async upsert(
     analysis: AnalysisResultV1,
-    calibration: Calibration,
+    calibration: Calibration | undefined,
     visibleInHistory = true,
   ): Promise<HistoryRecordV1> {
     const source = await this.sourceFor(analysis.source_video?.path ?? analysis.video.path);
     const index = await this.loadIndex();
     const existing = await this.findMatchingRecord(source);
     const record = historyRecordSchema.parse({
-      schema_version: 1,
+      schema_version: analysis.schema_version === 4 ? 2 : 1,
       id: existing?.id ?? randomUUID(),
       analyzed_at: new Date().toISOString(),
       source,
       calibration,
-      analysis,
+      analysis: updateSmallHistoryBoundaries(analysis),
       visible_in_history: visibleInHistory,
       completion_kind: visibleInHistory ? 'analysis' : existing?.completion_kind ?? 'analysis',
       output_path: visibleInHistory ? null : existing?.output_path ?? null,

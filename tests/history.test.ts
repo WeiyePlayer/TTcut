@@ -4,6 +4,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildHistoryCoverArgs, HistoryStore } from '../src/main/history';
 import type { AnalysisResultV1, Calibration } from '../src/shared/contracts';
+import { smallResult } from './fixtures/small-result';
 
 const temporaryDirectories: string[] = [];
 
@@ -63,6 +64,79 @@ async function storeFixture() {
 }
 
 describe('analysis history', () => {
+  it('backfills Small clip starts once while preserving recognition evidence and history identity', async () => {
+    const { store, source, root } = await storeFixture();
+    const record = await store.upsert(smallResult(source), undefined);
+    const legacy = { ...record, analysis: smallResult(source) };
+    const target = path.join(root, 'history', 'records', `${record.id}.json`);
+    const before = JSON.stringify(legacy);
+    await writeFile(target, before);
+    const reopened = await store.open(record.id);
+    expect(reopened.id).toBe(record.id);
+    expect(reopened.analyzed_at).toBe(record.analyzed_at);
+    if (reopened.analysis.schema_version !== 4) throw new Error('Expected Small');
+    expect(reopened.analysis.rallies[0]!.default_clip_start_time_seconds).toBeCloseTo(0.7);
+    expect(reopened.analysis.rallies.map(({ default_clip_start_time_seconds, ...rally }) => rally)).toEqual(legacy.analysis.rallies);
+    expect(reopened.analysis.segments).toEqual(legacy.analysis.segments);
+    expect(await readFile(`${target}.before-small-play2s-serve1.5s-tail0.5s.bak`, 'utf8')).toBe(before);
+    const after = await readFile(target, 'utf8');
+    await store.open(record.id);
+    expect(await readFile(target, 'utf8')).toBe(after);
+    expect(await readFile(`${target}.before-small-play2s-serve1.5s-tail0.5s.bak`, 'utf8')).toBe(before);
+  });
+  it('recomputes a play-only Small clip start before the recognized rally on reopen', async () => {
+    const { store, source, root } = await storeFixture();
+    const original = smallResult(source);
+    const rally = original.rallies[0]!;
+    const playOnly = { ...rally, start_time_seconds: 8, end_time_seconds: 10,
+      kind: 'play_only' as const, has_serve: false, has_play: true,
+      phases: rally.phases.filter(phase => phase.label === 'play') };
+    const record = await store.upsert({ ...original, rallies: [playOnly] }, undefined);
+    const target = path.join(root, 'history', 'records', `${record.id}.json`);
+    await writeFile(target, JSON.stringify({ ...record, analysis: {
+      ...original, rallies: [{ ...playOnly, default_clip_start_time_seconds: 8 }],
+    } }));
+
+    const reopened = await store.open(record.id);
+    expect(reopened.analysis.schema_version).toBe(4);
+    if (reopened.analysis.schema_version !== 4) throw new Error('Expected Small');
+    expect(reopened.analysis.rallies[0]!.start_time_seconds).toBe(8);
+    expect(reopened.analysis.rallies[0]!.default_clip_start_time_seconds).toBe(6.5);
+    expect((await store.open(record.id)).analysis).toEqual(reopened.analysis);
+  });
+  it('overwrites between old and Small modes and reopens a no-calibration record', async () => {
+    const { store, source } = await storeFixture();
+    const original = await store.upsert(analysis(source), calibration);
+    const small = await store.upsert(smallResult(source), undefined);
+    expect(small.id).toBe(original.id);
+    expect(small.schema_version).toBe(2);
+    expect(small.calibration).toBeUndefined();
+    const reopened = await store.open(small.id);
+    expect(reopened.analysis.schema_version).toBe(4);
+    expect(reopened.calibration).toBeUndefined();
+    expect(await store.list()).toHaveLength(1);
+    const restored = await store.upsert(analysis(source), calibration);
+    expect(restored.id).toBe(original.id);
+    expect(restored.schema_version).toBe(1);
+    expect(restored.calibration).toEqual(calibration);
+  });
+
+  it('filters short play in old history, updates counts and keeps a recoverable original', async () => {
+    const { store, source, root } = await storeFixture();
+    const original = smallResult(source);
+    const record = await store.upsert(original, undefined);
+    const first = original.rallies[0]!;
+    first.phases = first.phases.filter(phase => phase.label === 'serve');
+    const target = path.join(root, 'history', 'records', `${record.id}.json`);
+    const before = JSON.stringify({ ...record, analysis: original });
+    await writeFile(target, before);
+    const reopened = await store.open(record.id);
+    expect(reopened.analysis.rallies).toHaveLength(2);
+    expect(reopened.analysis.rallies.map(r => [r.id, r.index])).toEqual([['rally_001', 1], ['rally_002', 2]]);
+    expect((await store.list())[0]!.record.analysis.rallies).toHaveLength(2);
+    expect(await readFile(`${target}.before-small-play2s-serve1.5s-tail0.5s.bak`, 'utf8')).toBe(before);
+  });
+
   it('extracts the first decoded frame without seeking or representative-frame filtering', () => {
     const args = buildHistoryCoverArgs('D:/比赛/输入.mp4', 'D:/缓存/封面.jpg');
     expect(args[args.indexOf('-frames:v') + 1]).toBe('1');

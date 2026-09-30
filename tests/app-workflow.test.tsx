@@ -6,10 +6,12 @@ import type { AppEvent, BootstrapData, SelectedVideo, TTcutApi } from '../src/sh
 import type { UpdateState, VideoMetadata } from '../src/shared/contracts';
 import { analysisResultSchema } from '../src/shared/contracts';
 import hybridProvenance from './fixtures/hybrid-provenance.json';
+import { smallResult } from './fixtures/small-result';
 
 const bootstrap: BootstrapData = {
   version: '1.3.7',
   settings: {
+    analysis_backend: 'existing',
     language: 'zh-CN',
     calibration_method: 'automatic',
     pre_roll_seconds: 2.5,
@@ -379,6 +381,53 @@ describe('App workflow notices and multi-task entry', () => {
     expect(screen.queryByRole('radio', { name: '高精' })).toBeNull();
     expect(screen.queryByRole('radio', { name: '落台判定' })).toBeNull();
     expect(screen.queryByRole('radio', { name: '连续运动' })).toBeNull();
+  });
+
+  it('switches to Small and analyzes without calibration or a usable BlurBall component', async () => {
+    vi.mocked(window.ttcut.bootstrap).mockResolvedValue({
+      ...bootstrap, smallBackend: { available: true, detail: null },
+      components: { ...bootstrap.components, analysis: { ...bootstrap.components.analysis, available: false } },
+    });
+    const selected = { path: 'C:/video/small.mp4', name: 'small.mp4', size: 100, mediaUrl: 'ttcut-media://small' };
+    selectVideos.mockResolvedValue([selected]);
+    render(<App />);
+    const option = await screen.findByRole('radio', { name: 'MobileNetV3-Small（本地试用）' });
+    fireEvent.click(option);
+    await waitFor(() => expect(window.ttcut.saveSettings).toHaveBeenCalledWith(expect.objectContaining({ analysis_backend: 'mobilenet_small' })));
+    const smallPreRoll = screen.getByRole('radiogroup', { name: '回合前时间' });
+    expect(within(smallPreRoll).getByRole('radio', { name: '0 s' })).toBeChecked();
+    fireEvent.click(within(smallPreRoll).getByRole('radio', { name: '0.5 s' }));
+    await waitFor(() => expect(window.ttcut.saveSettings).toHaveBeenLastCalledWith(expect.objectContaining({ small_pre_roll_seconds: 0.5, pre_roll_seconds: 2.5 })));
+    fireEvent.click(within(smallPreRoll).getByRole('radio', { name: '0 s' }));
+    await waitFor(() => expect(window.ttcut.saveSettings).toHaveBeenLastCalledWith(expect.objectContaining({ small_pre_roll_seconds: 0 })));
+    expect(screen.queryByRole('radiogroup', { name: '回合后时间' })).toBeNull();
+    expect(screen.getByText('固定在回合结束后保留 0.5 秒，到达视频结尾时截断。')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '自动剪辑' }));
+    fireEvent.click(await screen.findByRole('button', { name: '选择或将文件拖到这里' }));
+    const start = await screen.findByRole('button', { name: '开始分析' });
+    expect(start).toBeEnabled();
+    expect(screen.queryByText('自动球台标定')).toBeNull();
+    fireEvent.click(start);
+    await waitFor(() => expect(window.ttcut.startAnalysis).toHaveBeenCalledWith({
+      analysisBackend: 'mobilenet_small', videoPath: selected.path, device: 'auto',
+      historyVisibility: 'visible', normalizeVariableFrameRate: false,
+    }));
+    expect(window.ttcut.startAutoCalibration).not.toHaveBeenCalled();
+    act(() => taskListener?.({ type: 'analysis-result', taskId: 'analysis-task-1', analysisId: 'small-id', data: smallResult(selected.path) }));
+    fireEvent.click(await screen.findByRole('button', { name: /精彩回合/ }));
+    expect(screen.getByRole('radiogroup', { name: '时长档位' })).toBeVisible();
+    expect(screen.queryByRole('radiogroup', { name: '板数筛选' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '开始剪辑' }));
+    await waitFor(() => expect(window.ttcut.startExport).toHaveBeenCalledWith(expect.objectContaining({
+      analysis_id: 'small-id', selection: expect.objectContaining({ criterion: { kind: 'duration_tier', tier: 'rally' }, pre_roll_seconds: 0, post_roll_seconds: 0 }),
+    })));
+  });
+
+  it('hides the Small switch on macOS', async () => {
+    Object.defineProperty(window.ttcut, 'platform', { value: 'darwin', configurable: true });
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: '设置' }));
+    expect(screen.queryByRole('radio', { name: /MobileNetV3-Small/ })).toBeNull();
   });
 
   it.each([false, true])('recalibrates an empty result on the original video (normalized: %s)', async (normalized) => {

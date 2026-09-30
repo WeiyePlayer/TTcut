@@ -2,21 +2,40 @@ import {
   DURATION_HIGHLIGHT_SECONDS,
   hasBounceCounts,
   rallyRecognitionMethod,
+  usesDurationHighlights,
   type AnalysisResultV1,
   type CutGroup,
   type CutSelectionV1,
   type Rally,
   type RallyRecognitionMethod,
 } from '../shared/contracts';
+import { keepsSmallRally, SMALL_POST_ROLL_SECONDS, SMALL_SERVE_LEAD_SECONDS } from './small-rally-policy';
 
 const EPSILON = 1e-9;
 export const FINAL_RALLY_TAIL_SECONDS = 1;
 
 export function finalRallyTailSeconds(method: RallyRecognitionMethod): number {
+  if (method === 'mobilenet_small') return SMALL_POST_ROLL_SECONDS;
   return method === 'bounce_events' ? FINAL_RALLY_TAIL_SECONDS : 0;
 }
 
+export function rallyClipEnd(rallyEnd: number, postRollSeconds: number, videoDuration: number, method: RallyRecognitionMethod): number {
+  return Math.min(videoDuration, rallyEnd + finalRallyTailSeconds(method)
+    + (method === 'mobilenet_small' ? 0 : postRollSeconds));
+}
+
 export function rallyLeadInStart(rally: Rally, preRollSeconds: number, method: RallyRecognitionMethod): number {
+  if (method === 'mobilenet_small' && 'phases' in rally) {
+    if (rally.default_clip_start_time_seconds !== undefined) return Math.max(0, rally.default_clip_start_time_seconds - preRollSeconds);
+    // Short or missing serves get 1.5 seconds before the recognized rally.
+    // Longer serves keep their final 1.5 seconds before play.
+    const firstPlay = rally.phases.find((phase) => phase.label === 'play');
+    const serve = rally.phases.find((phase) => phase.label === 'serve'
+      && (!firstPlay || phase.end_sec <= firstPlay.start_sec));
+    const start = serve && serve.end_sec - serve.start_sec >= SMALL_SERVE_LEAD_SECONDS
+      ? serve.end_sec - SMALL_SERVE_LEAD_SECONDS : rally.start_time_seconds - SMALL_SERVE_LEAD_SECONDS;
+    return Math.max(0, start - preRollSeconds);
+  }
   const boundary = method === 'continuous_visibility' && 'lead_in_start_time_seconds' in rally
     ? rally.lead_in_start_time_seconds ?? 0 : 0;
   return Math.max(0, rally.start_time_seconds - preRollSeconds, Math.min(rally.start_time_seconds, boundary));
@@ -29,7 +48,8 @@ export class SelectionError extends Error {
 }
 
 export function selectRallies(result: AnalysisResultV1, selection: CutSelectionV1): Rally[] {
-  const unique = new Map(result.rallies.map((rally) => [rally.id, rally]));
+  const eligible = rallyRecognitionMethod(result) === 'mobilenet_small' ? result.rallies.filter(keepsSmallRally) : result.rallies;
+  const unique = new Map(eligible.map((rally) => [rally.id, rally]));
   const rallies = [...unique.values()].sort(
     (a, b) => a.start_time_seconds - b.start_time_seconds || a.index - b.index,
   );
@@ -47,7 +67,7 @@ export function selectRallies(result: AnalysisResultV1, selection: CutSelectionV
     if (criterion.kind === 'bounce_count' && !hasBounceCounts(result)) {
       throw new SelectionError('INVALID_HIGHLIGHT_CRITERION');
     }
-    if (criterion.kind === 'duration_tier' && method !== 'continuous_visibility') {
+    if (criterion.kind === 'duration_tier' && !usesDurationHighlights(method)) {
       throw new SelectionError('INVALID_HIGHLIGHT_CRITERION');
     }
     const filtered = criterion.kind === 'bounce_count'
@@ -79,6 +99,7 @@ export function buildCutGroups(
   const seen = new Set<string>();
   const ordered = rallies
     .filter((rally) => {
+      if (recognitionMethod === 'mobilenet_small' && !keepsSmallRally(rally)) return false;
       if (seen.has(rally.id)) return false;
       seen.add(rally.id);
       return Number.isFinite(rally.start_time_seconds)
@@ -94,7 +115,7 @@ export function buildCutGroups(
   );
   for (const rally of ordered) {
     const current = raw.at(-1);
-    if (current && !excludedBetween(current.rawEnd, rally.start_time_seconds)
+    if (recognitionMethod !== 'mobilenet_small' && current && !excludedBetween(current.rawEnd, rally.start_time_seconds)
       && rally.start_time_seconds - current.rawEnd < (recognitionMethod === 'hybrid_motion_bounce' ? 3 : 5 - EPSILON)) {
       current.rawEnd = Math.max(current.rawEnd, rally.end_time_seconds);
       current.rallyIds.push(rally.id);
@@ -111,8 +132,7 @@ export function buildCutGroups(
   for (const group of raw) {
     const firstRally = ordered.find((rally) => rally.id === group.rallyIds[0])!;
     let start = rallyLeadInStart(firstRally, preRollSeconds, recognitionMethod);
-    // Only bounce recognition needs the fixed tail; always apply the configured roll.
-    let end = Math.min(videoDuration, group.rawEnd + finalRallyTailSeconds(recognitionMethod) + postRollSeconds);
+    let end = rallyClipEnd(group.rawEnd, postRollSeconds, videoDuration, recognitionMethod);
     for (const fragment of excludedFragments) {
       if (fragment.end_time_seconds <= group.rawStart) start = Math.max(start, fragment.end_time_seconds);
       if (fragment.start_time_seconds >= group.rawEnd) end = Math.min(end, fragment.start_time_seconds);

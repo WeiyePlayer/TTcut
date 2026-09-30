@@ -6,6 +6,7 @@ import type { AppEvent, SelectedVideo, TTcutApi } from '../src/shared/api';
 import type { AnalysisResultV1, Calibration, TableAnalysis, VideoMetadata } from '../src/shared/contracts';
 import { hybridAnalysisResultV3Schema } from '../src/shared/contracts';
 import hybridProvenance from './fixtures/hybrid-provenance.json';
+import { smallResult } from './fixtures/small-result';
 
 const videos: SelectedVideo[] = [
   { path: 'C:\\video\\first.mp4', name: 'first.mp4', size: 100, mediaUrl: 'ttcut-media://first' },
@@ -115,6 +116,31 @@ describe('multi-task clipping', () => {
     act(() => listener?.({ type: 'analysis-result', taskId: `analysis-task-${index}`,
       analysisId: `${index}${'1'.repeat(7)}-1111-4111-8111-111111111111`, calibration, data: analysis(path) }));
   }
+
+  it('snapshots Small for the queue, skips calibration, and exports highlights by duration', async () => {
+    const props = { initialVideos: videos, preRoll: 2.5 as const, postRoll: 1 as const, onOpenAnalysis: vi.fn() };
+    const view = render(<MultiTaskPage {...props} analysisBackend="mobilenet_small" />);
+    await screen.findByText('first.mp4');
+    view.rerender(<MultiTaskPage {...props} analysisBackend="existing" />);
+    for (const group of screen.getAllByRole('group')) {
+      fireEvent.click(within(group).getByRole('button', { name: '精彩回合' }));
+    }
+    expect(screen.getAllByRole('radiogroup', { name: '时长档位' })).toHaveLength(2);
+    fireEvent.click(screen.getByRole('checkbox', { name: '合并为一个视频' }));
+    fireEvent.click(screen.getByRole('button', { name: '开始分析剪辑' }));
+    for (let i = 1; i <= 2; i++) {
+      await waitFor(() => expect(startAnalysis).toHaveBeenCalledTimes(i));
+      expect(startAnalysis.mock.calls[i - 1]![0]).toMatchObject({ analysisBackend: 'mobilenet_small' });
+      expect(startAnalysis.mock.calls[i - 1]![0]).not.toHaveProperty('calibrationChoice');
+      act(() => listener?.({ type: 'analysis-result', taskId: `analysis-task-${i}`,
+        analysisId: `small-${i}`, data: smallResult(videos[i - 1]!.path) }));
+    }
+    expect(startAutoCalibration).not.toHaveBeenCalled();
+    await waitFor(() => expect(window.ttcut.startBatchExport).toHaveBeenCalledOnce());
+    const request = vi.mocked(window.ttcut.startBatchExport).mock.calls[0]![0];
+    expect(request.items.every(item => item.selection.mode === 'highlight'
+      && 'criterion' in item.selection && item.selection.criterion.kind === 'duration_tier')).toBe(true);
+  });
 
   it('merges in addition order and completes only after the merged result arrives without shutdown', async () => {
     const finished = await prepareMergedBatch();

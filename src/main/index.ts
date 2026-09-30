@@ -23,6 +23,7 @@ import {
 } from '../shared/contracts';
 import { IPC } from '../shared/ipc';
 import { startAnalysis } from './analysis';
+import { inspectSmallBackend } from './small-components';
 import { startAutoCalibration } from './calibration';
 import { inspectInstalledComponents, startupComponentStatus } from './component-status';
 import { managedComponentsRoot } from './components';
@@ -104,8 +105,8 @@ async function selectedVideo(filePath: string) {
 
 function registerIpc(): void {
   ipcMain.handle(IPC.appBootstrap, async () => {
-    const [settings, components, platformCompatibility] = await Promise.all([
-      loadSettings(), startupComponentStatus(), getPlatformCompatibility(),
+    const [settings, components, platformCompatibility, smallBackend] = await Promise.all([
+      loadSettings(), startupComponentStatus(), getPlatformCompatibility(), inspectSmallBackend(),
     ]);
     if (!isMac && components.analysis.available && components.media.available) {
       void cleanupLegacyComponents(managedComponentsRoot()).catch((error) => (
@@ -116,6 +117,7 @@ function registerIpc(): void {
       version: app.getVersion(),
       windowState: { visible: mainWindow?.isVisible() ?? false },
       settings,
+      smallBackend,
       components,
       platformCompatibility,
       logsPath: getLogDirectory(),
@@ -189,6 +191,14 @@ function registerIpc(): void {
     if (historyVisibility !== 'visible' && historyVisibility !== 'deferred') throw new Error('INVALID_REQUEST');
     const normalizeVariableFrameRate = record.normalizeVariableFrameRate;
     if (typeof normalizeVariableFrameRate !== 'boolean') throw new Error('INVALID_REQUEST');
+    if (record.analysisBackend === 'mobilenet_small') {
+      if (record.calibrationChoice !== undefined) throw new Error('INVALID_REQUEST');
+      return startAnalysis(currentWindow(), {
+        analysisBackend: 'mobilenet_small', videoPath: record.videoPath, device,
+        historyVisibility, normalizeVariableFrameRate,
+      });
+    }
+    if (record.analysisBackend !== undefined && record.analysisBackend !== 'existing') throw new Error('INVALID_REQUEST');
     return startAnalysis(currentWindow(), {
       videoPath: record.videoPath,
       calibrationChoice: calibrationChoiceSchema.parse(record.calibrationChoice),

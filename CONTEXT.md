@@ -306,11 +306,28 @@ Manifests. Subsequent updates can return to the automatic NSIS flow.
 
 ## 回合识别方式（Rally Recognition Method）
 
-将 Source-frame Trajectory 划分为可剪辑 Rally 的算法标识，不再是设置项。
-Windows/Python 路径的新 BlurBall 固定使用 `hybrid_motion_bounce`；macOS 原生
+将分析证据划分为可剪辑 Rally 的算法标识，不等同于设置中的分析后端。
+Windows/Python 原有 BlurBall 路径固定使用 `hybrid_motion_bounce`；macOS 原生
 worker 在实现该算法前仍固定使用 `continuous_visibility`。历史 `bounce_events`、
 `continuous_visibility` 仍原样读取。展示和导出必须使用结果记录的实际方式。
 _Avoid_: Analysis Mode, highlight tier
+
+## 分析后端（Analysis Backend）
+
+用户为一次分析或一个批次选择的识别流程。原有后端根据球轨迹识别回合，Small 后端根据完整画面的比赛阶段识别回合。
+_Avoid_: 分析精度、精彩档位
+
+## Small 回合（Small Rally）
+
+由连续发球或对打阶段组成的时间区间。对打累计不足 2 秒的回合（包括仅发球回合）在进入历史、筛选和剪辑之前剔除；正好 2 秒保留。它不提供落点和板数，阶段平均分数也不是回合正确率。
+
+保留回合的识别边界保持完整；Small 默认剪辑范围保留开头发球阶段的末尾 1.5 秒和完整对打。发球不足 1.5 秒或缺失时，从识别起点向前保留 1.5 秒。独立的 Small 前余量默认为 0，从上述起点继续向前扩展；回合后固定保留 0.5 秒，忽略旧的 Small 后余量设置，边界不超出真实视频。自动剪辑不跨空隙合并 Small 回合，仅合并扩展后相接或重叠的区间；自定义范围由用户控制。
+_Avoid_: 落台回合、板数回合
+
+## Small 评分帧率（Small Sampling FPS）
+
+完整画面送入 Small 模型的实际时间采样率，新分析为 6 fps，历史可能为 12 或 30 fps。它决定评分序列、时序窗口的帧数和解码时间轴，不改变原媒体帧率。当前候选权重使用重新拟合的 6 fps 时序配置，其余评分帧率明确记录为迁移配置。
+_Avoid_: 导出帧率、媒体帧率、仅修改输出帧号
 
 ## 落台判定（Bounce Events）
 
@@ -328,7 +345,7 @@ Bounce Event Times。
 
 “精彩回合”的选择准则，不是 Rally Recognition Method 或 Analysis Mode。连续可见
 结果按 `end_time_seconds - start_time_seconds` 严格大于阈值的累计时长档位选择：
-短回合、相持、长相持。
+短回合、相持、长相持。Small 结果采用相同档位，时长包含回合内的发球阶段。
 
 ## 融合回合识别（Hybrid Motion Bounce）
 

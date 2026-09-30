@@ -13,6 +13,15 @@ import { loadSettings, saveSettings } from '../src/main/settings';
 import { appSettingsSchema } from '../src/shared/contracts';
 
 describe('settings migration', () => {
+  it('persists Small explicitly and defaults an unknown backend to the original', async () => {
+    const settings = await loadSettings();
+    expect(settings.analysis_backend).toBe('existing');
+    await saveSettings({ ...settings, analysis_backend: 'mobilenet_small', small_pre_roll_seconds: 0.5, small_post_roll_seconds: 2 });
+    expect(await loadSettings()).toMatchObject({ analysis_backend: 'mobilenet_small', small_pre_roll_seconds: 0.5, small_post_roll_seconds: 2,
+      pre_roll_seconds: 2.5, post_roll_seconds: 1 });
+    await writeFile(path.join(state.userData, 'settings.json'), JSON.stringify({ analysis_backend: 'unknown' }));
+    expect((await loadSettings()).analysis_backend).toBe('existing');
+  });
   beforeEach(async () => {
     state.userData = await mkdtemp(path.join(tmpdir(), 'ttcut-settings-'));
   });
@@ -26,7 +35,9 @@ describe('settings migration', () => {
       language: 'en', export_strategy: 'compatible', pre_roll_seconds: 5, post_roll_seconds: 0.5,
     }), 'utf8');
     await expect(loadSettings()).resolves.toEqual({
+      analysis_backend: 'existing',
       language: 'en', calibration_method: 'automatic',
+      small_pre_roll_seconds: 0, small_post_roll_seconds: 0,
       pre_roll_seconds: 5, post_roll_seconds: 0.5,
       normalize_variable_frame_rate: false,
     });
@@ -45,6 +56,7 @@ describe('settings migration', () => {
 
   it('saves settings without an export strategy atomically', async () => {
     const settings = {
+      analysis_backend: 'existing' as const,
       language: 'zh-CN' as const, calibration_method: 'automatic' as const,
       pre_roll_seconds: 2.5 as const, post_roll_seconds: 2 as const,
       normalize_variable_frame_rate: true,
@@ -59,8 +71,10 @@ describe('settings migration', () => {
       pre_roll_seconds: 2.5, post_roll_seconds: 2,
     }), 'utf8');
     await expect(loadSettings()).resolves.toEqual({
+      analysis_backend: 'existing',
       language: 'zh-CN', calibration_method: 'automatic', pre_roll_seconds: 2.5, post_roll_seconds: 2,
       normalize_variable_frame_rate: false,
+      small_pre_roll_seconds: 0, small_post_roll_seconds: 0,
     });
     expect(JSON.parse(await readFile(path.join(state.userData, 'settings.json'), 'utf8'))).not.toHaveProperty('ball_model_profile');
   });

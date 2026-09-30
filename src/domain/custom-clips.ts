@@ -6,7 +6,8 @@ import type {
   Rally,
   RallyRecognitionMethod,
 } from '../shared/contracts';
-import { finalRallyTailSeconds, rallyLeadInStart } from './segments';
+import { rallyClipEnd, rallyLeadInStart } from './segments';
+import { keepsSmallRally } from './small-rally-policy';
 
 const EPSILON = 1e-6;
 const PRECISION = 1_000_000;
@@ -104,12 +105,10 @@ export function createCustomClipDraft(
   recognitionMethod: RallyRecognitionMethod = 'bounce_events',
 ): CustomRallyClip[] {
   const minimumDuration = frameDuration(fps);
-  const clips = orderedRallies(rallies).map((rally) => {
+  const eligible = recognitionMethod === 'mobilenet_small' ? rallies.filter(keepsSmallRally) : rallies;
+  const clips = orderedRallies(eligible).map((rally) => {
     const defaultStart = seconds(rallyLeadInStart(rally, preRollSeconds, recognitionMethod));
-    const defaultEnd = seconds(Math.min(
-      videoDuration,
-      rally.end_time_seconds + finalRallyTailSeconds(recognitionMethod) + postRollSeconds,
-    ));
+    const defaultEnd = seconds(rallyClipEnd(rally.end_time_seconds, postRollSeconds, videoDuration, recognitionMethod));
     const end = Math.max(defaultEnd, seconds(Math.min(videoDuration, defaultStart + minimumDuration)));
     return {
       clipId: rally.id,

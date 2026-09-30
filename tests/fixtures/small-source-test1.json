@@ -1,0 +1,191 @@
+{
+  "schema_version": 1,
+  "time_intervals": "[start_sec, end_sec)",
+  "frame_intervals": "1-based inclusive canonical frames, not original source frame indices",
+  "fps": 30,
+  "frame_count": 1114,
+  "duration_sec": 37.13333333333333,
+  "offline_future_context": true,
+  "source": {
+    "video_path": "E:\\NEWMODEL\\videos\\test1.mp4",
+    "source_sha256": "34454d99e89a92d9a63eb2252d563301773e248eb1431ab12aba2128091df1fb",
+    "checkpoint_sha256": "706ea81e894010be854ec199bf1b7359f3e343a5dd24f0ee645683e92d38e44c",
+    "checkpoint": "E:\\MobileNetV3-Large\\huji_student\\runs\\v1\\student_final.pt",
+    "preprocessing": "full_frame_cv2_area_height256_jpeg95_pil_rgb_imagenet_v1",
+    "score_source": "student_source_video",
+    "device": "cuda",
+    "elapsed_sec": 16.920933299999888
+  },
+  "checkpoint_identity_verified": true,
+  "decoder_id": "54429b3382cb9e85",
+  "segments": [
+    {
+      "label": "serve",
+      "start_frame": 1,
+      "end_frame": 66,
+      "start_sec": 0,
+      "end_sec": 2.2,
+      "duration_sec": 2.2,
+      "mean_score": 0.9355634942459544
+    },
+    {
+      "label": "play",
+      "start_frame": 67,
+      "end_frame": 342,
+      "start_sec": 2.2,
+      "end_sec": 11.4,
+      "duration_sec": 9.2,
+      "mean_score": 0.9125600105997647
+    },
+    {
+      "label": "other",
+      "start_frame": 343,
+      "end_frame": 456,
+      "start_sec": 11.4,
+      "end_sec": 15.2,
+      "duration_sec": 3.8,
+      "mean_score": 0.8561790948219091
+    },
+    {
+      "label": "serve",
+      "start_frame": 457,
+      "end_frame": 525,
+      "start_sec": 15.2,
+      "end_sec": 17.5,
+      "duration_sec": 2.3,
+      "mean_score": 0.8996409135411336
+    },
+    {
+      "label": "play",
+      "start_frame": 526,
+      "end_frame": 730,
+      "start_sec": 17.5,
+      "end_sec": 24.333333333333332,
+      "duration_sec": 6.833333333333333,
+      "mean_score": 0.9078059132577847
+    },
+    {
+      "label": "other",
+      "start_frame": 731,
+      "end_frame": 745,
+      "start_sec": 24.333333333333332,
+      "end_sec": 24.833333333333332,
+      "duration_sec": 0.5,
+      "mean_score": 0.745935700389662
+    },
+    {
+      "label": "serve",
+      "start_frame": 746,
+      "end_frame": 831,
+      "start_sec": 24.833333333333332,
+      "end_sec": 27.7,
+      "duration_sec": 2.8666666666666667,
+      "mean_score": 0.8808073565149601
+    },
+    {
+      "label": "play",
+      "start_frame": 832,
+      "end_frame": 1114,
+      "start_sec": 27.7,
+      "end_sec": 37.13333333333333,
+      "duration_sec": 9.433333333333334,
+      "mean_score": 0.8787195970928783
+    }
+  ],
+  "rallies": [
+    {
+      "rally_id": 1,
+      "start_sec": 0,
+      "end_sec": 11.4,
+      "duration_sec": 11.4,
+      "phases": [
+        {
+          "label": "serve",
+          "start_frame": 1,
+          "end_frame": 66,
+          "start_sec": 0,
+          "end_sec": 2.2,
+          "duration_sec": 2.2,
+          "mean_score": 0.9355634942459544
+        },
+        {
+          "label": "play",
+          "start_frame": 67,
+          "end_frame": 342,
+          "start_sec": 2.2,
+          "end_sec": 11.4,
+          "duration_sec": 9.2,
+          "mean_score": 0.9125600105997647
+        }
+      ],
+      "has_serve": true,
+      "has_play": true,
+      "kind": "serve_and_play",
+      "touches_video_start": true,
+      "touches_video_end": false
+    },
+    {
+      "rally_id": 2,
+      "start_sec": 15.2,
+      "end_sec": 24.333333333333332,
+      "duration_sec": 9.133333333333333,
+      "phases": [
+        {
+          "label": "serve",
+          "start_frame": 457,
+          "end_frame": 525,
+          "start_sec": 15.2,
+          "end_sec": 17.5,
+          "duration_sec": 2.3,
+          "mean_score": 0.8996409135411336
+        },
+        {
+          "label": "play",
+          "start_frame": 526,
+          "end_frame": 730,
+          "start_sec": 17.5,
+          "end_sec": 24.333333333333332,
+          "duration_sec": 6.833333333333333,
+          "mean_score": 0.9078059132577847
+        }
+      ],
+      "has_serve": true,
+      "has_play": true,
+      "kind": "serve_and_play",
+      "touches_video_start": false,
+      "touches_video_end": false
+    },
+    {
+      "rally_id": 3,
+      "start_sec": 24.833333333333332,
+      "end_sec": 37.13333333333333,
+      "duration_sec": 12.3,
+      "phases": [
+        {
+          "label": "serve",
+          "start_frame": 746,
+          "end_frame": 831,
+          "start_sec": 24.833333333333332,
+          "end_sec": 27.7,
+          "duration_sec": 2.8666666666666667,
+          "mean_score": 0.8808073565149601
+        },
+        {
+          "label": "play",
+          "start_frame": 832,
+          "end_frame": 1114,
+          "start_sec": 27.7,
+          "end_sec": 37.13333333333333,
+          "duration_sec": 9.433333333333334,
+          "mean_score": 0.8787195970928783
+        }
+      ],
+      "has_serve": true,
+      "has_play": true,
+      "kind": "serve_and_play",
+      "touches_video_start": false,
+      "touches_video_end": true
+    }
+  ],
+  "score_note": "mean_score is a temporal model score, not a calibrated correctness probability"
+}

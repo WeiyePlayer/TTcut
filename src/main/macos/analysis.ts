@@ -13,7 +13,7 @@ import { callNative, probeMacVideo, renderMacMedia } from './client';
 import { logLine } from '../logger';
 import { removeProcessingCache } from '../processing-media';
 
-type AnalysisOptions = Parameters<typeof import('../analysis').startAnalysis>[1];
+type AnalysisOptions = Exclude<Parameters<typeof import('../analysis').startAnalysis>[1], { analysisBackend: 'mobilenet_small' }>;
 const checkpoint = { blurball: '3545206c7155194ea654899d33579c88c9fd8e82c632cbdbae3b0c0ec3f2985f', table: '160e1a9b2d0236b501dc4a4d38bbfb39315eeef6de5d8c11770452623ff102df' };
 const continuousVisibilityProvenance = {
   detection_confidence_threshold: 0.30,

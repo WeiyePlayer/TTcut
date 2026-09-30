@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
-import type { TTcutApi, AppEvent } from '../shared/api';
-import type { AppSettings, CalibrationChoice, ExportRequest } from '../shared/contracts';
+import type { TTcutApi, AppEvent, AnalysisStartInput } from '../shared/api';
+import type { AppSettings, ExportRequest } from '../shared/contracts';
 import { IPC } from '../shared/ipc';
 
 const api: TTcutApi = {
@@ -23,7 +23,7 @@ const api: TTcutApi = {
   startAutoCalibration: (input: { videoPath: string; device: 'auto' | 'directml' | 'cuda' | 'cpu' }) => (
     ipcRenderer.invoke(IPC.calibrationStart, input)
   ),
-  startAnalysis: (input: { videoPath: string; calibrationChoice: CalibrationChoice; device: 'auto' | 'directml' | 'cuda' | 'cpu'; historyVisibility: 'visible' | 'deferred'; normalizeVariableFrameRate: boolean }) => (
+  startAnalysis: (input: AnalysisStartInput) => (
     ipcRenderer.invoke(IPC.analysisStart, input)
   ),
   startExport: (input: ExportRequest) => ipcRenderer.invoke(IPC.exportStart, input),

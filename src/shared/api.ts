@@ -28,6 +28,7 @@ export type SelectedVideo = {
 };
 
 export type BootstrapData = {
+  smallBackend?: { available: boolean; detail: string | null };
   windowState?: { visible: boolean };
   capabilities?: { managedComponents: boolean; nativeWindow: boolean; shutdown: boolean; automaticUpdates: boolean };
   version: string;
@@ -39,7 +40,7 @@ export type BootstrapData = {
 
 export type AppEvent =
   | { type: 'progress'; data: TaskProgress }
-  | { type: 'analysis-result'; taskId: string; analysisId: string; calibration: Calibration; data: AnalysisResultV1 }
+  | { type: 'analysis-result'; taskId: string; analysisId: string; calibration?: Calibration | undefined; data: AnalysisResultV1 }
   | { type: 'calibration-result'; taskId: string; calibration: Calibration; tableAnalysis: TableAnalysis }
   | { type: 'export-result'; taskId: string; data: ExportResult }
   | { type: 'batch-export-result'; taskId: string; data: BatchExportResult }
@@ -57,8 +58,18 @@ export type HistoryOpenResultV1 = {
   analysisId: string;
   video: SelectedVideo;
   analysis: AnalysisResultV1;
-  calibration: Calibration;
+  calibration?: Calibration | undefined;
 };
+
+export type AnalysisStartInput = {
+  videoPath: string;
+  device: 'auto' | 'directml' | 'cuda' | 'cpu';
+  historyVisibility: 'visible' | 'deferred';
+  normalizeVariableFrameRate: boolean;
+} & (
+  | { analysisBackend?: 'existing'; calibrationChoice: CalibrationChoice }
+  | { analysisBackend: 'mobilenet_small'; calibrationChoice?: never }
+);
 
 export interface TTcutApi {
   readonly platform?: string;
@@ -77,13 +88,7 @@ export interface TTcutApi {
     videoPath: string;
     device: 'auto' | 'directml' | 'cuda' | 'cpu';
   }): Promise<string>;
-  startAnalysis(input: {
-    videoPath: string;
-    calibrationChoice: CalibrationChoice;
-    device: 'auto' | 'directml' | 'cuda' | 'cpu';
-    historyVisibility: 'visible' | 'deferred';
-    normalizeVariableFrameRate: boolean;
-  }): Promise<string>;
+  startAnalysis(input: AnalysisStartInput): Promise<string>;
   startExport(input: ExportRequest): Promise<string>;
   startBatchExport(input: BatchExportRequest): Promise<string>;
   listHistory(): Promise<HistorySummaryV1[]>;

@@ -4,10 +4,13 @@ import { app } from 'electron';
 import { appSettingsSchema, type AppSettings } from '../shared/contracts';
 
 const defaults: AppSettings = {
+  analysis_backend: 'existing',
   language: 'zh-CN',
   calibration_method: 'automatic',
   pre_roll_seconds: 2.5,
   post_roll_seconds: 1,
+  small_pre_roll_seconds: 0,
+  small_post_roll_seconds: 0,
   normalize_variable_frame_rate: false,
 };
 
@@ -27,6 +30,11 @@ export async function loadSettings(): Promise<AppSettings> {
   try {
     const raw = JSON.parse(await readFile(settingsPath(), 'utf8')) as Record<string, unknown>;
     const settings = appSettingsSchema.parse({
+      analysis_backend: raw.analysis_backend === 'mobilenet_small' ? 'mobilenet_small' : 'existing',
+      small_pre_roll_seconds: [0, 0.5, 1, 1.5, 2.5, 5].includes(Number(raw.small_pre_roll_seconds))
+        ? raw.small_pre_roll_seconds : 0,
+      small_post_roll_seconds: [0, 0.5, 1, 2, 4].includes(Number(raw.small_post_roll_seconds))
+        ? raw.small_post_roll_seconds : 0,
       language: raw.language === 'en' || raw.language === 'zh-CN' ? raw.language : defaults.language,
       calibration_method: raw.calibration_method === 'automatic' || raw.calibration_method === 'manual'
         ? raw.calibration_method

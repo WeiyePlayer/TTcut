@@ -4,6 +4,7 @@ import {
   DURATION_HIGHLIGHT_SECONDS,
   DURATION_HIGHLIGHT_TIER_VALUES,
   rallyRecognitionMethod,
+  usesDurationHighlights,
   type AnalysisResultV1,
   type AppSettings,
   type Calibration,
@@ -19,6 +20,7 @@ import {
 import type { AppEvent, BootstrapData, SelectedVideo } from '../shared/api';
 import { DONATION_URL, GITHUB_URL, RELEASES_URL, WEBSITE_URL } from '../shared/urls';
 import { formatTimestamp } from '../domain/time';
+import { analysisRollSettings } from '../domain/analysis-settings';
 import { createCustomClipDraft, customExportSegments, setCustomClipSelected, type CustomRallyClip } from '../domain/custom-clips';
 import type { CustomPlaybackMode } from '../domain/custom-playback';
 import { normalizeCalibrationPoints, validateCalibration } from '../domain/calibration';
@@ -88,6 +90,7 @@ function updateErrorMessage(code: string | null, language: Language): string {
 export function App() {
   const [bootstrap, setBootstrap] = useState<BootstrapData | null>(null);
   const [settings, setSettings] = useState<AppSettings>({
+    analysis_backend: 'existing',
     language: 'zh-CN', calibration_method: 'automatic',
     pre_roll_seconds: 2.5, post_roll_seconds: 1,
     normalize_variable_frame_rate: false,
@@ -143,8 +146,10 @@ export function App() {
   }, []);
   const t = messages(settings.language as Language);
   const isMac = window.ttcut.platform === 'darwin';
+  const useSmall = !isMac && settings.analysis_backend === 'mobilenet_small';
+  const analysisAvailable = useSmall ? bootstrap?.smallBackend?.available : bootstrap?.components.analysis.available;
   const platformSupported = bootstrap?.platformCompatibility.status === 'supported';
-  const useManualCalibration = settings.calibration_method === 'manual' || forceManual;
+  const useManualCalibration = !useSmall && (settings.calibration_method === 'manual' || forceManual);
   const platformDetail = !bootstrap
     ? ''
     : isMac
@@ -163,7 +168,9 @@ export function App() {
       setBootstrap(data);
       setSettings(data.settings);
       settingsRef.current = data.settings;
-      if (data.platformCompatibility.status !== 'supported' || !data.components.analysis.available || !data.components.media.available) {
+      const available = window.ttcut.platform !== 'darwin' && data.settings.analysis_backend === 'mobilenet_small'
+        ? data.smallBackend?.available : data.components.analysis.available;
+      if (data.platformCompatibility.status !== 'supported' || !available || !data.components.media.available) {
         setView('settings');
       }
     });
@@ -191,7 +198,7 @@ export function App() {
             ? `固定帧率预处理失败，已使用原始可变帧率视频继续分析（${event.data.processing.warning_code ?? 'CFR_FALLBACK'}）。`
             : `CFR preprocessing failed; analysis continued with the original VFR video (${event.data.processing.warning_code ?? 'CFR_FALLBACK'}).`);
         }
-        setPoints(event.calibration.points);
+        setPoints(event.calibration?.points ?? {});
         setStep(event.data.rallies.length ? 'mode' : 'empty');
       } else if (event.type === 'calibration-result' || event.type === 'batch-export-result') {
         return;
@@ -322,7 +329,9 @@ export function App() {
     points: normalizeCalibrationPoints(pointOrder.map((name) => points[name]!)),
   } : null;
   const calibrationIssue = calibrationValue ? validateCalibration(calibrationValue) : null;
-  const analysisUsesContinuousVisibility = analysis ? rallyRecognitionMethod(analysis) === 'continuous_visibility' : false;
+  const analysisUsesContinuousVisibility = analysis ? usesDurationHighlights(rallyRecognitionMethod(analysis)) : false;
+  const resultRolls = analysisRollSettings(settings, analysis && rallyRecognitionMethod(analysis) === 'mobilenet_small' ? 'mobilenet_small' : 'existing');
+  const settingRolls = analysisRollSettings(settings, useSmall ? 'mobilenet_small' : 'existing');
   const highlights = analysis?.rallies.filter((rally) => (
     analysisUsesContinuousVisibility
       ? rally.end_time_seconds - rally.start_time_seconds > DURATION_HIGHLIGHT_SECONDS[durationTier]
@@ -340,8 +349,8 @@ export function App() {
     setCustomPlaybackMode('source');
     setCustomDraft(createCustomClipDraft(
       analysis.rallies,
-      settings.pre_roll_seconds,
-      settings.post_roll_seconds,
+      resultRolls.pre_roll_seconds,
+      resultRolls.post_roll_seconds,
       analysis.video.duration_seconds,
       analysis.video.fps,
       rallyRecognitionMethod(analysis),
@@ -351,13 +360,15 @@ export function App() {
   };
 
   const startAnalysis = async () => {
-    if (!video || !metadata || (useManualCalibration && (!calibrationValue || calibrationIssue)) || !platformSupported || !bootstrap?.components.analysis.available) return;
+    if (!video || !metadata || (useManualCalibration && (!calibrationValue || calibrationIssue)) || !platformSupported || !analysisAvailable) return;
     updateVideoTaskOwner('single');
     setStep('analyzing'); setProgress({ percent: 0, stage: 'load_model' });
     try {
       setActiveTask(await window.ttcut.startAnalysis({
         videoPath: video.path,
-        calibrationChoice: useManualCalibration ? { method: 'manual', calibration: calibrationValue! } : { method: 'automatic' },
+        ...(useSmall ? { analysisBackend: 'mobilenet_small' as const } : {
+          calibrationChoice: useManualCalibration ? { method: 'manual' as const, calibration: calibrationValue! } : { method: 'automatic' as const },
+        }),
         device: 'auto',
         historyVisibility: 'visible',
         normalizeVariableFrameRate: settings.normalize_variable_frame_rate,
@@ -381,7 +392,7 @@ export function App() {
     if (!analysis || !analysisId || !platformSupported || (mediaRequired && !bootstrap?.components.media.available)) return;
     if (!preparedSelection && selectedCount === 0) return;
     let selection: CutSelectionV1;
-    const common = { pre_roll_seconds: settings.pre_roll_seconds, post_roll_seconds: settings.post_roll_seconds } as const;
+    const common = resultRolls;
     if (preparedSelection) selection = preparedSelection;
     else if (mode === 'all') selection = { mode, ...common };
     else if (mode === 'highlight') selection = analysisUsesContinuousVisibility
@@ -454,7 +465,7 @@ export function App() {
         ? { code: opened.analysis.processing.warning_code, message: opened.analysis.processing.warning_code }
         : null);
       setAnalysisId(opened.analysisId);
-      setPoints(opened.calibration.points);
+      setPoints(opened.calibration?.points ?? {});
       setMode('all');
       setBounceThreshold(5);
       setDurationTier('rally');
@@ -488,9 +499,10 @@ export function App() {
 
   const refreshComponents = async () => {
     const components = await window.ttcut.refreshComponents();
-    setBootstrap((current) => current ? { ...current, components } : current);
+    const refreshed = await window.ttcut.bootstrap();
+    setBootstrap((current) => current ? { ...current, components, ...(refreshed.smallBackend ? { smallBackend: refreshed.smallBackend } : {}) } : current);
     const missing = [
-      ...(!components.analysis.available ? [t.analysisComponent] : []),
+      ...(!(useSmall ? refreshed.smallBackend?.available : components.analysis.available) ? [useSmall ? 'MobileNetV3-Small' : t.analysisComponent] : []),
       ...(!components.media.available ? [t.mediaComponent] : []),
     ];
     setMissingComponents(missing.length > 0 ? missing : null);
@@ -591,8 +603,9 @@ export function App() {
           <div hidden={view !== 'multi'}>
             <MultiTaskPage
               initialVideos={multiVideos}
-              preRoll={settings.pre_roll_seconds}
-              postRoll={settings.post_roll_seconds}
+              analysisBackend={useSmall ? 'mobilenet_small' : 'existing'}
+              preRoll={settingRolls.pre_roll_seconds}
+              postRoll={settingRolls.post_roll_seconds}
               normalizeVariableFrameRate={settings.normalize_variable_frame_rate}
               language={settings.language}
               onTaskStateChange={handleMultiTaskStateChange}
@@ -657,7 +670,22 @@ export function App() {
                   value={settings.normalize_variable_frame_rate}
                 />
               </article>
-              <article className="card setting-card">
+              {!isMac && <article className="card setting-card">
+                <div><h2>{settings.language === 'zh-CN' ? '分析模式' : 'Analysis mode'}</h2><p>{settings.language === 'zh-CN' ? 'Small 无需球台标定，精彩回合按时长筛选。切换后重新分析会覆盖该视频的原历史结果。' : 'Small skips table calibration and filters highlights by duration. Reanalyzing replaces the video’s previous history result.'}</p></div>
+                <GlassRadioGroup
+                  ariaLabel={settings.language === 'zh-CN' ? '分析模式' : 'Analysis mode'}
+                  className="compact" idPrefix="settings-backend" name="settings-backend"
+                  disabled={Boolean(activeTask || videoTaskOwner)}
+                  onChange={(analysis_backend) => void saveRolls({ analysis_backend })}
+                  options={[
+                    { value: 'existing', label: settings.language === 'zh-CN' ? '原有模式' : 'Original mode' },
+                    { value: 'mobilenet_small', label: settings.language === 'zh-CN' ? 'MobileNetV3-Small（本地试用）' : 'MobileNetV3-Small (local trial)' },
+                  ] as const}
+                  value={settings.analysis_backend ?? 'existing'}
+                />
+                {useSmall && !bootstrap?.smallBackend?.available && <p role="alert">{localizedError(bootstrap?.smallBackend?.detail ?? 'SMALL_RUNTIME_MISSING', t)}</p>}
+              </article>}
+              {!useSmall && <article className="card setting-card">
                 <div><h2>{settings.language === 'zh-CN' ? '球台标定' : 'Table calibration'}</h2><p>{settings.language === 'zh-CN' ? '选择单视频流程使用的球台标定方式。多任务会先自动标定，失败项目可手动补充。' : 'Choose the calibration method for single videos. Batch tasks calibrate automatically first, with manual recovery for failed items.'}</p></div>
                 <GlassRadioGroup
                   ariaLabel={settings.language === 'zh-CN' ? '球台标定方式' : 'Table calibration method'}
@@ -671,31 +699,31 @@ export function App() {
                   ] as const}
                   value={settings.calibration_method}
                 />
-              </article>
+              </article>}
               <article className="card timing-settings-card">
                 <section className="timing-setting">
-                  <div><h2>{t.preRoll}</h2><p>{t.preRollSettingDetail}</p></div>
+                  <div><h2>{t.preRoll}</h2><p>{useSmall ? (settings.language === 'zh-CN' ? '默认保留发球末尾 1.5 秒及完整对打；发球不足 1.5 秒或无发球时，从识别回合起点向前保留 1.5 秒。对打不足 2 秒的回合会被剔除。此处可再向前扩展。' : 'Keep the final 1.5 seconds of a longer serve and all play; if the serve is shorter or absent, start 1.5 seconds before the recognized rally. Rallies with less than 2 seconds of play are removed. Optionally extend further here.') : t.preRollSettingDetail}</p></div>
                   <GlassRadioGroup
                     ariaLabel={t.preRoll}
                     className="timing-toggle"
                     idPrefix="settings-pre-roll"
                     name="settings-pre-roll"
-                    onChange={(pre_roll_seconds) => void saveRolls({ pre_roll_seconds })}
-                    options={([1.5, 2.5, 5] as const).map((value, index) => ({ value, label: [t.short, t.medium, t.long][index] }))}
-                    value={settings.pre_roll_seconds}
+                    onChange={(value) => void saveRolls(useSmall ? { small_pre_roll_seconds: value } : { pre_roll_seconds: value })}
+                    options={useSmall ? ([0, 0.5, 1, 1.5, 2.5, 5] as const).map(value => ({ value, label: `${value} s` })) : ([1.5, 2.5, 5] as const).map((value, index) => ({ value, label: [t.short, t.medium, t.long][index] }))}
+                    value={settingRolls.pre_roll_seconds}
                   />
                 </section>
                 <section className="timing-setting">
-                  <div><h2>{t.postRoll}</h2><p>{t.postRollSettingDetail}</p></div>
-                  <GlassRadioGroup
+                  <div><h2>{t.postRoll}</h2><p>{useSmall ? (settings.language === 'zh-CN' ? '固定在回合结束后保留 0.5 秒，到达视频结尾时截断。' : 'Always retain 0.5 seconds after the rally, clipped at the video end.') : t.postRollSettingDetail}</p></div>
+                  {useSmall ? <span>0.5 s</span> : <GlassRadioGroup
                     ariaLabel={t.postRoll}
                     className="timing-toggle"
                     idPrefix="settings-post-roll"
                     name="settings-post-roll"
-                    onChange={(post_roll_seconds) => void saveRolls({ post_roll_seconds })}
+                    onChange={(value) => void saveRolls({ post_roll_seconds: value })}
                     options={([0.5, 1, 2, 4] as const).map((value, index) => ({ value, label: [t.veryShort, t.short, t.medium, t.long][index] }))}
-                    value={settings.post_roll_seconds}
-                  />
+                    value={settingRolls.post_roll_seconds}
+                  />}
                 </section>
               </article>
               <article className="card components-card">
@@ -748,7 +776,7 @@ export function App() {
             {bootstrap && !platformSupported && step === 'select' && (
               <div className="notice platform-notice"><strong>{t.platformUnsupported}</strong><span>{platformDetail}</span><button className="secondary" onClick={() => setView('settings')}>{t.openSetup}</button></div>
             )}
-            {bootstrap && platformSupported && (!bootstrap.components.analysis.available || !bootstrap.components.media.available) && step === 'select' && (
+            {bootstrap && platformSupported && (!analysisAvailable || !bootstrap.components.media.available) && step === 'select' && (
               <div className="notice"><strong>{t.componentMissing}</strong><span>{t.componentMissingDetail}</span><button className="secondary" onClick={() => setView('settings')}>{t.openSetup}</button></div>
             )}
             {analysisWarning && analysis && !['select', 'calibrate', 'analyzing', 'cutting'].includes(step) && (
@@ -789,14 +817,15 @@ export function App() {
 
             {step === 'calibrate' && video && metadata && (
               <div className="workflow-page">
-                <div className="page-heading"><p className="eyebrow">1 / 4</p><h1>{t.calibrationTitle}</h1><p>{useManualCalibration ? t.calibrationDescription : (settings.language === 'zh-CN' ? '将调用自动标定内核识别球台四角。' : 'The automatic calibration kernel will identify the table corners.')}</p></div>
+                <div className="page-heading"><p className="eyebrow">1 / 4</p><h1>{useSmall ? 'MobileNetV3-Small' : t.calibrationTitle}</h1><p>{useSmall ? (settings.language === 'zh-CN' ? '直接识别完整画面中的发球与对打，无需球台标定。' : 'Recognize serves and play from the full frame, without table calibration.') : useManualCalibration ? t.calibrationDescription : (settings.language === 'zh-CN' ? '将调用自动标定内核识别球台四角。' : 'The automatic calibration kernel will identify the table corners.')}</p></div>
                 <div className="file-summary card"><div><span>{t.fileName}</span><strong>{video.name}</strong></div><div><span>{t.fileSize}</span><strong>{fileSize(video.size)}</strong></div><div><span>{t.duration}</span><strong>{formatTimestamp(metadata.duration_seconds)}</strong></div><div><span>{t.resolution}</span><strong>{metadata.width} × {metadata.height}</strong></div><div><span>{t.frameRate}</span><strong>{metadata.fps.toFixed(3)} fps</strong></div></div>
-                {useManualCalibration ? <>
+                {!useSmall && (useManualCalibration ? <>
                   <CalibrationSurface video={video} metadata={metadata} points={points} onPointsChange={setPoints} language={settings.language} />
                   <div className="point-legend">{[t.point1, t.point2, t.point3, t.point4].map((label, index) => <span className={points[pointOrder[index]!] ? 'done' : ''} key={label}><b>{index + 1}</b>{label.replace(/^\d\s/, '')}</span>)}</div>
                   {calibrationIssue && <p className="calibration-error" role="alert">{t.invalidCalibration}</p>}
-                </> : <div className="card automatic-calibration"><span>⌖</span><div><h2>{settings.language === 'zh-CN' ? '自动球台标定' : 'Automatic table calibration'}</h2><p>{settings.language === 'zh-CN' ? '将从视频多个位置识别球台，并通过跨帧几何一致性生成固定标定。' : 'The table is detected at multiple video positions and combined using cross-frame geometric consistency.'}</p></div></div>}
-                <div className="footer-actions">{useManualCalibration && <button className="secondary" onClick={() => setPoints({})}>{t.resetPoints}</button>}<button className="primary" disabled={(useManualCalibration && (!allPoints || Boolean(calibrationIssue))) || !platformSupported || !bootstrap?.components.analysis.available} onClick={() => void startAnalysis()}>{t.startAnalysis}</button></div>
+                </> : <div className="card automatic-calibration"><span>⌖</span><div><h2>{settings.language === 'zh-CN' ? '自动球台标定' : 'Automatic table calibration'}</h2><p>{settings.language === 'zh-CN' ? '将从视频多个位置识别球台，并通过跨帧几何一致性生成固定标定。' : 'The table is detected at multiple video positions and combined using cross-frame geometric consistency.'}</p></div></div>)}
+                {useSmall && !analysisAvailable && <p role="alert">{localizedError(bootstrap?.smallBackend?.detail ?? 'SMALL_RUNTIME_MISSING', t)}</p>}
+                <div className="footer-actions">{useManualCalibration && <button className="secondary" onClick={() => setPoints({})}>{t.resetPoints}</button>}<button className="primary" disabled={(useManualCalibration && (!allPoints || Boolean(calibrationIssue))) || !platformSupported || !analysisAvailable} onClick={() => void startAnalysis()}>{t.startAnalysis}</button></div>
               </div>
             )}
 
@@ -804,7 +833,7 @@ export function App() {
               <div className="progress-stage">
                 <div className="progress-orb"><span>{Math.round(progress.percent)}%</span></div>
                 <h1>{step === 'analyzing' ? (tableRecognitionStage ? stageText : t.analyzing) : stageText}</h1>
-                <p>{step === 'analyzing' ? (tableRecognitionStage ? stageText : t.analyzingDetail) : video?.name}</p>
+                <p>{step === 'analyzing' ? (useSmall ? 'MobileNetV3-Small' : tableRecognitionStage ? stageText : t.analyzingDetail) : video?.name}</p>
                 <div className="progress-track"><span style={{ width: `${progress.percent}%` }} /></div>
                 <strong>{stageText}</strong>
                 {activeTask && <button className="secondary" onClick={() => void window.ttcut.cancelTask(activeTask)}>{t.cancel}</button>}
@@ -812,7 +841,7 @@ export function App() {
             )}
 
             {step === 'empty' && (
-              <div className="empty-state"><span>○</span><h1>{t.noRallies}</h1><p>{t.noRalliesDetail}</p><div className="footer-actions"><button className="secondary" onClick={reset}>{t.chooseAnother}</button><button className="primary" onClick={recalibrate}>{t.recalibrate}</button></div></div>
+              <div className="empty-state"><span>○</span><h1>{t.noRallies}</h1><p>{analysis?.schema_version === 4 ? (settings.language === 'zh-CN' ? 'Small 未识别到可剪辑回合，可换一个视频继续试用。' : 'Small found no rallies. Try another video.') : t.noRalliesDetail}</p><div className="footer-actions"><button className="secondary" onClick={reset}>{t.chooseAnother}</button>{analysis?.schema_version !== 4 && <button className="primary" onClick={recalibrate}>{t.recalibrate}</button>}</div></div>
             )}
 
             {step === 'mode' && analysis && (

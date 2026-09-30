@@ -3,6 +3,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   RALLY_RECOGNITION_METHOD_DEFAULT,
   rallyRecognitionMethod as resultRecognitionMethod,
+  usesDurationHighlights,
+  type AnalysisBackend,
   DURATION_HIGHLIGHT_TIER_VALUES,
   AnalysisResultV1,
   BatchExportResult,
@@ -52,9 +54,10 @@ type BatchItem = {
 };
 
 interface MultiTaskPageProps {
+  analysisBackend?: AnalysisBackend;
   initialVideos: SelectedVideo[];
-  preRoll: 1.5 | 2.5 | 5;
-  postRoll: 0.5 | 1 | 2 | 4;
+  preRoll: 0 | 0.5 | 1 | 1.5 | 2.5 | 5;
+  postRoll: 0 | 0.5 | 1 | 2 | 4;
   normalizeVariableFrameRate?: boolean;
   language?: 'zh-CN' | 'en';
   onOpenAnalysis: (analysisId: string) => void;
@@ -68,7 +71,7 @@ function makeId(video: SelectedVideo): string {
   return `${video.path}:${video.size}:${Date.now()}:${Math.random()}`;
 }
 
-async function createItems(videos: SelectedVideo[], firstOrder = 0): Promise<BatchItem[]> {
+async function createItems(videos: SelectedVideo[], firstOrder = 0, backend: AnalysisBackend = 'existing'): Promise<BatchItem[]> {
   return Promise.all(videos.map(async (video, index) => ({
     id: makeId(video),
     additionOrder: firstOrder + index,
@@ -78,7 +81,7 @@ async function createItems(videos: SelectedVideo[], firstOrder = 0): Promise<Bat
     mode: 'all' as const,
     threshold: 5 as const,
     durationTier: 'rally' as const,
-    calibrationStatus: 'pending' as const,
+    calibrationStatus: backend === 'mobilenet_small' ? 'ready' as const : 'pending' as const,
     processingStatus: 'waiting' as const,
     progress: 0,
     calibration: null,
@@ -95,7 +98,7 @@ async function createItems(videos: SelectedVideo[], firstOrder = 0): Promise<Bat
 
 function modeLabel(item: BatchItem, rallyRecognitionMethod: RallyRecognitionMethod): string {
   if (item.mode === 'all') return '所有回合';
-  if (item.mode === 'highlight') return rallyRecognitionMethod === 'continuous_visibility'
+  if (item.mode === 'highlight') return usesDurationHighlights(rallyRecognitionMethod)
     ? `精彩回合_${({ short_rally: '短回合', rally: '相持', long_rally: '长相持' } as const)[item.durationTier]}`
     : `精彩回合_${item.threshold}板`;
   return '只分析';
@@ -115,6 +118,7 @@ function hasOpenBatchWork(items: BatchItem[]): boolean {
 }
 
 export function MultiTaskPage({
+  analysisBackend = 'existing',
   initialVideos,
   preRoll,
   postRoll,
@@ -124,6 +128,11 @@ export function MultiTaskPage({
   onCompletableTasksFinished = () => undefined,
   onTaskStateChange = () => undefined,
 }: MultiTaskPageProps) {
+  // A batch owns its backend, including videos added later to the same queue.
+  const [backend] = useState(analysisBackend);
+  const methodFor = (item: BatchItem): RallyRecognitionMethod => item.analysis
+    ? resultRecognitionMethod(item.analysis)
+    : backend === 'mobilenet_small' ? 'mobilenet_small' : RALLY_RECOGNITION_METHOD_DEFAULT;
   const [items, setItems] = useState<BatchItem[]>([]);
   const [initialized, setInitialized] = useState(false);
   const [activeItem, setActiveItem] = useState<string | null>(null);
@@ -234,7 +243,7 @@ export function MultiTaskPage({
 
   const selectionFor = (item: BatchItem): Exclude<CutSelectionV1, { mode: 'custom' }> => item.mode === 'all'
     ? { mode: 'all', pre_roll_seconds: optionsRef.current.preRoll, post_roll_seconds: optionsRef.current.postRoll }
-    : item.analysis && resultRecognitionMethod(item.analysis) === 'continuous_visibility'
+    : usesDurationHighlights(methodFor(item))
       ? { mode: 'highlight', criterion: { kind: 'duration_tier', tier: item.durationTier }, pre_roll_seconds: optionsRef.current.preRoll, post_roll_seconds: optionsRef.current.postRoll }
       : { mode: 'highlight', criterion: { kind: 'bounce_count', threshold: item.threshold }, pre_roll_seconds: optionsRef.current.preRoll, post_roll_seconds: optionsRef.current.postRoll };
 
@@ -388,7 +397,7 @@ export function MultiTaskPage({
         ...(candidate.tableAnalysis ? { table_analysis: candidate.tableAnalysis } : {}),
       }
       : null;
-    if (!calibrationChoice) {
+    if (!calibrationChoice && backend !== 'mobilenet_small') {
       updateItem(candidate.id, (item) => ({ ...item, processingStatus: 'failed', error: 'INVALID_CALIBRATION' }));
       setTimeout(() => scheduleRef.current(), 0);
       return;
@@ -397,7 +406,7 @@ export function MultiTaskPage({
     setActivePhase('analysis');
     const startPromise = window.ttcut.startAnalysis({
       videoPath: candidate.video.path,
-      calibrationChoice,
+      ...(backend === 'mobilenet_small' ? { analysisBackend: 'mobilenet_small' as const } : { calibrationChoice: calibrationChoice! }),
       device: 'auto',
       historyVisibility: mergeRunRef.current || candidate.mode === 'analyze-only' ? 'visible' : 'deferred',
       normalizeVariableFrameRate: optionsRef.current.normalizeVariableFrameRate,
@@ -420,7 +429,7 @@ export function MultiTaskPage({
 
   useEffect(() => {
     let cancelled = false;
-    void createItems(initialVideos).then((created) => {
+    void createItems(initialVideos, 0, backend).then((created) => {
       if (cancelled) return;
       itemsRef.current = created;
       setItems(created);
@@ -595,7 +604,7 @@ export function MultiTaskPage({
     nextAdditionOrder.current += unique.length;
     pendingAdditions.current += 1;
     try {
-      const created = await createItems(unique, firstOrder);
+      const created = await createItems(unique, firstOrder, backend);
       if (batchExportRef.current) return;
       const added = autoCalibrationAvailableRef.current
         ? created
@@ -853,7 +862,7 @@ export function MultiTaskPage({
                         </button>
                       ))}
                     </div>
-                    {item.mode === 'highlight' && (item.analysis && resultRecognitionMethod(item.analysis) === 'continuous_visibility' ? <GlassRadioGroup
+                    {item.mode === 'highlight' && (usesDurationHighlights(methodFor(item)) ? <GlassRadioGroup
                       ariaLabel={language === 'zh-CN' ? '时长档位' : 'Duration tier'}
                       className="compact"
                       disabled={exportLocked || (!mergeWorkflow && active)}
