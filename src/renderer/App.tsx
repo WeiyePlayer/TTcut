@@ -1,5 +1,5 @@
 import { CompatibleVideo } from './CompatibleVideo';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   DURATION_HIGHLIGHT_SECONDS,
   DURATION_HIGHLIGHT_TIER_VALUES,
@@ -34,6 +34,7 @@ import { SupportPrompt } from './SupportPrompt';
 import { CustomCutPage } from './CustomCutPage';
 import { renderScoreboardImage } from './scoreboard-canvas';
 import { GlassRadioGroup } from './GlassRadioGroup';
+import { ScoreboardStyleSelector } from './ScoreboardStyleSelector';
 import { UpdatePrompt } from './UpdatePrompt';
 import packageJson from '../../package.json';
 import captureGuideImage from './assets/pingpong-table-with-pose-mannequins.png';
@@ -116,7 +117,8 @@ export function App() {
   const [bounceThreshold, setBounceThreshold] = useState<3 | 5 | 7>(5);
   const [durationTier, setDurationTier] = useState<DurationHighlightTier>('rally');
   const [customDraft, setCustomDraft] = useState<CustomRallyClip[] | null>(null);
-  const [customScoreboard, setCustomScoreboard] = useState<ScoreboardSetting>(DEFAULT_SCOREBOARD);
+  const [customScoreboardDraft, setCustomScoreboard] = useState<ScoreboardSetting>(DEFAULT_SCOREBOARD);
+  const customScoreboard = useMemo(() => ({ ...customScoreboardDraft, style: settings.scoreboard_style ?? 'classic' }), [customScoreboardDraft, settings.scoreboard_style]);
   const [customPlaybackMode, setCustomPlaybackMode] = useState<CustomPlaybackMode>('source');
   const [customSaveError, setCustomSaveError] = useState(false);
   const [customResetVersion, setCustomResetVersion] = useState(0);
@@ -441,6 +443,7 @@ export function App() {
           x: customScoreboard.x,
           y: customScoreboard.y,
           scale: customScoreboard.scale,
+          style: customScoreboard.style,
           left_name: customScoreboard.left_name,
           right_name: customScoreboard.right_name,
           scores: customDraft.filter((clip) => clip.selected).map((clip) => {
@@ -698,6 +701,10 @@ export function App() {
                   options={[{ value: 'zh-CN', label: t.chinese }, { value: 'en', label: t.english }] as const}
                   value={settings.language as Language}
                 />
+              </article>
+              <article className="card scoreboard-style-setting">
+                <h2>{t.scoreboardStyle}</h2>
+                <ScoreboardStyleSelector value={settings.scoreboard_style ?? 'classic'} onChange={scoreboard_style => void saveRolls({ scoreboard_style })} translations={t} />
               </article>
               <article className="card setting-card">
                 <div>

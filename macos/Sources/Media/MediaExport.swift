@@ -6,11 +6,13 @@ public struct ScoreboardOverlay: Codable, Sendable {
   public let y: Double
   public let scale: Double?
   public let imagePath: String
+  public var style: String? = nil
 
   public var isValid: Bool {
     x.isFinite && y.isFinite && (0...1).contains(x) && (0...1).contains(y)
       && (scale == nil || (scale!.isFinite && (0.5...3).contains(scale!)))
       && !imagePath.isEmpty
+      && (style == nil || ["classic", "classic-orange", "classic-green", "red-blue"].contains(style!))
   }
 }
 
@@ -89,8 +91,10 @@ public struct MediaExporter: Sendable {
     // MediaProbe already returns display-oriented dimensions.
     let width = Double(video.width)
     let height = Double(video.height)
-    let boardWidth = max(1, Int((width * 0.28 * (score.scale ?? 1)).rounded()))
-    let boardHeight = min(Int(height), max(1, Int((Double(boardWidth) / 5.2).rounded())))
+    let widthFraction = score.style == "red-blue" ? 0.21 : 0.28
+    let boardWidth = max(1, Int((width * widthFraction * (score.scale ?? 1)).rounded()))
+    let aspect = score.style == "red-blue" ? 1.46 : 5.2
+    let boardHeight = min(Int(height), max(1, Int((Double(boardWidth) / aspect).rounded())))
     let x = Int((max(0, min(1 - Double(boardWidth) / width, score.x)) * width).rounded())
     let y = Int((max(0, min(1 - Double(boardHeight) / height, score.y)) * height).rounded())
     return "overlay=x=\(x):y=\(y):shortest=1:format=auto"

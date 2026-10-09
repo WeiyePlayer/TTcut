@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { useLayoutEffect, useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { calculateRallyPlaybackScrollTop, CustomCutPage, findPlaybackTargetClip } from '../src/renderer/CustomCutPage';
-import type { AnalysisResultV1, ExportRequest } from '../src/shared/contracts';
+import type { AnalysisResultV1, ExportRequest, ScoreboardPosition, ScoreboardStyle } from '../src/shared/contracts';
 import type { SelectedVideo } from '../src/shared/api';
 import { setCustomClipSelected, type CustomRallyClip } from '../src/domain/custom-clips';
 import type { CustomPlaybackMode } from '../src/domain/custom-playback';
@@ -61,13 +61,13 @@ function PlaybackHarness({ clips = playbackClips }: { clips?: CustomRallyClip[] 
   return <CustomCutPage video={video} analysis={analysis} clips={currentClips} playbackMode={playbackMode} onPlaybackModeChange={setPlaybackMode} translations={messages('en')} mediaAvailable onClipsChange={setCurrentClips} onToggleAll={vi.fn()} outputs={outputs} onOutputsChange={setOutputs} onExport={vi.fn()} />;
 }
 
-function ScoreboardHarness({ language = 'en' }: { language?: 'en' | 'zh-CN' }) {
+function ScoreboardHarness({ language = 'en', style = 'classic' }: { language?: 'en' | 'zh-CN'; style?: ScoreboardStyle }) {
   useLayoutEffect(() => {
     const monitor = document.querySelector('.custom-monitor video')!;
     Object.defineProperties(monitor, { readyState: { configurable: true, value: 4 }, paused: { configurable: true, value: false }, videoWidth: { configurable: true, value: 1280 }, videoHeight: { configurable: true, value: 720 } });
   }, []);
   const [clips, setClips] = useState(playbackClips);
-  const [scoreboard, setScoreboard] = useState({ enabled: false, x: 0.78, y: 0.04 });
+  const [scoreboard, setScoreboard] = useState<ScoreboardPosition & { enabled: boolean }>({ enabled: false, x: 0.78, y: 0.04, style });
   return <CustomCutPage video={video} analysis={analysis} clips={clips} scoreboard={scoreboard} onScoreboardChange={setScoreboard} playbackMode="source" onPlaybackModeChange={vi.fn()} translations={messages(language)} mediaAvailable onClipsChange={setClips} onToggleAll={vi.fn()} outputs={{ combined_video: true, rally_videos: false, premiere_xml: false }} onOutputsChange={vi.fn()} onExport={vi.fn()} />;
 }
 
@@ -121,8 +121,8 @@ function winner(side: 'A' | 'B') {
   return screen.getByRole('button', { name: `${side} wins this rally; add one point in the next rally` });
 }
 
-it('keeps the normal rally list and selection controls while toggling the overlay', () => {
-  render(<ScoreboardHarness />);
+it.each(['classic', 'classic-orange', 'classic-green', 'red-blue'] as const)('keeps the normal rally list and selection controls while toggling the overlay (%s)', (style) => {
+  render(<ScoreboardHarness style={style} />);
   const button = screen.getByRole('button', { name: 'Scoreboard' });
   expect(button.querySelector('svg path')).toBeInTheDocument();
   expect(button.compareDocumentPosition(screen.getByRole('button', { name: 'Sequential playback' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -141,8 +141,8 @@ it('keeps the normal rally list and selection controls while toggling the overla
   expect(screen.getByRole('checkbox', { name: 'Rally 3' })).not.toBeChecked();
 });
 
-it('scores and plays the next selected rally, replacing prior choices without double counting and staying on the last rally', () => {
-  render(<ScoreboardHarness />);
+it.each(['classic', 'classic-orange', 'classic-green', 'red-blue'] as const)('scores and plays the next selected rally, replacing prior choices without double counting and staying on the last rally (%s)', (style) => {
+  render(<ScoreboardHarness style={style} />);
   fireEvent.click(screen.getByRole('button', { name: 'Scoreboard' }));
   const monitor = document.querySelector<HTMLVideoElement>('.custom-monitor video')!;
   setVideoTime(monitor, 1.5);
@@ -174,8 +174,8 @@ it('scores and plays the next selected rally, replacing prior choices without do
   expect(scoreCell('B')).toHaveTextContent('1');
 });
 
-it('edits all four numbers before the first rally, between rallies, and after the final rally', () => {
-  render(<ScoreboardHarness />);
+it.each(['classic', 'classic-orange', 'classic-green', 'red-blue'] as const)('edits all four numbers before the first rally, between rallies, and after the final rally (%s)', (style) => {
+  render(<ScoreboardHarness style={style} />);
   fireEvent.click(screen.getByRole('button', { name: 'Scoreboard' }));
   const monitor = document.querySelector<HTMLVideoElement>('.custom-monitor video')!;
   // The editor initially opens at zero, outside the first selected rally.
@@ -205,8 +205,8 @@ it('edits all four numbers before the first rally, between rallies, and after th
   expect(scoreCell('A')).toHaveTextContent('9');
 });
 
-it('pauses on double-click so a playing rally cannot remove the score editor', () => {
-  render(<ScoreboardHarness />);
+it.each(['classic', 'classic-orange', 'classic-green', 'red-blue'] as const)('pauses on double-click so a playing rally cannot remove the score editor (%s)', (style) => {
+  render(<ScoreboardHarness style={style} />);
   fireEvent.click(screen.getByRole('button', { name: 'Scoreboard' }));
   const monitor = document.querySelector<HTMLVideoElement>('.custom-monitor video')!;
   setVideoTime(monitor, 1.9);
@@ -220,8 +220,8 @@ it('pauses on double-click so a playing rally cannot remove the score editor', (
   pause.mockRestore();
 });
 
-it('continues from manual scores and adjusts both columns by wheel without automatic game rules', () => {
-  render(<ScoreboardHarness />);
+it.each(['classic', 'classic-orange', 'classic-green', 'red-blue'] as const)('continues from manual scores and adjusts both columns by wheel without automatic game rules (%s)', (style) => {
+  render(<ScoreboardHarness style={style} />);
   fireEvent.click(screen.getByRole('button', { name: 'Scoreboard' }));
   const monitor = document.querySelector<HTMLVideoElement>('.custom-monitor video')!;
   setVideoTime(monitor, 1.5);
@@ -247,8 +247,8 @@ it('continues from manual scores and adjusts both columns by wheel without autom
   expect(scoreCell('A')).toHaveTextContent('11');
 });
 
-it('edits Unicode names on the overlay and normalizes leading zeros and empty scores', () => {
-  render(<ScoreboardHarness />);
+it.each(['classic', 'classic-orange', 'classic-green', 'red-blue'] as const)('edits Unicode names on the overlay and normalizes leading zeros and empty scores (%s)', (style) => {
+  render(<ScoreboardHarness style={style} />);
   fireEvent.click(screen.getByRole('button', { name: 'Scoreboard' }));
   setVideoTime(document.querySelector<HTMLVideoElement>('.custom-monitor video')!, 1.5);
   fireEvent.doubleClick(scoreCell('A'));
@@ -278,6 +278,38 @@ it('moves the scoreboard within the video frame when dragged', () => {
   fireEvent.pointerMove(board, { pointerId: 1, clientX: 120, clientY: 120 });
   expect(parseFloat(board.style.left)).toBeCloseTo(68.08, 2);
   expect(board).toHaveStyle({ top: '8%' });
+});
+
+it('retains name, game and point editing and next-rally scoring in the red-blue layout', () => {
+  render(<ScoreboardHarness style="red-blue" />);
+  fireEvent.click(screen.getByRole('button', { name: 'Scoreboard' }));
+  const board = screen.getByRole('button', { name: /Drag the scoreboard/ });
+  expect(board).toHaveClass('is-red-blue');
+  const monitor = document.querySelector<HTMLVideoElement>('.custom-monitor video')!;
+  editCell(scoreCell('A', 'games'), '2');
+  editCell(scoreCell('A'), '9');
+  fireEvent.wheel(scoreCell('B'), { deltaY: -1 });
+  expect(scoreCell('B')).toHaveTextContent('1');
+  setVideoTime(monitor, 1.5);
+  fireEvent.click(winner('A'));
+  expect(monitor.currentTime).toBe(4);
+  expect(scoreCell('A')).toHaveTextContent('10');
+  expect(scoreCell('A', 'games')).toHaveTextContent('2');
+  editCell(screen.getByLabelText('A name (double-click to edit)', { selector: 'span' }), '红方');
+  expect(screen.getByLabelText('红方 points (scroll to adjust, double-click to edit)', { selector: 'span' })).toHaveTextContent('10');
+  const plane = document.querySelector<HTMLDivElement>('.custom-scoreboard-plane')!;
+  vi.spyOn(plane, 'getBoundingClientRect').mockReturnValue({ width: 1000, height: 500 } as DOMRect);
+  Object.defineProperty(board, 'setPointerCapture', { value: vi.fn() });
+  fireEvent.pointerDown(board, { pointerId: 4, clientX: 0, clientY: 0 });
+  fireEvent.pointerMove(board, { pointerId: 4, clientX: 1000, clientY: 500 });
+  fireEvent.pointerUp(board, { pointerId: 4 });
+  expect(parseFloat(board.style.left)).toBeCloseTo(79);
+  expect(parseFloat(board.style.top)).toBeCloseTo(69.315, 2);
+  const handle = board.querySelector<HTMLElement>('.custom-scoreboard-resize-handle.is-bottom-right')!;
+  Object.defineProperty(handle, 'setPointerCapture', { value: vi.fn() });
+  fireEvent.pointerDown(handle, { pointerId: 5, clientX: 0, clientY: 0 });
+  fireEvent.pointerMove(handle, { pointerId: 5, clientX: 1000, clientY: 500 });
+  expect(Number(board.style.transform.match(/scale\(([^)]+)\)/)?.[1])).toBeCloseTo(1);
 });
 
 it('resizes the scoreboard proportionally from a corner', () => {

@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { app } from 'electron';
-import { appSettingsSchema, type AppSettings } from '../shared/contracts';
+import { appSettingsSchema, scoreboardStyleSchema, type AppSettings } from '../shared/contracts';
 
 const defaults: AppSettings = {
   language: 'zh-CN',
@@ -9,6 +9,7 @@ const defaults: AppSettings = {
   pre_roll_seconds: 2.5,
   post_roll_seconds: 1,
   normalize_variable_frame_rate: false,
+  scoreboard_style: 'classic',
 };
 
 function settingsPath(): string {
@@ -40,6 +41,7 @@ export async function loadSettings(): Promise<AppSettings> {
       normalize_variable_frame_rate: typeof raw.normalize_variable_frame_rate === 'boolean'
         ? raw.normalize_variable_frame_rate
         : defaults.normalize_variable_frame_rate,
+      scoreboard_style: scoreboardStyleSchema.safeParse(raw.scoreboard_style).data ?? defaults.scoreboard_style,
     });
     if (Object.hasOwn(raw, 'ball_model_profile')) await writeSettings(settings).catch(() => undefined);
     return settings;
@@ -53,4 +55,3 @@ export async function saveSettings(value: unknown): Promise<AppSettings> {
   await writeSettings(settings);
   return settings;
 }
-

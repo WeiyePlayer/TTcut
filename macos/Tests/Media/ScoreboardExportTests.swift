@@ -56,6 +56,33 @@ final class ScoreboardExportTests: XCTestCase {
       "overlay=x=180:y=160:shortest=1:format=auto")
   }
 
+  func testRedBlueOverlayClampsUsingItsTallerGeometry() throws {
+    var video = VideoInfo()
+    video.width = 1280; video.height = 720
+    let overlay = ScoreboardOverlay(x: 1, y: 1, scale: 1.5, imagePath: "/tmp/board.png", style: "red-blue")
+    XCTAssertTrue(overlay.isValid)
+    XCTAssertEqual(MediaExporter.scoreboardFilter(video: video, score: overlay),
+      "overlay=x=877:y=444:shortest=1:format=auto")
+    let legacy = try JSONDecoder().decode(ScoreboardOverlay.self,
+      from: Data(#"{"x":0.5,"y":0.25,"scale":1,"imagePath":"/tmp/board.png"}"#.utf8))
+    XCTAssertNil(legacy.style)
+    XCTAssertTrue(legacy.isValid)
+  }
+
+  func testClassicColorVariantsPreserveGeometryAndRejectUnknownStyles() throws {
+    var video = VideoInfo()
+    video.width = 1280; video.height = 720
+    let classic = ScoreboardOverlay(x: 1, y: 1, scale: 1.5, imagePath: "/tmp/board.png", style: "classic")
+    for style in ["classic-orange", "classic-green"] {
+      let overlay = try JSONDecoder().decode(ScoreboardOverlay.self,
+        from: Data("{\"x\":1,\"y\":1,\"scale\":1.5,\"imagePath\":\"/tmp/board.png\",\"style\":\"\(style)\"}".utf8))
+      XCTAssertTrue(overlay.isValid)
+      XCTAssertEqual(MediaExporter.scoreboardFilter(video: video, score: overlay),
+        MediaExporter.scoreboardFilter(video: video, score: classic))
+    }
+    XCTAssertFalse(ScoreboardOverlay(x: 0, y: 0, scale: nil, imagePath: "/tmp/board.png", style: "unknown").isValid)
+  }
+
   func testRotatedAndHDROverlaysUseDisplayGeometryAndPreserveFormat() async throws {
     guard ProcessInfo.processInfo.environment["TTCUT_NATIVE_TESTS"] == "1" else {
       throw XCTSkip("Requires bundled FFmpeg; use TTCUT_NATIVE_TESTS=1")

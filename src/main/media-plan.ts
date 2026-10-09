@@ -336,7 +336,7 @@ export function buildScoreboardFilter(
   height: number,
   scoreboard: ScoreboardAsset,
 ): string {
-  const { width: boardWidth, height: boardHeight } = scoreboardDimensions(width, height, scoreboard.scale ?? 1);
+  const { width: boardWidth, height: boardHeight } = scoreboardDimensions(width, height, scoreboard.scale ?? 1, scoreboard.style);
   const x = Math.round(Math.max(0, Math.min(1 - boardWidth / width, scoreboard.x)) * width);
   const y = Math.round(Math.max(0, Math.min(1 - boardHeight / height, scoreboard.y)) * height);
   return `overlay=x=${x}:y=${y}:shortest=1:format=auto`;
