@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { ScoreboardScore } from '../shared/contracts';
+import type { ScoreboardScore, ScoreboardStyle } from '../shared/contracts';
 
 function EditableCell({ value, label, numeric = false, disabled = false, className, onChange, onEditStart }: {
   value: string; label: string; numeric?: boolean; disabled?: boolean; className: string;
@@ -35,26 +35,29 @@ function EditableCell({ value, label, numeric = false, disabled = false, classNa
         selectZero.current = numeric && next === '0'; setDraft(next);
       } }}
       onBlur={commit} onKeyDown={event => { event.stopPropagation(); if (event.key === 'Enter' && !event.nativeEvent.isComposing) commit(); if (event.key === 'Escape') setEditing(false); }} />
-      : <span style={numeric ? undefined : { fontSize: `min(1.72cqw, ${32 / Math.max(1, Array.from(value).length)}cqw)` }}>{value}</span>}
+      : <span style={{ '--scoreboard-text-length': Math.max(1, Array.from(value).length) } as React.CSSProperties}>{value}</span>}
   </span>;
 }
 
-export function ScoreboardFields({ names, score, winner, enabled, winnerEnabled, labels, onName, onScore, onWinner, onEditStart }: {
+export function ScoreboardFields({ names, score, winner, enabled, winnerEnabled, style = 'classic', editable = true, showControls = true, labels, onName, onScore, onWinner, onEditStart }: {
   names: [string, string]; score: ScoreboardScore; winner?: 'left' | 'right' | undefined; enabled: boolean;
   winnerEnabled: boolean;
+  style?: ScoreboardStyle | undefined;
+  editable?: boolean;
+  showControls?: boolean;
   labels: { name: string; games: string; points: string; winner: string };
   onName(side: 'left' | 'right', value: string): void;
   onScore(field: keyof ScoreboardScore, value: number): void;
   onWinner(side: 'left' | 'right'): void;
   onEditStart(): void;
 }) {
-  return <>{(['left', 'right'] as const).map((side, row) => <div className="custom-scoreboard-row" key={side}>
-    <EditableCell className="custom-scoreboard-name" label={`${names[row]} ${labels.name}`} value={names[row]!} onEditStart={onEditStart} onChange={value => onName(side, value)} />
+  return <>{style === 'red-blue' && <span className="custom-scoreboard-colon" aria-hidden="true"><i /><i /></span>}{(['left', 'right'] as const).map((side, row) => <div className={`custom-scoreboard-row is-${side}`} key={side}>
+    <EditableCell className="custom-scoreboard-name" disabled={!editable} label={`${names[row]} ${labels.name}`} value={names[row]!} onEditStart={onEditStart} onChange={value => onName(side, value)} />
     <EditableCell className="custom-scoreboard-games" label={`${names[row]} ${labels.games}`} numeric disabled={!enabled} value={String(score[`${side}_games`] ?? 0)} onEditStart={onEditStart} onChange={value => onScore(`${side}_games`, Number(value))} />
     <EditableCell className="custom-scoreboard-points" label={`${names[row]} ${labels.points}`} numeric disabled={!enabled} value={String(score[side])} onEditStart={onEditStart} onChange={value => onScore(side, Number(value))} />
-    <button className="custom-scoreboard-winner" type="button" disabled={!winnerEnabled} aria-label={`${names[row]} ${labels.winner}`} aria-pressed={winner === side}
+    {showControls && <button className="custom-scoreboard-winner" type="button" disabled={!winnerEnabled} aria-label={`${names[row]} ${labels.winner}`} aria-pressed={winner === side}
       onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); onWinner(side); }}>
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d={winner === side ? 'm5 12 4 4L19 6' : 'M12 5v14M5 12h14'} /></svg>
-    </button>
+    </button>}
   </div>)}</>;
 }

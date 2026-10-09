@@ -274,14 +274,15 @@ td input { accent-color: var(--blue); }
   object-fit: contain; object-position: center center; background-color: #000;
 }
 .custom-scoreboard-plane { position: absolute; z-index: 2; left: 50%; top: 50%; width: min(100cqw, calc(100cqh * var(--source-aspect))); max-height: 100%; aspect-ratio: var(--source-aspect); transform: translate(-50%, -50%); pointer-events: none; container-type: inline-size; }
-.custom-scoreboard { position: absolute; box-sizing: border-box; display: grid; grid-template-rows: 1fr 1fr; width: 28%; height: auto; aspect-ratio: 5.2; transform-origin: top left; background: #292929; color: white; font: 700 1.72cqw/1.1 "Noto Sans SC Variable", "Microsoft YaHei", sans-serif; font-variant-numeric: tabular-nums; cursor: grab; touch-action: none; user-select: none; pointer-events: auto; }
+.custom-scoreboard { position: absolute; box-sizing: border-box; display: grid; grid-template-rows: 1fr 1fr; width: var(--scoreboard-width, 28%); height: auto; aspect-ratio: var(--scoreboard-aspect, 5.2); transform-origin: top left; background: #292929; color: white; font: 700 var(--scoreboard-name-size, 1.72cqw)/1.1 "Noto Sans SC Variable", "Microsoft YaHei", sans-serif; font-variant-numeric: tabular-nums; cursor: grab; touch-action: none; user-select: none; pointer-events: auto; }
 .custom-scoreboard:active { cursor: grabbing; }
 .custom-scoreboard-row { display: grid; position: relative; grid-template-columns: 76% 12% 12%; min-height: 0; }
 .custom-scoreboard-row + .custom-scoreboard-row { border-top: 1px solid #777; }
 .custom-scoreboard-name, .custom-scoreboard-games, .custom-scoreboard-points { display: flex; align-items: center; min-width: 0; overflow: hidden; white-space: nowrap; }
 .custom-scoreboard-name { padding: 0 4%; text-align: left; }
+.custom-scoreboard-name > span { font-size: min(var(--scoreboard-name-size, 1.72cqw), calc(var(--scoreboard-name-fit, 19cqw) / var(--scoreboard-text-length))); }
 .custom-scoreboard-games, .custom-scoreboard-points { justify-content: center; }
-.custom-scoreboard-games { background: #3a83f7; }
+.custom-scoreboard-games { background: var(--scoreboard-games-color, #3a83f7); }
 .custom-scoreboard-points { background: #333; }
 .custom-scoreboard input { box-sizing: border-box; width: 100%; min-width: 0; padding: 0; border: 0; outline: 1px solid white; color: inherit; background: transparent; font: inherit; text-align: inherit; }
 .custom-scoreboard-games input, .custom-scoreboard-points input { text-align: center; }
@@ -295,6 +296,33 @@ td input { accent-color: var(--blue); }
 .custom-scoreboard-resize-handle.is-top-right { top: -7px; right: -7px; cursor: nesw-resize; }
 .custom-scoreboard-resize-handle.is-bottom-left { bottom: -7px; left: -7px; cursor: nesw-resize; }
 .custom-scoreboard-resize-handle.is-bottom-right { bottom: -7px; right: -7px; cursor: nwse-resize; }
+
+.custom-scoreboard.is-red-blue { --scoreboard-name-size: 1.44cqw; --scoreboard-name-fit: 7.6cqw; --scoreboard-points-size: 7.59cqw; --scoreboard-points-fit: 14.41cqw; --scoreboard-games-size: 2.37cqw; grid-template-columns: 42.5% 15% 42.5%; grid-template-rows: 1fr; background: transparent; font-weight: 800; }
+.custom-scoreboard.is-red-blue .custom-scoreboard-row { grid-row: 1; grid-template-columns: 1fr; grid-template-rows: 20.5% 1.2% 61.3% 17%; border: 0; border-radius: 9% / 6%; background: linear-gradient(#f00000 25%, #a90000); }
+.custom-scoreboard.is-red-blue .custom-scoreboard-row.is-left { grid-column: 1; }
+.custom-scoreboard.is-red-blue .custom-scoreboard-row.is-right { grid-column: 3; background: linear-gradient(#007df7 25%, #0057b3); }
+.custom-scoreboard.is-red-blue .custom-scoreboard-row::before { content: ''; grid-row: 2; grid-column: 1; background: #292929; }
+.custom-scoreboard.is-red-blue .custom-scoreboard-games { grid-row: 1; grid-column: 1; background: rgba(0,0,0,.28); border-radius: 9% 9% 0 0 / 29% 29% 0 0; font-size: var(--scoreboard-games-size); }
+.custom-scoreboard.is-red-blue .custom-scoreboard-points { grid-row: 3; grid-column: 1; background: transparent; font-size: var(--scoreboard-points-size); }
+.custom-scoreboard.is-red-blue .custom-scoreboard-points > span { font-size: min(var(--scoreboard-points-size), calc(var(--scoreboard-points-fit) / var(--scoreboard-text-length))); }
+.custom-scoreboard.is-red-blue .custom-scoreboard-name { grid-row: 4; grid-column: 1; align-items: center; padding: 0 7%; font-size: var(--scoreboard-name-size); }
+.custom-scoreboard-colon { grid-row: 1; grid-column: 2; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7%; padding-top: 6%; }
+.custom-scoreboard-colon i { width: 25%; aspect-ratio: 1; background: #9a9a9a; }
+.custom-scoreboard.is-red-blue .custom-scoreboard-winner { top: 104%; left: 37%; width: 26%; height: auto; aspect-ratio: 1; border-radius: 5px; }
+.custom-scoreboard.is-red-blue .custom-scoreboard-winner[aria-pressed="true"] { border-color: #71a6ff; }
+
+.scoreboard-style-setting { padding: 20px; }
+.scoreboard-style-setting h2 { margin-bottom: 16px; line-height: 1.5; }
+.scoreboard-style-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px 20px; }
+.scoreboard-style-option { display: grid; gap: 12px; cursor: pointer; }
+.scoreboard-style-preview { position: relative; container-type: inline-size; aspect-ratio: 2; border: 2px solid transparent; border-radius: 12px; background: #303030; }
+.scoreboard-style-option.is-selected .scoreboard-style-preview { border-color: var(--blue); }
+.scoreboard-style-option:focus-within .scoreboard-style-preview { outline: 2px solid var(--blue); outline-offset: 3px; }
+.scoreboard-style-preview .custom-scoreboard { --scoreboard-name-size: 5.16cqw; --scoreboard-name-fit: 57cqw; left: 50%; top: 50%; width: 84%; transform: translate(-50%, -50%); cursor: inherit; pointer-events: none; }
+.scoreboard-style-preview .custom-scoreboard.is-red-blue { --scoreboard-name-size: 3.71cqw; --scoreboard-name-fit: 19.54cqw; --scoreboard-points-size: 19.52cqw; --scoreboard-points-fit: 37.05cqw; --scoreboard-games-size: 6.1cqw; width: 54%; }
+.scoreboard-style-choice { display: flex; align-items: center; justify-content: center; min-height: 24px; gap: 8px; font-size: 14px; }
+.scoreboard-style-choice input { width: 16px; height: 16px; margin: 0; accent-color: var(--blue); cursor: pointer; }
+.scoreboard-style-option.is-selected .scoreboard-style-choice { color: var(--blue); font-weight: 600; }
 .custom-timeline { position: relative; width: 100%; min-width: 0; user-select: none; }
 .timeline-viewport {
   position: relative; width: 100%; min-width: 0; max-width: 100%; height: 78px; overflow-x: auto; overflow-y: hidden;

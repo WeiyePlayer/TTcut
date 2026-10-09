@@ -547,7 +547,7 @@ async function writeScoreboardAssets(
   const display = scoreboardDisplayDimensions(video);
   const assets: ScoreboardAsset[] = [];
   for (const [index, scoreboard] of scoreboards.entries()) {
-    const dimensions = scoreboardDimensions(display.width, display.height, scoreboard.scale ?? 1);
+    const dimensions = scoreboardDimensions(display.width, display.height, scoreboard.scale ?? 1, scoreboard.style);
     const imagePath = path.join(directory, `scoreboard-${String(index + 1).padStart(6, '0')}.png`);
     let image: Buffer;
     if (scoreboard.image_data) {
@@ -559,13 +559,14 @@ async function writeScoreboardAssets(
         throw new Error('INVALID_SCOREBOARD');
       }
     } else {
-      if (scoreboardName(scoreboard.left_name, 'A') !== 'A' || scoreboardName(scoreboard.right_name, 'B') !== 'B') {
+      if (scoreboard.style === 'red-blue' || scoreboardName(scoreboard.left_name, 'A') !== 'A' || scoreboardName(scoreboard.right_name, 'B') !== 'B') {
         throw new Error('INVALID_SCOREBOARD');
       }
-      image = createScoreboardPng(dimensions.width, dimensions.height, scoreboard);
+      const { left, right, left_games, right_games } = scoreboard;
+      image = createScoreboardPng(dimensions.width, dimensions.height, { left, right, left_games, right_games }, scoreboard.style);
     }
     await writeFile(imagePath, image);
-    assets.push({ x: scoreboard.x, y: scoreboard.y, scale: scoreboard.scale, imagePath });
+    assets.push({ x: scoreboard.x, y: scoreboard.y, scale: scoreboard.scale, style: scoreboard.style, imagePath });
   }
   return assets;
 }
@@ -1215,6 +1216,7 @@ export async function startExport(window: BrowserWindow, rawRequest: ExportReque
       x: request.scoreboard!.x,
       y: request.scoreboard!.y,
       scale: request.scoreboard!.scale,
+      style: request.scoreboard!.style,
       left_name: request.scoreboard!.left_name,
       right_name: request.scoreboard!.right_name,
       ...scoreboardByClip.get(segment.clipId)!,

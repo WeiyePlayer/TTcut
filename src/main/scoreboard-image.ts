@@ -1,5 +1,6 @@
 import { deflateSync } from 'node:zlib';
-import type { ScoreboardScore } from '../shared/contracts';
+import type { ScoreboardScore, ScoreboardStyle } from '../shared/contracts';
+import { scoreboardGamesColor } from '../domain/scoreboard';
 export { scoreboardDimensions, scoreboardDisplayDimensions } from '../domain/scoreboard';
 
 const GLYPHS: Readonly<Record<string, readonly string[]>> = {
@@ -35,7 +36,7 @@ function chunk(name: string, data: Buffer): Buffer {
   return result;
 }
 
-export function createScoreboardPng(width: number, height: number, score: ScoreboardScore): Buffer {
+export function createScoreboardPng(width: number, height: number, score: ScoreboardScore, style: ScoreboardStyle = 'classic'): Buffer {
   if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1
     || !Number.isInteger(score.left) || !Number.isInteger(score.right)
     || Object.values(score).some(value => value !== undefined && (!Number.isInteger(value) || value < 0 || value > 999))) {
@@ -51,7 +52,10 @@ export function createScoreboardPng(width: number, height: number, score: Scoreb
     }
   };
   fill(0, 0, width, height, [41, 41, 41, 255]);
-  fill(Math.round(width * .76), 0, Math.round(width * .12), height, [58, 131, 247, 255]);
+  const gamesColor = scoreboardGamesColor(style);
+  fill(Math.round(width * .76), 0, Math.round(width * .12), height, [
+    parseInt(gamesColor.slice(1, 3), 16), parseInt(gamesColor.slice(3, 5), 16), parseInt(gamesColor.slice(5, 7), 16), 255,
+  ]);
   fill(Math.round(width * .88), 0, width, height, [51, 51, 51, 255]);
   fill(0, Math.floor(height / 2), width, 1, [119, 119, 119, 255]);
   const unit = Math.max(1, Math.floor(height / 22));

@@ -3,7 +3,7 @@ import { ScoreboardFields } from './ScoreboardFields';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { SelectedVideo } from '../shared/api';
 import { hasBounceCounts, type AnalysisResultV1, type ExportRequest, type ScoreboardPosition, type ScoreboardScore } from '../shared/contracts';
-import { SCOREBOARD_MAX_SCALE, SCOREBOARD_MIN_SCALE, SCOREBOARD_WIDTH_FRACTION, SCOREBOARD_PREVIEW_WIDTH_FRACTION, scoreboardHeightFraction, scoreboardDisplayDimensions, scoreboardName } from '../domain/scoreboard';
+import { SCOREBOARD_MAX_SCALE, SCOREBOARD_MIN_SCALE, scoreboardWidthFraction, scoreboardAspectRatio, scoreboardGamesColor, scoreboardPreviewWidthFraction, scoreboardPreviewHeightFraction, scoreboardHeightFraction, scoreboardDisplayDimensions, scoreboardName } from '../domain/scoreboard';
 import {
   createManualCustomClip,
   deleteCustomClip,
@@ -237,10 +237,15 @@ export function CustomCutPage({
   const previewMetadata = analysis.source_video?.path === video.path ? analysis.source_video : analysis.video;
   const displayDimensions = scoreboardDisplayDimensions(previewMetadata);
   const previewAspect = displayDimensions.width / displayDimensions.height;
-  const scoreboardScale = scoreboard.scale ?? 1;
-  const scoreboardBaseHeight = scoreboardHeightFraction(previewAspect);
-  const scoreboardMaxX = Math.max(0, 1 - SCOREBOARD_PREVIEW_WIDTH_FRACTION * scoreboardScale);
-  const scoreboardMaxY = Math.max(0, 1 - scoreboardBaseHeight * scoreboardScale);
+  const scoreboardStyle = scoreboard.style ?? 'classic';
+  const scoreboardBaseWidth = scoreboardWidthFraction(scoreboardStyle);
+  const scoreboardBaseHeight = scoreboardHeightFraction(previewAspect, scoreboardStyle);
+  const scoreboardPreviewWidth = scoreboardPreviewWidthFraction(scoreboardStyle);
+  const scoreboardPreviewHeight = scoreboardPreviewHeightFraction(previewAspect, scoreboardStyle);
+  const scoreboardScaleLimit = Math.min(SCOREBOARD_MAX_SCALE, 1 / scoreboardPreviewWidth, 1 / scoreboardPreviewHeight);
+  const scoreboardScale = Math.min(scoreboard.scale ?? 1, scoreboardScaleLimit);
+  const scoreboardMaxX = Math.max(0, 1 - scoreboardPreviewWidth * scoreboardScale);
+  const scoreboardMaxY = Math.max(0, 1 - scoreboardPreviewHeight * scoreboardScale);
   const preview = useCompatiblePreview(videoRef, video.mediaUrl, previewMetadata.video_codec);
   const [currentTime, setCurrentTime] = useState(0);
   const [currentEditingClipId, setCurrentEditingClipId] = useState<string | null>(null);
@@ -266,10 +271,10 @@ export function CustomCutPage({
   const showBounceCounts = hasBounceCounts(analysis);
 
   useEffect(() => {
-    if (scoreboard.enabled && (scoreboard.x > scoreboardMaxX || scoreboard.y > scoreboardMaxY)) {
-      onScoreboardChange({ ...scoreboard, x: Math.min(scoreboard.x, scoreboardMaxX), y: Math.min(scoreboard.y, scoreboardMaxY) });
+    if (scoreboard.enabled && (scoreboard.x > scoreboardMaxX || scoreboard.y > scoreboardMaxY || (scoreboard.scale ?? 1) > scoreboardScaleLimit)) {
+      onScoreboardChange({ ...scoreboard, scale: scoreboardScale, x: Math.min(scoreboard.x, scoreboardMaxX), y: Math.min(scoreboard.y, scoreboardMaxY) });
     }
-  }, [scoreboard, scoreboardMaxX, scoreboardMaxY, onScoreboardChange]);
+  }, [scoreboard, scoreboardMaxX, scoreboardMaxY, scoreboardScale, scoreboardScaleLimit, onScoreboardChange]);
 
   useEffect(() => {
     if (!multiSelectOpen) return;
@@ -581,27 +586,27 @@ export function CustomCutPage({
     const deltaY = (event.clientY - drag.startY) / bounds.height;
     if (!drag.corner) {
       onScoreboardChange({ ...scoreboard,
-        x: Math.max(0, Math.min(1 - SCOREBOARD_PREVIEW_WIDTH_FRACTION * drag.scale, drag.x + deltaX)),
-        y: Math.max(0, Math.min(1 - scoreboardBaseHeight * drag.scale, drag.y + deltaY)),
+        x: Math.max(0, Math.min(1 - scoreboardPreviewWidth * drag.scale, drag.x + deltaX)),
+        y: Math.max(0, Math.min(1 - scoreboardPreviewHeight * drag.scale, drag.y + deltaY)),
       });
       return;
     }
     const fromRight = drag.corner.endsWith('right');
     const fromBottom = drag.corner.startsWith('bottom');
-    const anchorX = fromRight ? drag.x : drag.x + SCOREBOARD_WIDTH_FRACTION * drag.scale;
+    const anchorX = fromRight ? drag.x : drag.x + scoreboardBaseWidth * drag.scale;
     const anchorY = fromBottom ? drag.y : drag.y + scoreboardBaseHeight * drag.scale;
-    const vectorX = (fromRight ? 1 : -1) * SCOREBOARD_WIDTH_FRACTION;
+    const vectorX = (fromRight ? 1 : -1) * scoreboardBaseWidth;
     const vectorY = (fromBottom ? 1 : -1) * scoreboardBaseHeight;
     const requestedScale = drag.scale + (deltaX * vectorX + deltaY * vectorY) / (vectorX * vectorX + vectorY * vectorY);
     const maxScale = Math.min(
       SCOREBOARD_MAX_SCALE,
-      (fromRight ? 1 - anchorX : anchorX) / SCOREBOARD_WIDTH_FRACTION,
-      (fromBottom ? 1 - anchorY : anchorY) / scoreboardBaseHeight,
+      (fromRight ? 1 - anchorX : anchorX) / scoreboardPreviewWidth,
+      (fromBottom ? 1 - anchorY : anchorY) / scoreboardPreviewHeight,
     );
     const scale = Math.max(SCOREBOARD_MIN_SCALE, Math.min(maxScale, requestedScale));
     onScoreboardChange({ ...scoreboard, scale,
-      x: Math.max(0, Math.min(1 - SCOREBOARD_PREVIEW_WIDTH_FRACTION * scale, fromRight ? anchorX : anchorX - SCOREBOARD_WIDTH_FRACTION * scale)),
-      y: fromBottom ? anchorY : anchorY - scoreboardBaseHeight * scale,
+      x: Math.max(0, Math.min(1 - scoreboardPreviewWidth * scale, fromRight ? anchorX : anchorX - scoreboardBaseWidth * scale)),
+      y: Math.max(0, Math.min(1 - scoreboardPreviewHeight * scale, fromBottom ? anchorY : anchorY - scoreboardBaseHeight * scale)),
     });
   };
 
@@ -691,7 +696,7 @@ export function CustomCutPage({
             </div>}
             <CompatibleVideo hdr={Boolean(analysis.video.native_video && analysis.video.native_video.hdr !== 'sdr')} ref={videoRef} src={preview.url} controls={false} preload={preview.url === video.mediaUrl ? 'metadata' : 'auto'} playsInline tabIndex={0} aria-label={translations.togglePlayback} onClick={togglePlayback} onLoadedMetadata={() => { lastPlaybackClipIdRef.current = null; playback.tick(); }} onPlay={() => { playback.tick(); startVideoFrameTracking(); }} onPause={stopVideoFrameTracking} onEnded={() => { stopVideoFrameTracking(); playback.ended(); }} onTimeUpdate={() => playback.tick()} onSeeked={() => playback.tick()} />
             {scoreboard.enabled && <div ref={scoreboardPlaneRef} className="custom-scoreboard-plane" style={{ '--source-aspect': String(previewAspect) } as React.CSSProperties}>
-              <div className="custom-scoreboard" role="button" tabIndex={0} aria-label={translations.dragScoreboard} title={translations.dragScoreboard} style={{ left: `${scoreboard.x * 100}%`, top: `${scoreboard.y * 100}%`, transform: `scale(${scoreboardScale})` }} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => {
+              <div className={`custom-scoreboard is-${scoreboardStyle}`} role="button" tabIndex={0} aria-label={translations.dragScoreboard} title={translations.dragScoreboard} style={{ '--scoreboard-aspect': scoreboardAspectRatio(scoreboardStyle), '--scoreboard-games-color': scoreboardGamesColor(scoreboardStyle), '--scoreboard-width': `${scoreboardBaseWidth * 100}%`, left: `${scoreboard.x * 100}%`, top: `${scoreboard.y * 100}%`, transform: `scale(${scoreboardScale})` } as React.CSSProperties} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => {
                 event.preventDefault(); event.stopPropagation(); (event.target as HTMLElement).setPointerCapture(event.pointerId);
                 scoreboardDragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, x: scoreboard.x, y: scoreboard.y, scale: scoreboardScale, corner: null };
               }} onPointerMove={moveScoreboard} onPointerUp={(event) => { if (scoreboardDragRef.current?.pointerId === event.pointerId) scoreboardDragRef.current = null; }} onPointerCancel={() => { scoreboardDragRef.current = null; }} onLostPointerCapture={() => { scoreboardDragRef.current = null; }} onKeyDown={(event) => {
@@ -704,7 +709,7 @@ export function CustomCutPage({
                 else return;
                 event.preventDefault(); event.stopPropagation(); onScoreboardChange(next);
               }}>
-                <ScoreboardFields key={currentScoreClip?.clipId ?? 'gap'} names={[leftName, rightName]} score={currentScore ?? { left: 0, right: 0 }} winner={currentScoreClip?.winner} enabled={Boolean(currentScoreClip)} winnerEnabled={Boolean(activeScoreClip)}
+                <ScoreboardFields key={currentScoreClip?.clipId ?? 'gap'} style={scoreboardStyle} names={[leftName, rightName]} score={currentScore ?? { left: 0, right: 0 }} winner={currentScoreClip?.winner} enabled={Boolean(currentScoreClip)} winnerEnabled={Boolean(activeScoreClip)}
                   labels={{ name: translations.scoreboardEditName, games: translations.scoreboardGames, points: translations.scoreboardPoints, winner: translations.scoreboardWinner }}
                   onEditStart={() => preview.seekTo(currentTimeRef.current, false)}
                   onName={(side, value) => onScoreboardChange({ ...scoreboard, [`${side}_name`]: value })}
