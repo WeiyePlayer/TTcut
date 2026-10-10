@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../src/renderer/App';
+import { CUSTOM_GUIDE_STORAGE_KEY } from '../src/renderer/custom-guide-preference';
 import { SUPPORT_PROMPT_SNOOZE_MS, SUPPORT_PROMPT_SNOOZE_STORAGE_KEY } from '../src/domain/support-prompt';
 import type { AppEvent, BootstrapData, SelectedVideo, TTcutApi } from '../src/shared/api';
 import type { CustomEditorDraft, UpdateState, VideoMetadata } from '../src/shared/contracts';
@@ -78,6 +79,7 @@ describe('App workflow notices and multi-task entry', () => {
     bootstrap.settings.language = 'zh-CN';
     delete bootstrap.settings.scoreboard_style;
     window.localStorage.clear();
+    window.localStorage.setItem(CUSTOM_GUIDE_STORAGE_KEY, '1');
     taskListener = null;
     updateListener = null;
     selectVideos = vi.fn().mockResolvedValue([]);
@@ -903,13 +905,19 @@ describe('App workflow notices and multi-task entry', () => {
     expect(screen.getByRole('checkbox', { name: 'Export rally videos' })).toBeChecked();
     expect(screen.getByRole('checkbox', { name: 'Export XML' })).toBeChecked();
 
+    fireEvent.click(screen.getByRole('button', { name: 'Undo clip edit' }));
+    expect(Number(screen.getByRole('slider', { name: 'Resize clip end 1' }).getAttribute('aria-valuenow'))).toBe(editedEnd);
+    fireEvent.click(screen.getByRole('button', { name: 'Redo clip edit' }));
+    expect(Number(screen.getByRole('slider', { name: 'Resize clip end 1' }).getAttribute('aria-valuenow'))).toBe(draggedEnd);
+    expect(screen.getByRole('checkbox', { name: 'Export XML' })).toBeChecked();
+
     fireEvent.click(screen.getByRole('button', { name: 'Back' }));
     expect(await screen.findByRole('heading', { name: 'Choose a cutting mode' })).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: /Custom/ }));
     expect(Number(screen.getByRole('slider', { name: 'Resize clip end 1' }).getAttribute('aria-valuenow'))).toBe(draggedEnd);
     expect(screen.getByRole('checkbox', { name: 'Rally 2' })).not.toBeChecked();
     const reset = screen.getByRole('button', { name: 'Reset edits' });
-    expect(reset.previousElementSibling).toHaveClass('playback-mode-toggle');
+    expect(reset.previousElementSibling).toBe(screen.getByRole('button', { name: 'Redo clip edit' }));
     fireEvent.click(reset);
     expect(screen.getByRole('dialog', { name: 'Reset edits' })).toHaveTextContent('Reset the changes on this page?');
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
@@ -918,6 +926,8 @@ describe('App workflow notices and multi-task entry', () => {
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Confirm' }));
     expect(Number(screen.getByRole('slider', { name: 'Resize clip end 1' }).getAttribute('aria-valuenow'))).toBe(defaultEnd);
     expect(screen.getAllByRole('checkbox', { name: /Rally/ }).every((input) => (input as HTMLInputElement).checked)).toBe(true);
+    expect(screen.getByRole('button', { name: 'Undo clip edit' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Redo clip edit' })).toBeDisabled();
     await waitFor(() => expect(window.ttcut.saveCustomEditorDraft).toHaveBeenLastCalledWith(
       '11111111-1111-4111-8111-111111111111', expect.objectContaining({ clips: expect.arrayContaining([
         expect.objectContaining({ sourceRallyId: 'rally_001', end: defaultEnd, selected: true }),

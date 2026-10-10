@@ -174,6 +174,7 @@ try {
     await page.waitForTimeout(400);
     await page.screenshot({path:path.join(run,'continuous-duration-review-en.png')});
     await page.locator('.mode-card').filter({hasText:'Custom'}).click();
+    await page.getByRole('dialog',{name:'Custom editing guide',exact:true}).getByRole('button',{name:'Got it',exact:true}).click();
     assert.equal(await page.getByText(/^Bounces \d+$/).count(),2);
     await page.getByRole('button',{name:'Clear all',exact:true}).click();
     assert.equal(await page.locator('.custom-rally-list input:checked').count(),0);

@@ -947,6 +947,7 @@ export const customRallyClipSchema = z.object({
   start: finiteNumber.nonnegative(),
   end: finiteNumber.positive(),
   selected: z.boolean(),
+  isSplit: z.boolean().optional(),
   score: scoreboardScoreSchema.optional(),
   winner: z.enum(['left', 'right']).optional(),
 }).strict();

@@ -10,7 +10,7 @@ const segments: ValidatedCustomExportSegment[] = [
 
 function metadata(overrides: Partial<VideoMetadata> = {}): VideoMetadata {
   return {
-    path: 'D:\\比赛 & 练习\\match clip.mp4',
+    path: process.platform === 'win32' ? 'D:\\比赛 & 练习\\match clip.mp4' : '/比赛 & 练习/match clip.mp4',
     duration_seconds: 12,
     width: 1920,
     height: 1080,
@@ -37,7 +37,7 @@ describe('Premiere XML export', () => {
     expect(document.querySelectorAll('sequence > media > audio > track')).toHaveLength(2);
     expect(document.querySelectorAll('sequence > media > audio > track > clipitem')).toHaveLength(4);
     expect(document.querySelectorAll('file[id="file-1"]')).toHaveLength(6);
-    expect(document.querySelector('pathurl')?.textContent).toContain('file:///D:/');
+    expect(document.querySelector('pathurl')?.textContent).toContain(process.platform === 'win32' ? 'file:///D:/' : 'file:///%E6%AF%94');
     expect(output.xml).toContain('&amp;');
     expect(document.querySelector('file > media > audio > layout')?.textContent).toBe('stereo');
     expect(document.querySelector('file > media > audio > channelcount')?.textContent).toBe('2');

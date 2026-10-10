@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildHistoryCoverArgs, HistoryStore } from '../src/main/history';
 import type { AnalysisResultV1, Calibration } from '../src/shared/contracts';
-import { createCustomClipDraft } from '../src/domain/custom-clips';
+import { createCustomClipDraft, splitCustomClip } from '../src/domain/custom-clips';
 
 const temporaryDirectories: string[] = [];
 
@@ -115,6 +115,22 @@ describe('analysis history', () => {
     expect((await store.open(record.id)).custom_editor_draft?.clips).toEqual([]);
     await store.flush();
     expect(store.hasPendingWrites()).toBe(false);
+  });
+
+  it('reopens split detected clips with shared source IDs and preserves score annotation state', async () => {
+    const { store, root, source } = await storeFixture();
+    const record = await store.upsert(analysis(source), calibration);
+    const original = createCustomClipDraft(record.analysis.rallies, 1.5, 0.5, 30, 60);
+    const target = original[0]!;
+    const clips = splitCustomClip(original, target.clipId, (target.start + target.end) / 2, 'split_right', 60)!;
+    clips[1]!.winner = 'left';
+    const draft = { schema_version: 1 as const, clips, playbackMode: 'source' as const,
+      outputs: { combined_video: true, rally_videos: false, premiere_xml: false } };
+    await store.saveCustomEditorDraft(record.id, draft);
+    const reopened = await new HistoryStore(path.join(root, 'history')).open(record.id);
+    expect(reopened.custom_editor_draft).toEqual(draft);
+    expect(reopened.analysis).toEqual(record.analysis);
+    await expect(store.saveCustomEditorDraft(record.id, { ...draft, clips: [clips[0], { ...clips[1], clipId: clips[0]!.clipId }] })).rejects.toThrow('INVALID_CUSTOM_DRAFT');
   });
 
   it('extracts the first decoded frame without seeking or representative-frame filtering', () => {

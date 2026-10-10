@@ -2,6 +2,7 @@ import { act, cleanup, renderHook } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CustomRallyClip } from '../src/domain/custom-clips';
+import { splitCustomClip } from '../src/domain/custom-clips';
 import type { CustomPlaybackMode } from '../src/domain/custom-playback';
 import { useCustomPlayback } from '../src/renderer/use-custom-playback';
 
@@ -42,6 +43,21 @@ function setup(initialMode: CustomPlaybackMode = 'rallies') {
 }
 
 describe('custom playback transport', () => {
+  it('keeps playing at the right child through split, undo, and redo of an active loop', () => {
+    const h = setup('loop');
+    act(() => h.result.current.playClip(clips[0]!)); h.tick(1.8);
+    const split = splitCustomClip(clips, 'a', 1.5, 'right', 30)!;
+    const seeks = h.seekTo.mock.calls.length;
+    act(() => h.result.current.remapSplitTarget('a', 'right', 1.5));
+    h.rerender({ draft: split });
+    expect(h.result.current.loopClipId).toBe('right');
+    h.rerender({ draft: clips });
+    expect(h.result.current.loopClipId).toBe('a');
+    h.rerender({ draft: split });
+    expect(h.result.current.loopClipId).toBe('right');
+    expect(h.player).toMatchObject({ currentTime: 1.8, paused: false });
+    expect(h.seekTo).toHaveBeenCalledTimes(seeks);
+  });
   it('uses frame callbacks for boundaries without publishing every source frame', () => {
     const h = setup(); h.player.paused = false; h.player.currentTime = 1.5;
     act(() => h.result.current.tick(false));

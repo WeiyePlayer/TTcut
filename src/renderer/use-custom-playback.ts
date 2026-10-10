@@ -99,6 +99,15 @@ export function useCustomPlayback({ videoRef, preview, clips, mode, duration, on
     navigate(clip.start, true, 'play', true);
   }, [navigate, setLoopTarget]);
 
+  const remapSplitTarget = useCallback((clipId: string, rightClipId: string, boundary: number) => {
+    const state = current.current;
+    const target = state.clips.find((clip) => clip.clipId === clipId);
+    const time = state.preview.getPlaybackIntent().time;
+    if (state.mode === 'loop' && loopTargetRef.current === clipId && target && time >= boundary && time < target.end) {
+      setLoopTarget(rightClipId);
+    }
+  }, [setLoopTarget]);
+
   const switchMode = useCallback(() => {
     const state = current.current;
     const next = state.mode === 'source' ? 'rallies' : state.mode === 'rallies' ? 'loop' : 'source';
@@ -122,12 +131,25 @@ export function useCustomPlayback({ videoRef, preview, clips, mode, duration, on
   }, []);
 
   const previousMode = useRef(mode);
+  const previousClips = useRef(clips);
   useLayoutEffect(() => {
     const intent = current.current.preview.getPlaybackIntent();
     if (mode === 'loop') {
       if (previousMode.current !== 'loop') setLoopTarget(chooseLoopTarget(clips, intent.time));
       else if (!clips.some((clip) => clip.clipId === loopTargetRef.current && validPlaybackClip(clip))) {
         setLoopTarget(chooseLoopTarget(clips.filter((clip) => clip.selected), intent.time));
+      } else {
+        // Redo restores split drafts without calling the pointer split handler.
+        // Follow the child at the playhead when the surviving left ID shrinks.
+        const before = previousClips.current.find((clip) => clip.clipId === loopTargetRef.current);
+        const after = clips.find((clip) => clip.clipId === loopTargetRef.current);
+        if (before && after?.isSplit && intent.time >= before.start && intent.time < before.end
+          && (intent.time < after.start || intent.time >= after.end)) {
+          const child = clips.find((clip) => clip.isSplit && clip.source === before.source
+            && clip.sourceRallyId === before.sourceRallyId && clip.start >= before.start && clip.end <= before.end
+            && intent.time >= clip.start && intent.time < clip.end);
+          if (child) setLoopTarget(child.clipId);
+        }
       }
     } else setLoopTarget(null);
     if (previousMode.current !== mode || !clips.some((clip) => clip.selected)
@@ -135,9 +157,10 @@ export function useCustomPlayback({ videoRef, preview, clips, mode, duration, on
       temporaryClipId.current = null;
     }
     previousMode.current = mode;
+    previousClips.current = clips;
     if (scrubbing.current) return;
     navigate(intent.time, intent.playing, 'reconcile', false);
   }, [clips, mode, navigate, setLoopTarget]);
 
-  return { tick, seek, cancelScrub, togglePlayback, playClip, switchMode, ended, loopClipId };
+  return { tick, seek, cancelScrub, togglePlayback, playClip, remapSplitTarget, switchMode, ended, loopClipId };
 }
