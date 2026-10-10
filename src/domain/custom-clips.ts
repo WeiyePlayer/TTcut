@@ -25,6 +25,7 @@ export type CustomRallyClip = {
   start: number;
   end: number;
   selected: boolean;
+  isSplit?: boolean | undefined;
   score?: ScoreboardScore | undefined;
   winner?: 'left' | 'right' | undefined;
 };
@@ -87,6 +88,36 @@ export function calculateManualBounceCount(
 ): number | null {
   if (!bounceTimesSeconds) return null;
   return bounceTimesSeconds.filter((time) => Number.isFinite(time) && time >= start && time < end).length;
+}
+
+export function canSplitCustomClip(clip: CustomRallyClip, time: number, fps: number): boolean {
+  const boundary = seconds(time);
+  const minimum = frameDuration(fps);
+  return Number.isFinite(time) && boundary > clip.start && boundary < clip.end
+    && boundary - clip.start + EPSILON >= minimum
+    && clip.end - boundary + EPSILON >= minimum;
+}
+
+export function splitCustomClip(
+  clips: readonly CustomRallyClip[],
+  clipId: string,
+  time: number,
+  rightClipId: string,
+  fps: number,
+  bounceTimesSeconds?: readonly number[],
+): CustomRallyClip[] | null {
+  const target = clips.find((clip) => clip.clipId === clipId);
+  if (!target || !rightClipId || clips.some((clip) => clip.clipId === rightClipId)
+    || !canSplitCustomClip(target, time, fps)) return null;
+  const boundary = seconds(time);
+  const { score: _score, winner: _winner, ...base } = target;
+  const child = (id: string, start: number, end: number): CustomRallyClip => ({
+    ...base, clipId: id, start, end, defaultStart: start, defaultEnd: end, isSplit: true,
+    bounceCount: calculateManualBounceCount(start, end, bounceTimesSeconds),
+  });
+  return reindexCustomClips(clips.flatMap((clip) => clip.clipId === clipId
+    ? [child(clipId, target.start, boundary), child(rightClipId, boundary, target.end)]
+    : [clip]));
 }
 
 function normalizeSelected(
@@ -214,7 +245,7 @@ export function resizeCustomClip(
     const maximum = following?.start ?? videoDuration;
     clip.end = seconds(Math.min(maximum, Math.max(clip.start + minimumDuration, requestedTime)));
   }
-  if (clip.source === 'manual') clip.bounceCount = calculateManualBounceCount(clip.start, clip.end, bounceTimesSeconds);
+  if (clip.source === 'manual' || clip.isSplit) clip.bounceCount = calculateManualBounceCount(clip.start, clip.end, bounceTimesSeconds);
   return next;
 }
 
@@ -362,7 +393,6 @@ export function validateCustomExportSegments(
 ): ValidatedCustomExportSegment[] {
   if (!segments.length) throw new InvalidCustomSegmentsError();
   const seenClipIds = new Set<string>();
-  const seenRallyIds = new Set<string>();
   const minimumDuration = frameDuration(result.video.fps);
   const groups: ValidatedCustomExportSegment[] = [];
   let previousStart = -1;
@@ -372,7 +402,6 @@ export function validateCustomExportSegments(
   for (const rawSegment of segments) {
     const segment = normalizeCustomExportSegment(result, rawSegment);
     if (seenClipIds.has(segment.clipId)
-      || (segment.sourceRallyId !== null && seenRallyIds.has(segment.sourceRallyId))
       || !Number.isFinite(segment.start) || !Number.isFinite(segment.end)
       || segment.start < 0 || segment.end > result.video.duration_seconds
       || segment.end - segment.start + EPSILON < minimumDuration
@@ -381,7 +410,6 @@ export function validateCustomExportSegments(
       throw new InvalidCustomSegmentsError();
     }
     seenClipIds.add(segment.clipId);
-    if (segment.sourceRallyId !== null) seenRallyIds.add(segment.sourceRallyId);
     groups.push({
       clipId: segment.clipId,
       source: segment.source,

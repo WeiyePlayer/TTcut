@@ -62,8 +62,8 @@ and Analysis ROI. TrackNet and BlurBall keep the 1.25× ROI sampling policy.
 
 ## Board Count
 
-For a detected Rally, the displayed `bounce_count`: the number of detected
-table bounces in that Rally at analysis time. For a Manual Rally Clip, it is
+For an unmodified detected Rally Clip, the number of detected table bounces
+in its source Rally at analysis time. For a Manual or Split Rally Clip, it is
 the number of Bounce Event Times inside its current `[start, end)` interval;
 it is unavailable for legacy analyses that did not retain those times. It is
 not a count of racket contacts.
@@ -85,6 +85,18 @@ end and After-rally time. Only historical bounce-event results add one fixed
 closing second; hybrid and continuous results do not. Selected Custom Rally
 Clips never overlap on the single track.
 _Avoid_: Rally, CutGroup
+
+## Split Rally Clip
+
+A Custom Rally Clip formed by dividing another clip into two adjacent intervals.
+It retains the original clip's source association; several split clips may
+refer to the same detected Rally.
+_Avoid_: newly detected Rally, reanalysis
+
+## Score Annotation
+
+A starting score or winner explicitly recorded for one Custom Rally Clip.
+A score inherited from preceding clips is not a Score Annotation.
 
 ## Playback Target Clip
 
@@ -142,9 +154,8 @@ _Avoid_: racket contact time, Rally boundary
 
 ## Custom Cut Draft
 
-The Renderer-owned, non-persisted set of Custom Rally Clips and selection
-states for the current video. It survives cancellation of its own export but is
-discarded when returning to mode selection, changing video, or restarting.
+The editable collection of Custom Rally Clips and selection states for the
+current video, saved with its local History Record and restored when reopened.
 _Avoid_: History Record, project file
 
 ## Rally Segment Video

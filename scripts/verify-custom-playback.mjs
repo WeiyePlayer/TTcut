@@ -1,5 +1,5 @@
 // Real Electron/decoded-frame regression using the actual custom page and media protocol.
-// Usage: node scripts/verify-custom-playback.mjs [source] [--baseline | --zoom-only | --original-media] [--preview-only]
+// Usage: node scripts/verify-custom-playback.mjs [source] [--baseline | --zoom-only | --razor-only | --original-media] [--preview-only]
 // --original-media uses the full untouched source and the production preview service.
 // --reuse-preview=<file> can reuse a previously validated full preview for UI retries.
 import { mkdtemp, realpath, writeFile, readFile, symlink } from 'node:fs/promises';
@@ -14,6 +14,7 @@ import { _electron as electron, expect } from '@playwright/test';
 const root = path.resolve(import.meta.dirname, '..');
 const baseline = process.argv.includes('--baseline');
 const zoomOnly = process.argv.includes('--zoom-only');
+const razorOnly = process.argv.includes('--razor-only');
 const originalMedia = process.argv.includes('--original-media');
 const previewOnly = process.argv.includes('--preview-only');
 const reusePreview = process.argv.find(arg => arg.startsWith('--reuse-preview='))?.slice('--reuse-preview='.length);
@@ -39,15 +40,18 @@ import React, {useState} from 'react'; import {createRoot} from 'react-dom/clien
 import {CustomCutPage} from ${JSON.stringify(path.join(root, 'src/renderer/CustomCutPage.tsx'))};
 import {CompatibleVideo} from ${JSON.stringify(path.join(root, 'src/renderer/CompatibleVideo.tsx'))};
 import {messages} from ${JSON.stringify(path.join(root, 'src/renderer/i18n.ts'))};
+import {useCustomClipHistory} from ${JSON.stringify(path.join(root, 'src/renderer/use-custom-clip-history.ts'))};
 import ${JSON.stringify(path.join(root, 'src/renderer/styles.css'))};
 const video = window.fixture;
 const metadata=video.metadata??{path:video.path,duration_seconds:30,width:640,height:360,fps:30,variable_frame_rate:false,video_codec:'h264',audio_codec:null,container:'mp4'};
-const analysis={schema_version:1,video:metadata,rallies:[],bounce_times_seconds:[]};
+const analysis={schema_version:1,video:metadata,rallies:[],bounce_times_seconds:[5.2,6,6.8,7.5]};
 function Harness(){const [output,setOutput]=useState(false);window.showOutput=()=>setOutput(true);
-const [clips,setClips]=useState([5,15,25].map((start,index)=>({clipId:'clip'+index,source:'manual',rallyIndex:index+1,bounceCount:0,defaultStart:start,defaultEnd:start+3,start,end:start+3,selected:true})));
+const history=useCustomClipHistory([5,15,25].map((start,index)=>({clipId:'clip'+index,source:'manual',sourceRallyId:null,rallyIndex:index+1,bounceCount:0,defaultStart:start,defaultEnd:start+3,start,end:start+3,selected:true,...(${JSON.stringify(razorOnly)}&&index===0?{score:{left:2,right:1},winner:'left'}:{})})));
+const clips=history.clips;const setClips=history.edit;window.getDraft=()=>clips;
+const [scoreboard,setScoreboard]=useState({enabled:${JSON.stringify(razorOnly)},x:0.7,y:0.1});
 const [outputs,setOutputs]=useState({combined_video:true,rally_videos:false,premiere_xml:false});
 const [mode,setMode]=useState('source');const [language,setLanguage]=useState('en');window.setDraft=setClips;window.setLanguage=setLanguage;
-return output?<CompatibleVideo className="output-preview" src={video.mediaUrl} controls preload="metadata"/>:<CustomCutPage video={video} analysis={analysis} clips={clips} playbackMode={mode} onPlaybackModeChange={setMode} translations={messages(language)} mediaAvailable onClipsChange={setClips} onToggleAll={selected=>setClips(current=>current.map(clip=>({...clip,selected})))} outputs={outputs} onOutputsChange={setOutputs} onExport={()=>{}}/>;}
+return output?<CompatibleVideo className="output-preview" src={video.mediaUrl} controls preload="metadata"/>:<CustomCutPage video={video} analysis={analysis} clips={clips} playbackMode={mode} onPlaybackModeChange={setMode} translations={messages(language)} mediaAvailable onClipsChange={setClips} onToggleAll={selected=>setClips(current=>current.map(clip=>({...clip,selected})))} outputs={outputs} onOutputsChange={setOutputs} onExport={()=>{}} scoreboard={scoreboard} onScoreboardChange={setScoreboard} canUndo={history.canUndo} canRedo={history.canRedo} onUndo={history.undo} onRedo={history.redo} onEditStart={history.begin} onEditEnd={history.commit}/>;}
 createRoot(document.getElementById('root')).render(<Harness/>);
 `);
 await build({ root: run, configFile: false, base: './', plugins: [{ name: 'baseline-source', enforce: 'pre', load(id) { return original.get(id); } }, react()], logLevel: 'error', build: { outDir: path.join(run, 'renderer'), emptyOutDir: true } });
@@ -55,11 +59,12 @@ const protocolSource = await readFile(path.join(root, 'src/main/media-protocol.t
 await writeFile(path.join(run, 'media-protocol.cjs'), ts.transpileModule(protocolSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true, target: ts.ScriptTarget.ES2022 } }).outputText);
 await writeFile(path.join(run, 'preload.cjs'), `const {contextBridge,ipcRenderer}=require('electron');contextBridge.exposeInMainWorld('fixture',JSON.parse(process.argv.find(a=>a.startsWith('--fixture=')).slice(10)));contextBridge.exposeInMainWorld('ttcut',{platform:${JSON.stringify(originalMedia ? 'win32' : process.platform)},prepareVideoPreview:()=>ipcRenderer.invoke('proxy')});`);
 await writeFile(path.join(run, 'main.cjs'), `
-const {app,BrowserWindow,protocol,ipcMain}=require('electron');const path=require('node:path');
+const {app,BrowserWindow,Menu,protocol,ipcMain}=require('electron');const path=require('node:path');
 const originalMedia=${originalMedia};
 app.setPath('userData',path.join(__dirname,'user-data'));app.disableHardwareAcceleration();
 protocol.registerSchemesAsPrivileged([{scheme:'ttcut-media',privileges:{standard:true,secure:true,supportFetchAPI:true,stream:true}}]);
 app.whenReady().then(async()=>{
+ if(process.platform==='darwin')Menu.setApplicationMenu(Menu.buildFromTemplate([{role:'appMenu'},{role:'editMenu'},{role:'viewMenu'},{role:'windowMenu'}]));
  const backend=originalMedia?require('./backend/index.cjs'):require('./media-protocol.cjs');
  const {installMediaProtocol,registerMediaPath}=backend;
  const handle=protocol.handle.bind(protocol);let first=true;
@@ -101,7 +106,121 @@ async function advancing(name, minimum, maximum, selector = '.custom-monitor vid
  checks.push({ name, before, after: await frameState(selector) });
 }
 try {
- if (previewOnly) {
+ if (!baseline) {
+  const guide = page.getByRole('dialog', { name: 'Custom editing guide', exact: true });
+  await expect(guide).toBeVisible();
+  await guide.getByRole('button', { name: 'Got it', exact: true }).click();
+ }
+ if (razorOnly) {
+  const monitor = page.locator('.custom-monitor video');
+  await expect.poll(async() => (await frameState()).ready).toBeGreaterThanOrEqual(2);
+  const position = async time => {
+   await monitor.evaluate((video,time) => { video.pause(); video.currentTime=time; }, time);
+   await expect.poll(async() => monitor.evaluate(video => !video.seeking)).toBe(true);
+   await expect.poll(async() => (await frameState()).time).toBeCloseTo(time, 2);
+  };
+  const draft = () => page.evaluate(() => window.getDraft());
+  const initial = await draft();
+  await expect(page.locator('.clip-score-annotation')).toHaveCount(1);
+  await position(6.5);
+  await page.getByRole('button',{name:'Razor tool',exact:true}).click();
+  const trackBox = await page.locator('.timeline-track').boundingBox();
+  const first = await page.locator('[data-clip-id="clip0"]').boundingBox();
+  const pointer = {x:first.x+1.5*trackBox.width/30+6,y:first.y+first.height/2};
+  await page.mouse.move(pointer.x,pointer.y);
+  await expect(page.locator('.razor-cut-line')).toHaveAttribute('data-cut-time','6.5');
+  await expect(page.locator('.razor-cut-line')).toHaveClass(/is-snapped/);
+  await page.screenshot({path:path.join(run,'razor-snap-annotated.png'),animations:'disabled'});
+  await page.mouse.click(pointer.x,pointer.y);
+  await expect(page.locator('.timeline-clip')).toHaveCount(4);
+  await expect(page.locator('.clip-score-annotation')).toHaveCount(0);
+  const split = await draft();
+  expect(split.slice(0,2).map(clip=>[clip.start,clip.end,clip.bounceCount])).toEqual([[5,6.5,2],[6.5,8,2]]);
+  expect(split.slice(0,2).every(clip=>clip.score===undefined&&clip.winner===undefined)).toBe(true);
+  expect((await frameState()).paused).toBe(true);expect((await frameState()).time).toBeCloseTo(6.5,2);
+  checks.push({name:'razor preview and cut snap to playhead without moving paused transport; counts partition and annotations clear',passed:true});
+  const modifier=process.platform==='darwin'?'Meta':'Control';
+  await page.keyboard.press(modifier+'+z');
+  await expect(page.locator('.timeline-clip')).toHaveCount(3);
+  await expect(page.locator('.clip-score-annotation')).toHaveCount(1);
+  expect(await draft()).toEqual(initial);
+  await page.keyboard.press(modifier+'+Shift+z');
+  await expect(page.locator('.timeline-clip')).toHaveCount(4);expect(await draft()).toEqual(split);
+  checks.push({name:'native platform undo and redo restore annotations and the exact split IDs',passed:true});
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('button',{name:'Razor tool',exact:true})).toHaveAttribute('aria-pressed','false');
+  const ruler = page.locator('.timeline-ruler');const rulerBox = await ruler.boundingBox();
+  await page.mouse.move(rulerBox.x+rulerBox.width/2,rulerBox.y+15);
+  await page.keyboard.down('Control');await page.mouse.wheel(0,-300);await page.keyboard.up('Control');
+  const viewport = page.locator('.timeline-viewport');
+  await expect.poll(async()=>Number(await viewport.getAttribute('data-zoom'))).toBeGreaterThan(1);
+  await viewport.evaluate(element=>{element.scrollLeft=150});
+  await page.evaluate(()=>new Promise(requestAnimationFrame));
+  await position(7.85);
+  await page.getByRole('button',{name:'Razor tool',exact:true}).click();
+  const right=await page.locator(`[data-clip-id="${split[1].clipId}"]`).boundingBox();
+  const zoomTrack=await page.locator('.timeline-track').boundingBox();
+  const cutX=right.x+0.7*zoomTrack.width/30;
+  await page.mouse.move(cutX,right.y+20);
+  const displayedCut=Number(await page.locator('.razor-cut-line').getAttribute('data-cut-time'));
+  await page.mouse.click(cutX,right.y+20);
+  const repeated=await draft();expect(repeated).toHaveLength(5);
+  expect(repeated[1].end).toBe(displayedCut);expect(repeated[2].start).toBe(displayedCut);
+  expect(displayedCut).toBeCloseTo(7.2,1);
+  await page.locator('.timeline-track-window').click({button:'right'});
+  await expect(page.getByRole('button',{name:'Razor tool',exact:true})).toHaveAttribute('aria-pressed','false');
+  checks.push({name:'zoomed and scrolled timeline uses the displayed cut position for repeated splits',passed:true});
+  await page.getByRole('button',{name:'Sequential playback',exact:true}).click();
+  await position(5.2);await monitor.evaluate(video=>video.play());
+  await advancing('rally playback advances decoded frames across adjacent split clips',5.3,8);
+  await expect.poll(async() => (await frameState()).time).toBeGreaterThan(repeated[1].start);
+  await page.screenshot({path:path.join(run,'razor-split-playback.png'),animations:'disabled'});
+  await position(7.6);
+  await page.getByRole('button',{name:'Rally playback',exact:true}).click();
+  await page.getByRole('button',{name:'Razor tool',exact:true}).click();
+  const loopClip = await page.locator(`[data-clip-id="${repeated[2].clipId}"]`).boundingBox();
+  const loopX=loopClip.x+(7.45-repeated[2].start)*zoomTrack.width/30;
+  await page.mouse.click(loopX,loopClip.y+20);
+  await expect(page.locator('.timeline-clip')).toHaveCount(6);
+  const loopDraft=await draft();
+  const expectedLoopIndex=loopDraft.findIndex(clip=>7.6>=clip.start&&7.6<clip.end);
+  expect(await page.locator('tr[data-loop-target="true"]').evaluate(row=>[...row.parentElement.children].indexOf(row))).toBe(expectedLoopIndex);
+  expect((await frameState()).time).toBeCloseTo(7.6,2);
+  await page.keyboard.press(modifier+'+z');
+  await expect(page.locator('.timeline-clip')).toHaveCount(5);
+  await page.keyboard.press(modifier+'+Shift+z');
+  await expect(page.locator('.timeline-clip')).toHaveCount(6);
+  expect(await page.locator('tr[data-loop-target="true"]').evaluate(row=>[...row.parentElement.children].indexOf(row))).toBe(expectedLoopIndex);
+  expect((await frameState()).time).toBeCloseTo(7.6,2);
+  await page.keyboard.press('Escape');await monitor.evaluate(video=>video.play());
+  await advancing('split loop target continues decoding in the child at the playhead',7.6,8);
+  checks.push({name:'splitting and redoing the active loop target preserve time and follow the child containing the playhead',passed:true});
+  await page.locator('[data-clip-id="clip1"]').click({position:{x:15,y:20}});
+  await advancing('another source clip starts decoding in loop mode',15,18);
+  await page.getByRole('button',{name:'Razor tool',exact:true}).click();
+  const playingClip=await page.locator('[data-clip-id="clip1"]').boundingBox();
+  const playingTrack=await page.locator('.timeline-track').boundingBox();
+  const playingCutX=playingClip.x+2*playingTrack.width/30;
+  const beforePlayingCut=await frameState();
+  await page.mouse.click(playingCutX,playingClip.y+20);
+  await expect(page.locator('.timeline-clip')).toHaveCount(7);
+  const afterPlayingCut=await frameState();
+  expect(afterPlayingCut.paused).toBe(false);
+  expect(afterPlayingCut.time).toBeGreaterThanOrEqual(beforePlayingCut.time-0.03);
+  await advancing('cutting during playback preserves intent and decoded-frame advancement',afterPlayingCut.time,17);
+  await page.locator('.custom-scoreboard-winner').first().click();
+  await expect(page.locator('[data-clip-id="clip1"] .clip-score-annotation')).toHaveCount(1);
+  await position(17.3);
+  const annotatedClip=await page.locator('[data-clip-id="clip1"]').boundingBox();
+  await page.mouse.click(annotatedClip.x+playingTrack.width/30,annotatedClip.y+20);
+  await expect(page.locator('.timeline-clip')).toHaveCount(8);
+  await expect(page.locator('.clip-score-annotation')).toHaveCount(0);
+  checks.push({name:'a real scoreboard winner click creates the red dot; splitting that annotated clip clears it',passed:true});
+  await page.evaluate(()=>window.setLanguage('zh-CN'));
+  await expect(page.getByRole('button',{name:'剃刀工具',exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'撤销片段编辑',exact:true})).toBeVisible();
+  await page.screenshot({path:path.join(run,'razor-tools-zh.png'),animations:'disabled'});
+ } else if (previewOnly) {
   const monitor = page.locator('.custom-monitor video');
   await expect.poll(async () => {
    const alert = page.locator('.custom-preview-status[role="alert"]');
@@ -332,12 +451,12 @@ try {
  }
  if (errors.length) throw new Error(errors.join('\n'));
  passed = true;
- console.log(JSON.stringify({ passed: true, host: process.platform, baseline, zoomOnly, originalMedia, reusePreview, source, checks, run }, null, 2));
+ console.log(JSON.stringify({ passed: true, host: process.platform, baseline, zoomOnly, razorOnly, originalMedia, reusePreview, source, checks, run }, null, 2));
 } catch (error) {
  errors.push(String(error));
  throw error;
 } finally {
- await writeFile(path.join(run, 'report.json'), JSON.stringify({ passed, host: process.platform, baseline, zoomOnly, originalMedia, reusePreview, source, checks, errors }, null, 2));
+ await writeFile(path.join(run, 'report.json'), JSON.stringify({ passed, host: process.platform, baseline, zoomOnly, razorOnly, originalMedia, reusePreview, source, checks, errors }, null, 2));
  await instance.close();
  console.log('Evidence:', run);
 }

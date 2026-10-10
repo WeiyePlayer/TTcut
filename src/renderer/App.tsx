@@ -32,6 +32,7 @@ import { MultiTaskPage } from './MultiTaskPage';
 import { CalibrationSurface } from './CalibrationSurface';
 import { SupportPrompt } from './SupportPrompt';
 import { CustomCutPage } from './CustomCutPage';
+import { useCustomClipHistory } from './use-custom-clip-history';
 import { renderScoreboardImage } from './scoreboard-canvas';
 import { GlassRadioGroup } from './GlassRadioGroup';
 import { ScoreboardStyleSelector } from './ScoreboardStyleSelector';
@@ -116,11 +117,13 @@ export function App() {
   const [mode, setMode] = useState<'all' | 'highlight' | 'custom'>('all');
   const [bounceThreshold, setBounceThreshold] = useState<3 | 5 | 7>(5);
   const [durationTier, setDurationTier] = useState<DurationHighlightTier>('rally');
-  const [customDraft, setCustomDraft] = useState<CustomRallyClip[] | null>(null);
+  const customHistory = useCustomClipHistory();
+  const { clips: customDraft, edit: setCustomDraft, load: loadCustomDraft } = customHistory;
   const [customScoreboardDraft, setCustomScoreboard] = useState<ScoreboardSetting>(DEFAULT_SCOREBOARD);
   const customScoreboard = useMemo(() => ({ ...customScoreboardDraft, style: settings.scoreboard_style ?? 'classic' }), [customScoreboardDraft, settings.scoreboard_style]);
   const [customPlaybackMode, setCustomPlaybackMode] = useState<CustomPlaybackMode>('source');
   const [customSaveError, setCustomSaveError] = useState(false);
+  const [customSaveVersion, setCustomSaveVersion] = useState(0);
   const [customResetVersion, setCustomResetVersion] = useState(0);
   const customSaveRef = useRef<Promise<void>>(Promise.resolve());
   const [customOutputs, setCustomOutputs] = useState<NonNullable<ExportRequest['outputs']>>({
@@ -189,7 +192,7 @@ export function App() {
         if (videoTaskOwnerRef.current === 'single') updateVideoTaskOwner(null);
         setAnalysisId(event.analysisId);
         setAnalysis(event.data);
-        setCustomDraft(null);
+        loadCustomDraft(null);
         setCustomScoreboard(DEFAULT_SCOREBOARD);
         setCustomPlaybackMode('source');
         setCustomOutputs({ combined_video: true, rally_videos: false, premiere_xml: false });
@@ -265,13 +268,15 @@ export function App() {
       schema_version: 1, clips: customDraft, playbackMode: customPlaybackMode, scoreboard: customScoreboard, outputs: customOutputs,
     }).catch(() => { if (current) setCustomSaveError(true); });
     return () => { current = false; };
-  }, [analysisId, customDraft, customPlaybackMode, customScoreboard, customOutputs]);
+  }, [analysisId, customDraft, customPlaybackMode, customScoreboard, customOutputs, customSaveVersion]);
   useEffect(() => {
     if (!toast) return;
     const timeout = window.setTimeout(() => setToast(null), 3_000);
     return () => window.clearTimeout(timeout);
   }, [toast]);
   const updatePromptKey = `${updateState.status}:${updateState.version}`;
+  const updatePromptVisible = Boolean(bootstrap && updateState.version
+    && (updateState.status === 'available' || updateState.status === 'downloaded') && dismissedUpdate !== updatePromptKey);
   const runUpdateAction = async (action: 'check' | 'download' | 'skip' | 'restart') => {
     if (updateActionRef.current) return;
     updateActionRef.current = true;
@@ -299,7 +304,7 @@ export function App() {
     setStep('select'); setVideo(null); setMetadata(null); setPoints({}); setAnalysis(null); setAnalysisId(null); setForceManual(false);
     setAnalysisWarning(null);
     setCustomPlaybackMode('source');
-    setMode('all'); setBounceThreshold(5); setDurationTier('rally'); setCustomDraft(null); setCustomScoreboard(DEFAULT_SCOREBOARD); setCustomOutputs({ combined_video: true, rally_videos: false, premiere_xml: false }); setProgress({ percent: 0, stage: 'probe' });
+    setMode('all'); setBounceThreshold(5); setDurationTier('rally'); loadCustomDraft(null); setCustomScoreboard(DEFAULT_SCOREBOARD); setCustomOutputs({ combined_video: true, rally_videos: false, premiere_xml: false }); setProgress({ percent: 0, stage: 'probe' });
     setActiveTask(null); setExportResult(null); setError(null);
     if (videoTaskOwnerRef.current === 'single') updateVideoTaskOwner(null);
   }, [updateVideoTaskOwner]);
@@ -368,7 +373,7 @@ export function App() {
 
   const resetCustomEditor = () => {
     if (!analysis) return;
-    setCustomDraft(createCustomClipDraft(
+    loadCustomDraft(createCustomClipDraft(
       analysis.rallies,
       settings.pre_roll_seconds,
       settings.post_roll_seconds,
@@ -523,7 +528,7 @@ export function App() {
       setMode('all');
       setBounceThreshold(5);
       setDurationTier('rally');
-      setCustomDraft(opened.customEditorDraft?.clips ?? null);
+      loadCustomDraft(opened.customEditorDraft?.clips ?? null);
       setCustomScoreboard(opened.customEditorDraft?.scoreboard ?? DEFAULT_SCOREBOARD);
       setCustomPlaybackMode(opened.customEditorDraft?.playbackMode ?? 'source');
       setCustomOutputs(opened.customEditorDraft?.outputs ?? { combined_video: true, rally_videos: false, premiere_xml: false });
@@ -911,13 +916,21 @@ export function App() {
                 playbackMode={customPlaybackMode}
                 onPlaybackModeChange={setCustomPlaybackMode}
                 translations={t}
+                language={settings.language}
+                autoGuideAllowed={!missingComponents && !historyConfirmation && !closeDialog && !updatePromptVisible}
                 mediaAvailable={Boolean(platformSupported && bootstrap?.components.media.available)}
                 outputs={customOutputs}
                 onOutputsChange={setCustomOutputs}
                 onClipsChange={setCustomDraft}
+                canUndo={customHistory.canUndo}
+                canRedo={customHistory.canRedo}
+                onUndo={customHistory.undo}
+                onRedo={customHistory.redo}
+                onEditStart={customHistory.begin}
+                onEditEnd={customHistory.commit}
                 onReset={resetCustomEditor}
                 saveError={customSaveError}
-                onRetrySave={() => setCustomDraft((current) => current ? [...current] : null)}
+                onRetrySave={() => setCustomSaveVersion((version) => version + 1)}
                 onToggleAll={(selected) => {
                   if (!selected) {
                     setCustomDraft((current) => current?.map((clip) => ({ ...clip, selected: false })) ?? null);
@@ -1021,7 +1034,7 @@ export function App() {
         />
       )}
       {toast && <div className="toast" role="status">{toast}</div>}
-      {bootstrap && updateState.version && (updateState.status === 'available' || updateState.status === 'downloaded') && dismissedUpdate !== updatePromptKey && (
+      {updatePromptVisible && updateState.version && (
         <UpdatePrompt
           version={updateState.version}
           downloaded={updateState.status === 'downloaded'}

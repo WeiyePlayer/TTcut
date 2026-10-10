@@ -33,3 +33,15 @@ boundary.
 Renderer can offer manual timeline edits without becoming an authority for
 export safety. Combined video, per-clip video, and Premiere XML all consume
 the same validated source-aware segment sequence.
+
+## Follow-up: razor splits (2026-10-09)
+
+A detected Rally may now supply multiple Custom Rally Clips after a razor
+split. Keeping the source association preserves provenance across editing and
+history reopen, instead of reclassifying split detected clips as manual clips.
+Main requires unique clip IDs, existing source Rally IDs, increasing display
+indices, frame-sized in-video intervals, and non-overlap; the source Rally ID
+itself need not be unique. This replaces ADR 0008's duplicate-Rally rejection.
+Legacy requests still use their Rally ID as the clip ID, so duplicate legacy
+segments remain invalid. Draft v1 adds an optional `isSplit` flag for range-based
+board counts; existing drafts without it keep their original semantics.

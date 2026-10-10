@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { useLayoutEffect, useState } from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { CUSTOM_GUIDE_STORAGE_KEY } from '../src/renderer/custom-guide-preference';
 import { calculateRallyPlaybackScrollTop, CustomCutPage, findPlaybackTargetClip } from '../src/renderer/CustomCutPage';
 import type { AnalysisResultV1, ExportRequest, ScoreboardPosition, ScoreboardStyle } from '../src/shared/contracts';
 import type { SelectedVideo } from '../src/shared/api';
@@ -106,6 +107,7 @@ function mockRallyListGeometry() {
   return { scroll, rows };
 }
 
+beforeEach(() => window.localStorage.setItem(CUSTOM_GUIDE_STORAGE_KEY, '1'));
 afterEach(() => cleanup());
 
 function scoreCell(side: 'A' | 'B', kind: 'points' | 'games' = 'points') {

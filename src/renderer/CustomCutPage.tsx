@@ -11,10 +11,13 @@ import {
   resolvedSelectedClipScores,
   selectCustomClipsByBounceCount,
   setCustomClipSelected,
+  splitCustomClip,
   type CustomRallyClip,
 } from '../domain/custom-clips';
 import { CustomTimeline, type TimelineToolMode } from './CustomTimeline';
-import type { Messages } from './i18n';
+import type { Language, Messages } from './i18n';
+import { CustomEditingGuide } from './CustomEditingGuide';
+import { customGuidePreference } from './custom-guide-preference';
 import { useCompatiblePreview } from './use-compatible-preview';
 import { useCustomPlayback } from './use-custom-playback';
 import type { CustomPlaybackMode } from '../domain/custom-playback';
@@ -99,6 +102,14 @@ function TrashIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 7h16M10 11v6m4-6v6M9 7l.8-2h4.4l.8 2M6.5 7l.8 12h9.4l.8-12" /></svg>;
 }
 
+function RazorIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m9 3 12 12-6 6L3 9ZM9 8l7 7M8 9l7 7M6 6l2 2m8 8 2 2" /></svg>;
+}
+
+function HistoryIcon({ redo = false }: { redo?: boolean }) {
+  return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" style={redo ? { transform: 'scaleX(-1)' } : undefined}><path d="m8 5-5 5 5 5M3 10h10a7 7 0 0 1 7 7v2" /></svg>;
+}
+
 function ZoomIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="6" /><path d="m14.5 14.5 5.5 5.5M7 10h6M10 7v6" /></svg>;
 }
@@ -118,14 +129,14 @@ function ScoreboardIcon() {
   );
 }
 
-function manualClipId(): string | null {
-  if (typeof globalThis.crypto?.randomUUID === 'function') return `manual_${globalThis.crypto.randomUUID()}`;
+function customClipId(prefix: 'manual' | 'split'): string | null {
+  if (typeof globalThis.crypto?.randomUUID === 'function') return `${prefix}_${globalThis.crypto.randomUUID()}`;
   if (typeof globalThis.crypto?.getRandomValues !== 'function') return null;
   const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16));
   bytes[6] = (bytes[6]! & 0x0f) | 0x40;
   bytes[8] = (bytes[8]! & 0x3f) | 0x80;
   const hex = [...bytes].map((value) => value.toString(16).padStart(2, '0')).join('');
-  return `manual_${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  return `${prefix}_${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 function RallyScrollbar({ scrollRef, contentRef }: { scrollRef: React.RefObject<HTMLDivElement | null>; contentRef: React.RefObject<HTMLTableElement | null> }) {
@@ -188,6 +199,8 @@ export function CustomCutPage({
   playbackMode,
   onPlaybackModeChange,
   translations,
+  language = 'zh-CN',
+  autoGuideAllowed = true,
   mediaAvailable,
   onClipsChange,
   onToggleAll,
@@ -197,6 +210,12 @@ export function CustomCutPage({
   onReset,
   saveError = false,
   onRetrySave,
+  canUndo = false,
+  canRedo = false,
+  onUndo,
+  onRedo,
+  onEditStart,
+  onEditEnd,
 }: {
   video: SelectedVideo;
   analysis: AnalysisResultV1;
@@ -206,6 +225,8 @@ export function CustomCutPage({
   playbackMode: CustomPlaybackMode;
   onPlaybackModeChange: (mode: CustomPlaybackMode) => void;
   translations: Messages;
+  language?: Language;
+  autoGuideAllowed?: boolean;
   mediaAvailable: boolean;
   onClipsChange: (clips: CustomRallyClip[]) => void;
   onToggleAll: (selected: boolean) => void;
@@ -215,6 +236,12 @@ export function CustomCutPage({
   onReset?: () => void;
   saveError?: boolean;
   onRetrySave?: () => void;
+  canUndo?: boolean;
+  canRedo?: boolean;
+  onUndo?: () => void;
+  onRedo?: () => void;
+  onEditStart?: () => void;
+  onEditEnd?: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const scoreboardPlaneRef = useRef<HTMLDivElement>(null);
@@ -224,6 +251,7 @@ export function CustomCutPage({
   const rallyRowRefs = useRef(new Map<string, HTMLTableRowElement>());
   const multiSelectRef = useRef<HTMLDivElement>(null);
   const multiSelectButtonRef = useRef<HTMLButtonElement>(null);
+  const guideButtonRef = useRef<HTMLButtonElement>(null);
   const multiSelectId = useId();
   const exportCloseTimerRef = useRef<number | null>(null);
   const playbackCueTimerRef = useRef<number | null>(null);
@@ -255,6 +283,7 @@ export function CustomCutPage({
   const [multiSelectOpen, setMultiSelectOpen] = useState(false);
   const [bounceFilterValue, setBounceFilterValue] = useState('');
   const [resetConfirmation, setResetConfirmation] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
   const selectedCount = clips.filter((clip) => clip.selected).length;
   const visibleClips = clips;
   const selectedScores = useMemo(() => resolvedSelectedClipScores(clips), [clips]);
@@ -275,6 +304,30 @@ export function CustomCutPage({
       onScoreboardChange({ ...scoreboard, scale: scoreboardScale, x: Math.min(scoreboard.x, scoreboardMaxX), y: Math.min(scoreboard.y, scoreboardMaxY) });
     }
   }, [scoreboard, scoreboardMaxX, scoreboardMaxY, scoreboardScale, scoreboardScaleLimit, onScoreboardChange]);
+
+  const openGuide = useCallback(() => {
+    const intent = preview.getPlaybackIntent();
+    // Cancel queued playback as well as a currently playing media element.
+    preview.seekTo(intent.time, false);
+    videoRef.current?.pause();
+    setToolMode(null);
+    setMultiSelectOpen(false);
+    if (exportCloseTimerRef.current !== null) {
+      window.clearTimeout(exportCloseTimerRef.current);
+      exportCloseTimerRef.current = null;
+    }
+    setExportOptionsOpen(false);
+    setGuideOpen(true);
+  }, [preview.getPlaybackIntent, preview.seekTo]);
+
+  useEffect(() => {
+    if (autoGuideAllowed && !resetConfirmation && !guideOpen && !customGuidePreference.hasSeen()) openGuide();
+  }, [autoGuideAllowed, resetConfirmation, guideOpen, openGuide]);
+
+  const closeGuide = () => {
+    customGuidePreference.markSeen();
+    setGuideOpen(false);
+  };
 
   useEffect(() => {
     if (!multiSelectOpen) return;
@@ -492,7 +545,7 @@ export function CustomCutPage({
   }, [analysis, clips, onClipsChange, showBounceCounts]);
 
   const addManualAt = useCallback((start: number, makeCurrent = false) => {
-    const clipId = manualClipId();
+    const clipId = customClipId('manual');
     if (!clipId) return false;
     const nextClips = createManualCustomClip(
       clips,
@@ -507,9 +560,44 @@ export function CustomCutPage({
     return true;
   }, [analysis, clips, onClipsChange, showBounceCounts]);
 
+  const splitClipAt = (clipId: string, time: number) => {
+    const rightId = customClipId('split');
+    if (!rightId) return false;
+    const next = splitCustomClip(clips, clipId, time, rightId, analysis.video.fps, showBounceCounts ? analysis.bounce_times_seconds : undefined);
+    if (!next) return false;
+    const boundary = next.find((clip) => clip.clipId === rightId)!.start;
+    playback.remapSplitTarget(clipId, rightId, boundary);
+    const target = clips.find((clip) => clip.clipId === clipId)!;
+    if (currentEditingClipId === clipId && currentTimeRef.current >= boundary && currentTimeRef.current < target.end) {
+      setCurrentEditingClipId(rightId);
+    }
+    onClipsChange(next);
+    return true;
+  };
+
+  useEffect(() => {
+    const handleEditShortcut = (event: KeyboardEvent) => {
+      if (guideOpen || !autoGuideAllowed || resetConfirmation || event.isComposing || event.repeat || event.altKey || isEditableShortcutTarget(event.target)) return;
+      if (event.key === 'Escape' && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+        setToolMode(null);
+        return;
+      }
+      const isMac = window.ttcut?.platform === 'darwin';
+      const modifier = isMac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+      if (!modifier) return;
+      const key = event.key.toLowerCase();
+      const action = key === 'z' ? (event.shiftKey ? onRedo : onUndo)
+        : !isMac && key === 'y' && !event.shiftKey ? onRedo : undefined;
+      if (!action) return;
+      event.preventDefault(); event.stopPropagation(); action();
+    };
+    window.addEventListener('keydown', handleEditShortcut, true);
+    return () => window.removeEventListener('keydown', handleEditShortcut, true);
+  }, [onUndo, onRedo, resetConfirmation, guideOpen, autoGuideAllowed]);
+
   useEffect(() => {
     const handleSpace = (event: KeyboardEvent) => {
-      if (resetConfirmation) return;
+      if (guideOpen || !autoGuideAllowed || resetConfirmation) return;
       if (event.target instanceof HTMLElement && event.target.closest('.custom-scoreboard input')) return;
       if (event.isComposing || (event.code !== 'Space' && event.key !== ' ')) return;
       // Own Space before row handlers and native button/checkbox activation.
@@ -524,15 +612,15 @@ export function CustomCutPage({
       window.removeEventListener('keydown', handleSpace, true);
       window.removeEventListener('keyup', handleSpace, true);
     };
-  }, [togglePlayback, resetConfirmation]);
+  }, [togglePlayback, resetConfirmation, guideOpen, autoGuideAllowed]);
 
   useEffect(() => {
     const handleBoundaryShortcut = (event: KeyboardEvent) => {
-      if (resetConfirmation) return;
+      if (guideOpen || !autoGuideAllowed || resetConfirmation) return;
       if (event.isComposing || event.repeat || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey
         || isEditableShortcutTarget(event.target)
         || (event.code !== 'KeyA' && event.code !== 'KeyD')
-        || toolMode === 'delete') return;
+        || toolMode === 'delete' || toolMode === 'razor') return;
 
       if (toolMode === 'add' && event.code === 'KeyA') {
         event.preventDefault();
@@ -548,7 +636,7 @@ export function CustomCutPage({
     };
     window.addEventListener('keydown', handleBoundaryShortcut, true);
     return () => window.removeEventListener('keydown', handleBoundaryShortcut, true);
-  }, [addManualAt, currentEditingClipId, resizeClipAt, toolMode, resetConfirmation]);
+  }, [addManualAt, currentEditingClipId, resizeClipAt, toolMode, resetConfirmation, guideOpen, autoGuideAllowed]);
 
   const toggleTool = (nextTool: Exclude<TimelineToolMode, null>) => {
     setToolMode((active) => active === nextTool ? null : nextTool);
@@ -723,18 +811,24 @@ export function CustomCutPage({
             </div>}
           </div></div>
 
-          <CustomTimeline clips={clips} duration={analysis.video.duration_seconds} fps={analysis.video.fps} currentTime={currentTime} currentEditingClipId={currentEditingClipId} timelineLabel={translations.timeline} resizeStartLabel={translations.resizeStart} resizeEndLabel={translations.resizeEnd} toolMode={toolMode} onSeek={seek} onScrubCancel={playback.cancelScrub} onPlayClip={playClip} onAddAt={addManualAt} onDeleteClip={(clipId) => onClipsChange(deleteCustomClip(clips, clipId))} onResize={resizeClipAt} />
+          <CustomTimeline clips={clips} duration={analysis.video.duration_seconds} fps={analysis.video.fps} currentTime={currentTime} currentEditingClipId={currentEditingClipId} timelineLabel={translations.timeline} resizeStartLabel={translations.resizeStart} resizeEndLabel={translations.resizeEnd} toolMode={toolMode} onSeek={seek} onScrubCancel={playback.cancelScrub} onPlayClip={playClip} onAddAt={addManualAt} onDeleteClip={(clipId) => onClipsChange(deleteCustomClip(clips, clipId))} onResize={resizeClipAt} onSplitClip={splitClipAt} onEditStart={onEditStart} onEditEnd={onEditEnd} scoreAnnotationLabel={translations.scoreAnnotated} />
 
           <div className="custom-timeline-actions">
             <div className="timeline-tool-buttons" role="group" aria-label={translations.timelineTools}>
               <button className={`timeline-tool${toolMode === 'add' ? ' is-active' : ''}`} type="button" aria-label={translations.addManualRally} title={translations.addManualRally} aria-pressed={toolMode === 'add'} onClick={() => toggleTool('add')}><PlusIcon /></button>
+              <button className={`timeline-tool${toolMode === 'razor' ? ' is-active' : ''}`} type="button" aria-label={translations.razorTool} title={translations.razorToolHint} aria-pressed={toolMode === 'razor'} onClick={() => toggleTool('razor')}><RazorIcon /></button>
               <button className={`timeline-tool${toolMode === 'delete' ? ' is-active' : ''}`} type="button" aria-label={translations.deleteRally} title={translations.deleteRally} aria-pressed={toolMode === 'delete'} onClick={() => toggleTool('delete')}><TrashIcon /></button>
               <button className={`timeline-tool${toolMode === 'zoom' ? ' is-active' : ''}`} type="button" aria-label={translations.zoomTimeline} title={translations.zoomTimelineHint} aria-pressed={toolMode === 'zoom'} onClick={() => toggleTool('zoom')}><ZoomIcon /></button>
               <button className={`timeline-tool scoreboard-tool${scoreboard.enabled ? ' is-active' : ''}`} type="button" aria-label={translations.addScoreboard} aria-pressed={scoreboard.enabled} title={translations.addScoreboard} onClick={() => onScoreboardChange({ ...scoreboard, enabled: !scoreboard.enabled })}><ScoreboardIcon /></button>
               <button className="timeline-tool playback-mode-toggle" type="button" aria-label={playbackMode === 'source' ? translations.sourcePlayback : playbackMode === 'rallies' ? translations.rallyPlayback : translations.loopPlayback} title={playbackMode === 'source' ? translations.switchToRallyPlayback : playbackMode === 'rallies' ? translations.switchToLoopPlayback : translations.switchToSourcePlayback} onClick={playback.switchMode}><PlaybackModeIcon mode={playbackMode} /></button>
+              <button className="timeline-tool" type="button" aria-label={translations.undoClipEdit} title={`${translations.undoClipEdit} (${window.ttcut?.platform === 'darwin' ? '⌘Z' : 'Ctrl+Z'})`} disabled={!canUndo} onClick={onUndo}><HistoryIcon /></button>
+              <button className="timeline-tool" type="button" aria-label={translations.redoClipEdit} title={`${translations.redoClipEdit} (${window.ttcut?.platform === 'darwin' ? '⌘⇧Z' : 'Ctrl+Y / Ctrl+Shift+Z'})`} disabled={!canRedo} onClick={onRedo}><HistoryIcon redo /></button>
               {onReset && <button className="timeline-tool" type="button" aria-label={translations.resetCustomEdits} title={translations.resetCustomEdits} onClick={() => setResetConfirmation(true)}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 7v5h-5M20 12a8 8 0 1 0-2.3 5.7" /></svg>
               </button>}
+              <button ref={guideButtonRef} className="timeline-tool custom-guide-trigger" type="button" aria-label={translations.customGuide.title} title={translations.customGuide.title} aria-haspopup="dialog" onClick={openGuide}>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 11v6" /><circle cx="12" cy="7.5" r="1" fill="currentColor" stroke="none" /></svg>
+              </button>
             </div>
             <div className={`custom-export-launcher floating-launcher${exportOptionsOpen ? ' is-open' : ''}`} onPointerLeave={scheduleExportClose}>
               <div className="custom-export-options floating-launch-options" role="group" aria-label={translations.customExportOptions} onPointerEnter={cancelExportClose} onPointerLeave={scheduleExportClose}>
@@ -754,6 +848,7 @@ export function CustomCutPage({
           </div>
         </div>
       </div>
+      {guideOpen && autoGuideAllowed && <CustomEditingGuide copy={translations.customGuide} language={language} platform={window.ttcut?.platform ?? 'win32'} onClose={closeGuide} returnFocus={guideButtonRef} />}
       {resetConfirmation && <div className="modal-backdrop" onKeyDown={(event) => { if (event.key === 'Escape') setResetConfirmation(false); }}>
         <div className="modal" role="dialog" aria-modal="true" aria-labelledby="custom-reset-title">
           <h2 id="custom-reset-title">{translations.resetCustomEdits}</h2>
