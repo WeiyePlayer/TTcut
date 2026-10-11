@@ -22,3 +22,10 @@ For Windows x64 and macOS 15+ on Apple Silicon: scoreboard styles, razor splitti
 ## Before public publication
 
 - The Windows native-preview NOTICE requires corresponding source and notices for the pinned GPL libmpv build and its linked dependencies. Those materials are absent from the current draft; retain draft status until supplied and verified.
+
+## macOS verification
+
+- Type checking, 98 related regressions and 6 native scoreboard tests passed. Real Electron checks passed for the guide (7), playback (23) and razor/undo interactions (9).
+- All 21 packaged-app checks passed, covering offline startup, Core ML, 120 fps, decoded-frame advancement, HDR/VFR, history and export. Validation passed for 29 arm64 native binaries, DMG mounting, signature integrity and archive SHA-256 values.
+- macOS source commit: `584ed28ad10e64b8608e4dc318cde59ab45b19ad`, with a clean worktree at build time. Windows checksum entries match GitHub asset digests; update metadata agrees on version, filename and size. Windows installation and signature tests were not rerun in this session.
+- Signature-integrity checks do not imply Apple notarization. No real-match algorithm-accuracy comparison was performed.
