@@ -11,6 +11,7 @@ const root = path.resolve(import.meta.dirname, '..');
 const sources = process.argv.slice(2).filter(arg => !arg.startsWith('--')).map(file => path.resolve(file));
 if (!sources.length) throw new Error('Pass one or more original video paths');
 const browserOnly = process.argv.includes('--browser');
+const stylesOnly = process.argv.includes('--styles-only');
 const outputRoot = path.join(root, 'output/playwright'); await mkdir(outputRoot, { recursive: true });
 const run = await mkdtemp(path.join(outputRoot, 'scoreboard-overlay-'));
 await symlink(path.join(root, 'node_modules'), path.join(run, 'node_modules'), 'junction');
@@ -34,13 +35,14 @@ import ${JSON.stringify(path.join(root, 'src/renderer/styles.css'))};
 import '@fontsource-variable/noto-sans-sc';
 import {resolvedSelectedClipScores} from ${JSON.stringify(path.join(root, 'src/domain/custom-clips.ts'))};
 import {renderScoreboardImage} from ${JSON.stringify(path.join(root, 'src/renderer/scoreboard-canvas.ts'))};
+import {useCustomClipHistory} from ${JSON.stringify(path.join(root, 'src/renderer/use-custom-clip-history.ts'))};
 function makeClips(duration){return [0,duration*.3,duration*.7].map((start,i)=>({clipId:'clip'+i,source:'manual',rallyIndex:i+1,bounceCount:0,start,end:Math.min(start+3,duration),defaultStart:start,defaultEnd:Math.min(start+3,duration),selected:i!==2}));}
 function Harness(){const [index,setIndex]=useState(0);window.selectFixture=setIndex;const video=window.fixtures[index];
 return <Editor key={index} video={video}/>;}
-function Editor({video}){const [clips,setClips]=useState(makeClips(video.metadata.duration_seconds));window.setDraft=setClips;window.clips=clips;window.scores=Object.fromEntries(resolvedSelectedClipScores(clips));
-const [scoreboard,setScoreboard]=useState({enabled:true,x:.06,y:.06,scale:1,left_name:'Player A',right_name:'Player B'});window.scoreboard=scoreboard;window.exportBoards=async()=>{await document.fonts.load('800 24px "Noto Sans SC Variable"',scoreboard.left_name+scoreboard.right_name+'0123456789');return clips.filter(c=>c.selected).map(c=>({clip:c,score:window.scores[c.clipId],image:renderScoreboardImage(video.metadata.width,video.metadata.height,scoreboard,window.scores[c.clipId])}));};
+function Editor({video}){const history=useCustomClipHistory(makeClips(video.metadata.duration_seconds));const clips=history.clips,setClips=history.edit;window.setDraft=setClips;window.clips=clips;window.scores=Object.fromEntries(resolvedSelectedClipScores(clips));
+const [scoreboard,setScoreboard]=useState({enabled:true,x:.06,y:.06,scale:1,left_name:'Player A',right_name:'Player B'});window.setScoreboard=setScoreboard;window.scoreboard=scoreboard;window.exportBoards=async()=>{await document.fonts.load('800 24px "Noto Sans SC Variable"',scoreboard.left_name+scoreboard.right_name+'0123456789');return clips.filter(c=>c.selected).map(c=>({clip:c,score:window.scores[c.clipId],image:renderScoreboardImage(video.metadata.width,video.metadata.height,scoreboard,window.scores[c.clipId])}));};
 const [mode,setMode]=useState('source');const [outputs,setOutputs]=useState({combined_video:true,rally_videos:false,premiere_xml:false});
-return <CustomCutPage video={video} analysis={{schema_version:1,video:video.metadata,rallies:[],bounce_times_seconds:[]}} clips={clips} scoreboard={scoreboard} onScoreboardChange={setScoreboard} playbackMode={mode} onPlaybackModeChange={setMode} translations={messages('en')} mediaAvailable onClipsChange={setClips} onToggleAll={selected=>setClips(c=>c.map(x=>({...x,selected})))} outputs={outputs} onOutputsChange={setOutputs} onExport={()=>{window.exportClicked=true}} onReset={()=>{}}/>;}
+return <CustomCutPage video={video} analysis={{schema_version:1,video:video.metadata,rallies:[],bounce_times_seconds:[]}} clips={clips} scoreboard={scoreboard} onScoreboardChange={setScoreboard} playbackMode={mode} onPlaybackModeChange={setMode} translations={messages('en')} mediaAvailable onClipsChange={setClips} onToggleAll={selected=>setClips(c=>c.map(x=>({...x,selected})))} outputs={outputs} onOutputsChange={setOutputs} onExport={()=>{window.exportClicked=true}} onReset={()=>{}} canUndo={history.canUndo} canRedo={history.canRedo} onUndo={history.undo} onRedo={history.redo} onEditStart={history.begin} onEditEnd={history.commit}/>;}
 createRoot(document.getElementById('root')).render(<Harness/>);
 `);
 await build({ root: run, configFile: false, base: './', logLevel: 'error', plugins: [react(), { name: 'browser-preview-acceptance', transform(code, id) { if (browserOnly && id.replaceAll('\\\\','/').endsWith('/src/renderer/CustomCutPage.tsx')) return code.replace(/const nativeEnabled = [^;]+;/, 'const nativeEnabled = false;'); } }], build: { outDir: path.join(run, 'renderer') } });
@@ -62,6 +64,7 @@ const page = await instance.firstWindow(); page.setDefaultTimeout(15000);
 const errors=[];page.on('pageerror',e=>errors.push(String(e)));
 await page.evaluate(()=>{window.inputEvents=[];window.ttcut.onNativePreviewEvent(event=>{if(event.type!=='state')window.inputEvents.push(event);});});
 const checks=[];let passed=false;
+await page.getByRole('dialog', {name:'Custom editing guide',exact:true}).getByRole('button',{name:'Got it',exact:true}).click();
 
 if (browserOnly) {
  try {
@@ -109,12 +112,17 @@ function input(action,x=0,y=0,value='',dx=0,dy=0){
 async function boardInput(action,rx,ry,value='',dx=0,dy=0){
  const b=await currentOverlay();const box=await surface.boundingBox();
  const vw=Math.min(box.width,box.height*b.aspect),vh=vw/b.aspect;
- const x=((box.width-vw)/2+vw*(b.x+.28*b.scale*rx))/box.width;
- const y=((box.height-vh)/2+vh*b.y+vw*.28*b.scale/5.2*ry)/box.height;
+ const fraction=b.style==='red-blue'?.21:.28,ratio=b.style==='red-blue'?1.46:5.2;
+ const x=((box.width-vw)/2+vw*(b.x+fraction*b.scale*rx))/box.width;
+ const y=((box.height-vh)/2+vh*b.y+vw*fraction*b.scale/ratio*ry)/box.height;
  input(action,x,y,value,dx,dy);
 }
+const metadata=fixtures[0].metadata;const ffmpeg=path.join(root,'.runtime/windows/ffmpeg/ffmpeg.exe');
+const ff=(args)=>execFileSync(ffmpeg,['-hide_banner','-loglevel','error',...args],{windowsHide:true,maxBuffer:16_000_000});
 try {
  await expect.poll(()=>surface.getAttribute('data-ready')).toBe('true');
+ if(stylesOnly)await page.evaluate(()=>window.setDraft(clips=>clips.map((clip,index)=>index===0?{...clip,score:{left:4,right:3,left_games:1},winner:'left'}:clip)));
+ if(!stylesOnly){
  await expect(page.locator('.custom-rally-table tbody tr')).toHaveCount(3);
  await expect(page.getByRole('checkbox',{name:'Rally 3',exact:true})).not.toBeChecked();
  await expect(page.getByRole('button',{name:'Multi-select',exact:true})).toBeVisible();
@@ -167,8 +175,6 @@ try {
  await expect.poll(async()=>Boolean((await stat(capture).catch(()=>null))?.size)).toBe(true);
  await page.screenshot({path:path.join(run,'ui.png')});
  const boards=await page.evaluate(()=>window.exportBoards());const scoreboard=await page.evaluate(()=>window.scoreboard);
- const metadata=fixtures[0].metadata;const ffmpeg=path.join(root,'.runtime/windows/ffmpeg/ffmpeg.exe');
- const ff=(args)=>execFileSync(ffmpeg,['-hide_banner','-loglevel','error',...args],{windowsHide:true,maxBuffer:16_000_000});
  const outputs=[];
  for(let i=0;i<boards.length;i++){
   const b=boards[i],imagePath=path.join(run,'score-'+i+'.png'),output=path.join(run,'clip-'+i+'.mp4');
@@ -191,6 +197,53 @@ try {
  let difference=0;for(let i=0;i<original.length;i++)difference+=Math.abs(original[i]-exported[i]);
  const meanDifference=difference/original.length;expect(meanDifference).toBeLessThan(12);
  checks.push('real FFmpeg clip + combined export: 4:3 then 5:3; original pixels remain in the button region, mean difference '+meanDifference.toFixed(2));
+ }
+ // Validate the new platform adaptation with the production native host and
+ // the same selected styles sent to the production FFmpeg filter builder.
+ for(const [style,rgb] of [['classic',[58,131,247]],['classic-orange',[245,158,11]],['classic-green',[34,197,94]],['red-blue',[0,0,0]]]){
+  await page.evaluate(style=>window.setScoreboard(b=>({...b,style,x:.06,y:.06,scale:1})),style);
+  await expect.poll(async()=>(await currentOverlay()).style).toBe(style);
+  await go(0);
+  const nativeFile=path.join(run,style+'-native.png');
+  await instance.evaluate(({BrowserWindow},file)=>global.backend.captureNativePreviewFrame(BrowserWindow.getAllWindows()[0].id,file),nativeFile);
+  await expect.poll(async()=>Boolean((await stat(nativeFile).catch(()=>null))?.size)).toBe(true);
+  const nativePixels=ff(['-i',nativeFile,'-pix_fmt','rgb24','-f','rawvideo','pipe:1']);
+  const captured=JSON.parse(execFileSync(process.env.FFPROBE_PATH||'ffprobe',['-v','error','-show_streams','-of','json',nativeFile],{encoding:'utf8',windowsHide:true})).streams[0];
+  const b=await currentOverlay(),vw=Math.min(captured.width,captured.height*b.aspect),vh=vw/b.aspect;
+  const width=vw*(style==='red-blue'?.21:.28),height=width/(style==='red-blue'?1.46:5.2);
+  const pixel=(rx,ry)=>{const x=Math.round((captured.width-vw)/2+vw*b.x+width*rx),y=Math.round((captured.height-vh)/2+vh*b.y+height*ry);return [...nativePixels.subarray((y*captured.width+x)*3,(y*captured.width+x)*3+3)];};
+  if(style==='red-blue'){expect(pixel(.04,.3)[0]).toBeGreaterThan(180);expect(pixel(.62,.3)[2]).toBeGreaterThan(180);}
+  else pixel(.78,.1).forEach((value,index)=>expect(Math.abs(value-rgb[index])).toBeLessThan(18));
+  const board=(await page.evaluate(()=>window.exportBoards()))[0],imagePath=path.join(run,style+'.png'),output=path.join(run,style+'-export.mp4');
+  await writeFile(imagePath,Buffer.from(board.image.split(',')[1],'base64'));
+  ff(await instance.evaluate((_,p)=>global.backend.buildSegmentReencodeArgs(p.source,p.output,{rallyIds:[p.clip.clipId],rawStart:p.clip.start,rawEnd:p.clip.end,start:p.clip.start,end:p.clip.end},0,p.metadata,'libx264',{...p.scoreboard,imagePath:p.imagePath}),{source:fixtures[0].path,output,clip:board.clip,metadata,scoreboard:await page.evaluate(()=>window.scoreboard),imagePath}));
+  const probe=JSON.parse(execFileSync(process.env.FFPROBE_PATH||'ffprobe',['-v','error','-show_streams','-of','json',output],{encoding:'utf8',windowsHide:true}));
+  expect(probe.streams.some(s=>s.codec_type==='video')).toBe(true);
+  if(metadata.audio_codec)expect(probe.streams.some(s=>s.codec_type==='audio')).toBe(true);
+  ff(['-y','-ss','0.5','-i',output,'-frames:v','1',path.join(run,style+'-export-frame.png')]);
+  checks.push(style+': native pixel colors, canvas PNG, actual clip export and source audio verified');
+ }
+ await go(0);
+ await boardInput('edit',.7875,.1,'2');await expect.poll(async()=>(await currentOverlay()).rightGames).toBe(2);
+ await boardInput('edit',.2125,.5,'7');await expect.poll(async()=>(await currentOverlay()).left).toBe(7);
+ await boardInput('wheel',.7875,.5,'120');await expect.poll(async()=>(await currentOverlay()).right).toBe(4);
+ await boardInput('click',.2125,1.12);await expect.poll(async()=>(await currentOverlay()).clipId).toBe('clip1');
+ checks.push('red-blue native card number editing, wheel adjustment and winner controls use the new geometry');
+ await page.locator('.timeline-playhead').focus();await page.keyboard.press('Home');
+ await page.keyboard.press('ArrowRight');await expect.poll(()=>surface.getAttribute('data-seeking')).toBe('false');
+ const ruler=await page.locator('.timeline-ruler').boundingBox();
+ await page.mouse.click(ruler.x+ruler.width*6/metadata.duration_seconds,ruler.y+12);
+ await expect.poll(async()=>(await currentOverlay()).winnerEnabled).toBe(false);
+ await boardInput('edit',.2125,.5,'9');await expect.poll(async()=>(await currentOverlay()).left).toBe(9);
+ expect(await surface.getAttribute('data-paused')).toBe('true');
+ checks.push('score editing between selected rallies targets the upcoming rally and pauses original media');
+ const beforeGuide=await page.evaluate(()=>window.clips);
+ await page.getByRole('button',{name:'Custom editing guide',exact:true}).click();
+ await expect.poll(()=>instance.evaluate(()=>[...global.backend.acceptanceSessions.values()][0].bounds.visible)).toBe(false);
+ await page.keyboard.press('Control+z');expect(await page.evaluate(()=>window.clips)).toEqual(beforeGuide);
+ await page.keyboard.press('Escape');
+ await expect.poll(()=>instance.evaluate(()=>[...global.backend.acceptanceSessions.values()][0].bounds.visible)).toBe(true);
+ checks.push('operation guide pauses transport, hides the native HWND, blocks undo and restores preview on dismissal');
  expect(errors).toEqual([]);passed=true;
 } catch(error){errors.push(String(error.stack));console.error(error);console.error('Recent input events',await page.evaluate(()=>window.inputEvents.slice(-8)));console.error('Draft',await page.evaluate(()=>window.clips));}
 await writeFile(path.join(run,'report.json'),JSON.stringify({passed,checks,errors},null,2));console.log(JSON.stringify({passed,checks,errors,run}));

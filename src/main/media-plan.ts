@@ -322,7 +322,7 @@ export function buildTrimFilter(
     parts.push(`[vcat]${outputFrameFilters}[vout]`);
   }
   if (scoreboard) {
-    const display = scoreboardDisplayDimensions(metadata.width, metadata.height, metadata.rotation ?? 0);
+    const display = scoreboardDisplayDimensions(metadata);
     parts.push(`[vbase][1:v]${buildScoreboardFilter(display.width, display.height, scoreboard)}[vout]`);
   }
   return {
@@ -336,7 +336,7 @@ export function buildScoreboardFilter(
   height: number,
   scoreboard: ScoreboardAsset,
 ): string {
-  const { width: boardWidth, height: boardHeight } = scoreboardDimensions(width, height, scoreboard.scale ?? 1);
+  const { width: boardWidth, height: boardHeight } = scoreboardDimensions(width, height, scoreboard.scale ?? 1, scoreboard.style);
   const x = Math.round(Math.max(0, Math.min(1 - boardWidth / width, scoreboard.x)) * width);
   const y = Math.round(Math.max(0, Math.min(1 - boardHeight / height, scoreboard.y)) * height);
   return `overlay=x=${x}:y=${y}:shortest=1:format=auto`;

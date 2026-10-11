@@ -75,12 +75,13 @@ static std::string utf8(const std::wstring& value) {
   WideCharToMultiByte(CP_UTF8, 0, value.data(), int(value.size()), result.data(), int(result.size()), nullptr, nullptr); return result;
 }
 struct BoardRect { double x, y, w, h; };
+static bool redBlueBoard() { return overlay.value("style", std::string()) == "red-blue"; }
 static BoardRect boardRect() {
   RECT bounds; GetClientRect(host, &bounds);
   const double aspect = overlay.value("aspect", 16.0 / 9.0);
   const double vw = std::min(double(bounds.right), bounds.bottom * aspect), vh = vw / aspect;
-  const double bw = vw * .28 * overlay.value("scale", 1.0);
-  return {(bounds.right - vw) / 2 + overlay.value("x", 0.0) * vw, (bounds.bottom - vh) / 2 + overlay.value("y", 0.0) * vh, bw, bw / 5.2};
+  const double bw = vw * (redBlueBoard() ? .21 : .28) * overlay.value("scale", 1.0);
+  return {(bounds.right - vw) / 2 + overlay.value("x", 0.0) * vw, (bounds.bottom - vh) / 2 + overlay.value("y", 0.0) * vh, bw, bw / (redBlueBoard() ? 1.46 : 5.2)};
 }
 static void finishEdit(bool commit) {
   if (!editor) return;
@@ -111,18 +112,24 @@ static void beginEdit(const json& value) {
   const bool games = editField == "leftGames" || editField == "rightGames";
   const bool bottom = editField.rfind("right", 0) == 0;
   const auto b = boardRect();
+  const bool redBlue = redBlueBoard();
+  const double cellX = redBlue ? (bottom ? .575 : 0) + (name ? .425 * .07 : 0) : (name ? .025 : games ? .76 : .88);
+  const double cellY = redBlue ? (name ? .83 : games ? 0 : .217) : (bottom ? .5 : 0);
+  const double cellW = redBlue ? .425 * (name ? .86 : 1) : (name ? .71 : .12);
+  const double cellH = redBlue ? (name ? .17 : games ? .205 : .613) : .5;
+  desiredPaused = true; api_mpv_set_property_string(player, "pause", "yes");
   const auto text = wide(name ? overlay.value(editField, std::string()) : std::to_string(overlay.value(editField, 0)));
   // Composite the text box and caret above mpv's D3D swapchain, while keeping
   // the entire inline editor clipped to the video host.
   editorSurface = CreateWindowExW(WS_EX_LAYERED, L"TTcutEditorSurface", L"", WS_CHILD | WS_VISIBLE,
-    int(b.x + b.w * (name ? .025 : games ? .76 : .88)), int(b.y + b.h * (bottom ? .5 : 0)), int(b.w * (name ? .71 : .12)), int(b.h * .5), host, nullptr, GetModuleHandleW(nullptr), nullptr);
+    int(b.x + b.w * cellX), int(b.y + b.h * cellY), std::max(1, int(b.w * cellW)), std::max(1, int(b.h * cellH)), host, nullptr, GetModuleHandleW(nullptr), nullptr);
   if (!editorSurface) return;
   SetLayeredWindowAttributes(editorSurface, 0, 255, LWA_ALPHA);
   RECT bounds; GetClientRect(editorSurface, &bounds);
   editor = CreateWindowExW(0, L"EDIT", text.c_str(), WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL | (name ? ES_LEFT : ES_CENTER | ES_NUMBER),
     0, 0, bounds.right, bounds.bottom, editorSurface, nullptr, GetModuleHandleW(nullptr), nullptr);
   if (!editor) { DestroyWindow(editorSurface); editorSurface = nullptr; return; }
-  editorFont = CreateFontW(-int(b.h * .32), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Microsoft YaHei");
+  editorFont = CreateFontW(-int(b.h * (redBlue ? (name ? .10018 : games ? .165 : .528) : .32)), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Microsoft YaHei");
   SendMessageW(editor, WM_SETFONT, reinterpret_cast<WPARAM>(editorFont), TRUE);
   SendMessageW(editor, EM_SETLIMITTEXT, name ? 24 : 3, 0);
   editorProc = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(editor, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(editProc)));
@@ -136,10 +143,50 @@ static void drawOverlay() {
   std::string ass;
   if (overlay.value("enabled", false)) {
     const auto b = boardRect(); const double x = b.x, y = b.y, bw = b.w, bh = b.h;
-    auto rect = [&](double rx, double ry, double rw, double rh, const char* color) {
+    auto rect = [&](double rx, double ry, double rw, double rh, const std::string& color) {
       ass += "{\\an7\\pos(" + f(rx) + "," + f(ry) + ")\\bord0\\shad0\\1c&H" + color + "&\\p1}m 0 0 l " + f(rw) + " 0 " + f(rw) + " " + f(rh) + " 0 " + f(rh) + "{\\p0}\n";
     };
-    rect(x, y, bw, bh, "292929"); rect(x + bw * .76, y, bw * .12, bh, "F7833A"); rect(x + bw * .88, y, bw * .12, bh, "333333");
+    const bool redBlue = redBlueBoard();
+    const bool winnerEnabled = overlay.value("winnerEnabled", !overlay.value("clipId", std::string()).empty());
+    if (redBlue) {
+      const double cw = bw * .425, radius = bh * .06;
+      auto color = [](int r, int g, int b) { char hex[7]; std::snprintf(hex, sizeof(hex), "%02X%02X%02X", b, g, r); return std::string(hex); };
+      auto text = [&](const std::string& value, double tx, double ty, double size, double maximumWidth, int align = 5) {
+        double units = 0; for (const auto c : wide(value)) units += c < 128 ? .62 : 1.0;
+        size = std::min(size, maximumWidth / std::max(1.0, units));
+        ass += "{\\an" + std::to_string(align) + "\\pos(" + f(tx) + "," + f(ty) + ")\\fnMicrosoft YaHei\\fs" + f(size) + "\\b1\\bord0\\shad0\\1c&HFFFFFF&}" + assEscape(value) + "\n";
+      };
+      for (int side = 0; side < 2; side++) {
+        const double cx = x + (side == 0 ? 0 : bw - cw);
+        // Match the shared canvas gradient and rounded cards without covering
+        // the transparent gap between the two players.
+        for (int strip = 0; strip < 96; strip++) {
+          const double top = bh * strip / 96, bottom = bh * (strip + 1) / 96;
+          const double center = (top + bottom) / 2;
+          const double edge = std::min(center, bh - center);
+          const double inset = edge < radius ? radius - std::sqrt(std::max(0.0, radius * radius - (radius - edge) * (radius - edge))) : 0;
+          const double t = std::clamp((center / bh - .25) / .75, 0.0, 1.0);
+          double r = side == 0 ? 240 - 71 * t : 0;
+          double g = side == 0 ? 0 : 125 - 38 * t;
+          double blue = side == 0 ? 0 : 247 - 68 * t;
+          if (center < bh * .205) { r *= .72; g *= .72; blue *= .72; }
+          rect(cx + inset, y + top, cw - 2 * inset, bottom - top + 1, color(int(std::round(r)), int(std::round(g)), int(std::round(blue))));
+        }
+        rect(cx, y + bh * .205, cw, bh * .012, "292929");
+        text(std::to_string(overlay.value(side == 0 ? "leftGames" : "rightGames", 0)), cx + cw / 2, y + bh * .1025, bh * .165, cw * .88);
+        text(std::to_string(overlay.value(side == 0 ? "left" : "right", 0)), cx + cw / 2, y + bh * .5235, bh * .528, cw * .88);
+        text(overlay.value(side == 0 ? "leftName" : "rightName", std::string(side == 0 ? "A" : "B")), cx + cw * .07, y + bh * .915, bh * .10018, cw * .86, 4);
+        const double button = cw * .26;
+        rect(cx + cw * .37, y + bh * 1.04, button, button, "292929");
+        const bool checked = overlay.value("winner", std::string()) == (side == 0 ? "left" : "right");
+        ass += "{\\an5\\pos(" + f(cx + cw / 2) + "," + f(y + bh * 1.04 + button / 2) + ")\\fnSegoe UI Symbol\\fs" + f(button * .75) + "\\bord0\\shad0\\1c&H" + (winnerEnabled ? checked ? "FFA671" : "FFFFFF" : "777777") + "&}" + (checked ? "\xE2\x9C\x93" : "+") + "\n";
+      }
+      const double dot = bh * .054;
+      for (const double center : {.485, .61}) rect(x + (bw - dot) / 2, y + bh * center - dot / 2, dot, dot, "9A9A9A");
+    } else {
+    const auto style = overlay.value("style", std::string());
+    const auto gamesColor = style == "classic-orange" ? "0B9EF5" : style == "classic-green" ? "5EC522" : "F7833A";
+    rect(x, y, bw, bh, "292929"); rect(x + bw * .76, y, bw * .12, bh, gamesColor); rect(x + bw * .88, y, bw * .12, bh, "333333");
     rect(x, y + bh / 2, bw, 1, "777777");
     for (int row = 0; row < 2; row++) {
       const std::string name = overlay.value(row == 0 ? "leftName" : "rightName", std::string(row == 0 ? "A" : "B"));
@@ -155,8 +202,9 @@ static void drawOverlay() {
       rect(x + bw * 1.02, y + bh * row * .5 + 1, bw * .12, bh * .5 - 2, "292929");
       const bool checked = overlay.value("winner", std::string()) == (row == 0 ? "left" : "right");
       const auto symbol = checked ? "\xE2\x9C\x93" : "+";
-      const auto color = overlay.value("clipId", std::string()).empty() ? "777777" : checked ? "FFA671" : "FFFFFF";
+      const auto color = !winnerEnabled ? "777777" : checked ? "FFA671" : "FFFFFF";
       ass += "{\\an5\\pos(" + f(x + bw * 1.08) + "," + f(cy) + ")\\fnSegoe UI Symbol\\fs" + f(bh * .38) + "\\b0\\bord0\\shad0\\1c&H" + color + "&}" + symbol + "\n";
+    }
     }
     for (const double rx : {x, x + bw}) for (const double ry : {y, y + bh}) rect(rx - 3, ry - 3, 6, 6, "FFFFFF");
   }
@@ -198,8 +246,8 @@ static LRESULT CALLBACK inputProc(HWND window, UINT message, WPARAM wp, LPARAM l
     }
   }
   if (message == WM_KEYDOWN && !(lp & (1LL << 30))) {
-    std::string key = wp == VK_SPACE ? "Space" : wp == VK_ESCAPE ? "Escape" : wp == 'A' ? "KeyA" : wp == 'D' ? "KeyD" : wp == VK_LEFT ? "ArrowLeft" : wp == VK_RIGHT ? "ArrowRight" : wp == VK_UP ? "ArrowUp" : wp == VK_DOWN ? "ArrowDown" : "";
-    if (!key.empty()) { emit({{"type", "key"}, {"key", key}, {"shift", (GetKeyState(VK_SHIFT) & 0x8000) != 0}}); return 0; }
+    std::string key = wp == VK_SPACE ? "Space" : wp == VK_ESCAPE ? "Escape" : wp == 'A' ? "KeyA" : wp == 'D' ? "KeyD" : wp == 'Z' ? "KeyZ" : wp == 'Y' ? "KeyY" : wp == VK_LEFT ? "ArrowLeft" : wp == VK_RIGHT ? "ArrowRight" : wp == VK_UP ? "ArrowUp" : wp == VK_DOWN ? "ArrowDown" : "";
+    if (!key.empty()) { emit({{"type", "key"}, {"key", key}, {"shift", (GetKeyState(VK_SHIFT) & 0x8000) != 0}, {"ctrl", (GetKeyState(VK_CONTROL) & 0x8000) != 0}}); return 0; }
   }
   if (message == WM_ERASEBKGND) return 1;
   return previous ? CallWindowProcW(previous, window, message, wp, lp) : DefWindowProcW(window, message, wp, lp);

@@ -55,7 +55,7 @@ export function useNativePreview(source: string, enabled: boolean) {
     let failed = false, disposed = false, opened = false, frame = 0, lastBounds = '';
     const bounds = (): PreviewBounds => {
       const rect = surface.getBoundingClientRect();
-      return { x: rect.x, y: rect.y, width: rect.width, height: rect.height, visible: !failed && document.visibilityState !== 'hidden' && !document.querySelector('.modal-backdrop') && rect.width > 0 && rect.height > 0 };
+      return { x: rect.x, y: rect.y, width: rect.width, height: rect.height, visible: !failed && document.visibilityState !== 'hidden' && !document.querySelector('.modal-backdrop, dialog[open]') && rect.width > 0 && rect.height > 0 };
     };
     const update = () => {
       cancelAnimationFrame(frame);

@@ -820,10 +820,14 @@ export const scoreboardScoreSchema = z.object({
   right_games: z.number().int().min(0).max(999).optional(),
 }).strict();
 
+export const scoreboardStyleSchema = z.enum(['classic', 'classic-orange', 'classic-green', 'red-blue']);
+export type ScoreboardStyle = z.infer<typeof scoreboardStyleSchema>;
+
 export const scoreboardPositionSchema = z.object({
   x: finiteNumber.min(0).max(1),
   y: finiteNumber.min(0).max(1),
   scale: finiteNumber.min(0.5).max(3).optional(),
+  style: scoreboardStyleSchema.optional(),
   left_name: z.string().max(24).regex(/^[^\x00-\x1f\x7f]*$/u).optional(),
   right_name: z.string().max(24).regex(/^[^\x00-\x1f\x7f]*$/u).optional(),
 }).strict();
@@ -886,6 +890,7 @@ export const appSettingsSchema = z.object({
   pre_roll_seconds: z.union(PRE_ROLL_VALUES.map((value) => z.literal(value))),
   post_roll_seconds: z.union(POST_ROLL_VALUES.map((value) => z.literal(value))),
   normalize_variable_frame_rate: z.boolean().default(false),
+  scoreboard_style: scoreboardStyleSchema.optional(),
 }).strict();
 
 export const historySourceSchema = z.object({
@@ -906,6 +911,7 @@ export const customRallyClipSchema = z.object({
   start: finiteNumber.nonnegative(),
   end: finiteNumber.positive(),
   selected: z.boolean(),
+  isSplit: z.boolean().optional(),
   score: scoreboardScoreSchema.optional(),
   winner: z.enum(['left', 'right']).optional(),
 }).strict();

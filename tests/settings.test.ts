@@ -29,6 +29,7 @@ describe('settings migration', () => {
       language: 'en', calibration_method: 'automatic',
       pre_roll_seconds: 5, post_roll_seconds: 0.5,
       normalize_variable_frame_rate: false,
+      scoreboard_style: 'classic',
     });
   });
 
@@ -61,6 +62,7 @@ describe('settings migration', () => {
     await expect(loadSettings()).resolves.toEqual({
       language: 'zh-CN', calibration_method: 'automatic', pre_roll_seconds: 2.5, post_roll_seconds: 2,
       normalize_variable_frame_rate: false,
+      scoreboard_style: 'classic',
     });
     expect(JSON.parse(await readFile(path.join(state.userData, 'settings.json'), 'utf8'))).not.toHaveProperty('ball_model_profile');
   });
@@ -101,5 +103,16 @@ describe('settings migration', () => {
     expect(settings).not.toHaveProperty('rally_recognition_method');
     await saveSettings(settings);
     expect(JSON.parse(await readFile(path.join(state.userData, 'settings.json'), 'utf8'))).not.toHaveProperty('rally_recognition_method');
+  });
+
+  it('persists the selected scoreboard style and falls back for an unknown stored style', async () => {
+    for (const style of ['classic', 'classic-orange', 'classic-green', 'red-blue'] as const) {
+      await saveSettings({ ...await loadSettings(), scoreboard_style: style });
+      expect((await loadSettings()).scoreboard_style).toBe(style);
+    }
+    const settings = await loadSettings();
+    expect(appSettingsSchema.safeParse({ ...settings, scoreboard_style: 'unknown' }).success).toBe(false);
+    await writeFile(path.join(state.userData, 'settings.json'), JSON.stringify({ ...settings, scoreboard_style: 'unknown' }));
+    expect((await loadSettings()).scoreboard_style).toBe('classic');
   });
 });

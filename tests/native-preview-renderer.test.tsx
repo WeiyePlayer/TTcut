@@ -76,3 +76,62 @@ it('keeps displaying coalesced keyframes during continuous drag, then sends only
   act(()=>preview.seekTo(4,false,false));view.unmount();await act(async()=>vi.advanceTimersByTimeAsync(60));
   expect(seeks()).toHaveLength(2);expect(close).toHaveBeenCalledOnce();
 });
+
+it('hit tests red-blue cards and disables winner buttons while editing the next rally in a gap', () => {
+  const input = { current: null as ((event: NativePreviewEvent) => void) | null };
+  const send = vi.fn(), onEdit = vi.fn(), onWinner = vi.fn(), onToggle = vi.fn(), onPosition = vi.fn();
+  const native = { send, status: 'ready', onInput: input, surfaceRef: { current: null } } as unknown as ReturnType<typeof useNativePreview>;
+  let board: PreviewScoreboard = { enabled: true, style: 'red-blue', winnerEnabled: false, x: .1, y: .1, scale: 1, aspect: 2, left: 4, right: 3, leftGames: 2, rightGames: 1, leftName: 'A', rightName: 'B', clipId: 'next' };
+  const ui = () => <NativePreviewSurface preview={native} scoreboard={board} onPosition={onPosition} onWinner={onWinner} onEdit={onEdit} onToggle={onToggle} label="Preview" />;
+  const view = render(ui());
+  const point = (rx: number, ry: number) => ({ x: 100 + 210 * rx, y: 50 + 210 / 1.46 * ry, width: 1000, height: 500 });
+  const click = (rx: number, ry: number) => {
+    input.current!({ sessionId: 'test', type: 'pointer', action: 'down', ...point(rx, ry) });
+    input.current!({ sessionId: 'test', type: 'pointer', action: 'up', ...point(rx, ry) });
+  };
+  click(.2125, 1.12);
+  expect(onWinner).not.toHaveBeenCalled();
+  expect(onToggle).not.toHaveBeenCalled();
+  click(.7875, .1); click(.7875, .1);
+  expect(send.mock.calls.slice(-2)).toEqual([[{ type: 'pause', paused: true }], [{ type: 'scoreboard-edit', field: 'rightGames', clipId: 'next' }]]);
+  input.current!({ sessionId: 'test', type: 'wheel', delta: 120, ...point(.2125, .5) });
+  expect(onEdit).toHaveBeenLastCalledWith('next', 'left', '5');
+  board = { ...board, winnerEnabled: true }; view.rerender(ui());
+  click(.7875, 1.12);
+  expect(onWinner).toHaveBeenCalledWith('next', 'right');
+  input.current!({ sessionId: 'test', type: 'pointer', action: 'down', ...point(.2125, .5) });
+  input.current!({ sessionId: 'test', type: 'pointer', action: 'move', x: 2000, y: 1600, width: 1000, height: 500 });
+  expect(onPosition.mock.lastCall![0].y).toBeCloseTo(1 - .21 * 2 / 1.46 * 1.2);
+});
+
+it('forwards Ctrl+Z and Ctrl+Shift+Z from the video HWND with browser key names', () => {
+  const input = { current: null as ((event: NativePreviewEvent) => void) | null };
+  const native = { send: vi.fn(), status: 'ready', onInput: input, surfaceRef: { current: null } } as unknown as ReturnType<typeof useNativePreview>;
+  const board: PreviewScoreboard = { enabled: true, x: 0, y: 0, scale: 1, aspect: 2, left: 0, right: 0, leftName: 'A', rightName: 'B' };
+  render(<NativePreviewSurface preview={native} scoreboard={board} onPosition={vi.fn()} onWinner={vi.fn()} onEdit={vi.fn()} onToggle={vi.fn()} label="Preview" />);
+  const keys: KeyboardEvent[] = [];
+  const listener = (event: KeyboardEvent) => keys.push(event);
+  window.addEventListener('keydown', listener);
+  try {
+    input.current!({ sessionId: 'test', type: 'key', key: 'KeyZ', ctrl: true, shift: false });
+    input.current!({ sessionId: 'test', type: 'key', key: 'KeyZ', ctrl: true, shift: true });
+    expect(keys.map(({ key, code, ctrlKey, shiftKey }) => ({ key, code, ctrlKey, shiftKey }))).toEqual([
+      { key: 'z', code: 'KeyZ', ctrlKey: true, shiftKey: false },
+      { key: 'z', code: 'KeyZ', ctrlKey: true, shiftKey: true },
+    ]);
+  } finally { window.removeEventListener('keydown', listener); }
+});
+
+it('keeps the native child hidden beneath an open guide and restores it after dismissal', async () => {
+  vi.useFakeTimers();
+  const open = vi.fn().mockResolvedValue(undefined), command = vi.fn().mockResolvedValue(undefined);
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  vi.stubGlobal('ttcut', { nativePreviewOpen: open, nativePreviewCommand: command, nativePreviewClose: vi.fn().mockResolvedValue(undefined), onNativePreviewEvent: () => () => {} });
+  vi.spyOn(HTMLDivElement.prototype, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, width: 1000, height: 500 } as DOMRect);
+  const view = render(<><dialog open /> <Harness /></>);
+  await act(async () => {});
+  expect(open.mock.calls[0]![0].bounds.visible).toBe(false);
+  view.rerender(<><Harness /></>);
+  await act(async () => { await vi.advanceTimersByTimeAsync(50); });
+  expect(command.mock.calls.some(([, value]) => value.type === 'bounds' && value.bounds.visible)).toBe(true);
+});

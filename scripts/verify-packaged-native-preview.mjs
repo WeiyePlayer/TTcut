@@ -1,16 +1,28 @@
 // Smoke the shipped executable and original history workflow in an isolated profile.
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:net';
-import { mkdtemp, mkdir, readFile, writeFile, copyFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, copyFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { chromium, expect } from '@playwright/test';
 const executable=path.resolve(process.argv[2]);const recordFile=path.resolve(process.argv[3]);
 const run=await mkdtemp(path.resolve('output/playwright/packaged-native-'));
 const profile=path.join(run,'profile');const record=JSON.parse(await readFile(recordFile,'utf8'));
+const post138=process.argv.includes('--post138');
+if(post138){
+  const original=record.source.path,fixture=path.join(run,path.basename(original));
+  if(record.analysis.video.path!==original)throw new Error('Use a history record analyzed from its original source for --post138');
+  await copyFile(original,fixture);const info=await stat(fixture);
+  record.source={...record.source,path:fixture,size:info.size,modified_time_ms:info.mtimeMs};
+  record.analysis.video.path=fixture;
+  if(record.analysis.source_video?.path===original)record.analysis.source_video.path=fixture;
+  record.custom_editor_draft.scoreboard={enabled:true,x:.06,y:.06,scale:1};
+  record.custom_editor_draft.clips=record.custom_editor_draft.clips.map(({score,winner,...clip},index)=>({...clip,selected:index===0,...(index===0?{score:{left:2,right:1},winner:'left'}:{})}));
+  record.custom_editor_draft.outputs={combined_video:true,rally_videos:false,premiere_xml:false};
+}
 await mkdir(path.join(profile,'history/records'),{recursive:true});
-await copyFile(recordFile,path.join(profile,'history/records',record.id+'.json'));
+await writeFile(path.join(profile,'history/records',record.id+'.json'),JSON.stringify(record));
 await writeFile(path.join(profile,'history/index.json'),JSON.stringify({schema_version:1,entries:[{id:record.id,analyzed_at:record.analyzed_at}]}));
 await writeFile(path.join(profile,'settings.json'),JSON.stringify({language:'en',calibration_method:'automatic',pre_roll_seconds:2.5,post_roll_seconds:1,normalize_variable_frame_rate:false}));
 const server=createServer();await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const port=server.address().port;await new Promise(resolve=>server.close(resolve));
@@ -20,8 +32,18 @@ let browser,page,passed=false;const report={executable,profile,source:record.sou
 try{
   await expect.poll(async()=>{if(child.exitCode!==null)throw new Error(stderr);return fetch(`http://127.0.0.1:${port}/json/version`).then(r=>r.ok).catch(()=>false);},{timeout:30000}).toBe(true);
   browser=await chromium.connectOverCDP(`http://127.0.0.1:${port}`);page=browser.contexts()[0].pages()[0];page.setDefaultTimeout(20000);
+  if(post138){
+    await page.getByRole('button',{name:'Settings',exact:true}).click();
+    const styles=page.getByRole('radiogroup',{name:'Scoreboard style',exact:true});
+    await expect(styles.getByRole('radio')).toHaveCount(4);
+    await styles.getByRole('radio',{name:'Red & blue',exact:true}).check();
+    await expect.poll(async()=>JSON.parse(await readFile(path.join(profile,'settings.json'),'utf8')).scoreboard_style).toBe('red-blue');
+    await page.screenshot({path:path.join(run,'scoreboard-settings.png')});
+    report.checks.push({name:'shipped settings show all four styles and persist the selected red-blue style'});
+  }
   await page.getByRole('button',{name:'History',exact:true}).click();await page.locator('.history-open').click();
   await page.getByRole('button',{name:/Custom.*Choose individual/}).click();
+  await page.getByRole('dialog',{name:'Custom editing guide',exact:true}).getByRole('button',{name:'Got it',exact:true}).click();
   const surface=page.locator('[data-native-preview]');await expect.poll(()=>surface.getAttribute('data-ready')).toBe('true');
   report.checks.push({name:'packaged original media first frame',state:await surface.evaluate(e=>({...e.dataset}))});
   await page.locator('.custom-rally-table tbody tr').first().click();const before=Number(await surface.getAttribute('data-time'));
@@ -42,7 +64,61 @@ try{
   const releasedTarget=Number(await playhead.getAttribute('aria-valuenow'));
   await expect.poll(async()=>Math.abs(Number(await surface.getAttribute('data-time'))-releasedTarget)<.06&&await surface.getAttribute('data-seeking')==='false').toBe(true);
   report.checks.push({name:'scrub release resolves accurately and remains paused',target:releasedTarget,state:await surface.evaluate(e=>({...e.dataset}))});
-  await page.screenshot({path:path.join(run,'ui.png')});passed=true;
+  await page.screenshot({path:path.join(run,'ui.png')});
+  if(post138){
+    const saved=async()=>JSON.parse(await readFile(path.join(profile,'history/records',record.id+'.json'),'utf8')).custom_editor_draft;
+    const initialCount=await page.locator('.timeline-clip').count();
+    await expect(page.locator('.clip-score-annotation')).toHaveCount(1);
+    const viewport=page.locator('.timeline-viewport');
+    const rulerBox=await ruler.boundingBox();await page.mouse.move(rulerBox.x+20,rulerBox.y+10);
+    await page.keyboard.down('Control');
+    for(let index=0;index<12;index++)await page.mouse.wheel(0,-120);
+    await page.keyboard.up('Control');
+    await expect.poll(()=>viewport.getAttribute('data-zoom')).not.toBe('1');
+    await viewport.evaluate(element=>{element.scrollLeft=0});
+    const clipBox=await page.locator('.timeline-clip').first().boundingBox(),rulerAfterZoom=await ruler.boundingBox();
+    await page.mouse.click(clipBox.x+clipBox.width/2,rulerAfterZoom.y+12);
+    await expect.poll(()=>surface.getAttribute('data-seeking')).toBe('false');
+    const cutTime=Number(await playhead.getAttribute('aria-valuenow'));
+    await page.getByRole('button',{name:'Razor tool',exact:true}).click();
+    await page.mouse.click(clipBox.x+clipBox.width/2,clipBox.y+clipBox.height/2);
+    await expect(page.locator('.timeline-clip')).toHaveCount(initialCount+1);
+    await expect(page.locator('.clip-score-annotation')).toHaveCount(0);
+    await page.keyboard.press('Control+z');await expect(page.locator('.timeline-clip')).toHaveCount(initialCount);
+    await expect(page.locator('.clip-score-annotation')).toHaveCount(1);
+    await page.keyboard.press('Control+Shift+z');await expect(page.locator('.timeline-clip')).toHaveCount(initialCount+1);
+    await expect.poll(async()=>(await saved()).clips.filter(c=>c.isSplit).length).toBe(2);
+    const split=(await saved()).clips.filter(c=>c.isSplit);
+    expect(split.map(c=>c.sourceRallyId)).toEqual([record.custom_editor_draft.clips[0].sourceRallyId,record.custom_editor_draft.clips[0].sourceRallyId]);
+    expect(split[0].end).toBeCloseTo(cutTime,5);expect(split[1].start).toBeCloseTo(cutTime,5);
+    report.checks.push({name:'shipped razor, Ctrl+Z / Ctrl+Shift+Z, red dots and saved split provenance',cutTime,split});
+    const physical=action=>execFileSync('C:/Program Files/PowerShell/7/pwsh.exe',['-NoLogo','-NoProfile','-File',path.resolve('scripts/scoreboard-native-physical-input.ps1'),'-ProcessId',String(child.pid),'-Action',action,'-X','.8','-Y','.8',...(action==='click'?[]:['-KeepFocus'])],{windowsHide:true,encoding:'utf8'});
+    physical('click');physical('undo');await expect(page.locator('.timeline-clip')).toHaveCount(initialCount);
+    physical('redo');await expect(page.locator('.timeline-clip')).toHaveCount(initialCount+1);
+    report.checks.push({name:'actual Win32 video focus forwards Ctrl+Z and Ctrl+Y to clip history'});
+    await page.keyboard.press('Escape');
+    await page.locator('.workflow-back').click();await page.getByRole('button',{name:/Custom.*Choose individual/}).click();
+    await expect(page.locator('.timeline-clip')).toHaveCount(initialCount+1);
+    await expect(page.getByRole('dialog',{name:'Custom editing guide',exact:true})).toHaveCount(0);
+    report.checks.push({name:'leaving and reopening preserves split clips, selected style and guide preference'});
+    const events=[];await page.exposeFunction('recordAcceptanceEvent',event=>events.push(event));
+    await page.evaluate(()=>window.ttcut.onTaskEvent(event=>window.recordAcceptanceEvent(event)));
+    await page.getByRole('button',{name:'Start cutting',exact:true}).click();
+    await expect.poll(()=>events.find(e=>e.type==='export-result'||e.type==='error'),{timeout:120000}).toBeTruthy();
+    const completed=events.find(e=>e.type==='export-result'||e.type==='error');
+    expect(completed.type).toBe('export-result');
+    expect(completed.data.timing.segmentCount).toBe(2);
+    expect(Math.abs(completed.data.timing.driftSeconds)).toBeLessThanOrEqual(completed.data.timing.allowedDriftSeconds);
+    expect((await stat(completed.data.outputPath)).size).toBeGreaterThan(1024);
+    const mediaRoot=path.join(path.dirname(executable),'resources/windows/ffmpeg');
+    const probe=JSON.parse(execFileSync(path.join(mediaRoot,'ffprobe.exe'),['-v','error','-show_streams','-of','json',completed.data.outputPath],{windowsHide:true,encoding:'utf8'}));
+    expect(probe.streams.some(stream=>stream.codec_type==='video')).toBe(true);
+    if(record.analysis.video.audio_codec)expect(probe.streams.some(stream=>stream.codec_type==='audio')).toBe(true);
+    execFileSync(path.join(mediaRoot,'ffmpeg.exe'),['-hide_banner','-loglevel','error','-y','-ss','0.5','-i',completed.data.outputPath,'-frames:v','1',path.join(run,'packaged-export-frame.png')],{windowsHide:true});
+    report.checks.push({name:'shipped application exports both split clips with the red-blue scoreboard through Main IPC',event:completed});
+    await page.screenshot({path:path.join(run,'export-complete.png')});
+  }
+  passed=true;
 }catch(error){report.error=String(error);console.error(error);if(page)console.error((await page.locator('body').innerText()).slice(-4000));}
 await writeFile(path.join(run,'report.json'),JSON.stringify({passed,...report},null,2));console.log(JSON.stringify({passed,...report}));console.log('Evidence:',run);
 if(process.argv.includes('--hold')){process.stdin.setEncoding('utf8');await new Promise(resolve=>process.stdin.once('data',resolve));process.stdin.pause();}

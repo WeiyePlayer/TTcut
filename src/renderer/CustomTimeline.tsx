@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { CustomRallyClip } from '../domain/custom-clips';
+import { canSplitCustomClip, type CustomRallyClip } from '../domain/custom-clips';
 
 const RULER_HEIGHT = 34;
 const LABEL_SPACING = 150;
@@ -9,7 +9,7 @@ const CLIP_BOUNDARY_MARKER_MIN_WIDTH = 24;
 const RESIZE_DIRECTION_THRESHOLD = 3;
 const PLAYHEAD_SNAP_DISTANCE_PX = 8;
 
-export type TimelineToolMode = 'add' | 'delete' | 'zoom' | null;
+export type TimelineToolMode = 'add' | 'razor' | 'delete' | 'zoom' | null;
 export type TimelineSeekIntent = 'preview' | 'commit';
 type Edge = 'start' | 'end';
 
@@ -119,6 +119,10 @@ export function CustomTimeline({
   onResize,
   onAddAt,
   onDeleteClip,
+  onSplitClip,
+  onEditStart,
+  onEditEnd,
+  scoreAnnotationLabel,
 }: {
   clips: readonly CustomRallyClip[];
   duration: number;
@@ -135,6 +139,10 @@ export function CustomTimeline({
   onResize: (clipId: string, edge: Edge, time: number) => number;
   onAddAt: (time: number) => boolean;
   onDeleteClip: (clipId: string) => void;
+  onSplitClip?: (clipId: string, time: number) => boolean;
+  onEditStart?: (() => void) | undefined;
+  onEditEnd?: (() => void) | undefined;
+  scoreAnnotationLabel?: string;
 }) {
   const surfaceRef = useRef<HTMLElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -147,6 +155,7 @@ export function CustomTimeline({
   const [resizeFeedback, setResizeFeedback] = useState<ResizeFeedback | null>(null);
   const [addTargetValid, setAddTargetValid] = useState<boolean | null>(null);
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+  const [razorPointer, setRazorPointer] = useState<{ clipId: string; clientX: number } | null>(null);
   const playheadDraggingRef = useRef<number | null>(null);
   const wheelHandlerRef = useRef<(event: WheelEvent) => void>(() => undefined);
   const draggingRef = useRef<{
@@ -164,13 +173,19 @@ export function CustomTimeline({
   const pixelsPerSecond = contentWidth / Math.max(duration, 0.001);
   const visibleScrollLeft = clampTimelineScrollLeft(scrollLeft, viewportWidth, contentWidth);
   const selectedClips = useMemo(() => clips.filter((clip) => clip.selected), [clips]);
-  const editingToolActive = toolMode === 'add' || toolMode === 'delete';
+  const editingToolActive = toolMode === 'add' || toolMode === 'delete' || toolMode === 'razor';
 
   useEffect(() => {
+    if (draggingRef.current) { draggingRef.current = null; onEditEnd?.(); }
     setAddTargetValid(null);
     setDeleteTargetId(null);
     setResizeFeedback(null);
-  }, [toolMode]);
+    setRazorPointer(null);
+  }, [toolMode, onEditEnd]);
+
+  useEffect(() => () => {
+    if (draggingRef.current) { draggingRef.current = null; onEditEnd?.(); }
+  }, [onEditEnd]);
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
@@ -325,6 +340,7 @@ export function CustomTimeline({
   const beginResize = (event: React.PointerEvent<HTMLButtonElement>, clip: CustomRallyClip, edge: Edge) => {
     if (event.button !== 0 || editingToolActive || draggingRef.current) return;
     event.stopPropagation();
+    onEditStart?.();
     event.currentTarget.setPointerCapture(event.pointerId);
     const index = selectedClips.findIndex((item) => item.clipId === clip.clipId);
     const left = edge === 'end' ? clip : selectedClips[index - 1];
@@ -363,6 +379,7 @@ export function CustomTimeline({
     if (draggingRef.current?.pointerId !== event.pointerId) return;
     draggingRef.current = null;
     setResizeFeedback(null);
+    onEditEnd?.();
   };
 
   const keyboardResize = (event: React.KeyboardEvent<HTMLButtonElement>, clip: CustomRallyClip, edge: Edge) => {
@@ -425,6 +442,12 @@ export function CustomTimeline({
     if (canAddAt(time)) onAddAt(time);
   };
 
+  const razorTarget = (clip: CustomRallyClip, clientX: number) => {
+    const requested = timeFromTrackPointer(clientX);
+    const time = Math.round(snapTimelineBoundaryToPlayhead(requested, currentTime, pixelsPerSecond) * 1_000_000) / 1_000_000;
+    return { time, valid: canSplitCustomClip(clip, time, fps), snapped: Math.abs(time - currentTime) < 1e-6 };
+  };
+
   return (
     <section ref={surfaceRef} className={`custom-timeline${toolMode ? ` is-${toolMode}-mode` : ''}${toolMode === 'add' && addTargetValid === false ? ' is-add-unavailable' : ''}`} aria-label={timelineLabel}>
       <div ref={viewportRef} className="timeline-viewport" data-zoom={actualZoom} onScroll={(event) => setScrollLeft(clampTimelineScrollLeft(event.currentTarget.scrollLeft, event.currentTarget.clientWidth, event.currentTarget.scrollWidth))}>
@@ -446,16 +469,27 @@ export function CustomTimeline({
             const following = selectedClips[index + 1];
             const deleteTarget = toolMode === 'delete' && deleteTargetId === clip.clipId;
             const currentEditing = currentEditingClipId === clip.clipId;
+            const cut = toolMode === 'razor' && razorPointer?.clipId === clip.clipId ? razorTarget(clip, razorPointer.clientX) : null;
+            const annotated = clip.score !== undefined || clip.winner !== undefined;
+            const dotSize = Math.min(5, Math.max(1, width - 2));
             return (
-              <div key={clip.clipId} className={`timeline-clip${currentEditing ? ' current-editing' : ''}${deleteTarget ? ' delete-target' : ''}`} aria-current={currentEditing ? 'true' : undefined} data-clip-id={clip.clipId} data-rally-id={clip.sourceRallyId ?? undefined} style={{ left, width }} onPointerEnter={() => { if (toolMode === 'delete') setDeleteTargetId(clip.clipId); }} onPointerLeave={() => { if (deleteTargetId === clip.clipId) setDeleteTargetId(null); }} onPointerDown={(event) => {
+              <div key={clip.clipId} className={`timeline-clip${currentEditing ? ' current-editing' : ''}${deleteTarget ? ' delete-target' : ''}${cut && !cut.valid ? ' razor-unavailable' : ''}`} aria-current={currentEditing ? 'true' : undefined} data-clip-id={clip.clipId} data-rally-id={clip.sourceRallyId ?? undefined} style={{ left, width }} onPointerEnter={(event) => { if (toolMode === 'delete') setDeleteTargetId(clip.clipId); if (toolMode === 'razor') setRazorPointer({ clipId: clip.clipId, clientX: event.clientX }); }} onPointerMove={(event) => { if (toolMode === 'razor') setRazorPointer({ clipId: clip.clipId, clientX: event.clientX }); }} onPointerLeave={() => { if (deleteTargetId === clip.clipId) setDeleteTargetId(null); setRazorPointer(null); }} onPointerDown={(event) => {
                 // Right-click is reserved for CustomCutPage's context-menu cancellation.
                 if (event.button !== 0) return;
+                if (toolMode === 'razor') {
+                  event.preventDefault(); event.stopPropagation();
+                  const target = razorTarget(clip, event.clientX);
+                  if (target.valid) onSplitClip?.(clip.clipId, target.time);
+                  return;
+                }
                 if (toolMode === 'delete') { event.preventDefault(); event.stopPropagation(); onDeleteClip(clip.clipId); return; }
                 if (toolMode === 'add') { event.preventDefault(); event.stopPropagation(); return; }
                 onPlayClip(clip);
               }}>
                 {!editingToolActive ? <button type="button" className="clip-handle start" role="slider" aria-orientation="horizontal" aria-label={`${resizeStartLabel} ${clip.rallyIndex}`} aria-valuemin={previous?.end ?? 0} aria-valuemax={clip.end - minimumDuration} aria-valuenow={clip.start} style={{ left: -CLIP_EDGE_HIT_OUTSET, width: edgeHitWidth }} onPointerDown={(event) => beginResize(event, clip, 'start')} onPointerMove={moveResize} onPointerUp={endResize} onPointerCancel={endResize} onLostPointerCapture={endResize} onKeyDown={(event) => keyboardResize(event, clip, 'start')} /> : null}
                 {!deleteTarget ? <span>{clip.rallyIndex}</span> : null}
+                {annotated && <i className="clip-score-annotation" role="img" aria-label={scoreAnnotationLabel} title={scoreAnnotationLabel} style={{ width: dotSize, height: dotSize, left: Math.min(4, Math.max(0, (width - dotSize) / 2)) }} />}
+                {cut?.valid && <i className={`razor-cut-line${cut.snapped ? ' is-snapped' : ''}`} data-cut-time={cut.time} style={{ left: (cut.time - clip.start) * pixelsPerSecond }} aria-hidden="true" />}
                 {deleteTarget ? <i className="timeline-delete-overlay"><TrashIcon /></i> : null}
                 {showBoundaryMarkers ? <><i className="clip-boundary-marker start" aria-hidden="true" /><i className="clip-boundary-marker end" aria-hidden="true" /></> : null}
                 {!editingToolActive ? <button type="button" className="clip-handle end" role="slider" aria-orientation="horizontal" aria-label={`${resizeEndLabel} ${clip.rallyIndex}`} aria-valuemin={clip.start + minimumDuration} aria-valuemax={following?.start ?? duration} aria-valuenow={clip.end} style={{ right: -CLIP_EDGE_HIT_OUTSET, width: edgeHitWidth }} onPointerDown={(event) => beginResize(event, clip, 'end')} onPointerMove={moveResize} onPointerUp={endResize} onPointerCancel={endResize} onLostPointerCapture={endResize} onKeyDown={(event) => keyboardResize(event, clip, 'end')} /> : null}

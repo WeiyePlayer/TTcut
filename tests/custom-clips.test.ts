@@ -10,6 +10,7 @@ import {
   resolvedSelectedClipScores,
   selectCustomClipsByBounceCount,
   setCustomClipSelected,
+  splitCustomClip,
   validateAndBuildCustomCutGroups,
   validateCustomExportSegments,
 } from '../src/domain/custom-clips';
@@ -60,6 +61,40 @@ it('carries the latest explicitly edited score into later selected rallies', () 
 });
 
 describe('custom rally clip draft', () => {
+  it('splits detected clips without changing source analysis or copying score annotations', () => {
+    const result = analysis([rally('rally_001', 1, 10, 12), rally('rally_002', 2, 17, 19)]);
+    const clips = createCustomClipDraft(result.rallies, 2, 1, 30, 30);
+    clips[0]!.score = { left: 4, right: 3 }; clips[0]!.winner = 'left';
+    const next = splitCustomClip(clips, 'rally_001', 12, 'split_right', 30, [9, 11, 12, 13])!;
+    expect(next.slice(0, 2)).toMatchObject([
+      { clipId: 'rally_001', sourceRallyId: 'rally_001', start: 8, end: 12, defaultStart: 8, defaultEnd: 12, bounceCount: 2, isSplit: true },
+      { clipId: 'split_right', sourceRallyId: 'rally_001', start: 12, end: 14, defaultStart: 12, defaultEnd: 14, bounceCount: 2, isSplit: true },
+    ]);
+    expect(next.slice(0, 2).every(clip => clip.score === undefined && clip.winner === undefined)).toBe(true);
+    expect(clips[0]).toMatchObject({ end: 14, score: { left: 4, right: 3 }, winner: 'left' });
+    expect(result.rallies).toHaveLength(2);
+    expect(validateCustomExportSegments(result, customExportSegments(next))).toHaveLength(3);
+    expect(validateAndBuildCustomCutGroups(result, customExportSegments(next))[0]?.rallyIds).toEqual(['rally_001', 'split_right']);
+    const repeated = splitCustomClip(next, 'split_right', 13, 'split_again', 30)!;
+    expect(repeated.map(clip => clip.rallyIndex)).toEqual([1, 2, 3, 4]);
+    expect(repeated[1]?.bounceCount).toBeNull();
+    const hidden = setCustomClipSelected(next, 'split_right', false, 30, 30);
+    expect(setCustomClipSelected(hidden, 'split_right', true, 30, 30).slice(0, 2).map(clip => [clip.start, clip.end])).toEqual([[8, 12], [12, 14]]);
+    expect(resizeCustomClip(next, 'split_right', 'start', 12.5, 30, 30, [12, 13])[1]?.bounceCount).toBe(1);
+  });
+
+  it.each([8, 8.01, 13.99, 14, Number.NaN, Number.POSITIVE_INFINITY])('rejects invalid cuts at %s', (time) => {
+    const clips = createCustomClipDraft(analysis().rallies, 2, 1, 30, 30);
+    expect(splitCustomClip(clips, 'rally_001', time, 'right', 30)).toBeNull();
+  });
+
+  it('accepts a one-frame child, rejects duplicate IDs, and splits unselected manual clips safely', () => {
+    const clips = createManualCustomClip([], 'manual_a', 1, 10, [])!.map(clip => ({ ...clip, selected: false }));
+    expect(splitCustomClip(clips, 'manual_a', 1.5, 'manual_a', 30)).toBeNull();
+    const next = splitCustomClip(clips, 'manual_a', 1 + 1 / 30, 'right', 30, [])!;
+    expect(next.every(clip => !clip.selected && clip.source === 'manual' && clip.sourceRallyId === null && clip.bounceCount === 0)).toBe(true);
+    expect(next[0]!.end - next[0]!.start).toBeCloseTo(1 / 30, 6);
+  });
   it('replaces selection with inclusive board-count matches and excludes unavailable counts', () => {
     const clips = createCustomClipDraft([
       rally('rally_001', 1, 1, 2), rally('rally_002', 2, 4, 5), rally('rally_003', 3, 7, 8),
