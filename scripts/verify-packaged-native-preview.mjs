@@ -1,6 +1,5 @@
 // Smoke the shipped executable and original history workflow in an isolated profile.
 import { spawn, execFileSync } from 'node:child_process';
-import { once } from 'node:events';
 import { createServer } from 'node:net';
 import { mkdtemp, mkdir, readFile, writeFile, copyFile, stat } from 'node:fs/promises';
 import path from 'node:path';
@@ -27,6 +26,8 @@ await writeFile(path.join(profile,'history/index.json'),JSON.stringify({schema_v
 await writeFile(path.join(profile,'settings.json'),JSON.stringify({language:'en',calibration_method:'automatic',pre_roll_seconds:2.5,post_roll_seconds:1,normalize_variable_frame_rate:false}));
 const server=createServer();await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const port=server.address().port;await new Promise(resolve=>server.close(resolve));
 const child=spawn(executable,[`--user-data-dir=${profile}`,`--remote-debugging-port=${port}`],{windowsHide:false,stdio:['ignore','pipe','pipe']});
+const exited=new Promise(resolve=>child.once('exit',(code,signal)=>resolve({code,signal})));
+child.stdout.resume();
 let stderr='';child.stderr.on('data',chunk=>stderr+=String(chunk));
 let browser,page,passed=false;const report={executable,profile,source:record.source.path,checks:[]};
 try{
@@ -120,11 +121,13 @@ try{
   }
   passed=true;
 }catch(error){report.error=String(error);console.error(error);if(page)console.error((await page.locator('body').innerText()).slice(-4000));}
-await writeFile(path.join(run,'report.json'),JSON.stringify({passed,...report},null,2));console.log(JSON.stringify({passed,...report}));console.log('Evidence:',run);
 if(process.argv.includes('--hold')){process.stdin.setEncoding('utf8');await new Promise(resolve=>process.stdin.once('data',resolve));process.stdin.pause();}
+const shutdownStarted=Date.now();
 if(page&&!page.isClosed())await page.evaluate(()=>window.ttcut.confirmClose('exit')).catch(()=>undefined);
-await Promise.race([once(child,'exit'),delay(6000)]);
-if(child.exitCode===null){report.forcedShutdown=true;child.kill();passed=false;}
 await browser?.close().catch(()=>undefined);
+report.shutdown=await Promise.race([exited,delay(30000).then(()=>null)]);
+report.shutdownElapsedMs=Date.now()-shutdownStarted;
+if(report.shutdown===null){report.forcedShutdown=true;child.kill();passed=false;report.stderr=stderr;}
 await writeFile(path.join(run,'report.json'),JSON.stringify({passed,...report},null,2));
+console.log(JSON.stringify({passed,...report}));console.log('Evidence:',run);
 if(!passed)process.exitCode=1;
