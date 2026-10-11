@@ -7,6 +7,8 @@ export const previewBoundsSchema = z.object({
 }).strict();
 export const previewScoreboardSchema = z.object({
   enabled: z.boolean(), x: z.number().min(0).max(1), y: z.number().min(0).max(1),
+  style: z.enum(['classic', 'classic-orange', 'classic-green', 'red-blue']).optional(),
+  winnerEnabled: z.boolean().optional(),
   scale: z.number().min(0.5).max(3), aspect: z.number().positive().max(100),
   left: z.number().int().min(0).max(999), right: z.number().int().min(0).max(999),
   leftName: z.string().max(100), rightName: z.string().max(100),
@@ -37,7 +39,7 @@ export type NativePreviewEvent = {
   | { type: 'loading'; message: string }
   | { type: 'error'; message: string }
   | { type: 'pointer'; action: 'down' | 'move' | 'up' | 'cancel'; x: number; y: number; width: number; height: number }
-  | { type: 'key'; key: string; shift: boolean }
+  | { type: 'key'; key: string; shift: boolean; ctrl?: boolean }
   | { type: 'wheel'; delta: number; x: number; y: number; width: number; height: number }
   | { type: 'scoreboard-edit'; field: ScoreboardField; value: string; clipId: string }
 );

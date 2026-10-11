@@ -2,7 +2,7 @@ import { beforeAll as beforeWindowsSuite, afterAll as afterWindowsSuite } from '
 const actualPlatform = process.platform;
 beforeWindowsSuite(() => Object.defineProperty(process, 'platform', { value: 'win32' }));
 afterWindowsSuite(() => Object.defineProperty(process, 'platform', { value: actualPlatform }));
-import { access, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -253,6 +253,23 @@ describe('export task start and terminal lifecycle', () => {
     const result = state.events.find((event): event is Extract<AppEvent, { type: 'export-result' }> => event.type === 'export-result');
     expect(result?.data).toMatchObject({ kind: 'custom-artifacts', premiereXml: { quantizedForVfr: false } });
     expect(state.keyframes).not.toHaveBeenCalled();
+  });
+
+  it('exports two independently editable XML clips from one detected Rally', async () => {
+    const taskId = await startExport(windowMock() as never, {
+      analysis_id: request.analysis_id,
+      selection: { mode: 'custom', segments: [
+        { source: 'detected', rally_id: 'rally_001', clip_id: 'rally_001', display_index: 1, start_time_seconds: 8, end_time_seconds: 11 },
+        { source: 'detected', rally_id: 'rally_001', clip_id: 'split_right', display_index: 2, start_time_seconds: 11, end_time_seconds: 14 },
+      ] }, destination: 'source', outputs: { combined_video: false, rally_videos: false, premiere_xml: true },
+    });
+    await waitForTaskEnd(taskId);
+    const result = state.events.find((event): event is Extract<AppEvent, { type: 'export-result' }> => event.type === 'export-result');
+    if (!result || result.data.kind !== 'custom-artifacts') throw new Error('Missing split XML artifact');
+    const xml = await readFile(result.data.premiereXml!.outputPath, 'utf8');
+    expect(xml.match(/<clipitem id="video-/g)).toHaveLength(2);
+    expect(xml).toContain('<out>330</out>');
+    expect(xml).toContain('<in>330</in>');
   });
 
   it('uses an incrementing directory for repeated custom artifact exports', async () => {

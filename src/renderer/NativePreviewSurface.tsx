@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import type { PreviewScoreboard, ScoreboardField } from '../shared/native-preview';
 import type { useNativePreview } from './use-native-preview';
-import { SCOREBOARD_MAX_SCALE, SCOREBOARD_MIN_SCALE, SCOREBOARD_WIDTH_FRACTION, SCOREBOARD_PREVIEW_WIDTH_FRACTION, scoreboardHeightFraction } from '../domain/scoreboard';
+import { SCOREBOARD_MAX_SCALE, SCOREBOARD_MIN_SCALE, SCOREBOARD_RED_BLUE_CARD_FRACTION, scoreboardWidthFraction, scoreboardPreviewWidthFraction, scoreboardHeightFraction, scoreboardPreviewHeightFraction } from '../domain/scoreboard';
 
 type Position = { x: number; y: number; scale: number };
 export function NativePreviewSurface({ preview, scoreboard, onPosition, onToggle, onWinner, onEdit, label }: {
@@ -42,19 +42,21 @@ export function NativePreviewSurface({ preview, scoreboard, onPosition, onToggle
       surface.removeEventListener('wheel', wheel);
     };
   }, [preview.surfaceRef, preview.onInput]);
-  useEffect(() => { preview.send({ type: 'scoreboard', scoreboard }); }, [preview.send, preview.status, scoreboard.enabled, scoreboard.x, scoreboard.y, scoreboard.scale, scoreboard.aspect, scoreboard.left, scoreboard.right, scoreboard.leftGames, scoreboard.rightGames, scoreboard.leftName, scoreboard.rightName, scoreboard.clipId, scoreboard.winner]);
+  useEffect(() => { preview.send({ type: 'scoreboard', scoreboard }); }, [preview.send, preview.status, scoreboard.enabled, scoreboard.style, scoreboard.winnerEnabled, scoreboard.x, scoreboard.y, scoreboard.scale, scoreboard.aspect, scoreboard.left, scoreboard.right, scoreboard.leftGames, scoreboard.rightGames, scoreboard.leftName, scoreboard.rightName, scoreboard.clipId, scoreboard.winner]);
   preview.onInput.current = event => {
-    const bw = SCOREBOARD_WIDTH_FRACTION, pw = SCOREBOARD_PREVIEW_WIDTH_FRACTION;
-    const bh = scoreboardHeightFraction(scoreboard.aspect);
+    const bw = scoreboardWidthFraction(scoreboard.style), pw = scoreboardPreviewWidthFraction(scoreboard.style);
+    const bh = scoreboardHeightFraction(scoreboard.aspect, scoreboard.style);
+    const ph = scoreboardPreviewHeightFraction(scoreboard.aspect, scoreboard.style);
+    const winnerEnabled = scoreboard.winnerEnabled ?? Boolean(scoreboard.clipId);
     if (event.type === 'scoreboard-edit') { onEdit(event.clipId, event.field, event.value); return; }
     if (event.type === 'key') {
       const delta = event.shift ? .05 : .01;
       if (scoreboard.enabled && event.key.startsWith('Arrow')) {
         onPosition({ scale: scoreboard.scale,
           x: Math.max(0, Math.min(1 - pw * scoreboard.scale, scoreboard.x + (event.key === 'ArrowLeft' ? -delta : event.key === 'ArrowRight' ? delta : 0))),
-          y: Math.max(0, Math.min(1 - bh * scoreboard.scale, scoreboard.y + (event.key === 'ArrowUp' ? -delta : event.key === 'ArrowDown' ? delta : 0))),
+          y: Math.max(0, Math.min(1 - ph * scoreboard.scale, scoreboard.y + (event.key === 'ArrowUp' ? -delta : event.key === 'ArrowDown' ? delta : 0))),
         });
-      } else window.dispatchEvent(new KeyboardEvent('keydown', { code: event.key, key: event.key === 'Space' ? ' ' : event.key, shiftKey: event.shift, bubbles: true }));
+      } else window.dispatchEvent(new KeyboardEvent('keydown', { code: event.key, key: event.key === 'Space' ? ' ' : event.key.startsWith('Key') ? event.key.slice(3).toLowerCase() : event.key, shiftKey: event.shift, ctrlKey: event.ctrl ?? false, bubbles: true }));
       return;
     }
     if (event.type !== 'pointer' && event.type !== 'wheel') return;
@@ -63,9 +65,17 @@ export function NativePreviewSurface({ preview, scoreboard, onPosition, onToggle
     const x = (event.x - (event.width - vw) / 2) / vw, y = (event.y - (event.height - vh) / 2) / vh;
     const rx = (x - scoreboard.x) / (bw * scoreboard.scale), ry = (y - scoreboard.y) / (bh * scoreboard.scale);
     const inRow = scoreboard.enabled && ry >= 0 && ry <= 1;
-    const side = ry < .5 ? 'left' : 'right';
-    const field: ScoreboardField | null = inRow && rx >= 0 && rx <= 1 ? (rx < .76 ? `${side}Name` : rx < .88 ? `${side}Games` : side) : null;
-    const winnerButton = inRow && rx >= 1.02 && rx <= 1.14;
+    const redBlue = scoreboard.style === 'red-blue';
+    const side = redBlue ? (rx < .5 ? 'left' : 'right') : (ry < .5 ? 'left' : 'right');
+    const cardX = side === 'left' ? 0 : 1 - SCOREBOARD_RED_BLUE_CARD_FRACTION;
+    const inCard = rx >= cardX && rx <= cardX + SCOREBOARD_RED_BLUE_CARD_FRACTION;
+    const field: ScoreboardField | null = inRow && rx >= 0 && rx <= 1 && (!redBlue || inCard)
+      ? redBlue ? (ry < .205 ? `${side}Games` : ry >= .83 ? `${side}Name` : side)
+        : (rx < .76 ? `${side}Name` : rx < .88 ? `${side}Games` : side) : null;
+    const winnerButton = scoreboard.enabled && (redBlue
+      ? ry >= 1.04 && ry <= 1.04 + SCOREBOARD_RED_BLUE_CARD_FRACTION * .26 * 1.46
+        && rx >= cardX + SCOREBOARD_RED_BLUE_CARD_FRACTION * .37 && rx <= cardX + SCOREBOARD_RED_BLUE_CARD_FRACTION * .63
+      : inRow && rx >= 1.02 && rx <= 1.14);
     if (event.type === 'wheel') {
       if (field && !field.endsWith('Name') && scoreboard.clipId && event.delta) {
         const value = scoreboard[field] as number | undefined;
@@ -84,23 +94,24 @@ export function NativePreviewSurface({ preview, scoreboard, onPosition, onToggle
       }
     } else if (event.action === 'move' && drag.current) {
       const d = drag.current, dx = x - d.startX, dy = y - d.startY;
-      if (!d.corner) onPosition({ scale: d.scale, x: Math.max(0, Math.min(1 - pw * d.scale, d.x + dx)), y: Math.max(0, Math.min(1 - bh * d.scale, d.y + dy)) });
+      if (!d.corner) onPosition({ scale: d.scale, x: Math.max(0, Math.min(1 - pw * d.scale, d.x + dx)), y: Math.max(0, Math.min(1 - ph * d.scale, d.y + dy)) });
       else {
         const right = d.corner.endsWith('right'), bottom = d.corner.startsWith('bottom');
         const ax = right ? d.x : d.x + bw * d.scale, ay = bottom ? d.y : d.y + bh * d.scale;
         const vx = (right ? 1 : -1) * bw, vy = (bottom ? 1 : -1) * bh;
-        const max = Math.min(SCOREBOARD_MAX_SCALE, (right ? 1 - ax : ax) / bw, (bottom ? 1 - ay : ay) / bh);
+        const max = Math.min(SCOREBOARD_MAX_SCALE, right ? (1 - ax) / pw : ax / bw, bottom ? (1 - ay) / ph : ay / bh);
         const scale = Math.max(SCOREBOARD_MIN_SCALE, Math.min(max, d.scale + (dx * vx + dy * vy) / (vx * vx + vy * vy)));
-        onPosition({ scale, x: Math.max(0, Math.min(1 - pw * scale, right ? ax : ax - bw * scale)), y: bottom ? ay : ay - bh * scale });
+        onPosition({ scale, x: Math.max(0, Math.min(1 - pw * scale, right ? ax : ax - bw * scale)), y: Math.max(0, Math.min(1 - ph * scale, bottom ? ay : ay - bh * scale)) });
       }
     } else if (event.action === 'up' || event.action === 'cancel') {
       const c = click.current;
       if (event.action === 'up' && c && Math.hypot(event.x - c.x, event.y - c.y) < 5) {
         if (c.video) onToggle();
-        else if (c.side && c.clipId && winnerButton && c.side === side) onWinner(c.clipId, c.side);
+        else if (c.side && c.clipId && winnerEnabled && winnerButton && c.side === side) onWinner(c.clipId, c.side);
         else if (c.field && c.field === field && !drag.current?.corner && (c.clipId || c.field.endsWith('Name'))) {
           const prior = lastClick.current;
           if (prior?.field === c.field && prior.clipId === c.clipId && Date.now() - prior.time < 450) {
+            preview.send({ type: 'pause', paused: true });
             preview.send({ type: 'scoreboard-edit', field: c.field, clipId: c.clipId }); lastClick.current = null;
           } else lastClick.current = { field: c.field, clipId: c.clipId, time: Date.now() };
         }

@@ -76,6 +76,8 @@ switch($Action){
  'wheel'{[Physical]::mouse_event(0x800,0,0,$Delta,[UIntPtr]::Zero)}
  'type'{[Physical]::Type($Value);Start-Sleep -Milliseconds 180}
  'key'{[Physical]::Key([ushort]$Delta);[Physical]::Key([ushort]$Delta,$true);Start-Sleep -Milliseconds 180}
+ 'undo'{[Physical]::Key(17);[Physical]::Key(90);[Physical]::Key(90,$true);[Physical]::Key(17,$true);Start-Sleep -Milliseconds 180}
+ 'redo'{[Physical]::Key(17);[Physical]::Key(89);[Physical]::Key(89,$true);[Physical]::Key(17,$true);Start-Sleep -Milliseconds 180}
  'edit'{Click;Start-Sleep -Milliseconds 90;Click;Start-Sleep -Milliseconds 300;[Physical]::Key(17);[Physical]::Key(65);[Physical]::Key(65,$true);[Physical]::Key(17,$true);[Physical]::Type($Value);[Physical]::Key(13);[Physical]::Key(13,$true)}
  'drag'{[Physical]::mouse_event(2,0,0,0,[UIntPtr]::Zero);for($i=1;$i -le 12;$i++){[Physical]::SetCursorPos($px+[int](($rect.Right-$rect.Left)*$Dx*$i/12),$py+[int](($rect.Bottom-$rect.Top)*$Dy*$i/12))|Out-Null;Start-Sleep -Milliseconds 25};[Physical]::mouse_event(4,0,0,0,[UIntPtr]::Zero)}
 }

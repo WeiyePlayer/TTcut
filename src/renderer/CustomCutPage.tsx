@@ -5,7 +5,7 @@ import { useNativePreview } from './use-native-preview';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { SelectedVideo } from '../shared/api';
 import { hasBounceCounts, type AnalysisResultV1, type ExportRequest, type ScoreboardPosition, type ScoreboardScore } from '../shared/contracts';
-import { SCOREBOARD_MAX_SCALE, SCOREBOARD_MIN_SCALE, SCOREBOARD_WIDTH_FRACTION, SCOREBOARD_PREVIEW_WIDTH_FRACTION, scoreboardHeightFraction, scoreboardName } from '../domain/scoreboard';
+import { SCOREBOARD_MAX_SCALE, SCOREBOARD_MIN_SCALE, scoreboardWidthFraction, scoreboardAspectRatio, scoreboardGamesColor, scoreboardPreviewWidthFraction, scoreboardPreviewHeightFraction, scoreboardHeightFraction, scoreboardDisplayDimensions, scoreboardName } from '../domain/scoreboard';
 import {
   createManualCustomClip,
   deleteCustomClip,
@@ -13,10 +13,13 @@ import {
   resolvedSelectedClipScores,
   selectCustomClipsByBounceCount,
   setCustomClipSelected,
+  splitCustomClip,
   type CustomRallyClip,
 } from '../domain/custom-clips';
 import { CustomTimeline, type TimelineToolMode } from './CustomTimeline';
-import type { Messages } from './i18n';
+import type { Language, Messages } from './i18n';
+import { CustomEditingGuide } from './CustomEditingGuide';
+import { customGuidePreference } from './custom-guide-preference';
 import { useCompatiblePreview } from './use-compatible-preview';
 import { useCustomPlayback } from './use-custom-playback';
 import type { CustomPlaybackMode } from '../domain/custom-playback';
@@ -101,6 +104,14 @@ function TrashIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 7h16M10 11v6m4-6v6M9 7l.8-2h4.4l.8 2M6.5 7l.8 12h9.4l.8-12" /></svg>;
 }
 
+function RazorIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m9 3 12 12-6 6L3 9ZM9 8l7 7M8 9l7 7M6 6l2 2m8 8 2 2" /></svg>;
+}
+
+function HistoryIcon({ redo = false }: { redo?: boolean }) {
+  return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" style={redo ? { transform: 'scaleX(-1)' } : undefined}><path d="m8 5-5 5 5 5M3 10h10a7 7 0 0 1 7 7v2" /></svg>;
+}
+
 function ZoomIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="6" /><path d="m14.5 14.5 5.5 5.5M7 10h6M10 7v6" /></svg>;
 }
@@ -120,14 +131,14 @@ function ScoreboardIcon() {
   );
 }
 
-function manualClipId(): string | null {
-  if (typeof globalThis.crypto?.randomUUID === 'function') return `manual_${globalThis.crypto.randomUUID()}`;
+function customClipId(prefix: 'manual' | 'split'): string | null {
+  if (typeof globalThis.crypto?.randomUUID === 'function') return `${prefix}_${globalThis.crypto.randomUUID()}`;
   if (typeof globalThis.crypto?.getRandomValues !== 'function') return null;
   const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16));
   bytes[6] = (bytes[6]! & 0x0f) | 0x40;
   bytes[8] = (bytes[8]! & 0x3f) | 0x80;
   const hex = [...bytes].map((value) => value.toString(16).padStart(2, '0')).join('');
-  return `manual_${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  return `${prefix}_${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 function RallyScrollbar({ scrollRef, contentRef }: { scrollRef: React.RefObject<HTMLDivElement | null>; contentRef: React.RefObject<HTMLTableElement | null> }) {
@@ -190,6 +201,8 @@ export function CustomCutPage({
   playbackMode,
   onPlaybackModeChange,
   translations,
+  language = 'zh-CN',
+  autoGuideAllowed = true,
   mediaAvailable,
   onClipsChange,
   onToggleAll,
@@ -199,6 +212,12 @@ export function CustomCutPage({
   onReset,
   saveError = false,
   onRetrySave,
+  canUndo = false,
+  canRedo = false,
+  onUndo,
+  onRedo,
+  onEditStart,
+  onEditEnd,
 }: {
   video: SelectedVideo;
   analysis: AnalysisResultV1;
@@ -208,6 +227,8 @@ export function CustomCutPage({
   playbackMode: CustomPlaybackMode;
   onPlaybackModeChange: (mode: CustomPlaybackMode) => void;
   translations: Messages;
+  language?: Language;
+  autoGuideAllowed?: boolean;
   mediaAvailable: boolean;
   onClipsChange: (clips: CustomRallyClip[]) => void;
   onToggleAll: (selected: boolean) => void;
@@ -217,6 +238,12 @@ export function CustomCutPage({
   onReset?: () => void;
   saveError?: boolean;
   onRetrySave?: () => void;
+  canUndo?: boolean;
+  canRedo?: boolean;
+  onUndo?: () => void;
+  onRedo?: () => void;
+  onEditStart?: () => void;
+  onEditEnd?: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const scoreboardPlaneRef = useRef<HTMLDivElement>(null);
@@ -226,6 +253,7 @@ export function CustomCutPage({
   const rallyRowRefs = useRef(new Map<string, HTMLTableRowElement>());
   const multiSelectRef = useRef<HTMLDivElement>(null);
   const multiSelectButtonRef = useRef<HTMLButtonElement>(null);
+  const guideButtonRef = useRef<HTMLButtonElement>(null);
   const multiSelectId = useId();
   const exportCloseTimerRef = useRef<number | null>(null);
   const playbackCueTimerRef = useRef<number | null>(null);
@@ -237,13 +265,17 @@ export function CustomCutPage({
   const playbackTickRef = useRef<() => void>(() => undefined);
   const currentTimeRef = useRef(0);
   const previewMetadata = analysis.source_video?.path === video.path ? analysis.source_video : analysis.video;
-  const previewAspect = Math.abs(previewMetadata.rotation ?? 0) % 180 === 90
-    ? previewMetadata.height / previewMetadata.width
-    : previewMetadata.width / previewMetadata.height;
-  const scoreboardScale = scoreboard.scale ?? 1;
-  const scoreboardBaseHeight = scoreboardHeightFraction(previewAspect);
-  const scoreboardMaxX = Math.max(0, 1 - SCOREBOARD_PREVIEW_WIDTH_FRACTION * scoreboardScale);
-  const scoreboardMaxY = Math.max(0, 1 - scoreboardBaseHeight * scoreboardScale);
+  const displayDimensions = scoreboardDisplayDimensions(previewMetadata);
+  const previewAspect = displayDimensions.width / displayDimensions.height;
+  const scoreboardStyle = scoreboard.style ?? 'classic';
+  const scoreboardBaseWidth = scoreboardWidthFraction(scoreboardStyle);
+  const scoreboardBaseHeight = scoreboardHeightFraction(previewAspect, scoreboardStyle);
+  const scoreboardPreviewWidth = scoreboardPreviewWidthFraction(scoreboardStyle);
+  const scoreboardPreviewHeight = scoreboardPreviewHeightFraction(previewAspect, scoreboardStyle);
+  const scoreboardScaleLimit = Math.min(SCOREBOARD_MAX_SCALE, 1 / scoreboardPreviewWidth, 1 / scoreboardPreviewHeight);
+  const scoreboardScale = Math.min(scoreboard.scale ?? 1, scoreboardScaleLimit);
+  const scoreboardMaxX = Math.max(0, 1 - scoreboardPreviewWidth * scoreboardScale);
+  const scoreboardMaxY = Math.max(0, 1 - scoreboardPreviewHeight * scoreboardScale);
   const nativeEnabled = window.ttcut?.platform === 'win32' && Boolean(window.ttcut.nativePreviewOpen);
   const browserPreview = useCompatiblePreview(videoRef, video.mediaUrl, previewMetadata.video_codec, nativeEnabled);
   const nativePreview = useNativePreview(video.mediaUrl, nativeEnabled);
@@ -256,20 +288,51 @@ export function CustomCutPage({
   const [multiSelectOpen, setMultiSelectOpen] = useState(false);
   const [bounceFilterValue, setBounceFilterValue] = useState('');
   const [resetConfirmation, setResetConfirmation] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
   const selectedCount = clips.filter((clip) => clip.selected).length;
   const visibleClips = clips;
   const selectedScores = useMemo(() => resolvedSelectedClipScores(clips), [clips]);
-  const currentScoreClip = clips.find((clip) => clip.selected && currentTime >= clip.start && currentTime < clip.end);
+  const selectedScoreClips = clips.filter((clip) => clip.selected);
+  const activeScoreClip = selectedScoreClips.find((clip) => currentTime >= clip.start && currentTime < clip.end);
+  // Outside a rally, show/edit the next selected rally's starting score (or the
+  // final selected rally after the end). Opening at time zero must allow edits.
+  const currentScoreClip = activeScoreClip
+    ?? selectedScoreClips.find((clip) => clip.start > currentTime)
+    ?? selectedScoreClips.at(-1);
   const currentScore = currentScoreClip ? selectedScores.get(currentScoreClip.clipId) : null;
   const leftName = scoreboardName(scoreboard.left_name, 'A');
   const rightName = scoreboardName(scoreboard.right_name, 'B');
   const showBounceCounts = hasBounceCounts(analysis);
 
   useEffect(() => {
-    if (scoreboard.enabled && (scoreboard.x > scoreboardMaxX || scoreboard.y > scoreboardMaxY)) {
-      onScoreboardChange({ ...scoreboard, x: Math.min(scoreboard.x, scoreboardMaxX), y: Math.min(scoreboard.y, scoreboardMaxY) });
+    if (scoreboard.enabled && (scoreboard.x > scoreboardMaxX || scoreboard.y > scoreboardMaxY || (scoreboard.scale ?? 1) > scoreboardScaleLimit)) {
+      onScoreboardChange({ ...scoreboard, scale: scoreboardScale, x: Math.min(scoreboard.x, scoreboardMaxX), y: Math.min(scoreboard.y, scoreboardMaxY) });
     }
-  }, [scoreboard, scoreboardMaxX, scoreboardMaxY, onScoreboardChange]);
+  }, [scoreboard, scoreboardMaxX, scoreboardMaxY, scoreboardScale, scoreboardScaleLimit, onScoreboardChange]);
+
+  const openGuide = useCallback(() => {
+    const intent = preview.getPlaybackIntent();
+    // Cancel queued playback as well as a currently playing media element.
+    preview.seekTo(intent.time, false);
+    videoRef.current?.pause();
+    setToolMode(null);
+    setMultiSelectOpen(false);
+    if (exportCloseTimerRef.current !== null) {
+      window.clearTimeout(exportCloseTimerRef.current);
+      exportCloseTimerRef.current = null;
+    }
+    setExportOptionsOpen(false);
+    setGuideOpen(true);
+  }, [preview.getPlaybackIntent, preview.seekTo]);
+
+  useEffect(() => {
+    if (autoGuideAllowed && !resetConfirmation && !guideOpen && !customGuidePreference.hasSeen()) openGuide();
+  }, [autoGuideAllowed, resetConfirmation, guideOpen, openGuide]);
+
+  const closeGuide = () => {
+    customGuidePreference.markSeen();
+    setGuideOpen(false);
+  };
 
   useEffect(() => {
     if (!multiSelectOpen) return;
@@ -488,7 +551,7 @@ export function CustomCutPage({
   }, [analysis, clips, onClipsChange, showBounceCounts]);
 
   const addManualAt = useCallback((start: number, makeCurrent = false) => {
-    const clipId = manualClipId();
+    const clipId = customClipId('manual');
     if (!clipId) return false;
     const nextClips = createManualCustomClip(
       clips,
@@ -503,9 +566,44 @@ export function CustomCutPage({
     return true;
   }, [analysis, clips, onClipsChange, showBounceCounts]);
 
+  const splitClipAt = (clipId: string, time: number) => {
+    const rightId = customClipId('split');
+    if (!rightId) return false;
+    const next = splitCustomClip(clips, clipId, time, rightId, analysis.video.fps, showBounceCounts ? analysis.bounce_times_seconds : undefined);
+    if (!next) return false;
+    const boundary = next.find((clip) => clip.clipId === rightId)!.start;
+    playback.remapSplitTarget(clipId, rightId, boundary);
+    const target = clips.find((clip) => clip.clipId === clipId)!;
+    if (currentEditingClipId === clipId && currentTimeRef.current >= boundary && currentTimeRef.current < target.end) {
+      setCurrentEditingClipId(rightId);
+    }
+    onClipsChange(next);
+    return true;
+  };
+
+  useEffect(() => {
+    const handleEditShortcut = (event: KeyboardEvent) => {
+      if (guideOpen || !autoGuideAllowed || resetConfirmation || event.isComposing || event.repeat || event.altKey || isEditableShortcutTarget(event.target)) return;
+      if (event.key === 'Escape' && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+        setToolMode(null);
+        return;
+      }
+      const isMac = window.ttcut?.platform === 'darwin';
+      const modifier = isMac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+      if (!modifier) return;
+      const key = event.key.toLowerCase();
+      const action = key === 'z' ? (event.shiftKey ? onRedo : onUndo)
+        : !isMac && key === 'y' && !event.shiftKey ? onRedo : undefined;
+      if (!action) return;
+      event.preventDefault(); event.stopPropagation(); action();
+    };
+    window.addEventListener('keydown', handleEditShortcut, true);
+    return () => window.removeEventListener('keydown', handleEditShortcut, true);
+  }, [onUndo, onRedo, resetConfirmation, guideOpen, autoGuideAllowed]);
+
   useEffect(() => {
     const handleSpace = (event: KeyboardEvent) => {
-      if (resetConfirmation) return;
+      if (guideOpen || !autoGuideAllowed || resetConfirmation) return;
       if (event.target instanceof HTMLElement && event.target.closest('.custom-scoreboard input')) return;
       if (event.isComposing || (event.code !== 'Space' && event.key !== ' ')) return;
       // Own Space before row handlers and native button/checkbox activation.
@@ -520,15 +618,15 @@ export function CustomCutPage({
       window.removeEventListener('keydown', handleSpace, true);
       window.removeEventListener('keyup', handleSpace, true);
     };
-  }, [togglePlayback, resetConfirmation]);
+  }, [togglePlayback, resetConfirmation, guideOpen, autoGuideAllowed]);
 
   useEffect(() => {
     const handleBoundaryShortcut = (event: KeyboardEvent) => {
-      if (resetConfirmation) return;
+      if (guideOpen || !autoGuideAllowed || resetConfirmation) return;
       if (event.isComposing || event.repeat || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey
         || isEditableShortcutTarget(event.target)
         || (event.code !== 'KeyA' && event.code !== 'KeyD')
-        || toolMode === 'delete') return;
+        || toolMode === 'delete' || toolMode === 'razor') return;
 
       if (toolMode === 'add' && event.code === 'KeyA') {
         event.preventDefault();
@@ -544,7 +642,7 @@ export function CustomCutPage({
     };
     window.addEventListener('keydown', handleBoundaryShortcut, true);
     return () => window.removeEventListener('keydown', handleBoundaryShortcut, true);
-  }, [addManualAt, currentEditingClipId, resizeClipAt, toolMode, resetConfirmation]);
+  }, [addManualAt, currentEditingClipId, resizeClipAt, toolMode, resetConfirmation, guideOpen, autoGuideAllowed]);
 
   const toggleTool = (nextTool: Exclude<TimelineToolMode, null>) => {
     setToolMode((active) => active === nextTool ? null : nextTool);
@@ -582,27 +680,27 @@ export function CustomCutPage({
     const deltaY = (event.clientY - drag.startY) / bounds.height;
     if (!drag.corner) {
       onScoreboardChange({ ...scoreboard,
-        x: Math.max(0, Math.min(1 - SCOREBOARD_PREVIEW_WIDTH_FRACTION * drag.scale, drag.x + deltaX)),
-        y: Math.max(0, Math.min(1 - scoreboardBaseHeight * drag.scale, drag.y + deltaY)),
+        x: Math.max(0, Math.min(1 - scoreboardPreviewWidth * drag.scale, drag.x + deltaX)),
+        y: Math.max(0, Math.min(1 - scoreboardPreviewHeight * drag.scale, drag.y + deltaY)),
       });
       return;
     }
     const fromRight = drag.corner.endsWith('right');
     const fromBottom = drag.corner.startsWith('bottom');
-    const anchorX = fromRight ? drag.x : drag.x + SCOREBOARD_WIDTH_FRACTION * drag.scale;
+    const anchorX = fromRight ? drag.x : drag.x + scoreboardBaseWidth * drag.scale;
     const anchorY = fromBottom ? drag.y : drag.y + scoreboardBaseHeight * drag.scale;
-    const vectorX = (fromRight ? 1 : -1) * SCOREBOARD_WIDTH_FRACTION;
+    const vectorX = (fromRight ? 1 : -1) * scoreboardBaseWidth;
     const vectorY = (fromBottom ? 1 : -1) * scoreboardBaseHeight;
     const requestedScale = drag.scale + (deltaX * vectorX + deltaY * vectorY) / (vectorX * vectorX + vectorY * vectorY);
     const maxScale = Math.min(
       SCOREBOARD_MAX_SCALE,
-      (fromRight ? 1 - anchorX : anchorX) / SCOREBOARD_WIDTH_FRACTION,
-      (fromBottom ? 1 - anchorY : anchorY) / scoreboardBaseHeight,
+      (fromRight ? 1 - anchorX : anchorX) / scoreboardPreviewWidth,
+      (fromBottom ? 1 - anchorY : anchorY) / scoreboardPreviewHeight,
     );
     const scale = Math.max(SCOREBOARD_MIN_SCALE, Math.min(maxScale, requestedScale));
     onScoreboardChange({ ...scoreboard, scale,
-      x: Math.max(0, Math.min(1 - SCOREBOARD_PREVIEW_WIDTH_FRACTION * scale, fromRight ? anchorX : anchorX - SCOREBOARD_WIDTH_FRACTION * scale)),
-      y: fromBottom ? anchorY : anchorY - scoreboardBaseHeight * scale,
+      x: Math.max(0, Math.min(1 - scoreboardPreviewWidth * scale, fromRight ? anchorX : anchorX - scoreboardBaseWidth * scale)),
+      y: Math.max(0, Math.min(1 - scoreboardPreviewHeight * scale, fromBottom ? anchorY : anchorY - scoreboardBaseHeight * scale)),
     });
   };
 
@@ -691,7 +789,7 @@ export function CustomCutPage({
               {preview.status === 'failed' && <button type="button" onClick={preview.retry}>{translations.previewRetry}</button>}
             </div>}
             {nativeEnabled ? <NativePreviewSurface preview={nativePreview} label={translations.togglePlayback} onToggle={togglePlayback}
-              scoreboard={{ enabled: scoreboard.enabled, x: Math.min(scoreboard.x, scoreboardMaxX), y: Math.min(scoreboard.y, scoreboardMaxY), scale: scoreboardScale, aspect: previewAspect, left: currentScore?.left ?? 0, right: currentScore?.right ?? 0, leftGames: currentScore?.left_games ?? 0, rightGames: currentScore?.right_games ?? 0, leftName, rightName, ...(currentScoreClip ? { clipId: currentScoreClip.clipId, ...(currentScoreClip.winner ? { winner: currentScoreClip.winner } : {}) } : {}) }}
+              scoreboard={{ enabled: scoreboard.enabled, style: scoreboardStyle, winnerEnabled: Boolean(activeScoreClip), x: Math.min(scoreboard.x, scoreboardMaxX), y: Math.min(scoreboard.y, scoreboardMaxY), scale: scoreboardScale, aspect: previewAspect, left: currentScore?.left ?? 0, right: currentScore?.right ?? 0, leftGames: currentScore?.left_games ?? 0, rightGames: currentScore?.right_games ?? 0, leftName, rightName, ...(currentScoreClip ? { clipId: currentScoreClip.clipId, ...(currentScoreClip.winner ? { winner: currentScoreClip.winner } : {}) } : {}) }}
               onWinner={updateWinner} onEdit={(clipId, field, value) => {
                 if (field === 'leftName' || field === 'rightName') onScoreboardChange({ ...scoreboard, [field === 'leftName' ? 'left_name' : 'right_name']: value.replace(/[\x00-\x1f\x7f]/g, '').slice(0, 24).trim() });
                 else updateScore(clipId, field === 'leftGames' ? 'left_games' : field === 'rightGames' ? 'right_games' : field, Number(value));
@@ -699,7 +797,7 @@ export function CustomCutPage({
               onPosition={value => onScoreboardChange({ ...scoreboard, ...value })} />
               : <CompatibleVideo hdr={Boolean(analysis.video.native_video && analysis.video.native_video.hdr !== 'sdr')} ref={videoRef} src={preview.url} controls={false} preload={preview.url === video.mediaUrl ? 'metadata' : 'auto'} playsInline tabIndex={0} aria-label={translations.togglePlayback} onClick={togglePlayback} onLoadedMetadata={() => { lastPlaybackClipIdRef.current = null; playback.tick(); }} onPlay={() => { playback.tick(); startVideoFrameTracking(); }} onPause={stopVideoFrameTracking} onEnded={() => { stopVideoFrameTracking(); playback.ended(); }} onTimeUpdate={() => playback.tick()} onSeeked={() => playback.tick()} />}
             {!nativeEnabled && scoreboard.enabled && <div ref={scoreboardPlaneRef} className="custom-scoreboard-plane" style={{ '--source-aspect': String(previewAspect) } as React.CSSProperties}>
-              <div className="custom-scoreboard" role="button" tabIndex={0} aria-label={translations.dragScoreboard} title={translations.dragScoreboard} style={{ left: `${scoreboard.x * 100}%`, top: `${scoreboard.y * 100}%`, transform: `scale(${scoreboardScale})` }} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => {
+              <div className={`custom-scoreboard is-${scoreboardStyle}`} role="button" tabIndex={0} aria-label={translations.dragScoreboard} title={translations.dragScoreboard} style={{ '--scoreboard-aspect': scoreboardAspectRatio(scoreboardStyle), '--scoreboard-games-color': scoreboardGamesColor(scoreboardStyle), '--scoreboard-width': `${scoreboardBaseWidth * 100}%`, left: `${scoreboard.x * 100}%`, top: `${scoreboard.y * 100}%`, transform: `scale(${scoreboardScale})` } as React.CSSProperties} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => {
                 event.preventDefault(); event.stopPropagation(); (event.target as HTMLElement).setPointerCapture(event.pointerId);
                 scoreboardDragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, x: scoreboard.x, y: scoreboard.y, scale: scoreboardScale, corner: null };
               }} onPointerMove={moveScoreboard} onPointerUp={(event) => { if (scoreboardDragRef.current?.pointerId === event.pointerId) scoreboardDragRef.current = null; }} onPointerCancel={() => { scoreboardDragRef.current = null; }} onLostPointerCapture={() => { scoreboardDragRef.current = null; }} onKeyDown={(event) => {
@@ -712,8 +810,9 @@ export function CustomCutPage({
                 else return;
                 event.preventDefault(); event.stopPropagation(); onScoreboardChange(next);
               }}>
-                <ScoreboardFields key={currentScoreClip?.clipId ?? 'gap'} names={[leftName, rightName]} score={currentScore ?? { left: 0, right: 0 }} winner={currentScoreClip?.winner} enabled={Boolean(currentScoreClip)}
+                <ScoreboardFields key={currentScoreClip?.clipId ?? 'gap'} style={scoreboardStyle} names={[leftName, rightName]} score={currentScore ?? { left: 0, right: 0 }} winner={currentScoreClip?.winner} enabled={Boolean(currentScoreClip)} winnerEnabled={Boolean(activeScoreClip)}
                   labels={{ name: translations.scoreboardEditName, games: translations.scoreboardGames, points: translations.scoreboardPoints, winner: translations.scoreboardWinner }}
+                  onEditStart={() => preview.seekTo(currentTimeRef.current, false)}
                   onName={(side, value) => onScoreboardChange({ ...scoreboard, [`${side}_name`]: value })}
                   onScore={(field, value) => { if (currentScoreClip) updateScore(currentScoreClip.clipId, field, value); }}
                   onWinner={side => { if (currentScoreClip) updateWinner(currentScoreClip.clipId, side); }} />
@@ -725,18 +824,24 @@ export function CustomCutPage({
             </div>}
           </div></div>
 
-          <CustomTimeline clips={clips} duration={analysis.video.duration_seconds} fps={analysis.video.fps} currentTime={currentTime} currentEditingClipId={currentEditingClipId} timelineLabel={translations.timeline} resizeStartLabel={translations.resizeStart} resizeEndLabel={translations.resizeEnd} toolMode={toolMode} onSeek={seek} onScrubCancel={playback.cancelScrub} onPlayClip={playClip} onAddAt={addManualAt} onDeleteClip={(clipId) => onClipsChange(deleteCustomClip(clips, clipId))} onResize={resizeClipAt} />
+          <CustomTimeline clips={clips} duration={analysis.video.duration_seconds} fps={analysis.video.fps} currentTime={currentTime} currentEditingClipId={currentEditingClipId} timelineLabel={translations.timeline} resizeStartLabel={translations.resizeStart} resizeEndLabel={translations.resizeEnd} toolMode={toolMode} onSeek={seek} onScrubCancel={playback.cancelScrub} onPlayClip={playClip} onAddAt={addManualAt} onDeleteClip={(clipId) => onClipsChange(deleteCustomClip(clips, clipId))} onResize={resizeClipAt} onSplitClip={splitClipAt} onEditStart={onEditStart} onEditEnd={onEditEnd} scoreAnnotationLabel={translations.scoreAnnotated} />
 
           <div className="custom-timeline-actions">
             <div className="timeline-tool-buttons" role="group" aria-label={translations.timelineTools}>
               <button className={`timeline-tool${toolMode === 'add' ? ' is-active' : ''}`} type="button" aria-label={translations.addManualRally} title={translations.addManualRally} aria-pressed={toolMode === 'add'} onClick={() => toggleTool('add')}><PlusIcon /></button>
+              <button className={`timeline-tool${toolMode === 'razor' ? ' is-active' : ''}`} type="button" aria-label={translations.razorTool} title={translations.razorToolHint} aria-pressed={toolMode === 'razor'} onClick={() => toggleTool('razor')}><RazorIcon /></button>
               <button className={`timeline-tool${toolMode === 'delete' ? ' is-active' : ''}`} type="button" aria-label={translations.deleteRally} title={translations.deleteRally} aria-pressed={toolMode === 'delete'} onClick={() => toggleTool('delete')}><TrashIcon /></button>
               <button className={`timeline-tool${toolMode === 'zoom' ? ' is-active' : ''}`} type="button" aria-label={translations.zoomTimeline} title={translations.zoomTimelineHint} aria-pressed={toolMode === 'zoom'} onClick={() => toggleTool('zoom')}><ZoomIcon /></button>
               <button className={`timeline-tool scoreboard-tool${scoreboard.enabled ? ' is-active' : ''}`} type="button" aria-label={translations.addScoreboard} aria-pressed={scoreboard.enabled} title={translations.addScoreboard} onClick={() => onScoreboardChange({ ...scoreboard, enabled: !scoreboard.enabled })}><ScoreboardIcon /></button>
               <button className="timeline-tool playback-mode-toggle" type="button" aria-label={playbackMode === 'source' ? translations.sourcePlayback : playbackMode === 'rallies' ? translations.rallyPlayback : translations.loopPlayback} title={playbackMode === 'source' ? translations.switchToRallyPlayback : playbackMode === 'rallies' ? translations.switchToLoopPlayback : translations.switchToSourcePlayback} onClick={playback.switchMode}><PlaybackModeIcon mode={playbackMode} /></button>
+              <button className="timeline-tool" type="button" aria-label={translations.undoClipEdit} title={`${translations.undoClipEdit} (${window.ttcut?.platform === 'darwin' ? '⌘Z' : 'Ctrl+Z'})`} disabled={!canUndo} onClick={onUndo}><HistoryIcon /></button>
+              <button className="timeline-tool" type="button" aria-label={translations.redoClipEdit} title={`${translations.redoClipEdit} (${window.ttcut?.platform === 'darwin' ? '⌘⇧Z' : 'Ctrl+Y / Ctrl+Shift+Z'})`} disabled={!canRedo} onClick={onRedo}><HistoryIcon redo /></button>
               {onReset && <button className="timeline-tool" type="button" aria-label={translations.resetCustomEdits} title={translations.resetCustomEdits} onClick={() => setResetConfirmation(true)}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 7v5h-5M20 12a8 8 0 1 0-2.3 5.7" /></svg>
               </button>}
+              <button ref={guideButtonRef} className="timeline-tool custom-guide-trigger" type="button" aria-label={translations.customGuide.title} title={translations.customGuide.title} aria-haspopup="dialog" onClick={openGuide}>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 11v6" /><circle cx="12" cy="7.5" r="1" fill="currentColor" stroke="none" /></svg>
+              </button>
             </div>
             <div className={`custom-export-launcher floating-launcher${exportOptionsOpen ? ' is-open' : ''}`} onPointerLeave={scheduleExportClose}>
               <div className="custom-export-options floating-launch-options" role="group" aria-label={translations.customExportOptions} onPointerEnter={cancelExportClose} onPointerLeave={scheduleExportClose}>
@@ -756,6 +861,7 @@ export function CustomCutPage({
           </div>
         </div>
       </div>
+      {guideOpen && autoGuideAllowed && <CustomEditingGuide copy={translations.customGuide} language={language} platform={window.ttcut?.platform ?? 'win32'} onClose={closeGuide} returnFocus={guideButtonRef} />}
       {resetConfirmation && <div className="modal-backdrop" onKeyDown={(event) => { if (event.key === 'Escape') setResetConfirmation(false); }}>
         <div className="modal" role="dialog" aria-modal="true" aria-labelledby="custom-reset-title">
           <h2 id="custom-reset-title">{translations.resetCustomEdits}</h2>
