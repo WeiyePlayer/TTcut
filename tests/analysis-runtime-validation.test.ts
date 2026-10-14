@@ -20,7 +20,7 @@ vi.mock('../src/main/processes', () => ({
 }));
 
 import { AnalysisRuntimeValidationError, formatAnalysisRuntimeDiagnostics, validateAnalysisRuntime } from '../src/main/components';
-import { ProcessExecutionError } from '../src/main/processes';
+import { ProcessExecutionError, runProcess } from '../src/main/processes';
 
 describe('bundled ONNX runtime validation', () => {
   beforeEach(() => {
@@ -29,6 +29,8 @@ describe('bundled ONNX runtime validation', () => {
       python_executable: 'D:\\TTcut\\windows\\python\\python.exe',
       python: '3.12.13', numpy: '2.5.1', opencv: '4.13.0', onnxruntime: '1.24.3',
       providers: ['DmlExecutionProvider', 'CPUExecutionProvider'],
+      module_paths: { numpy: 'bundled/numpy/__init__.py', opencv: 'bundled/cv2/__init__.py', onnxruntime: 'bundled/onnxruntime/__init__.py' },
+      dependency_paths_valid: true,
     };
   });
 
@@ -36,7 +38,21 @@ describe('bundled ONNX runtime validation', () => {
     await expect(validateAnalysisRuntime('python.exe')).resolves.toEqual({
       version: 'Python 3.12.13 / ONNX Runtime 1.24.3',
       pythonVersion: '3.12.13', onnxRuntimeVersion: '1.24.3', acceleration: 'directml', variant: 'bundled',
+      modulePaths: processMock.value.module_paths,
     });
+    expect(runProcess).toHaveBeenLastCalledWith('python.exe',
+      expect.arrayContaining(['-I', '-S', '-X', 'utf8']), expect.objectContaining({ env: expect.any(Object) }));
+  });
+
+  it('rejects dependencies from outside the bundle even when their versions match', async () => {
+    processMock.value.dependency_paths_valid = false;
+    processMock.value.module_paths = { numpy: 'C:\\Users\\User\\AppData\\Roaming\\Python\\Python312\\site-packages\\numpy\\__init__.py' };
+    const error = await validateAnalysisRuntime('python.exe').catch((value) => value);
+    expect(error).toMatchObject({
+      message: 'ANALYSIS_RUNTIME_DEPENDENCY_OUTSIDE_BUNDLE',
+      diagnostics: { modulePaths: processMock.value.module_paths },
+    });
+    expect(formatAnalysisRuntimeDiagnostics(error)).toContain(JSON.stringify(processMock.value.module_paths));
   });
 
   it('accepts CPU-only availability but rejects a runtime without CPU', async () => {

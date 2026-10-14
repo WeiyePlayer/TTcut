@@ -32,6 +32,7 @@ import { probeVideo } from './probe';
 import { overallAnalysisProgress } from '../domain/analysis-progress';
 import { requestedAnalysisDevice } from '../domain/analysis-device';
 import { analysisProcessEnvironment } from './analysis-environment';
+import { pythonRuntimeLaunch } from './python-runtime';
 import { reconcileAnalysisVideoMetadata } from '../domain/analysis-result';
 import {
   CfrNormalizationError,
@@ -68,8 +69,6 @@ function workerEnvironment(
 ): NodeJS.ProcessEnv {
   return {
     ...analysisProcessEnvironment(process.env),
-    PYTHONPATH: components.worker,
-    PYTHONUTF8: '1',
     ...(includeBlurball ? { TTCUT_BLURBALL_WEIGHTS: components.blurballWeights } : {}),
     ...(includeTrackNet && components.tracknetWeights ? { TTCUT_TRACKNET_WEIGHTS: components.tracknetWeights } : {}),
     TTCUT_TABLE_ANALYZE_WEIGHTS: components.tableAnalyzeWeights,
@@ -79,16 +78,18 @@ function workerEnvironment(
 async function runWorker<T>(options: {
   taskId: string;
   executable: string;
-  args: string[];
+  module: string;
+  runtimeVariant: Awaited<ReturnType<typeof resolveUsableAnalysisComponents>>['runtimeVariant'];
   cwd: string;
   env: NodeJS.ProcessEnv;
   request: unknown;
   parseResult: (data: unknown) => T;
   onProgress: (event: Extract<WorkerEventV1, { type: 'progress' }>) => void;
 }): Promise<T> {
-  const { taskId, executable, args, cwd, env, request, parseResult, onProgress } = options;
+  const { taskId, executable, module, runtimeVariant, cwd, env, request, parseResult, onProgress } = options;
+  const launch = pythonRuntimeLaunch(executable, { module, worker: cwd }, env, runtimeVariant);
   return new Promise<T>((resolve, reject) => {
-    const child = spawnTracked(taskId, executable, args, { cwd, env });
+    const child = spawnTracked(taskId, executable, launch.args, { cwd, env: launch.env });
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
     let stdoutBuffer = '';
@@ -214,7 +215,8 @@ export async function startAnalysis(
         const calibrationData = await runWorker({
           taskId,
           executable: python,
-          args: ['-m', 'ttcut_worker.calibration_worker'],
+          module: 'ttcut_worker.calibration_worker',
+          runtimeVariant: analysisComponents.runtimeVariant,
           cwd: analysisComponents.worker,
           env: workerEnvironment(analysisComponents, false),
           request: calibrationRequest,
@@ -364,7 +366,8 @@ export async function startAnalysis(
       const workerResult = await runWorker({
         taskId,
         executable: python,
-        args: ['-m', 'ttcut_worker.worker'],
+        module: 'ttcut_worker.worker',
+        runtimeVariant: analysisComponents.runtimeVariant,
         cwd: analysisComponents.worker,
         env: workerEnvironment(
           analysisComponents,

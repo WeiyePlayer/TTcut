@@ -130,6 +130,131 @@ final class MediaIntegrationTests: XCTestCase {
       XCTAssertEqual(frame.width, 256)
     }
   }
+
+  func testDynamicHDRExportIsRejectedBeforeCopyOrEncoding() async throws {
+    var video = VideoInfo(path: "/nonexistent/dynamic-hdr.mp4")
+    video.width = 320
+    video.height = 180
+    video.duration = 2
+    video.fps = 12
+    let destination = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mp4")
+    for kind in [HDRKind.dolbyVision, .hdr10Plus] {
+      video.hdr = kind
+      XCTAssertThrowsError(try MediaExporter.encoding(video)) {
+        XCTAssertEqual(($0 as? TTError)?.code, "DYNAMIC_HDR_UNSUPPORTED")
+      }
+      for strategy in [ExportStrategy.fastSegmented, .compatible] {
+        do {
+          try await MediaExporter(paths: paths).merged(
+            video: video, ranges: [CutRange(0, 1)], destination: destination, strategy: strategy)
+          XCTFail("Dynamic metadata would be lost during export")
+        } catch let error as TTError {
+          XCTAssertEqual(error.code, "DYNAMIC_HDR_UNSUPPORTED")
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+      }
+    }
+  }
+
+  func testHDR10PlusCanBeProbedPreviewedAndAnalyzed() async throws {
+    let folder = try workspace()
+    let raw = folder.appendingPathComponent("hdr10.hevc")
+    _ = try await ProcessRunner.run(paths.ffmpeg, [
+      "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=12:duration=2",
+      "-c:v", "libx265", "-preset", "ultrafast", "-pix_fmt", "yuv420p10le",
+      "-color_primaries", "bt2020", "-color_trc", "smpte2084", "-colorspace", "bt2020nc",
+      "-color_range", "tv", "-x265-params",
+      "pools=2:frame-threads=2:log-level=error:hdr10=1:bframes=0:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc",
+      "-f", "hevc", raw.path,
+    ])
+    // Valid SMPTE 2094-40 payload serialized by libavutil's av_dynamic_hdr_plus_to_t35:
+    // one window, 1000-nit target, maxSCL 0.1, average maxRGB 0.05, 99th percentile 0.1.
+    let metadata: [UInt8] = [
+      0xb5, 0x00, 0x3c, 0x00, 0x01, 0x04, 0x01, 0x40, 0x00, 0x1f, 0x40, 0x4e, 0x20,
+      0x27, 0x10, 0x13, 0x88, 0x04, 0xe2, 0x07, 0x18, 0x9c, 0x40, 0x00, 0x00,
+    ]
+    var escaped: [UInt8] = []
+    var zeros = 0
+    for byte in [UInt8(4), UInt8(metadata.count)] + metadata + [0x80] {
+      if zeros >= 2 && byte <= 3 { escaped.append(3); zeros = 0 }
+      escaped.append(byte)
+      zeros = byte == 0 ? zeros + 1 : 0
+    }
+    let sei: [UInt8] = [0, 0, 0, 1, 0x4e, 1] + escaped
+    let bytes = [UInt8](try Data(contentsOf: raw))
+    var tagged = Data()
+    var index = 0
+    var last = 0
+    var inserted = 0
+    while index + 5 < bytes.count {
+      let prefix = bytes[index] == 0 && bytes[index + 1] == 0
+        ? (bytes[index + 2] == 1 ? 3 : bytes[index + 2] == 0 && bytes[index + 3] == 1 ? 4 : 0) : 0
+      if prefix == 0 { index += 1; continue }
+      if (bytes[index + prefix] >> 1) & 0x3f <= 31 {
+        tagged.append(contentsOf: bytes[last..<index])
+        tagged.append(contentsOf: sei)
+        last = index
+        inserted += 1
+      }
+      index += prefix + 2
+    }
+    tagged.append(contentsOf: bytes[last...])
+    XCTAssertEqual(inserted, 24)
+    let taggedRaw = folder.appendingPathComponent("hdr10plus.hevc")
+    try tagged.write(to: taggedRaw)
+    let source = folder.appendingPathComponent("hdr10plus.mp4")
+    _ = try await ProcessRunner.run(paths.ffmpeg, [
+      "-v", "error", "-y", "-r", "12", "-i", taggedRaw.path, "-c", "copy", "-tag:v", "hvc1", source.path,
+    ])
+
+    let identity = try SourceIdentity(url: source)
+    let video = try await MediaProbe(paths: paths).inspect(source)
+    XCTAssertEqual(video.hdr, .hdr10Plus)
+    XCTAssertEqual(video.colorTransfer, "smpte2084")
+    XCTAssertEqual(video.bitDepth, 10)
+    XCTAssertEqual(video.frameCount, 24)
+    let reader = try XCTUnwrap(tt_reader_open(source.path, 0, 1, video.fps))
+    defer { tt_reader_close(reader) }
+    var decoded = 0
+    while true {
+      var frame = TTFrame()
+      let status = tt_reader_next(reader, &frame)
+      XCTAssertGreaterThanOrEqual(status, 0, String(cString: tt_last_error()))
+      if status <= 0 { break }
+      XCTAssertEqual(frame.width, 320)
+      decoded += 1
+    }
+    XCTAssertEqual(decoded, 24)
+
+    let previewPath = folder.appendingPathComponent("preview.mp4")
+    try await MediaPreview.render(video: video, paths: paths, destination: previewPath)
+    let preview = try await MediaProbe(paths: paths).inspect(previewPath)
+    XCTAssertEqual(preview.hdr, .sdr)
+    XCTAssertEqual(preview.videoCodec, "h264")
+    let cover = folder.appendingPathComponent("cover.jpg")
+    try await MediaExporter(paths: paths).cover(video: video, destination: cover)
+    XCTAssertTrue(FileManager.default.fileExists(atPath: cover.path))
+
+    var request = AnalysisRequest(
+      taskID: UUID().uuidString, operation: "analyze", video: video, modelsDirectory: paths.models.path)
+    request.calibration = Calibration(width: 320, height: 180, points: [
+      Point(40, 40), Point(280, 40), Point(300, 160), Point(20, 160),
+    ])
+    request.rallyRecognitionMethod = .continuousVisibility
+    let result = try await AnalysisClient.run(request, paths: paths) { _ in }
+    XCTAssertEqual(result.type, "result")
+    XCTAssertNotNil(result.visibilityRallies)
+    request.operation = "calibrate"
+    do {
+      let calibration = try await AnalysisClient.run(request, paths: paths) { _ in }
+      XCTAssertEqual(calibration.tableSamples?.count, 11)
+    } catch let error as TTError {
+      // Synthetic pattern footage is not a real table; the HDR gate must not prevent inference.
+      XCTAssertEqual(error.code, "AUTO_CALIBRATION_FAILED")
+    }
+    XCTAssertEqual(identity.currentStatus, .available)
+  }
+
   func testSynthetic8KCut() async throws {
     let folder = try workspace()
     let source = folder.appendingPathComponent("8k.mp4")

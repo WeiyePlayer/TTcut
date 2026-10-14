@@ -3,6 +3,29 @@ import XCTest
 @testable import TTcutCore
 
 final class DomainTests: XCTestCase {
+  func testDynamicHDRDoesNotPreventVideoAnalysisValidation() throws {
+    var video = VideoInfo(path: "/tmp/hdr.mp4")
+    video.width = 320
+    video.height = 180
+    video.duration = 2
+    video.fps = 12
+    for kind in [HDRKind.sdr, .hdr10, .hlg, .dolbyVision, .hdr10Plus] {
+      video.hdr = kind
+      XCTAssertNoThrow(try video.validate(), kind.rawValue)
+      if kind == .dolbyVision || kind == .hdr10Plus {
+        XCTAssertThrowsError(try video.validateHDRExport()) {
+          XCTAssertEqual(($0 as? TTError)?.code, "DYNAMIC_HDR_UNSUPPORTED")
+        }
+      } else {
+        XCTAssertNoThrow(try video.validateHDRExport())
+      }
+    }
+    video.width = 0
+    XCTAssertThrowsError(try video.validate()) {
+      XCTAssertEqual(($0 as? TTError)?.code, "INVALID_VIDEO")
+    }
+  }
+
   func testRefinementClampsAndUnionsAndEmptyStaysEmpty() {
     XCTAssertEqual(Segments.refinement([], duration: 10), [])
     let rallies = [

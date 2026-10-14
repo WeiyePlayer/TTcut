@@ -87,6 +87,9 @@ public struct VideoInfo: Codable, Equatable, Sendable {
     guard width > 0, height > 0, duration.isFinite, duration > 0, fps.isFinite, fps > 0 else {
       throw TTError("INVALID_VIDEO", "视频元数据无效 / Invalid video metadata")
     }
+  }
+  /// Analysis and previews decode the base layer; faithful exports must retain dynamic metadata.
+  public func validateHDRExport() throws {
     if hdr == .dolbyVision || hdr == .hdr10Plus {
       throw TTError("DYNAMIC_HDR_UNSUPPORTED", "暂不支持 Dolby Vision / HDR10+ 保真剪辑")
     }
