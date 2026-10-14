@@ -39,3 +39,11 @@
 - 请求普通 PR 合并时使用正常 push / PR merge / 本地 fast-forward 流程，并核查同步结果；不要擅自 force-push、重写历史或发布产物。
 
 审计背景及来源见 [指令审计记录](docs/agent-instructions-audit.md)。
+
+## Cloud Agent（Linux）
+
+默认镜像已有 Node.js 22 与 npm 10。环境安装脚本会安装 `python3-venv`，在 `/opt/ttcut-venv` 按 `worker/requirements-cpu.txt` 安装 CPU 版依赖和 `pytest==8.3.5`，并在仓库根与 `website/` 执行 `npm ci`。`/usr/local/bin/python` 必须是执行 `/opt/ttcut-venv/bin/python` 的包装脚本；把虚拟环境里的解释器符号链接到其他路径会让 CPython 忽略 `pyvenv.cfg`。`pytest` 链接到同一环境。
+
+模型权重不在 Git 中。安装脚本按 `resources/online-model-delivery.json` 下载并校验 `resources/models/`。
+
+在此环境使用 `npm`、`npx` 和 `python -m pytest worker/tests -q`，不要使用 `npm.cmd` 或 PowerShell 发布脚本。`npm run typecheck` 可直接运行。`npm test` 中依赖 Windows 路径、PowerShell 签名或仅 Windows 更新器的用例会失败，其余 Vitest 可通过。`npm start` 启动 Electron；没有图形会话时用 `xvfb-run -a npm start`。系统 FFmpeg 不能代替受管视频处理组件，打开视频会得到 `MEDIA_COMPONENT_MISSING` 或 `MEDIA_RUNTIME_VERSION_MISMATCH`。Windows 安装包、签名和正式发布不在此环境验证。
