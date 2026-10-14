@@ -79,7 +79,7 @@ def copy_runtime(source: Path, destination: Path) -> None:
     site_packages = destination / "Lib" / "site-packages"
     site_packages.mkdir(parents=True, exist_ok=True)
     subprocess.run([
-        str(source / "python.exe"), "-m", "pip", "install",
+        str(source / "python.exe"), "-I", "-m", "pip", "install",
         "--disable-pip-version-check", "--no-compile", "--upgrade",
         "--target", str(site_packages),
         "numpy==2.5.1", "opencv-python-headless==4.13.0.92",
@@ -120,12 +120,23 @@ def main() -> int:
         shutil.copy2(ffmpeg_source / name, media_destination / name)
 
     probe = subprocess.run([
-        str(python_destination / "python.exe"), "-c",
+        str(python_destination / "python.exe"), "-I", "-S", "-X", "utf8", "-c",
+        "import os,sys;"
+        "root=os.path.dirname(os.path.abspath(sys.executable));"
+        "sys.path[:]=[os.path.join(root,'python%d%d.zip'%sys.version_info[:2]),root,"
+        "os.path.join(root,'DLLs'),os.path.join(root,'Lib'),os.path.join(root,'Lib','site-packages')];"
         "import json,cv2,numpy,onnxruntime as ort;"
+        "module_paths={name:os.path.realpath(module.__file__) for name,module in "
+        "[('numpy',numpy),('opencv',cv2),('onnxruntime',ort)]};"
+        "site_root=os.path.normcase(os.path.join(os.path.realpath(root),'Lib','site-packages'));"
         "print(json.dumps({'numpy':numpy.__version__,'opencv':cv2.__version__,"
-        "'onnxruntime':ort.__version__,'providers':ort.get_available_providers()}))",
+        "'onnxruntime':ort.__version__,'providers':ort.get_available_providers(),"
+        "'module_paths':module_paths,'dependency_paths_valid':"
+        "all(os.path.normcase(file).startswith(site_root+os.sep) for file in module_paths.values())}))",
     ], check=True, capture_output=True, text=True)
     runtime = json.loads(probe.stdout.strip().splitlines()[-1])
+    if runtime["dependency_paths_valid"] is not True:
+        raise RuntimeError(f"Bundled Python imported an external dependency: {runtime}")
     if runtime["numpy"] != "2.5.1" or runtime["opencv"] != "4.13.0":
         raise RuntimeError(f"Bundled Python dependency mismatch: {runtime}")
     if runtime["onnxruntime"] != "1.24.3" or "CPUExecutionProvider" not in runtime["providers"]:

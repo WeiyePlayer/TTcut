@@ -8,6 +8,7 @@ import { ProcessExecutionError, runProcess, type ProcessResult } from './process
 import { inspectMacComponents, macMediaComponents } from './macos/runtime';
 import { resolveInstallationLayout } from './installation-layout';
 import { logLine } from './logger';
+import { pythonRuntimeLaunch } from './python-runtime';
 
 const PYTHON_VERSION = '3.12.13';
 const NUMPY_VERSION = '2.5.1';
@@ -17,6 +18,7 @@ const ONNXRUNTIME_VERSION = '1.24.3';
 export type AnalysisRuntimeDiagnostics = {
   pythonExecutable: string;
   onnxRuntimeVersion: string | null;
+  modulePaths: Record<string, string>;
   providers: string[];
   stdout: string;
   stderr: string;
@@ -138,6 +140,9 @@ function diagnostics(python: string, result: ProcessResult, value: Record<string
   return {
     pythonExecutable: typeof value.python_executable === 'string' ? value.python_executable : python,
     onnxRuntimeVersion: typeof value.onnxruntime === 'string' ? value.onnxruntime : null,
+    modulePaths: value.module_paths && typeof value.module_paths === 'object'
+      ? Object.fromEntries(Object.entries(value.module_paths).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
+      : {},
     providers: Array.isArray(value.providers) ? value.providers.filter((item): item is string => typeof item === 'string') : [],
     stdout: result.stdout,
     stderr: result.stderr,
@@ -162,6 +167,7 @@ export function formatAnalysisRuntimeDiagnostics(error: unknown): string | null 
   return [
     `python.exe path=${JSON.stringify(value.pythonExecutable)}`,
     `onnxruntime=${JSON.stringify(value.onnxRuntimeVersion)}`,
+    `module paths=${JSON.stringify(value.modulePaths)}`,
     `providers=${JSON.stringify(value.providers)}`,
     `exit code=${JSON.stringify(value.exitCode)}`,
     `stdout=${JSON.stringify(value.stdout.slice(0, 7000))}`,
@@ -172,14 +178,18 @@ export function formatAnalysisRuntimeDiagnostics(error: unknown): string | null 
 export async function validateAnalysisRuntime(
   python: string,
   _expectedVariant?: unknown,
-): Promise<{ version: string; pythonVersion: string; onnxRuntimeVersion: string; acceleration: 'directml' | 'cpu'; variant: 'bundled' }> {
+): Promise<{ version: string; pythonVersion: string; onnxRuntimeVersion: string; modulePaths: Record<string, string>; acceleration: 'directml' | 'cpu'; variant: 'bundled' }> {
   const paths = await resolveComponents();
   let result: ProcessResult;
+  const launch = pythonRuntimeLaunch(python, { code: [
+    'import json,sys,os,cv2,numpy,onnxruntime as ort',
+    'module_paths={"opencv":os.path.realpath(cv2.__file__),"numpy":os.path.realpath(numpy.__file__),"onnxruntime":os.path.realpath(ort.__file__)}',
+    '_ttcut_site=os.path.normcase(os.path.join(os.path.realpath(_ttcut_root),"Lib","site-packages"))',
+    'dependency_paths_valid=all(os.path.normcase(file).startswith(_ttcut_site+os.sep) for file in module_paths.values())',
+    'print(json.dumps({"python_executable":sys.executable,"python":sys.version.split()[0],"opencv":cv2.__version__,"numpy":numpy.__version__,"onnxruntime":ort.__version__,"providers":ort.get_available_providers(),"module_paths":module_paths,"dependency_paths_valid":dependency_paths_valid}))',
+  ].join('\n') }, process.env);
   try {
-    result = await runProcess(python, ['-c', [
-      'import json,sys,cv2,numpy,onnxruntime as ort',
-      'print(json.dumps({"python_executable":sys.executable,"python":sys.version.split()[0],"opencv":cv2.__version__,"numpy":numpy.__version__,"onnxruntime":ort.__version__,"providers":ort.get_available_providers()}))',
-    ].join('\n')], { timeoutMs: 30_000, env: { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' } });
+    result = await runProcess(python, launch.args, { timeoutMs: 30_000, env: launch.env });
   } catch (error) {
     const raw = error instanceof ProcessExecutionError
       ? { code: error.exitCode ?? -1, stdout: error.stdout, stderr: error.stderr }
@@ -195,16 +205,20 @@ export async function validateAnalysisRuntime(
       || value.onnxruntime !== ONNXRUNTIME_VERSION || !providers.includes('CPUExecutionProvider')) {
     throw new AnalysisRuntimeValidationError('ANALYSIS_RUNTIME_VERSION_MISMATCH', diagnostics(python, result, value));
   }
+  if (value.dependency_paths_valid !== true) {
+    throw new AnalysisRuntimeValidationError('ANALYSIS_RUNTIME_DEPENDENCY_OUTSIDE_BUNDLE', diagnostics(python, result, value));
+  }
   let acceleration: 'directml' | 'cpu' = 'cpu';
   if (providers.includes('DmlExecutionProvider') && process.env.TTCUT_FORCE_ONNX_CPU !== '1') {
     try {
-      const probe = await runProcess(python, ['-c', [
+      const probeLaunch = pythonRuntimeLaunch(python, { code: [
         'import json,sys',
-        'sys.path.insert(0, sys.argv[1])',
+        `sys.path.append(${JSON.stringify(paths.worker)})`,
         'from ttcut_worker.directml_probe import select_configuration',
-        'print(json.dumps(select_configuration(sys.argv[2])))',
-      ].join('\n'), paths.worker, paths.blurballWeights], {
-        timeoutMs: 180_000, env: { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' },
+        `print(json.dumps(select_configuration(${JSON.stringify(paths.blurballWeights)})))`,
+      ].join('\n') }, process.env);
+      const probe = await runProcess(python, probeLaunch.args, {
+        timeoutMs: 180_000, env: probeLaunch.env,
       });
       const configuration = parseRuntimeOutput(probe.stdout);
       if (configuration.provider === 'directml' && [16, 8, 4, 2, 1].includes(Number(configuration.batch_size))) acceleration = 'directml';
@@ -217,6 +231,7 @@ export async function validateAnalysisRuntime(
     version: `Python ${value.python} / ONNX Runtime ${value.onnxruntime}`,
     pythonVersion: String(value.python),
     onnxRuntimeVersion: String(value.onnxruntime),
+    modulePaths: diagnostics(python, result, value).modulePaths,
     acceleration,
     variant: 'bundled',
   };
@@ -305,6 +320,9 @@ export async function inspectComponentPaths(paths: ComponentPaths): Promise<Comp
       const result = await validateAnalysisRuntime(paths.python);
       analysisVersion = `${result.version} (bundled)`;
       acceleration = result.acceleration;
+      await logLine('app', 'INFO', `Bundled analysis runtime: ${JSON.stringify({
+        python: paths.python, version: result.version, module_paths: result.modulePaths,
+      })}`).catch(() => undefined);
     } catch (error) {
       analysisDetail = error instanceof Error ? error.message : String(error);
       await recordFailure('analysis runtime', error);

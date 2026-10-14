@@ -27,6 +27,7 @@ public struct MediaExporter: Sendable {
     return "yuv\(video.chroma)p" + (video.bitDepth == 10 ? "10le" : "")
   }
   public static func encoding(_ video: VideoInfo) throws -> [String] {
+    try video.validateHDRExport()
     var args = [
       "-c:v", video.encoder, "-preset", "veryfast", "-crf", "18", "-pix_fmt",
       try pixelFormat(video),
@@ -219,6 +220,8 @@ public struct MediaExporter: Sendable {
     scoreboards: [ScoreboardOverlay]? = nil,
     progress: @escaping @Sendable (Double) -> Void = { _ in }
   ) async throws {
+    try video.validate()
+    try video.validateHDRExport()
     guard scoreboards == nil || (scoreboards!.count == ranges.count && scoreboards!.allSatisfy(\.isValid)) else {
       throw TTError("INVALID_SCOREBOARD")
     }

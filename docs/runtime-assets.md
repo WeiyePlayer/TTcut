@@ -51,6 +51,14 @@ ONNX Runtime 还依赖 Visual C++ x64 运行库。暂存脚本从 Visual Studio 
 `msvcp140.dll`、`msvcp140_1.dll`、`vcruntime140.dll` 和 `vcruntime140_1.dll`。
 缺失或架构错误会中止暂存，发行校验也会核对这些文件及清单中的哈希。
 
+启动检查、分析与校准统一使用随包 Python 的隔离启动：`-I -S -X utf8`，
+并显式限定标准库、DLL、`Lib/site-packages` 与受控 Worker 的搜索目录。
+子进程不会继承外部 `PYTHON*` 配置，也不会加载用户级包、`.pth` 或
+`sitecustomize` 启动钩子。暂存时的导入检查使用同样的目录限制，核对
+NumPy、OpenCV 和 ONNX Runtime 的实际文件路径确实位于随包依赖目录；
+不能用构建机或用户电脑的依赖补足缺失文件。显式本地 TrackNet 的外部
+Python 开发路径仍按该外部环境启动。
+
 ```powershell
 python scripts/stage-windows-runtime.py
 npm.cmd run stage:release
@@ -64,7 +72,8 @@ DirectML Session 使用顺序执行、关闭 memory pattern 和图优化。初�
 
 设置页只显示内置分析运行时和 x264 媒体工具的状态，并提供“重新检查”。
 缺失或自检失败显示不可用提示；启动和手动检测结果写入 `logs/app.log`，
-失败时保留模型路径、Python 路径、退出码和原始输出，便于区分文件缺失、
+成功检查记录依赖的实际文件路径；失败时保留模型路径、Python 路径、
+依赖路径、退出码和原始输出，便于区分文件缺失、
 完整性失败和运行时加载失败。应用不会下载、导入或安装组件，也不会
 把旧组件目录作为生产回退。全部内置自检成功后，应用只按固定白名单清理
 旧运行时、FFmpeg、下载缓存、暂存、回滚和组件清单；任一自检失败则保留

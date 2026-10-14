@@ -523,7 +523,9 @@ function assertExportNotCancelled(taskId: string): void {
 function exportCode(error: unknown): string | null {
   if (!(error instanceof Error)) return null;
   const code = (error as Error & { exportCode?: unknown }).exportCode;
-  return typeof code === 'string' ? code : (/^[A-Z][A-Z0-9_]+$/.test(error.message) ? error.message : null);
+  if (typeof code === 'string') return code;
+  if ('code' in error && error.code === 'DYNAMIC_HDR_UNSUPPORTED') return error.code;
+  return /^[A-Z][A-Z0-9_]+$/.test(error.message) ? error.message : null;
 }
 
 function wrapExportError(error: unknown, code: string): Error {
@@ -532,6 +534,7 @@ function wrapExportError(error: unknown, code: string): Error {
     current === 'EXPORT_CANCELLED'
     || current === 'EXPORT_TERMINATED'
     || current === 'EXPORT_SEGMENT_INCOMPATIBLE'
+    || current === 'DYNAMIC_HDR_UNSUPPORTED'
   ) return error instanceof Error ? error : new Error(current);
   const wrapped = new Error(`${code}: ${error instanceof Error ? error.message : String(error)}`);
   Object.assign(wrapped, { exportCode: code, cause: error });

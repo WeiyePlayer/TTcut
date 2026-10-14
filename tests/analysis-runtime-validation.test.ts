@@ -15,23 +15,27 @@ vi.mock('../src/main/processes', () => ({
   },
   runProcess: vi.fn(async (_python, args) => {
     if (processMock.error) throw processMock.error;
-    if (args.length > 2 && processMock.value.probeCrash) throw new Error('Native probe crashed');
-    if (args.length > 2) return { stdout: JSON.stringify({ provider: 'directml', batch_size: 4, ...(processMock.value.probe as object) }), stderr: '', code: 0 };
+    const modelProbe = args.some((arg: string) => arg.includes('select_configuration'));
+    if (modelProbe && processMock.value.probeCrash) throw new Error('Native probe crashed');
+    if (modelProbe) return { stdout: JSON.stringify({ provider: 'directml', batch_size: 4, ...(processMock.value.probe as object) }), stderr: '', code: 0 };
     return { stdout: JSON.stringify(processMock.value), stderr: '', code: 0 };
   }),
 }));
 
 import { AnalysisRuntimeValidationError, formatAnalysisRuntimeDiagnostics, validateAnalysisRuntime } from '../src/main/components';
-import { ProcessExecutionError } from '../src/main/processes';
+import { ProcessExecutionError, runProcess } from '../src/main/processes';
 vi.mock('../src/main/logger', () => ({ logLine: vi.fn(async () => undefined) }));
 
 describe('bundled ONNX runtime validation', () => {
   beforeEach(() => {
+    vi.mocked(runProcess).mockClear();
     processMock.error = null;
     processMock.value = {
       python_executable: 'D:\\TTcut\\windows\\python\\python.exe',
       python: '3.12.13', numpy: '2.5.1', opencv: '4.13.0', onnxruntime: '1.24.3',
       providers: ['DmlExecutionProvider', 'CPUExecutionProvider'],
+      module_paths: { numpy: 'bundled/numpy/__init__.py', opencv: 'bundled/cv2/__init__.py', onnxruntime: 'bundled/onnxruntime/__init__.py' },
+      dependency_paths_valid: true,
     };
   });
 
@@ -39,7 +43,24 @@ describe('bundled ONNX runtime validation', () => {
     await expect(validateAnalysisRuntime('python.exe')).resolves.toEqual({
       version: 'Python 3.12.13 / ONNX Runtime 1.24.3',
       pythonVersion: '3.12.13', onnxRuntimeVersion: '1.24.3', acceleration: 'directml', variant: 'bundled',
+      modulePaths: processMock.value.module_paths,
     });
+    expect(runProcess).toHaveBeenCalledTimes(2);
+    for (const [, args, options] of vi.mocked(runProcess).mock.calls) {
+      expect(args.slice(0, 5)).toEqual(['-I', '-S', '-X', 'utf8', '-c']);
+      expect(Object.keys(options!.env!)).not.toEqual(expect.arrayContaining([expect.stringMatching(/^PYTHON/i)]));
+    }
+  });
+
+  it('rejects dependencies from outside the bundle even when their versions match', async () => {
+    processMock.value.dependency_paths_valid = false;
+    processMock.value.module_paths = { numpy: 'C:\\Users\\User\\AppData\\Roaming\\Python\\Python312\\site-packages\\numpy\\__init__.py' };
+    const error = await validateAnalysisRuntime('python.exe').catch((value) => value);
+    expect(error).toMatchObject({
+      message: 'ANALYSIS_RUNTIME_DEPENDENCY_OUTSIDE_BUNDLE',
+      diagnostics: { modulePaths: processMock.value.module_paths },
+    });
+    expect(formatAnalysisRuntimeDiagnostics(error)).toContain(JSON.stringify(processMock.value.module_paths));
   });
 
   it('accepts CPU-only availability but rejects a runtime without CPU', async () => {

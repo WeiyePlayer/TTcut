@@ -15,6 +15,7 @@ import { logLine } from './logger';
 import { probeVideo } from './probe';
 import { hasActiveTasks, spawnTracked } from './processes';
 import { analysisProcessEnvironment } from './analysis-environment';
+import { pythonRuntimeLaunch } from './python-runtime';
 
 function send(window: BrowserWindow, event: AppEvent): void {
   if (!window.isDestroyed()) window.webContents.send(IPC.taskEvent, event);
@@ -46,15 +47,13 @@ export async function startAutoCalibration(
     },
     calibration_choice: { method: 'automatic' },
   });
-  const child = spawnTracked(taskId, components.python, ['-m', 'ttcut_worker.calibration_worker'], {
-    cwd: components.worker,
-    env: {
-      ...analysisProcessEnvironment(process.env),
-      PYTHONPATH: components.worker,
-      PYTHONUTF8: '1',
-      TTCUT_TABLE_ANALYZE_WEIGHTS: components.tableAnalyzeWeights,
-    },
-  });
+  const launch = pythonRuntimeLaunch(components.python, {
+    module: 'ttcut_worker.calibration_worker', worker: components.worker,
+  }, {
+    ...analysisProcessEnvironment(process.env),
+    TTCUT_TABLE_ANALYZE_WEIGHTS: components.tableAnalyzeWeights,
+  }, components.runtimeVariant);
+  const child = spawnTracked(taskId, components.python, launch.args, { cwd: components.worker, env: launch.env });
   child.stdout.setEncoding('utf8');
   child.stderr.setEncoding('utf8');
   let stdoutBuffer = '';

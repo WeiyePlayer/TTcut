@@ -33,8 +33,9 @@ beforeEach(async () => {
   };
   mock.log.mockReset().mockResolvedValue(undefined);
   mock.run.mockReset().mockImplementation(async (executable: string, args: string[]) => ({
-    code: 0, stderr: '', stdout: args[0] === '-c' ? JSON.stringify({
+    code: 0, stderr: '', stdout: args.includes('-c') ? JSON.stringify({
       python: '3.12.13', numpy: '2.5.1', opencv: '4.13.0', onnxruntime: '1.24.3', providers: ['CPUExecutionProvider'],
+      module_paths: { numpy: 'bundled/numpy', opencv: 'bundled/cv2', onnxruntime: 'bundled/onnxruntime' }, dependency_paths_valid: true,
     }) : args[0] === '-version' ? `${executable.replace('.exe', '')} version fixture` : 'libx264',
   }));
 });
@@ -62,7 +63,7 @@ describe('component failure diagnostics', () => {
     const result = await inspectComponentPaths(paths);
     expect(result.analysis).toMatchObject({ available: false, detail: 'MODEL_HASH_MISMATCH' });
     expect(mock.log).toHaveBeenCalledWith('app', 'ERROR', expect.stringContaining('Component check failed (models)'));
-    expect(mock.run.mock.calls.some(([, args]) => args[0] === '-c')).toBe(false);
+    expect(mock.run.mock.calls.some(([, args]) => args.includes('-c'))).toBe(false);
   });
 
   it('keeps the original failure when logging is unavailable', async () => {
@@ -75,6 +76,6 @@ describe('component failure diagnostics', () => {
     await expect(inspectComponentPaths(paths)).resolves.toMatchObject({
       analysis: { available: true, acceleration: 'cpu', detail: null }, media: { available: true, detail: null },
     });
-    expect(mock.log).not.toHaveBeenCalled();
+    expect(mock.log).toHaveBeenCalledWith('app', 'INFO', expect.stringContaining('"module_paths":{"numpy":"bundled/numpy"'));
   });
 });
