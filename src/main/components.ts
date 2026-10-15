@@ -35,7 +35,7 @@ export class AnalysisRuntimeValidationError extends Error {
 }
 
 export type RuntimeLocation = 'bundled' | 'external';
-export type MediaEncoder = 'libopenh264' | 'libx264';
+export type MediaEncoder = 'libopenh264' | 'libx264' | 'libx265';
 export type ComponentPaths = {
   python: string | null;
   runtimeVariant: RuntimeLocation | null;
@@ -249,9 +249,9 @@ export async function validateMediaComponent(
     runProcess(ffmpeg, ['-buildconf'], { timeoutMs: 10_000 }),
     runProcess(ffmpeg, ['-hide_banner', '-encoders'], { timeoutMs: 10_000 }),
   ]);
-  const requiredEncoder = encoder === 'libx264' ? 'libx264' : 'libopenh264';
+  const requiredEncoders = encoder === 'libopenh264' ? ['libopenh264'] : ['libx264', 'libx265'];
   if (!/ffmpeg version/i.test(version.stdout) || !/ffprobe version/i.test(probeVersion.stdout)
-      || !new RegExp(`\\b${requiredEncoder}\\b`).test(encoders.stdout)) {
+      || requiredEncoders.some((name) => !new RegExp(`\\b${name}\\b`).test(encoders.stdout))) {
     throw new Error('MEDIA_RUNTIME_INVALID');
   }
   return { version: version.stdout.split(/\r?\n/)[0]?.replace(/^ffmpeg version\s+/, '') ?? 'unknown', encoder };

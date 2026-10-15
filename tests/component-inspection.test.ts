@@ -36,7 +36,7 @@ beforeEach(async () => {
     code: 0, stderr: '', stdout: args.includes('-c') ? JSON.stringify({
       python: '3.12.13', numpy: '2.5.1', opencv: '4.13.0', onnxruntime: '1.24.3', providers: ['CPUExecutionProvider'],
       module_paths: { numpy: 'bundled/numpy', opencv: 'bundled/cv2', onnxruntime: 'bundled/onnxruntime' }, dependency_paths_valid: true,
-    }) : args[0] === '-version' ? `${executable.replace('.exe', '')} version fixture` : 'libx264',
+    }) : args[0] === '-version' ? `${executable.replace('.exe', '')} version fixture` : 'libx264 libx265',
   }));
 });
 afterEach(async () => { await rm(mock.root, { recursive: true, force: true }); });
@@ -77,5 +77,14 @@ describe('component failure diagnostics', () => {
       analysis: { available: true, acceleration: 'cpu', detail: null }, media: { available: true, detail: null },
     });
     expect(mock.log).toHaveBeenCalledWith('app', 'INFO', expect.stringContaining('"module_paths":{"numpy":"bundled/numpy"'));
+  });
+
+  it('rejects a bundled media runtime that cannot encode HEVC', async () => {
+    const original = mock.run.getMockImplementation()!;
+    mock.run.mockImplementation((executable, args) => args.includes('-encoders')
+      ? Promise.resolve({ code: 0, stdout: 'libx264', stderr: '' }) : original(executable, args));
+    await expect(inspectComponentPaths(paths)).resolves.toMatchObject({
+      analysis: { available: true }, media: { available: false, detail: 'MEDIA_RUNTIME_INVALID' },
+    });
   });
 });

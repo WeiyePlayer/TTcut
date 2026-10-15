@@ -5,7 +5,7 @@ export const nativePointSchema = z.object({ x: number, y: number }).strict();
 export const nativeCalibrationSchema = z.object({ width: positive.int(), height: positive.int(), points: z.array(nativePointSchema).length(4) }).strict();
 export const nativeVideoSchema = z.object({
   path: z.string().min(1), width: positive.int(), height: positive.int(), duration: positive,
-  fps: positive, nominalFPS: positive, frameRate: z.string().regex(/^\d+\/\d+$/), frameCount: positive.int().optional(),
+  fps: positive, nominalFPS: positive, nominalFrameRate: z.string().regex(/^\d+\/\d+$/).optional(), frameRate: z.string().regex(/^\d+\/\d+$/), frameCount: positive.int().optional(),
   variableFrameRate: z.boolean(), videoCodec: z.string(), profile: z.string(), pixelFormat: z.string(),
   bitDepth: positive.int(), chroma: z.string(), videoTimeBase: z.string(), videoStart: number, videoDuration: positive.optional(),
   audioCodec: z.string().optional(), audioChannels: number.int().nonnegative(), audioSampleRate: positive.int(),

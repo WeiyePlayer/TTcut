@@ -71,6 +71,7 @@ vi.mock('../src/main/history', () => ({
           fps: 30,
           variable_frame_rate: false,
           video_codec: 'h264',
+          media_fidelity: { hdr: 'sdr', bit_depth: 8, chroma: '420', mastering_display: null, max_cll: null },
           audio_codec: null,
           container: 'mp4',
           average_bitrate: 1_000_000,

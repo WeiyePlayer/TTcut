@@ -375,6 +375,31 @@ final class MediaIntegrationTests: XCTestCase {
     XCTAssertNotEqual(normalized.path, source.path)
     XCTAssertEqual(video.path, source.path)
   }
+
+  func testVFRExportRetainsLastDecodedFrameAndTimestamps() async throws {
+    let folder = try workspace()
+    let source = folder.appendingPathComponent("vfr-tail.mp4")
+    _ = try await ProcessRunner.run(paths.ffmpeg, [
+      "-y", "-f", "lavfi", "-i", "testsrc2=s=320x180:r=24:d=2", "-vf",
+      "select='not(mod(n,2))+not(mod(n,5))'", "-fps_mode", "vfr", "-c:v", "libx265", "-preset", "ultrafast",
+      "-x265-params", "pools=2:frame-threads=2:log-level=error", "-pix_fmt", "yuv420p10le", source.path,
+    ])
+    let video = try await MediaProbe(paths: paths).inspect(source)
+    XCTAssertTrue(video.variableFrameRate)
+    func timestamps(_ url: URL) async throws -> [Double] {
+      let result = try await ProcessRunner.run(paths.ffprobe, ["-v", "error", "-select_streams", "v:0", "-show_frames", "-show_entries", "frame=best_effort_timestamp_time", "-of", "json", url.path])
+      let document = try JSONSerialization.jsonObject(with: result.stdout) as! [String: Any]
+      return (document["frames"] as! [[String: Any]]).compactMap { ($0["best_effort_timestamp_time"] as? String).flatMap(Double.init) }
+    }
+    let expected = try await timestamps(source)
+    for strategy in [ExportStrategy.fastSegmented, .compatible] {
+      let output = folder.appendingPathComponent("vfr-\(strategy.rawValue).mp4")
+      try await MediaExporter(paths: paths).merged(video: video, ranges: [CutRange(0, video.duration)], destination: output, strategy: strategy)
+      let actual = try await timestamps(output)
+      XCTAssertEqual(actual.count, expected.count)
+      for (a, b) in zip(actual, expected) { XCTAssertEqual(a, b, accuracy: 0.00001) }
+    }
+  }
   func testTenBitSDRMultichannelAndRotatedSAR() async throws {
     let folder = try workspace()
     let source = folder.appendingPathComponent("tenbit.mp4")

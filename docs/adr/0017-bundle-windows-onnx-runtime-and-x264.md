@@ -4,6 +4,9 @@
 
 Accepted; supersedes ADR 0001 for Windows production packages.
 
+The H.264-only media decision below is superseded by
+[ADR 0018](0018-cross-platform-export-fidelity.md). The analysis-runtime decision remains current.
+
 ## Context
 
 Downloading Python/PyTorch, CUDA, models, and an optional encoder after install
