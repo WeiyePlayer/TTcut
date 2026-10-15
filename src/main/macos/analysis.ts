@@ -147,7 +147,7 @@ export async function startMacAnalysis(window: BrowserWindow, value: AnalysisOpt
       const processing: NonNullable<AnalysisResultV1['processing']> = { mode: source.variable_frame_rate ? 'original_vfr' : 'source_cfr', target_fps_ratio: null, encoder: null, warning_code: null };
       if (source.variable_frame_rate && value.normalizeVariableFrameRate) {
         const encoder = source.native_video!.hdr !== 'sdr' || source.video_codec === 'hevc' ? 'libx265' : 'libx264';
-        const key = createHash('sha256').update(JSON.stringify([originalIdentity, source.average_fps_ratio, encoder, 'native-cfr-v1'])).digest('hex');
+        const key = createHash('sha256').update(JSON.stringify([originalIdentity, source.nominal_fps_ratio ?? source.average_fps_ratio, encoder, 'native-cfr-v2'])).digest('hex');
         const directory = path.join(app.getPath('userData'), 'data', 'processing-media', 'v1', key);
         const cache = path.join(directory, 'media.mp4');
         const partial = path.join(directory, `${taskId}.partial.mp4`);
@@ -163,7 +163,7 @@ export async function startMacAnalysis(window: BrowserWindow, value: AnalysisOpt
             await rename(partial, cache); createdCache = directory;
             video = { ...normalized, path: cache, native_video: { ...normalized.native_video!, path: cache } };
           }
-          processing.mode = 'normalized_cfr'; processing.encoder = encoder; processing.target_fps_ratio = source.average_fps_ratio ?? null;
+          processing.mode = 'normalized_cfr'; processing.encoder = encoder; processing.target_fps_ratio = source.nominal_fps_ratio ?? source.average_fps_ratio ?? null;
         } catch (error) {
           if (controller.signal.aborted) throw error;
           processing.mode = 'vfr_fallback'; processing.warning_code = 'CFR_TRANSCODE_FAILED'; video = source;

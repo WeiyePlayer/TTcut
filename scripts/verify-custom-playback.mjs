@@ -1,5 +1,5 @@
 // Real Electron/decoded-frame regression using the actual custom page and media protocol.
-// Usage: node scripts/verify-custom-playback.mjs [source] [--baseline | --zoom-only | --razor-only | --original-media] [--preview-only]
+// Usage: node scripts/verify-custom-playback.mjs [source] [--baseline | --zoom-only | --razor-only | --original-media] [--preview-only | --export-preview-only]
 // --original-media uses the full untouched source and the production preview service.
 // --reuse-preview=<file> can reuse a previously validated full preview for UI retries.
 import { mkdtemp, realpath, writeFile, readFile, symlink } from 'node:fs/promises';
@@ -17,6 +17,8 @@ const zoomOnly = process.argv.includes('--zoom-only');
 const razorOnly = process.argv.includes('--razor-only');
 const originalMedia = process.argv.includes('--original-media');
 const previewOnly = process.argv.includes('--preview-only');
+const exportPreviewOnly = process.argv.includes('--export-preview-only');
+if (exportPreviewOnly && !originalMedia) throw new Error('--export-preview-only requires --original-media');
 const reusePreview = process.argv.find(arg => arg.startsWith('--reuse-preview='))?.slice('--reuse-preview='.length);
 if (reusePreview && !originalMedia) throw new Error('--reuse-preview requires --original-media');
 const source = path.resolve(process.argv.slice(2).find(arg => !arg.startsWith('--')) ?? path.join(root, 'artifacts/dynamic-roi/full_frame_trajectory.mp4'));
@@ -28,7 +30,7 @@ if (originalMedia) {
  // Only component discovery is substituted: probe, FFmpeg execution, duration
  // validation, cache publication and media registration use production code.
  await writeFile(path.join(run, 'backend.ts'), `export * from ${JSON.stringify(path.join(root, 'src/main/preview-media.ts'))};export * from ${JSON.stringify(path.join(root, 'src/main/probe.ts'))};export * from ${JSON.stringify(path.join(root, 'src/main/media-protocol.ts'))};`);
- await build({ root: run, configFile: false, logLevel: 'error', plugins: [{ name: 'test-media-components', enforce: 'pre', load(id) {
+ await build({ root: run, configFile: false, logLevel: 'error', define: { 'process.platform': JSON.stringify('win32') }, plugins: [{ name: 'test-media-components', enforce: 'pre', load(id) {
   if (id.replaceAll('\\', '/').endsWith('/src/main/components.ts')) return `export async function resolveUsableMediaComponents(){return {ffmpeg:process.env.FFMPEG_PATH||'ffmpeg',ffprobe:process.env.FFPROBE_PATH||'ffprobe',mediaEncoder:'libx264'}}`;
   if (id.replaceAll('\\', '/').endsWith('/src/main/macos/client.ts')) return `export function probeMacVideo(){throw new Error('Windows verification only')}`;
  } }], build: { outDir: path.join(run, 'backend'), lib: { entry: path.join(run, 'backend.ts'), formats: ['cjs'], fileName: () => 'index.cjs' }, rollupOptions: { external: ['electron', ...builtinModules, ...builtinModules.map(name => 'node:' + name)] } } });
@@ -38,7 +40,7 @@ await writeFile(path.join(run, 'index.html'), '<html lang="en"><head><meta chars
 await writeFile(path.join(run, 'entry.tsx'), `
 import React, {useState} from 'react'; import {createRoot} from 'react-dom/client';
 import {CustomCutPage} from ${JSON.stringify(path.join(root, 'src/renderer/CustomCutPage.tsx'))};
-import {CompatibleVideo} from ${JSON.stringify(path.join(root, 'src/renderer/CompatibleVideo.tsx'))};
+import {ExportVideoPreview} from ${JSON.stringify(path.join(root, 'src/renderer/ExportVideoPreview.tsx'))};
 import {messages} from ${JSON.stringify(path.join(root, 'src/renderer/i18n.ts'))};
 import {useCustomClipHistory} from ${JSON.stringify(path.join(root, 'src/renderer/use-custom-clip-history.ts'))};
 import ${JSON.stringify(path.join(root, 'src/renderer/styles.css'))};
@@ -51,7 +53,7 @@ const clips=history.clips;const setClips=history.edit;window.getDraft=()=>clips;
 const [scoreboard,setScoreboard]=useState({enabled:${JSON.stringify(razorOnly)},x:0.7,y:0.1});
 const [outputs,setOutputs]=useState({combined_video:true,rally_videos:false,premiere_xml:false});
 const [mode,setMode]=useState('source');const [language,setLanguage]=useState('en');window.setDraft=setClips;window.setLanguage=setLanguage;
-return output?<CompatibleVideo className="output-preview" src={video.mediaUrl} controls preload="metadata"/>:<CustomCutPage video={video} analysis={analysis} clips={clips} playbackMode={mode} onPlaybackModeChange={setMode} translations={messages(language)} mediaAvailable onClipsChange={setClips} onToggleAll={selected=>setClips(current=>current.map(clip=>({...clip,selected})))} outputs={outputs} onOutputsChange={setOutputs} onExport={()=>{}} scoreboard={scoreboard} onScoreboardChange={setScoreboard} canUndo={history.canUndo} canRedo={history.canRedo} onUndo={history.undo} onRedo={history.redo} onEditStart={history.begin} onEditEnd={history.commit}/>;}
+return output?<ExportVideoPreview hdr={Boolean(metadata.media_fidelity && metadata.media_fidelity.hdr !== 'sdr')} className="output-preview" src={video.mediaUrl} controls preload="metadata"/>:<CustomCutPage video={video} analysis={analysis} clips={clips} playbackMode={mode} onPlaybackModeChange={setMode} translations={messages(language)} mediaAvailable onClipsChange={setClips} onToggleAll={selected=>setClips(current=>current.map(clip=>({...clip,selected})))} outputs={outputs} onOutputsChange={setOutputs} onExport={()=>{}} scoreboard={scoreboard} onScoreboardChange={setScoreboard} canUndo={history.canUndo} canRedo={history.canRedo} onUndo={history.undo} onEditStart={history.begin} onEditEnd={history.commit}/>;}
 createRoot(document.getElementById('root')).render(<Harness/>);
 `);
 await build({ root: run, configFile: false, base: './', plugins: [{ name: 'baseline-source', enforce: 'pre', load(id) { return original.get(id); } }, react()], logLevel: 'error', build: { outDir: path.join(run, 'renderer'), emptyOutDir: true } });
@@ -111,7 +113,19 @@ try {
   await expect(guide).toBeVisible();
   await guide.getByRole('button', { name: 'Got it', exact: true }).click();
  }
- if (razorOnly) {
+ if (exportPreviewOnly) {
+  await page.evaluate(() => window.showOutput());
+  await expect(page.locator('.output-preview')).toBeVisible();
+  await expect(page.locator('.compatibility-preview-status[role="status"]')).toHaveCount(0, { timeout: 180000 });
+  await expect.poll(async () => (await frameState('.output-preview')).ready, { timeout: 180000 }).toBeGreaterThanOrEqual(2);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await page.locator('.output-preview').evaluate(video => video.play());
+  await advancing('export playback advances decoded proxy frames', 0, 5, '.output-preview');
+  const duration = await page.locator('.output-preview').evaluate(video => video.duration);
+  await page.locator('.output-preview').evaluate(video => { video.currentTime = video.duration - 3; });
+  await advancing('export playback seeks and decodes its final frames', duration - 3, duration, '.output-preview');
+  await page.screenshot({ path: path.join(run, 'export-preview.png') });
+ } else if (razorOnly) {
   const monitor = page.locator('.custom-monitor video');
   await expect.poll(async() => (await frameState()).ready).toBeGreaterThanOrEqual(2);
   const position = async time => {

@@ -48,10 +48,11 @@ export function fromNativeVideo(value: unknown): VideoMetadata {
   const v = nativeVideoSchema.parse(value);
   return videoMetadataSchema.parse({
     path: v.path, width: v.width, height: v.height, duration_seconds: v.duration, fps: v.fps, nominal_fps: v.nominalFPS,
-    average_fps_ratio: v.frameRate, nominal_fps_ratio: null, variable_frame_rate: v.variableFrameRate,
+    average_fps_ratio: v.frameRate, nominal_fps_ratio: v.nominalFrameRate ?? null, variable_frame_rate: v.variableFrameRate,
     video_codec: v.videoCodec, audio_codec: v.audioCodec ?? null, container: path.extname(v.path).slice(1).toLowerCase() || 'unknown',
     frame_count: v.frameCount ?? null, average_bitrate: v.bitrate || null, audio_bitrate: v.audioBitrate || null,
     pixel_format: v.pixelFormat, audio_sample_rate: v.audioCodec ? v.audioSampleRate : null, audio_channels: v.audioChannels || null,
+    media_fidelity: { hdr: v.hdr, bit_depth: v.bitDepth, chroma: v.chroma, mastering_display: v.masteringDisplay ?? null, max_cll: v.maxCLL ?? null },
     video_duration_seconds: v.videoDuration ?? null, audio_duration_seconds: v.audioDuration ?? null,
     video_start_time_seconds: v.videoStart, audio_start_time_seconds: v.audioStart,
     video_time_base: v.videoTimeBase, audio_time_base: v.audioTimeBase, rotation: v.rotation, sample_aspect_ratio: v.sar,

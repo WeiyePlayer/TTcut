@@ -328,6 +328,14 @@ export const analysisRequestSchema = z.union([
   analysisRequestV4Schema,
 ]);
 
+export const mediaFidelitySchema = z.object({
+  hdr: z.enum(['sdr', 'hdr10', 'hlg', 'dolbyVision', 'hdr10Plus']),
+  bit_depth: z.number().int().positive(),
+  chroma: z.string().min(1),
+  mastering_display: z.string().nullable(),
+  max_cll: z.string().nullable(),
+}).strict();
+
 export const videoMetadataSchema = z.object({
   path: z.string().min(1),
   duration_seconds: finiteNumber.nonnegative(),
@@ -345,6 +353,7 @@ export const videoMetadataSchema = z.object({
   average_bitrate: z.number().int().positive().nullable().optional(),
   audio_bitrate: z.number().int().positive().nullable().optional(),
   pixel_format: z.string().nullable().optional(),
+  media_fidelity: mediaFidelitySchema.optional(),
   native_video: nativeVideoSchema.optional(),
   audio_sample_rate: z.number().int().positive().nullable().optional(),
   audio_channels: z.number().int().positive().nullable().optional(),

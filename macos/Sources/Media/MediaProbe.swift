@@ -46,6 +46,7 @@ public struct MediaProbe: Sendable {
     info.frameRate = str(v, "avg_frame_rate", "30/1")
     info.fps = VideoInfo.ratio(info.frameRate)
     info.nominalFPS = VideoInfo.ratio(str(v, "r_frame_rate"))
+    if info.nominalFPS > 0 { info.nominalFrameRate = str(v, "r_frame_rate") }
     if info.fps <= 0 { info.fps = info.nominalFPS }
     if info.nominalFPS <= 0 { info.nominalFPS = info.fps }
     if VideoInfo.ratio(info.frameRate) <= 0 { info.frameRate = str(v, "r_frame_rate") }
@@ -88,7 +89,7 @@ public struct MediaProbe: Sendable {
       [
         "-select_streams", "v:0", "-read_intervals", Self.frameSampleIntervals(duration: info.duration),
         "-show_frames", "-show_entries",
-        "frame=best_effort_timestamp_time:frame_side_data",
+        "frame=best_effort_timestamp_time,duration_time:frame_side_data",
       ], url: url)
     let frames = frameDocument["frames"] as? [[String: Any]] ?? []
     let sides =
@@ -117,11 +118,11 @@ public struct MediaProbe: Sendable {
     if info.rotation == 90 || info.rotation == 270 { swap(&info.width, &info.height) }
     let times = frames.compactMap { Double(str($0, "best_effort_timestamp_time")) }
     guard !times.isEmpty else { throw TTError("VIDEO_TIMESTAMP_INVALID", "视频帧时间戳缺失") }
-    if times.count > 2 {
-      let intervalGap = max(2.0, info.fps > 0 ? 120 / info.fps : 2.0)
-      let deltas = zip(times, times.dropFirst()).map { $1 - $0 }
-        .filter { $0 > 0 && $0 <= intervalGap }
-      if let lo = deltas.min(), let hi = deltas.max(),
+    // Bounded packet windows can omit reordered B-frames at their ends. Their
+    // timestamp gaps are sampling artifacts, not evidence of a variable rate.
+    let durations = frames.compactMap { Double(str($0, "duration_time")) }.filter { $0 > 0 }
+    if durations.count > 2 {
+      if let lo = durations.min(), let hi = durations.max(),
         hi - lo > max(0.0001, 2 * VideoInfo.ratio(info.videoTimeBase))
       {
         info.variableFrameRate = true

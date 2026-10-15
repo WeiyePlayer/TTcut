@@ -146,15 +146,32 @@ def main() -> int:
     encoders = subprocess.run(
         [str(ffmpeg), "-hide_banner", "-encoders"], check=True, capture_output=True, text=True,
     ).stdout
-    if "libx264" not in encoders:
-        raise RuntimeError("Bundled FFmpeg does not provide libx264.")
-    encoder_help = subprocess.run(
-        [str(ffmpeg), "-hide_banner", "-h", "encoder=libx264"],
-        check=True, capture_output=True, text=True,
+    filters = subprocess.run(
+        [str(ffmpeg), "-hide_banner", "-filters"], check=True, capture_output=True, text=True,
     ).stdout
-    for pixel_format in ("yuv420p", "yuv422p", "yuv444p"):
-        if pixel_format not in encoder_help:
-            raise RuntimeError(f"Bundled libx264 lacks required pixel format: {pixel_format}")
+    for required_filter in ("zscale", "tonemap"):
+        if required_filter not in filters:
+            raise RuntimeError(f"Bundled FFmpeg lacks the HDR preview filter: {required_filter}")
+    bitstream_filters = subprocess.run(
+        [str(ffmpeg), "-hide_banner", "-bsfs"], check=True, capture_output=True, text=True,
+    ).stdout
+    if "setts" not in bitstream_filters:
+        raise RuntimeError("Bundled FFmpeg lacks the packet-duration filter: setts")
+    for encoder in ("libx264", "libx265"):
+        if encoder not in encoders:
+            raise RuntimeError(f"Bundled FFmpeg does not provide {encoder}.")
+        encoder_help = subprocess.run(
+            [str(ffmpeg), "-hide_banner", "-h", f"encoder={encoder}"],
+            check=True, capture_output=True, text=True,
+        ).stdout
+        for pixel_format in ("yuv420p", "yuv422p", "yuv444p", "yuv420p10le", "yuv422p10le", "yuv444p10le"):
+            if pixel_format not in encoder_help:
+                raise RuntimeError(f"Bundled {encoder} lacks required pixel format: {pixel_format}")
+    subprocess.run([
+        str(ffmpeg), "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=s=256x144:r=12:d=1",
+        "-frames:v", "2", "-c:v", "libx265", "-preset", "veryfast", "-pix_fmt", "yuv420p10le",
+        "-x265-params", "log-level=error:pools=2:frame-threads=2", "-f", "null", "-",
+    ], check=True, timeout=60)
     subprocess.run([
         str(ffmpeg), "-hide_banner", "-loglevel", "error",
         "-f", "lavfi", "-i", "color=c=black:s=7680x4320:r=1:d=1",
@@ -171,6 +188,7 @@ def main() -> int:
         "onnxruntime": runtime["onnxruntime"],
         "providers": runtime["providers"],
         "media_encoder": "libx264",
+        "media_encoders": ["libx264", "libx265"],
         "files": {
             **vc_runtime_hashes,
             "python/python.exe": sha256(python_destination / "python.exe"),

@@ -1,0 +1,14 @@
+[
+  {"name":"AVC SDR","codec":"h264","hdr":"sdr","depth":8,"chroma":"420","encoder":"libx264"},
+  {"name":"AVC ten-bit SDR","codec":"h264","hdr":"sdr","depth":10,"chroma":"420","encoder":"libx264"},
+  {"name":"HEVC SDR","codec":"hevc","hdr":"sdr","depth":8,"chroma":"420","encoder":"libx265"},
+  {"name":"HEVC ten-bit SDR","codec":"hevc","hdr":"sdr","depth":10,"chroma":"420","encoder":"libx265"},
+  {"name":"HLG AVC input","codec":"h264","hdr":"hlg","depth":10,"chroma":"420","encoder":"libx265"},
+  {"name":"HLG HEVC","codec":"hevc","hdr":"hlg","depth":10,"chroma":"420","encoder":"libx265"},
+  {"name":"HDR10","codec":"hevc","hdr":"hdr10","depth":10,"chroma":"420","encoder":"libx265"},
+  {"name":"HEVC 422","codec":"hevc","hdr":"sdr","depth":10,"chroma":"422","encoder":"libx265"},
+  {"name":"HEVC 444","codec":"hevc","hdr":"sdr","depth":10,"chroma":"444","encoder":"libx265"},
+  {"name":"twelve-bit","codec":"hevc","hdr":"sdr","depth":12,"chroma":"420","error":"BIT_DEPTH_UNSUPPORTED"},
+  {"name":"Dolby Vision","codec":"hevc","hdr":"dolbyVision","depth":10,"chroma":"420","error":"DYNAMIC_HDR_UNSUPPORTED"},
+  {"name":"HDR10Plus","codec":"hevc","hdr":"hdr10Plus","depth":10,"chroma":"420","error":"DYNAMIC_HDR_UNSUPPORTED"}
+]

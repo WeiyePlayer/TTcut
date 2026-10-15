@@ -19,7 +19,7 @@ vi.mock('../src/main/processes', () => ({
   runProcess: vi.fn(async (executable: string, args: readonly string[]) => {
     if (args[0] === '-version') return { stdout: `${path.basename(executable, '.exe')} version bundled-x264\n`, stderr: '', code: 0 };
     if (args[0] === '-buildconf') return { stdout: '--enable-libx264', stderr: '', code: 0 };
-    return { stdout: ' V..... libx264 H.264 / AVC\n', stderr: '', code: 0 };
+    return { stdout: ' V..... libx264 H.264 / AVC\n V..... libx265 HEVC\n', stderr: '', code: 0 };
   }),
 }));
 

@@ -4,6 +4,7 @@ import { displayVideoDimensions, videoContainerFromFileName } from '../domain/vi
 import { videoMetadataSchema, type VideoMetadata } from '../shared/contracts';
 import { resolveUsableMediaComponents } from './components';
 import { runProcess } from './processes';
+import { hdrSampleIntervals, probeMediaFidelity, type ProbeSideData } from './media-fidelity-probe';
 
 type ProbeStream = {
   codec_type?: string;
@@ -18,6 +19,7 @@ type ProbeStream = {
   nb_read_frames?: string;
   bit_rate?: string;
   pix_fmt?: string;
+  bits_per_raw_sample?: string;
   sample_rate?: string;
   channels?: number;
   duration?: string;
@@ -32,7 +34,8 @@ type ProbeStream = {
   color_transfer?: string;
   color_primaries?: string;
   tags?: { rotate?: string };
-  side_data_list?: Array<{ rotation?: number }>;
+  disposition?: { attached_pic?: number };
+  side_data_list?: Array<ProbeSideData & { rotation?: number }>;
 };
 
 type ProbeData = {
@@ -119,7 +122,7 @@ export async function probeVideo(videoPath: string, signal?: AbortSignal, mode: 
     '-v', 'error', '-show_format', '-show_streams', '-of', 'json', videoPath,
   ], signal ? { timeoutMs: 30_000, signal } : { timeoutMs: 30_000 });
   const data = parseJson<ProbeData>(result.stdout);
-  const video = data.streams?.find((stream) => stream.codec_type === 'video');
+  const video = data.streams?.find((stream) => stream.codec_type === 'video' && !stream.disposition?.attached_pic);
   const audio = data.streams?.find((stream) => stream.codec_type === 'audio');
   const duration = Number(data.format?.duration);
   const averageFps = rational(video?.avg_frame_rate);
@@ -140,6 +143,15 @@ export async function probeVideo(videoPath: string, signal?: AbortSignal, mode: 
   const rotation = video.side_data_list?.find((item) => Number.isFinite(item.rotation))?.rotation
     ?? (video.tags?.rotate ? Number(video.tags.rotate) : null);
   const displayDimensions = displayVideoDimensions(video.width, video.height, rotation);
+  // Static HDR10 and HDR10+ SEI can be present only on decoded frames, not the stream header.
+  // Match the native macOS probe's bounded sampling, including SDR-labelled HEVC/Dolby Vision.
+  const sampled = await runProcess(components.ffprobe, [
+    '-v', 'error', '-select_streams', 'v:0', '-read_intervals', hdrSampleIntervals(duration),
+    '-show_frames', '-show_entries', 'frame=best_effort_timestamp_time:frame_side_data', '-of', 'json', videoPath,
+  ], signal ? { timeoutMs: 60_000, signal } : { timeoutMs: 60_000 });
+  const frames = parseJson<{ frames?: Array<{ side_data_list?: ProbeSideData[] }> }>(sampled.stdout).frames ?? [];
+  const fidelity = probeMediaFidelity({ pixel_format: video.pix_fmt ?? null, color_transfer: video.color_transfer ?? null }, video.bits_per_raw_sample,
+    [...video.side_data_list ?? [], ...frames.flatMap((frame) => frame.side_data_list ?? [])]);
   return videoMetadataSchema.parse({
     path: path.resolve(videoPath),
     duration_seconds: duration,
@@ -157,6 +169,7 @@ export async function probeVideo(videoPath: string, signal?: AbortSignal, mode: 
     average_bitrate: optionalInteger(video.bit_rate ?? data.format?.bit_rate),
     audio_bitrate: optionalInteger(audio?.bit_rate),
     pixel_format: video.pix_fmt ?? null,
+    media_fidelity: fidelity,
     audio_sample_rate: optionalInteger(audio?.sample_rate),
     audio_channels: audio?.channels ?? null,
     video_duration_seconds: optionalNumber(video.duration),

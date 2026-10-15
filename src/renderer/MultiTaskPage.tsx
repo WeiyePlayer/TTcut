@@ -1,4 +1,4 @@
-import { CompatibleVideo } from './CompatibleVideo';
+import { ExportVideoPreview } from './ExportVideoPreview';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   RALLY_RECOGNITION_METHOD_DEFAULT,
@@ -947,7 +947,7 @@ export function MultiTaskPage({
               <button className="preview-close" type="button" onClick={() => setPreview(null)}>×</button>
             </div>
             <div className="batch-preview-media" style={{ aspectRatio: `${preview.width} / ${preview.height}` }}>
-              <CompatibleVideo hdr={preview.hdr} src={preview.source} controls autoPlay />
+              <ExportVideoPreview hdr={preview.hdr} src={preview.source} controls autoPlay />
             </div>
           </div>
         </div>

@@ -71,11 +71,9 @@ describe('media export planning', () => {
     expect(args).toContain(metadata.path);
     expect(args).toContain('processing.partial.mp4');
     if (encoder === 'libopenh264') {
-      expect(args).toEqual(expect.arrayContaining([
-        '-bsf:v', 'h264_metadata=video_full_range_flag=0:colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1',
-      ]));
+      expect(args[args.indexOf('-bsf:v') + 1]).toContain('h264_metadata=video_full_range_flag=0:colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1');
     } else {
-      expect(args).not.toContain('-bsf:v');
+      expect(args[args.indexOf('-bsf:v') + 1]).toContain('setts=pts=PTS:dts=DTS:duration=');
     }
   });
 
@@ -89,12 +87,13 @@ describe('media export planning', () => {
     expect(args).toEqual(expect.arrayContaining(['-preset', 'veryfast', '-crf', '18']));
     expect(args).toContain('vfr');
     expect(args).not.toContain('-r');
+    expect(args).toEqual(expect.arrayContaining(['-x264-params', 'fps=30/1', '-enc_time_base:v', 'filter']));
     expect(args).toContain('-autorotate');
     expect(args).not.toContain('-noautorotate');
     expect(args.slice(args.indexOf('-metadata:s:v:0'), args.indexOf('-metadata:s:v:0') + 2))
       .toEqual(['-metadata:s:v:0', 'rotate=0']);
     expect(args.join(' ')).toContain('setsar=sar=1/1,setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709');
-    expect(args).not.toContain('-bsf:v');
+    expect(args[args.indexOf('-bsf:v') + 1]).toContain('setts=pts=PTS:dts=DTS:duration=');
   });
 
   it('builds a single concat graph for multiple groups', () => {
@@ -104,7 +103,8 @@ describe('media export planning', () => {
     expect(filter).toContain('split=2');
     expect(filter).toContain('asplit=2');
     expect(filter).toContain('concat=n=2:v=1:a=1');
-    expect(filter.match(/setpts=PTS-STARTPTS:strip_fps=1/g)).toHaveLength(2);
+    expect(filter.match(/,setpts=PTS-STARTPTS/g)).toHaveLength(2);
+    expect(filter).not.toContain('strip_fps');
     expect(expectedOutputDuration([oneGroup, second])).toBe(11);
   });
 
@@ -134,7 +134,7 @@ describe('media export planning', () => {
     expect(args).not.toContain('libopenh264');
     expect(args).not.toContain('-b:v');
     expect(args).not.toContain('-profile:v');
-    expect(args).not.toContain('-bsf:v');
+    expect(args[args.indexOf('-bsf:v') + 1]).toContain('setts=pts=PTS:dts=DTS:duration=');
     expect(args[args.indexOf('-pix_fmt') + 1]).toBe('yuv420p');
   });
 
@@ -180,19 +180,18 @@ describe('media export planning', () => {
       ]);
       const filter = args[args.indexOf('-filter_complex') + 1];
       expect(filter).toContain('trim=start=3.000000:end=9.000000');
-      expect(filter).toContain('setpts=PTS-STARTPTS:strip_fps=1');
+      expect(filter).toContain('setpts=PTS-STARTPTS');
       expect(filter).toContain('atrim=start=3.000000:end=9.000000');
       expect(args).toContain(encoder);
       expect(args.slice(args.indexOf('-fps_mode'), args.indexOf('-fps_mode') + 2))
         .toEqual(['-fps_mode', 'vfr']);
       expect(args).not.toContain('-r');
+      expect(args).toContain('-enc_time_base:v');
       expect(filter).toContain('setsar=sar=1/1,setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709');
       if (encoder === 'libopenh264') {
-        expect(args).toEqual(expect.arrayContaining([
-          '-bsf:v', 'h264_metadata=video_full_range_flag=0:colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1',
-        ]));
+        expect(args[args.indexOf('-bsf:v') + 1]).toContain('h264_metadata=video_full_range_flag=0:colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1');
       } else {
-        expect(args).not.toContain('-bsf:v');
+        expect(args[args.indexOf('-bsf:v') + 1]).toContain('setts=pts=PTS:dts=DTS:duration=');
       }
     },
   );
@@ -317,5 +316,6 @@ describe('media export planning', () => {
     );
     expect(args.slice(args.indexOf('-fps_mode'), args.indexOf('-fps_mode') + 2)).toEqual(['-fps_mode', 'vfr']);
     expect(args).not.toContain('-r');
+    expect(args).toContain('-enc_time_base:v');
   });
 });

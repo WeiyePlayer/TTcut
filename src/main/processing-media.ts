@@ -2,14 +2,15 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, rename, rm, stat, statfs, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { AnalysisResultV1, VideoMetadata } from '../shared/contracts';
-import { buildCfrNormalizationArgs, normalizedSar } from './media-plan';
+import { buildCfrNormalizationArgs, displayedSar, normalizedSar, selectMediaEncoder } from './media-plan';
+import { fidelityMismatch, outputVideoCodec } from '../domain/media-fidelity';
 import { managedComponentsRoot, type MediaEncoder } from './components';
 import { getTaskController, spawnTracked } from './processes';
 import { probeVideo } from './probe';
 
 const PROCESSING_MEDIA_VERSION = 'v1';
 const CFR_CACHE_SCHEMA_VERSION = 1;
-const CFR_STRATEGY_VERSION = 1;
+const CFR_STRATEGY_VERSION = 2;
 const AV_SYNC_TOLERANCE_SECONDS = 0.1;
 
 export type ProcessingMediaMode = 'source_cfr' | 'normalized_cfr' | 'original_vfr' | 'vfr_fallback';
@@ -239,7 +240,7 @@ async function validateCfrMedia(
   if (metadata.rotation != null && Math.abs(metadata.rotation) > 0.5) {
     throw new CfrNormalizationError('CFR_ROTATION_MISMATCH');
   }
-  if (normalizedSar(metadata.sample_aspect_ratio) !== normalizedSar(source.sample_aspect_ratio)) {
+  if (normalizedSar(metadata.sample_aspect_ratio) !== displayedSar(source)) {
     throw new CfrNormalizationError('CFR_SAR_MISMATCH');
   }
   for (const [sourceColor, outputColor] of [
@@ -252,7 +253,9 @@ async function validateCfrMedia(
       throw new CfrNormalizationError('CFR_COLOR_METADATA_MISMATCH');
     }
   }
-  if (metadata.video_codec !== 'h264') throw new CfrNormalizationError('CFR_CODEC_UNSUPPORTED');
+  if (metadata.video_codec !== outputVideoCodec(source)) throw new CfrNormalizationError('CFR_CODEC_UNSUPPORTED');
+  const mismatch = fidelityMismatch(source, metadata);
+  if (mismatch) throw new CfrNormalizationError(mismatch);
   if ((source.audio_codec !== null) !== (metadata.audio_codec !== null)) {
     throw new CfrNormalizationError('CFR_AUDIO_MISSING');
   }
@@ -369,6 +372,7 @@ export async function prepareProcessingMedia(
     };
   }
   const targetFpsRatio = targetFrameRateRatio(source);
+  encoder = selectMediaEncoder(source, encoder);
   const identity = await sourceIdentity(source);
   const root = processingMediaRoot();
   const cached = await readValidCache(identity, source, targetFpsRatio, encoder, signal);

@@ -74,7 +74,8 @@ async function auditRuntime(directory, label) {
     check(value.numpy === '2.5.1', `${label} has the wrong NumPy version.`);
     check(value.opencv === '4.13.0', `${label} has the wrong OpenCV version.`);
     check(value.onnxruntime === '1.24.3', `${label} has the wrong ONNX Runtime version.`);
-    check(value.media_encoder === 'libx264', `${label} is not x264-only.`);
+    check(value.media_encoder === 'libx264', `${label} has the wrong default encoder.`);
+    check(['libx264', 'libx265'].every((encoder) => value.media_encoders?.includes(encoder)), `${label} must support x264 and x265.`);
     check(value.providers?.includes('CPUExecutionProvider'), `${label} has no CPU provider.`);
     check(value.providers?.includes('DmlExecutionProvider'), `${label} has no DirectML provider.`);
     for (const name of required.filter((name) => name.endsWith('.dll'))) {
@@ -164,5 +165,5 @@ if (failures.length) {
   failures.forEach((failure) => console.error(`- ${failure}`));
   process.exitCode = 1;
 } else {
-  console.log('Release verification passed: ONNX models, minimal Worker, bundled DirectML/CPU runtime, native preview, and x264-only package contract verified.');
+  console.log('Release verification passed: ONNX models, minimal Worker, bundled DirectML/CPU runtime, native preview, and x264/x265 package contract verified.');
 }

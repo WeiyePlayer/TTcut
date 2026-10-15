@@ -39,7 +39,7 @@ public struct MediaExporter: Sendable {
       if let value { args += [flag, value] }
     }
     if video.encoder == "libx265" {
-      var options = ["log-level=error", "repeat-headers=1"]
+      var options = ["log-level=error", "repeat-headers=1", "fps=" + video.frameRate]
       if video.hdr == .hdr10 { options += ["hdr10=1"] }
       if let display = video.masteringDisplay { options += ["master-display=" + display] }
       if let light = video.maxCLL { options += ["max-cll=" + light] }
@@ -50,6 +50,8 @@ public struct MediaExporter: Sendable {
         if let value { options += [name + "=" + value] }
       }
       args += ["-x265-params", options.joined(separator: ":"), "-tag:v", "hvc1"]
+    } else {
+      args += ["-x264-params", "fps=" + video.frameRate]
     }
     if video.hasAudio {
       args += [
@@ -62,6 +64,7 @@ public struct MediaExporter: Sendable {
       "-fps_mode", video.variableFrameRate ? "vfr" : "cfr",
     ]
     if !video.variableFrameRate { args += ["-r", video.frameRate] }
+    if video.variableFrameRate { args += ["-enc_time_base:v", "filter"] }
     return args
   }
   static func inputArguments(_ video: VideoInfo, seekStart: Double?) -> [String] {
@@ -121,7 +124,7 @@ public struct MediaExporter: Sendable {
       let fps = normalizeFPS ? ",fps=\(video.frameRate)" : ""
       let videoLabel = scoreboards == nil ? "v\(i)" : "vbase\(i)"
       parts.append(
-        vinput + "trim=start=\(start):end=\(end),setpts=PTS-STARTPTS:strip_fps=1\(fps)[\(videoLabel)]")
+        vinput + "trim=start=\(start):end=\(end),setpts=PTS-STARTPTS\(fps)[\(videoLabel)]")
       if let scoreboards {
         parts.append("[vbase\(i)][\(i + 1):v:0]" + Self.scoreboardFilter(video: video, score: scoreboards[i]) + "[v\(i)]")
       }
@@ -163,16 +166,23 @@ public struct MediaExporter: Sendable {
       throw TTError("INVALID_SCOREBOARD")
     }
     try video.validate()
-    let (graph, maps) = filter(video: video, ranges: ranges, normalizeFPS: normalizeFPS, scoreboards: scoreboards)
+    var encodingVideo = video
+    if normalizeFPS {
+      encodingVideo.frameRate = video.nominalFrameRate ?? video.frameRate
+      encodingVideo.variableFrameRate = false
+    }
+    let (graph, maps) = filter(video: encodingVideo, ranges: ranges, normalizeFPS: normalizeFPS, scoreboards: scoreboards)
     // x265's reorder delay can produce an invalid DTS when fewer than five frames are flushed.
     // Keep the same choice for every independently encoded segment in a concatenated output.
     let shortHEVC =
       video.encoder == "libx265"
       && (disableBFrames || ranges.reduce(0) { $0 + $1.duration } * video.fps < 5)
     let overlayInputs = scoreboards?.flatMap { ["-loop", "1", "-i", $0.imagePath] } ?? []
+    let duration = ranges.reduce(0) { $0 + $1.duration }
+    let packetDuration = "setts=pts=PTS:dts=DTS:duration='max(1,min(DURATION,ceil(\(Self.decimal(duration))/TB)-PTS))'"
     let args =
       Self.inputArguments(video, seekStart: seekStart) + overlayInputs + ["-filter_complex", graph] + maps
-      + (try Self.encoding(video)) + (shortHEVC ? ["-bf", "0"] : []) + [destination.path]
+      + (try Self.encoding(encodingVideo)) + (shortHEVC ? ["-bf", "0"] : []) + ["-bsf:v", packetDuration, destination.path]
     try await run(args, duration: ranges.reduce(0) { $0 + $1.duration }, progress: progress)
   }
   public func validate(_ url: URL, source: VideoInfo, duration: Double, segments: Int) async throws
