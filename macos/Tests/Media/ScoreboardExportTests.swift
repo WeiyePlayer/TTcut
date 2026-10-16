@@ -129,9 +129,13 @@ final class ScoreboardExportTests: XCTestCase {
 
   func testRejectsMismatchedAndInvalidScoreboardsBeforeExport() async throws {
     let exporter = MediaExporter(paths: paths)
+    var video = VideoInfo()
+    video.width = 640
+    video.height = 360
+    video.duration = 1
     for overlays in [[], [ScoreboardOverlay(x: .nan, y: 0, scale: 1, imagePath: "/tmp/board.png")]] {
       do {
-        try await exporter.merged(video: VideoInfo(), ranges: [CutRange(0, 1)],
+        try await exporter.merged(video: video, ranges: [CutRange(0, 1)],
           destination: URL(fileURLWithPath: "/tmp/unused-scoreboard.mp4"),
           strategy: .fastSegmented, scoreboards: overlays)
         XCTFail("Invalid scoreboard was accepted")
