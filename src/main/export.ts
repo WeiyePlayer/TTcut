@@ -777,7 +777,6 @@ async function executeExport(
     terminalEvent = { type: 'error', taskId, code, message };
   };
   try {
-    analysis.video = await exportSourceVideo(analysis, getTaskController(taskId)?.signal);
     assertMediaFidelity(analysis.video);
     await mkdir(tempDirectory, { recursive: true });
     const scoreboardAssets = scoreboards ? await writeScoreboardAssets(tempDirectory, analysis.video, scoreboards) : undefined;
@@ -1311,16 +1310,23 @@ export async function startExport(window: BrowserWindow, rawRequest: ExportReque
   const duration = expectedOutputDuration(groups);
   beginTrackedTask(taskId);
   try {
-    await assertExportPreconditions(analysis.video.path, path.dirname(output), taskId, duration, analysis.video, mediaComponents.mediaEncoder);
+    // Resolve legacy CFR histories before checking the input: their cached copy
+    // may be gone while the original is still available. Keep history unchanged.
+    const exportRecord = {
+      ...record,
+      analysis: { ...analysis, video: await exportSourceVideo(analysis, getTaskController(taskId)?.signal) },
+    };
+    const video = exportRecord.analysis.video;
+    await assertExportPreconditions(video.path, path.dirname(output), taskId, duration, video, mediaComponents.mediaEncoder);
     send(window, { type: 'progress', data: { taskId, kind: 'export', stage: 'preparing', percent: 0 } });
     await logLine(taskId, 'INFO', `Export target: ${output}`);
     await logLine(taskId, 'INFO', 'Export strategy: fast segmented');
-    await logLine(taskId, 'INFO', `Selected media encoder: ${selectMediaEncoder(analysis.video, mediaComponents.mediaEncoder)}`);
+    await logLine(taskId, 'INFO', `Selected media encoder: ${selectMediaEncoder(video, mediaComponents.mediaEncoder)}`);
     void executeExport(
       window,
       taskId,
       request,
-      record,
+      exportRecord,
       mediaComponents,
       groups,
       output,

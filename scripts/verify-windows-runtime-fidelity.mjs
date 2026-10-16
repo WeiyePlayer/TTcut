@@ -34,6 +34,7 @@ const realVideo = path.join(run, '真实比赛.mp4');
 execute(ffmpeg, ['-v', 'error', '-y', '-ss', '8', '-i', match, '-t', '4', '-an', '-c:v', 'libx264', '-preset', 'ultrafast', realVideo]);
 const id = randomUUID();
 const dynamicId = randomUUID();
+const legacyId = randomUUID();
 const template = JSON.parse(await readFile(templateFile, 'utf8'));
 const info = await stat(source);
 const record = {
@@ -51,7 +52,15 @@ const dynamicRecord = { ...record, id: dynamicId,
   analysis: { ...record.analysis, video: { ...record.analysis.video, path: dynamic, audio_codec: null } },
 };
 await writeFile(path.join(profile, 'history/records', `${dynamicId}.json`), JSON.stringify(dynamicRecord));
-await writeFile(path.join(profile, 'history/index.json'), JSON.stringify({ schema_version: 1, entries: [id, dynamicId].map((id) => ({ id, analyzed_at: record.analyzed_at })) }));
+const missingCache = path.join(run, 'deleted-legacy-cfr.mp4');
+const legacyRecord = { ...record, id: legacyId, analysis: {
+  ...record.analysis,
+  video: { ...record.analysis.video, path: missingCache, video_codec: 'h264', pixel_format: 'yuv420p' },
+  source_video: { ...record.analysis.video },
+  processing: { mode: 'normalized_cfr', target_fps_ratio: '24/1', encoder: 'libx264', warning_code: null },
+} };
+await writeFile(path.join(profile, 'history/records', `${legacyId}.json`), JSON.stringify(legacyRecord));
+await writeFile(path.join(profile, 'history/index.json'), JSON.stringify({ schema_version: 1, entries: [id, dynamicId, legacyId].map((id) => ({ id, analyzed_at: record.analyzed_at })) }));
 await writeFile(path.join(profile, 'settings.json'), JSON.stringify({ language: 'en', calibration_method: 'automatic', pre_roll_seconds: 1.5, post_roll_seconds: 0.5, normalize_variable_frame_rate: false }));
 const server = createServer();
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -97,10 +106,31 @@ try {
   assert.equal(dynamicProbe.media_fidelity.hdr, 'hdr10Plus');
   report.checks.push({ name: 'packaged Windows detects HLG and frame-carried HDR10+', hlg: probe.media_fidelity, dynamic: dynamicProbe.media_fidelity });
   const dynamicHash = await hash(dynamic);
-  const rejected = await task('startExport', { analysis_id: dynamicId, destination: 'source', selection: { mode: 'all', pre_roll_seconds: 1.5, post_roll_seconds: 0.5 } }, 'error');
+  let rejected;
+  try {
+    rejected = await task('startExport', { analysis_id: dynamicId, destination: 'source', selection: { mode: 'all', pre_roll_seconds: 1.5, post_roll_seconds: 0.5 } }, 'error');
+  } catch (error) {
+    // Legacy source metadata is now checked during preflight, before a task ID
+    // is returned. It may reject IPC directly instead of emitting a task event.
+    assert.match(String(error), /DYNAMIC_HDR_UNSUPPORTED/);
+    rejected = { type: 'error', code: 'DYNAMIC_HDR_UNSUPPORTED', phase: 'preflight', message: String(error) };
+  }
   assert.equal(rejected.code, 'DYNAMIC_HDR_UNSUPPORTED');
   assert.equal(await hash(dynamic), dynamicHash);
   report.checks.push({ name: 'packaged Main IPC rejects lossy HDR10+ export from old history', event: rejected, sourceHash: dynamicHash });
+  assert.equal(await stat(missingCache).catch(() => null), null);
+  const openedLegacy = await page.evaluate((id) => window.ttcut.openHistory(id), legacyId);
+  assert.equal(openedLegacy.video.path, source);
+  assert.equal(openedLegacy.analysis.video.path, missingCache);
+  const recovered = await task('startExport', { analysis_id: legacyId, destination: 'source', selection: { mode: 'all', pre_roll_seconds: 1.5, post_roll_seconds: 0.5 } }, 'export-result');
+  const recoveredStream = JSON.parse(execute(ffprobe, ['-v', 'error', '-show_streams', '-of', 'json', recovered.data.outputPath])).streams.find((stream) => stream.codec_type === 'video');
+  assert.equal(recoveredStream.codec_name, 'hevc'); assert.equal(recoveredStream.codec_tag_string, 'hvc1');
+  assert.equal(recoveredStream.pix_fmt, 'yuv420p10le'); assert.equal(recoveredStream.color_transfer, 'arib-std-b67');
+  execute(ffmpeg, ['-v', 'error', '-xerror', '-i', recovered.data.outputPath, '-f', 'null', '-']);
+  assert.equal(await stat(missingCache).catch(() => null), null);
+  assert.equal(JSON.parse(await readFile(path.join(profile, 'history/records', `${legacyId}.json`), 'utf8')).analysis.video.path, missingCache);
+  assert.equal(await hash(source), originalHash);
+  report.checks.push({ name: 'packaged Main IPC recovers the original HDR video with a missing legacy CFR cache', event: recovered, stream: recoveredStream, missingCache });
   await page.reload();
   await page.getByRole('button', { name: 'History', exact: true }).click();
   const entry = page.locator('.history-open').filter({ hasText: path.basename(source) });

@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -8,7 +8,7 @@ import type { AppEvent } from '../src/shared/api';
 import type { BrowserWindow } from 'electron';
 
 const historyState = vi.hoisted(() => ({ record: null as HistoryRecordV1 | null }));
-vi.mock('../src/main/history', () => ({ getHistoryStore: () => ({ open: async () => historyState.record }) }));
+vi.mock('../src/main/history', () => ({ getHistoryStore: () => ({ open: async () => historyState.record, markVisible: vi.fn().mockResolvedValue(undefined) }) }));
 
 vi.mock('electron', () => ({ dialog: {}, app: { isPackaged: false, getAppPath: () => process.cwd(), getPath: () => os.tmpdir() } }));
 vi.mock('../src/main/logger', () => ({ logLine: vi.fn().mockResolvedValue(undefined) }));
@@ -187,6 +187,39 @@ describe.skipIf(!enabled)('real FFmpeg Windows export fidelity', () => {
     expect(actual.media_fidelity?.hdr).toBe('hdr10');
     expect(actual.media_fidelity?.mastering_display).toBeNull();
     await expect(validateExportOutput(output, { targetSeconds: source.duration_seconds, segmentCount: 1 }, source)).rejects.toThrow('EXPORT_HDR_METADATA_LOST');
+  }, 60_000);
+
+  it('exports the original HDR video when an old Windows CFR cache is missing', async () => {
+    const original = videos.get('vfr-hlg')!;
+    const originalBytes = await readFile(original.path);
+    const cache = path.join(root, 'missing-legacy-cfr.mp4');
+    await expect(access(cache)).rejects.toThrow();
+    const { media_fidelity: _fidelity, ...legacyVideo } = original;
+    const id = '11111111-1111-4111-8111-111111111111';
+    historyState.record = {
+      id, source: { path: original.path, name: 'original.mp4', size: originalBytes.length, modified_time_ms: 1 },
+      analysis: { schema_version: 1,
+        video: { ...legacyVideo, path: cache, variable_frame_rate: false, video_codec: 'h264', pixel_format: 'yuv420p' },
+        source_video: legacyVideo,
+        processing: { mode: 'normalized_cfr', target_fps_ratio: '24/1', encoder: 'libx264', warning_code: null },
+        rallies: [{ id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 0.25, end_time_seconds: 1.75 }] },
+    } as HistoryRecordV1;
+    const savedAnalysis = structuredClone(historyState.record.analysis);
+    const events: AppEvent[] = [];
+    const window = { isDestroyed: () => false, webContents: { send: (_channel: string, event: AppEvent) => events.push(event) } } as unknown as BrowserWindow;
+    await startExport(window, { analysis_id: id, destination: 'source',
+      selection: { mode: 'all', pre_roll_seconds: 1.5, post_roll_seconds: 0.5 } });
+    await vi.waitFor(() => expect(events.some((event) => event.type === 'export-result' || event.type === 'error')).toBe(true), { timeout: 60_000 });
+    const result = events.find((event) => event.type === 'export-result' || event.type === 'error');
+    if (result?.type !== 'export-result' || result.data.kind === 'custom-artifacts') throw new Error(JSON.stringify(result));
+    const output = await probeVideo(result.data.outputPath);
+    expect(output.video_codec).toBe('hevc');
+    expect(output.media_fidelity).toEqual(original.media_fidelity);
+    expect(output.frame_count).toBe(original.frame_count);
+    expect(historyState.record.analysis).toEqual(savedAnalysis);
+    expect(await readFile(original.path)).toEqual(originalBytes);
+    await expect(access(cache)).rejects.toThrow();
+    await decode(result.data.outputPath);
   }, 60_000);
 
   it('rebuilds an old Windows CFR XML sidecar from the original HDR video', async () => {
