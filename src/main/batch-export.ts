@@ -27,7 +27,6 @@ async function executeBatchExport(window: BrowserWindow, taskId: string, request
   let terminal: AppEvent = { type: 'error', taskId, code: 'EXPORT_FAILED', message: 'Batch export did not complete' };
   try {
     const records = await Promise.all(request.items.map((item) => getHistoryStore().open(item.analysis_id)));
-    for (const record of records) record.analysis.video = await exportSourceVideo(record.analysis, signal);
     signal.throwIfAborted();
     // Cached analyses from an earlier failed individual export may still be deferred.
     // Retain them as analysis history, without attaching the batch video to each source.
@@ -36,7 +35,7 @@ async function executeBatchExport(window: BrowserWindow, taskId: string, request
     }
     const skippedAnalysisIds: string[] = [];
     const segments: Array<{ video: VideoMetadata; group: CutGroup }> = [];
-    records.forEach((record, index) => {
+    for (const [index, record] of records.entries()) {
       let groups: CutGroup[];
       try {
         groups = [...createCutGroups(record.analysis, request.items[index]!.selection)]
@@ -45,9 +44,14 @@ async function executeBatchExport(window: BrowserWindow, taskId: string, request
         if (!(error instanceof SelectionError) || !['NO_RALLIES', 'NO_HIGHLIGHTS'].includes(error.code)) throw error;
         groups = [];
       }
-      if (!groups.length) skippedAnalysisIds.push(record.id);
-      for (const group of groups) segments.push({ video: record.analysis.video, group });
-    });
+      if (!groups.length) {
+        skippedAnalysisIds.push(record.id);
+        continue;
+      }
+      const video = await exportSourceVideo(record.analysis, signal);
+      signal.throwIfAborted();
+      for (const group of groups) segments.push({ video, group });
+    }
     if (!segments.length) throw new Error('BATCH_EXPORT_EMPTY');
     const components = await resolveUsableMediaComponents();
     if (!components.ffmpeg || !components.ffprobe || components.mediaEncoder === 'unavailable') {
@@ -61,7 +65,7 @@ async function executeBatchExport(window: BrowserWindow, taskId: string, request
     const requestedDuration = segments.reduce((sum, segment) => sum + segment.group.end - segment.group.start, 0);
     const durations = segments.map((segment) => batchSegmentDuration(segment.group, profile));
     const duration = durations.reduce((sum, value) => sum + value, 0);
-    await assertExportPreconditions(first.analysis.video.path, path.dirname(source), taskId, duration, profile, components.mediaEncoder);
+    await assertExportPreconditions(segments[0]!.video.path, path.dirname(source), taskId, duration, profile, components.mediaEncoder);
     signal.throwIfAborted();
     temporaryDirectory = await mkdtemp(path.join(path.dirname(source), `.ttcut-batch-${taskId}-`));
     const names: string[] = [];

@@ -425,15 +425,8 @@ describe.each(cases)('fast segmented export with $encoder', ({ encoder, ffmpeg, 
           return name;
         });
 
-        const legacyManifest = path.join(directory, 'legacy.ffconcat');
-        writeFileSync(legacyManifest, buildConcatManifest(names), 'utf8');
-        const legacyOutput = path.join(directory, 'legacy.mp4');
-        const legacy = runWithStderr(
-          ffmpeg,
-          buildConcatArgs(legacyManifest, legacyOutput, metadata),
-        );
-        expect(legacy.stderr).toMatch(/Non-monotonic DTS/i);
-
+        // Preserving packet durations also fixes the former implicit-duration
+        // reproduction. Verify the production manifest's ordering directly.
         const fixedManifest = path.join(directory, 'fixed.ffconcat');
         writeFileSync(
           fixedManifest,
