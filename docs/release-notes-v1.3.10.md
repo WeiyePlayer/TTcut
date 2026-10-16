@@ -32,3 +32,12 @@
 - Windows 草稿所列 libmpv 固定构建及链接依赖的对应源码与许可分发材料尚未核实齐备；现有安装包和更新校验文件不等于该材料已经补齐。
 - Windows 本轮记录的 103 项相关回归、签名/更新清单及 7 项实际应用验收通过，详见 [Windows 验收记录](https://github.com/WeiyePlayer/TTcut/blob/develop/docs/windows-runtime-fidelity-validation-2026-10-16.md)。本次 macOS 发布不重复或扩大 Windows 验证结论。
 - 未验证 Windows 系统播放器、NSIS 安装/升级交互、用户问题原片或真实 Dolby Vision；合成 HDR 素材及分析链路验收不代表算法准确率评估。
+
+## 本次 macOS 交付验证
+
+- 类型检查、81 项相关回归及 22 项 macOS 专项通过；相关回归另有 3 项按环境跳过，两个集合有重叠，不累加为总数。
+- 原生测试覆盖动态 HDR 探测/预览/分析及导出拒绝、静态 HDR、8K、VFR 尾帧、比分牌和领域逻辑。初跑发现一项旧比分牌夹具缺少有效视频字段，修正后该组 6 项重跑通过；其余原生用例通过。
+- 打包应用 21 项验收通过，包括离线启动、Core ML、120 fps、实际解码帧推进、HDR/VFR、历史与导出；29 个 arm64 原生文件、DMG 挂载、签名完整性及归档 SHA-256 校验通过。
+- macOS 构建源码：`c1648c88c8ef425759251796465d8845e0339444`（构建清单记录干净工作树）；Windows 草稿源码：`285fa450cd8f31fc79502cc0db5803ab8626033a`。Windows 校验清单与 GitHub 摘要一致，更新清单版本、名称和大小匹配；本机未重新验证 Windows 签名或安装器。
+- macOS DMG SHA-256：`4ab660e6bf04ae96b659e63b01969d44b6ca7ad295228e31216429d7c50dd52b`。
+- macOS ZIP SHA-256：`c664081827db86bf6be8041cb3ab801610a9196e4c3c99ce7f04c0f228831d3f`。
