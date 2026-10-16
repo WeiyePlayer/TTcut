@@ -13,11 +13,13 @@ const state = vi.hoisted(() => ({
   validate: vi.fn(),
   open: vi.fn(),
   markVisible: vi.fn().mockResolvedValue(undefined),
+  probe: vi.fn(),
 }));
 vi.mock('electron', () => ({ dialog: {} }));
 vi.mock('../src/main/logger', () => ({ logLine: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../src/main/history', () => ({ getHistoryStore: () => ({ open: state.open, markVisible: state.markVisible }) }));
 vi.mock('../src/main/media-protocol', () => ({ registerMediaPath: (value: string) => `media:${value}` }));
+vi.mock('../src/main/probe', () => ({ probeVideo: state.probe }));
 vi.mock('../src/main/components', () => ({ resolveUsableMediaComponents: vi.fn().mockResolvedValue({
   ffmpeg: 'ffmpeg', ffprobe: 'ffprobe', mediaEncoder: 'libx264',
 }) }));
@@ -46,6 +48,11 @@ describe('batch export task', () => {
     state.events.length = 0;
     state.records.clear();
     state.markVisible.mockClear();
+    state.probe.mockReset().mockImplementation(async (file: string) => {
+      const record = [...state.records.values()].find((item) => item.analysis.video.path === file);
+      if (!record) throw new Error('INPUT_MOVED');
+      return { ...record.analysis.video, media_fidelity: { hdr: 'sdr', bit_depth: 8, chroma: '420', mastering_display: null, max_cll: null } };
+    });
     state.open.mockReset().mockImplementation(async (id: string) => state.records.get(id));
     state.run.mockReset().mockImplementation(async (_window, _id, _exe, args: string[]) => {
       if (args.at(-1) !== '-') await writeFile(args.at(-1)!, 'validated-video');
@@ -101,6 +108,8 @@ describe('batch export task', () => {
     if (result.type !== 'batch-export-result') throw new Error('Missing result');
     expect(result.data.outputPath).toBe(path.join(root, 'video-0_TTcut_合并集锦.mp4'));
     expect(result.data.skippedAnalysisIds).toEqual([ids[0]]);
+    expect(state.probe).toHaveBeenCalledExactlyOnceWith(state.records.get(ids[1]!)!.analysis.video.path, expect.any(AbortSignal));
+    expect(state.records.get(ids[1]!)!.analysis.video.media_fidelity).toBeUndefined();
     expect(await readdir(root)).toEqual(['video-0_TTcut_合并集锦.mp4']);
     const segmentCalls = state.run.mock.calls.filter((call) => call[6]?.segmentIndex);
     expect(segmentCalls).toHaveLength(1);
@@ -111,6 +120,7 @@ describe('batch export task', () => {
     state.records.forEach((record) => { record.analysis.rallies = []; });
     await startBatchExport(windowStub, request);
     await vi.waitFor(() => expect(state.events).toContainEqual(expect.objectContaining({ type: 'error', code: 'BATCH_EXPORT_EMPTY' })));
+    expect(state.probe).not.toHaveBeenCalled();
     expect(state.run).not.toHaveBeenCalled();
     expect(await readdir(root)).toEqual([]);
   });

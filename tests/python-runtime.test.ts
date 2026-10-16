@@ -30,7 +30,12 @@ describe('Python launch environment', () => {
   });
 });
 
-const interpreter = process.env.TTCUT_ISOLATION_TEST_PYTHON ?? (process.platform === 'win32' ? 'python' : 'python3');
+// A shell-selected virtualenv disables user-site imports, so it cannot reproduce
+// the shared-user-package regression. Use the same base Python as Windows staging.
+const windowsPython = process.platform === 'win32' && !process.env.TTCUT_ISOLATION_TEST_PYTHON
+  ? spawnSync('py', ['-3.12', '-I', '-S', '-X', 'utf8', '-c', 'import sys;print(sys.executable)'], { encoding: 'utf8', timeout: 5_000 }).stdout?.trim()
+  : null;
+const interpreter = process.env.TTCUT_ISOLATION_TEST_PYTHON ?? (process.platform === 'win32' ? windowsPython || 'python' : 'python3');
 const metadata = spawnSync(interpreter, ['-I', '-S', '-X', 'utf8', '-c',
   'import json,sys,sysconfig,os;print(json.dumps({"stdlib":sysconfig.get_path("stdlib"),"extensions":[p for p in sys.path if os.path.basename(p) in ("DLLs","lib-dynload")]}))',
 ], { encoding: 'utf8', timeout: 5_000 });

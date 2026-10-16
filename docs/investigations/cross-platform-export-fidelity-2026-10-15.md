@@ -33,6 +33,8 @@ High 10 / Level 6.2 / 10 位 HLG 导出视频。Windows 播放器截图提示编
 
 ## 验证及边界
 
+后续 Windows 随包 Python、FFmpeg 和实际 Electron 验收见 [2026-10-16 Windows 验收记录](../windows-runtime-fidelity-validation-2026-10-16.md)。
+
 验证主机是 macOS arm64。Windows TypeScript 路径使用本机 FFmpeg 执行真实
 编码，不能替代 Windows 原生 FFmpeg、系统播放器或安装包验证。
 
