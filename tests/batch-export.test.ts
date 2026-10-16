@@ -108,7 +108,11 @@ describe('batch export task', () => {
     if (result.type !== 'batch-export-result') throw new Error('Missing result');
     expect(result.data.outputPath).toBe(path.join(root, 'video-0_TTcut_合并集锦.mp4'));
     expect(result.data.skippedAnalysisIds).toEqual([ids[0]]);
-    expect(state.probe).toHaveBeenCalledExactlyOnceWith(state.records.get(ids[1]!)!.analysis.video.path, expect.any(AbortSignal));
+    if (process.platform === 'win32') {
+      expect(state.probe).toHaveBeenCalledExactlyOnceWith(state.records.get(ids[1]!)!.analysis.video.path, expect.any(AbortSignal));
+    } else {
+      expect(state.probe).not.toHaveBeenCalled();
+    }
     expect(state.records.get(ids[1]!)!.analysis.video.media_fidelity).toBeUndefined();
     expect(await readdir(root)).toEqual(['video-0_TTcut_合并集锦.mp4']);
     const segmentCalls = state.run.mock.calls.filter((call) => call[6]?.segmentIndex);
