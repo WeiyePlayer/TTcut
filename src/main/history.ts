@@ -337,7 +337,13 @@ export class HistoryStore {
     if (status === 'changed') throw new Error('HISTORY_SOURCE_CHANGED');
     if (record.analysis.processing?.mode === 'normalized_cfr') {
       const processingInfo = await stat(record.analysis.video.path).catch(() => null);
-      if (!processingInfo?.isFile() || processingInfo.size <= 0) throw new Error('HISTORY_PROCESSING_MEDIA_MISSING');
+      if (!processingInfo?.isFile() || processingInfo.size <= 0) {
+        const original = record.analysis.source_video;
+        const canRecoverOriginal = process.platform === 'win32' && !record.analysis.video.media_fidelity
+          && original && normalizedIdentityPath(original.path) === normalizedIdentityPath(record.source.path);
+        // sourceStatus above already verified the original's stored fingerprint.
+        if (!canRecoverOriginal) throw new Error('HISTORY_PROCESSING_MEDIA_MISSING');
+      }
       if (process.platform === 'darwin' && record.analysis.video.native_video) {
         const expected = record.analysis.video;
         const actual = await probeMacVideo(expected.path).catch(() => null);

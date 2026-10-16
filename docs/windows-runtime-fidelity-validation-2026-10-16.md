@@ -44,6 +44,8 @@
 
 ## 证据和本地程序
 
+本节程序哈希为首次验收快照；后续修复的当前构建与证据见文末补充记录。
+
 - 全量测试：`output/playwright/windows-fidelity-20261016/full-tests.json`。
 - 运行时专项：`output/playwright/windows-fidelity-20261016/runtime-tests.json`；该单次记录的污染夹具有 5 项跳过，最终全量测试已实际执行并全部通过。
 - 时间戳专项：`output/playwright/windows-fidelity-20261016/timestamp-tests.json`。
@@ -55,3 +57,23 @@
 - `resources/app.asar` SHA-256：`2ce9627537da15e7dfab393c3090f396e1fa136e1a236401a1481d4b3d0cdd29`。
 
 验收不修改用户历史或比赛原片；输出目录由 Git 忽略。本次仅完成本地同步、修复和测试，没有远端推送/合并、版本升级、NSIS 安装/升级、签名或发布。HDR 素材为合成片；未验证 Windows 系统播放器、真实 Dolby Vision 原片或反馈用户的特定问题文件。
+
+## 独立审计 P2：旧 CFR 缓存丢失的补充修复
+
+2026-10-16 后续修复关闭“缓存缺失、原片仍在时无法导出”的缺陷：
+
+- 普通视频导出先解析原片，再校验文件和媒体格式；仅给本次导出使用记录副本，避免改写历史分析元数据或重复探测。
+- 真实打包补验发现 `HistoryStore.open` 还会在更早阶段拒绝缺失的缓存。现在仅允许旧 Windows 历史恢复：未记录新保真元数据、原片路径与历史源文件一致，并且源文件指纹校验通过。原片缺失/变更、其他历史的缓存校验及 macOS 校验保持。
+- 打开该类历史时预览使用原片；导出完成后的历史更新也可正常执行。动态 HDR 的限制仍生效，并在预检阶段返回错误。
+
+验证：类型检查通过；53 项相关单测通过、3 项 macOS 环境测试跳过；13 项 Windows 实际 FFmpeg 保真测试通过，新增用例明确不创建 CFR 缓存，完成普通视频导出并全解码，保留 HDR、VFR 帧数、原片字节和历史元数据。最初新增回归在修复前实际复现 `INPUT_MOVED`。
+
+重新构建后的实际 Electron 验收 7 项全部通过，包括真实 `openHistory`、缺失缓存的普通 `startExport`、导出后历史更新、HEVC/hvc1/10 位 HLG 格式验证及完整解码；恢复样本目标和输出均为 2.000000 秒，漂移为 0，程序正常退出。该夹具的缓存始终不存在，源文件及历史原有缓存路径保持。
+
+- 编码证据：`output/playwright/missing-cfr-fix-20261016/media-tests.json`。
+- 最终应用证据：`output/playwright/windows-runtime-fidelity-LSEZUQ/report.json`。
+- 当前本地程序：`out/TTcut-win32-x64/TTcut.exe`，`NotSigned`，保留整个同级目录使用。
+- 当前 EXE SHA-256：`888f1190848c33b627057b63b0bbc0d59543033be86bd73133ef2a0fbc7df392`。
+- 当前 `resources/app.asar` SHA-256：`28a94a291a45ddf732f1cbf54c451d947f1a17c82a94203032a8eea879a01596`。
+
+此前审计中的动态 HDR Worker 分析、多任务/批量 HDR 预览覆盖缺口不属于本次 P2 修复，未扩大通过结论。本次仍未推送、合并或发布。
