@@ -7,6 +7,7 @@ import { resolveUsableMediaComponents, type MediaEncoder } from './components';
 import { probeVideo } from './probe';
 import { runProcess } from './processes';
 import { logLine } from './logger';
+import { mediaFidelity } from '../domain/media-fidelity';
 
 // These files are playback proxies only. Analysis, calibration and exports keep
 // their original media identity, dimensions and timestamps.
@@ -82,16 +83,19 @@ function previewDiagnostics(source: VideoMetadata, preview: VideoMetadata) {
 
 export function buildPreviewArgs(input: string, output: string, metadata: VideoMetadata, encoder: MediaEncoder): string[] {
   const fps = Math.min(60, metadata.nominal_fps || metadata.fps);
+  const tone = mediaFidelity(metadata).hdr === 'sdr' ? ''
+    : 'zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable,zscale=t=bt709:m=bt709:r=tv,';
   return [
     '-hide_banner', '-loglevel', 'error', '-nostdin', '-y', '-i', input,
     '-map', '0:v:0', '-map', '0:a:0?', '-sn', '-dn', '-map_metadata', '-1',
     // Convert the sample range as well as tagging it. Merely requesting
     // yuv420p lets a full-range source propagate to H.264 as yuvj420p.
-    '-vf', `scale=1280:720:force_original_aspect_ratio=decrease:force_divisible_by=2:out_range=tv,setsar=1,fps=${fps}`,
+    '-vf', `${tone}scale=1280:720:force_original_aspect_ratio=decrease:force_divisible_by=2:out_range=tv,setsar=1,fps=${fps}`,
     ...(encoder === 'libx264'
       ? ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20']
       : ['-c:v', 'libopenh264', '-b:v', '5000000']),
     '-pix_fmt', 'yuv420p', '-color_range', 'tv', '-profile:v', 'main', '-level:v', '4.2',
+    '-color_primaries', 'bt709', '-color_trc', 'bt709', '-colorspace', 'bt709',
     '-c:a', 'aac', '-b:a', '128k', '-ac', '2',
     '-metadata:s:v:0', 'rotate=0', '-movflags', '+faststart', output,
   ];

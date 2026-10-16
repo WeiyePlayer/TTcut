@@ -13,6 +13,7 @@ const state = vi.hoisted(() => {
   let releaseKeyframes: ((value: number[]) => void) | null = null;
   return {
     source: '',
+    analysis: null as AnalysisResultV1 | null,
     events: [] as AppEvent[],
     terminalTaskActive: [] as boolean[],
     keyframes: vi.fn((_path: string, _ffprobe: string, signal?: AbortSignal) => new Promise<number[]>((resolve, reject) => {
@@ -61,7 +62,7 @@ vi.mock('../src/main/history', () => ({
   getHistoryStore: () => ({
     open: vi.fn(async () => ({
       id: '11111111-1111-4111-8111-111111111111',
-      analysis: {
+      analysis: state.analysis ?? {
         schema_version: 1,
         video: {
           path: state.source,
@@ -71,6 +72,7 @@ vi.mock('../src/main/history', () => ({
           fps: 30,
           variable_frame_rate: false,
           video_codec: 'h264',
+          media_fidelity: { hdr: 'sdr', bit_depth: 8, chroma: '420', mastering_display: null, max_cll: null },
           audio_codec: null,
           container: 'mp4',
           average_bitrate: 1_000_000,
@@ -97,6 +99,7 @@ vi.mock('../src/main/history', () => ({
 
 import { startExport } from '../src/main/export';
 import { resolveUsableMediaComponents } from '../src/main/components';
+import { probeVideo } from '../src/main/probe';
 import { cancelAllTasks, cancelTask, getTaskController } from '../src/main/processes';
 
 const request: ExportRequest = {
@@ -136,11 +139,13 @@ describe('export task start and terminal lifecycle', () => {
   beforeEach(async () => {
     directory = await mkdtemp(path.join(tmpdir(), 'ttcut-export-start-'));
     state.source = path.join(directory, 'source.mp4');
+    state.analysis = null;
     state.events.length = 0;
     state.terminalTaskActive.length = 0;
     state.keyframes.mockClear();
     state.markVisible.mockClear();
     vi.mocked(resolveUsableMediaComponents).mockClear();
+    vi.mocked(probeVideo).mockReset();
     await writeFile(state.source, 'source');
   });
 
@@ -162,6 +167,33 @@ describe('export task start and terminal lifecycle', () => {
     expect(terminal).toEqual([
       expect.objectContaining({ type: 'error', taskId, code: 'EXPORT_CANCELLED' }),
     ]);
+    expect(state.terminalTaskActive).toEqual([false]);
+  });
+
+  it.skipIf(process.platform !== 'win32')('recovers a missing CFR cache before checking the original export input', async () => {
+    const original: AnalysisResultV1['video'] = {
+      path: state.source, duration_seconds: 30, width: 1280, height: 720, fps: 30,
+      variable_frame_rate: true, video_codec: 'hevc', pixel_format: 'yuv420p10le', audio_codec: null, container: 'mp4',
+      media_fidelity: { hdr: 'hlg', bit_depth: 10, chroma: '420', mastering_display: null, max_cll: null },
+    };
+    const cache = path.join(directory, 'missing-cfr.mp4');
+    state.analysis = {
+      schema_version: 1,
+      video: { ...original, path: cache, video_codec: 'h264', pixel_format: 'yuv420p', variable_frame_rate: false, media_fidelity: undefined },
+      source_video: original,
+      processing: { mode: 'normalized_cfr', target_fps_ratio: '30/1', encoder: 'libx264', warning_code: null },
+      rallies: [{ id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 10, end_time_seconds: 12 }],
+    };
+    vi.mocked(probeVideo).mockResolvedValue(original);
+    await expect(access(cache)).rejects.toThrow();
+
+    const taskId = await startExport(windowMock() as never, request);
+    await vi.waitFor(() => expect(state.keyframes).toHaveBeenCalledWith(state.source, 'unused-ffprobe.exe', expect.any(AbortSignal)));
+    expect(probeVideo).toHaveBeenCalledExactlyOnceWith(state.source, expect.any(AbortSignal));
+    expect(state.analysis.video.path).toBe(cache);
+    expect(state.analysis.video.media_fidelity).toBeUndefined();
+    await cancelTask(taskId, 'user');
+    await waitForTaskEnd(taskId);
     expect(state.terminalTaskActive).toEqual([false]);
   });
 

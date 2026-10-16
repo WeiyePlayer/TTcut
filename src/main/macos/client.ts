@@ -48,10 +48,11 @@ export function fromNativeVideo(value: unknown): VideoMetadata {
   const v = nativeVideoSchema.parse(value);
   return videoMetadataSchema.parse({
     path: v.path, width: v.width, height: v.height, duration_seconds: v.duration, fps: v.fps, nominal_fps: v.nominalFPS,
-    average_fps_ratio: v.frameRate, nominal_fps_ratio: null, variable_frame_rate: v.variableFrameRate,
+    average_fps_ratio: v.frameRate, nominal_fps_ratio: v.nominalFrameRate ?? null, variable_frame_rate: v.variableFrameRate,
     video_codec: v.videoCodec, audio_codec: v.audioCodec ?? null, container: path.extname(v.path).slice(1).toLowerCase() || 'unknown',
     frame_count: v.frameCount ?? null, average_bitrate: v.bitrate || null, audio_bitrate: v.audioBitrate || null,
     pixel_format: v.pixelFormat, audio_sample_rate: v.audioCodec ? v.audioSampleRate : null, audio_channels: v.audioChannels || null,
+    media_fidelity: { hdr: v.hdr, bit_depth: v.bitDepth, chroma: v.chroma, mastering_display: v.masteringDisplay ?? null, max_cll: v.maxCLL ?? null },
     video_duration_seconds: v.videoDuration ?? null, audio_duration_seconds: v.audioDuration ?? null,
     video_start_time_seconds: v.videoStart, audio_start_time_seconds: v.audioStart,
     video_time_base: v.videoTimeBase, audio_time_base: v.audioTimeBase, rotation: v.rotation, sample_aspect_ratio: v.sar,
@@ -60,8 +61,26 @@ export function fromNativeVideo(value: unknown): VideoMetadata {
   });
 }
 export async function probeMacVideo(sourcePath: string, signal?: AbortSignal): Promise<VideoMetadata> {
-  const result = await callNative('TTcutMediaWorker', { operation: 'probe', sourcePath }, { signal });
-  return fromNativeVideo(result.video);
+  try {
+    const result = await callNative('TTcutMediaWorker', { operation: 'probe', sourcePath }, { signal });
+    const video = fromNativeVideo(result.video);
+    if (video.native_video?.hdr !== 'sdr') {
+      await logLine('app', 'INFO', `HDR video probe: ${JSON.stringify({
+        sourcePath, hdr: video.native_video?.hdr, codec: video.video_codec,
+        bitDepth: video.native_video?.bitDepth, colorTransfer: video.color_transfer,
+      })}`).catch(() => undefined);
+    }
+    return video;
+  } catch (error) {
+    const code = error instanceof Error && 'code' in error ? String(error.code) : 'VIDEO_UNREADABLE';
+    // Missing preview/CFR caches are expected probe misses; only log failures for an existing source.
+    if (code !== 'PROCESS_CANCELLED' && await access(sourcePath).then(() => true, () => false)) {
+      await logLine('app', 'ERROR', `Video probe failed: ${JSON.stringify({
+        sourcePath, code, message: error instanceof Error ? error.message : String(error),
+      })}`).catch(() => undefined);
+    }
+    throw error;
+  }
 }
 export async function renderMacMedia(taskId: string, operation: 'export' | 'normalize' | 'preview' | 'cover', sourcePath: string, destination: string, ranges: readonly { start: number; end: number }[] = [], onProgress: (percent: number) => void = () => {}, scoreboards?: readonly ScoreboardAsset[]): Promise<VideoMetadata | null> {
   await mkdir(path.dirname(destination), { recursive: true });

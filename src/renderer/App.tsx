@@ -1,4 +1,4 @@
-import { CompatibleVideo } from './CompatibleVideo';
+import { ExportVideoPreview } from './ExportVideoPreview';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   DURATION_HIGHLIGHT_SECONDS,
@@ -974,7 +974,7 @@ export function App() {
                     allowed: exportResult.timing.allowedDriftSeconds.toFixed(2),
                   })}</span></div>
                 )}
-                <CompatibleVideo hdr={Boolean(analysis?.video.native_video && analysis.video.native_video.hdr !== 'sdr')} className="output-preview" src={exportResult.mediaUrl} controls preload="metadata" />
+                <ExportVideoPreview hdr={Boolean(analysis && (analysis.video.media_fidelity?.hdr ?? analysis.video.native_video?.hdr ?? 'sdr') !== 'sdr')} className="output-preview" src={exportResult.mediaUrl} controls preload="metadata" />
                 <div className="card output-details"><div><span>{t.outputName}</span><strong>{exportResult.outputName}</strong></div><div><span>{t.outputPath}</span><strong>{exportResult.outputPath}</strong></div></div>
                 <div className="footer-actions"><button className="secondary" onClick={() => void window.ttcut.revealOutput(exportResult.outputPath)}>{t.openFolder}</button><button className="primary" onClick={reset}>{t.cutAnother}</button></div>
                 {exportResult.warning && (

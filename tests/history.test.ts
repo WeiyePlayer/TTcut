@@ -212,4 +212,31 @@ describe('analysis history', () => {
     expect((await store.list())[0]?.sourceStatus).toBe('missing');
     await expect(store.open(record!.id)).rejects.toThrow('HISTORY_SOURCE_MISSING');
   });
+
+  it.skipIf(process.platform !== 'win32')('opens legacy CFR history and records export completion when only the cache is missing', async () => {
+    const { store, source, root } = await storeFixture();
+    const result = analysis(source);
+    result.source_video = { ...result.video, variable_frame_rate: true };
+    result.video = { ...result.video, path: path.join(root, 'deleted-cfr.mp4') };
+    result.processing = { mode: 'normalized_cfr', target_fps_ratio: '60/1', encoder: 'libx264', warning_code: null };
+    const record = await store.upsert(result, calibration);
+    expect((await store.open(record.id)).analysis).toEqual(result);
+    await store.markVisible(record.id, 'export', path.join(root, 'output.mp4'));
+    const reopened = await store.open(record.id);
+    expect(reopened.completion_kind).toBe('export');
+    expect(reopened.analysis).toEqual(result);
+    await rm(source);
+    await expect(store.open(record.id)).rejects.toThrow('HISTORY_SOURCE_MISSING');
+  });
+
+  it.skipIf(process.platform !== 'win32')('keeps missing-cache validation for histories outside the legacy recovery policy', async () => {
+    const { store, source, root } = await storeFixture();
+    const result = analysis(source);
+    result.source_video = { ...result.video, variable_frame_rate: true };
+    result.video = { ...result.video, path: path.join(root, 'deleted-cfr.mp4'),
+      media_fidelity: { hdr: 'sdr', bit_depth: 8, chroma: '420', mastering_display: null, max_cll: null } };
+    result.processing = { mode: 'normalized_cfr', target_fps_ratio: '60/1', encoder: 'libx264', warning_code: null };
+    const record = await store.upsert(result, calibration);
+    await expect(store.open(record.id)).rejects.toThrow('HISTORY_PROCESSING_MEDIA_MISSING');
+  });
 });

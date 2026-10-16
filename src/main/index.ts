@@ -228,9 +228,9 @@ function registerIpc(): void {
     if (hasActiveTasks()) throw new Error('TASK_BUSY');
     if (typeof id !== 'string') throw new Error('INVALID_REQUEST');
     const record = await getHistoryStore().open(id);
-    const previewPath = record.analysis.processing?.mode === 'normalized_cfr'
-      ? record.analysis.video.path
-      : record.source.path;
+    const cachedPath = record.analysis.processing?.mode === 'normalized_cfr' ? record.analysis.video.path : null;
+    const hasCachedMedia = cachedPath && await stat(cachedPath).then((info) => info.isFile() && info.size > 0).catch(() => false);
+    const previewPath = hasCachedMedia ? cachedPath! : record.source.path;
     const preview = await selectedVideo(previewPath);
     const analysis = record.analysis.processing
       ? record.analysis

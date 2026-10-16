@@ -37,17 +37,24 @@ import {
 } from '../domain/custom-clips';
 import { buildPremiereXml } from '../domain/premiere-xml';
 import { normalizedVideoRotation } from '../domain/video-input';
+import { assertMediaFidelity, fidelityMismatch, outputVideoCodec } from '../domain/media-fidelity';
+import { exportSourceVideo } from './export-source';
+import { targetFrameRateRatio } from './processing-media';
 import { resolveUsableMediaComponents, type MediaEncoder } from './components';
 import { logLine } from './logger';
 import { getHistoryStore } from './history';
 import {
   buildConcatArgs,
   buildConcatManifest,
+  buildCfrNormalizationArgs,
   buildSegmentReencodeArgs,
   buildStreamCopyArgs,
   canUseStreamCopy,
   expectedOutputDuration,
+  displayedSar,
+  normalizedSar,
   selectSeekStart,
+  selectMediaEncoder,
 } from './media-plan';
 import { registerMediaPath } from './media-protocol';
 import { createScoreboardPng, scoreboardDimensions, scoreboardDisplayDimensions } from './scoreboard-image';
@@ -238,6 +245,7 @@ export async function assertExportPreconditions(
   metadata: VideoMetadata,
   encoder: MediaEncoder,
 ): Promise<void> {
+  assertMediaFidelity(metadata);
   const inputInfo = await stat(input).catch(() => null);
   if (!inputInfo?.isFile() || inputInfo.size <= 0) throw new Error('INPUT_MOVED');
 
@@ -402,13 +410,17 @@ export async function validateExportOutput(
   if (metadata.width !== source.width || metadata.height !== source.height) {
     throw new Error('EXPORT_RESOLUTION_MISMATCH');
   }
-  if (metadata.video_codec !== 'h264') throw new Error('EXPORT_CODEC_UNSUPPORTED');
+  if (metadata.video_codec !== outputVideoCodec(source)) throw new Error('EXPORT_CODEC_UNSUPPORTED');
+  const fidelityError = fidelityMismatch(source, metadata);
+  if (fidelityError) throw new Error(fidelityError);
   if ((source.audio_codec !== null) !== (metadata.audio_codec !== null)) {
     throw new Error('EXPORT_AUDIO_MISSING');
   }
   if (source.audio_codec !== null && metadata.audio_codec !== 'aac') {
     throw new Error('EXPORT_AUDIO_CODEC_UNSUPPORTED');
   }
+  if (source.audio_codec !== null && (source.audio_channels && metadata.audio_channels !== source.audio_channels
+    || source.audio_sample_rate && metadata.audio_sample_rate !== source.audio_sample_rate)) throw new Error('EXPORT_AUDIO_FORMAT_MISMATCH');
   if (metadata.video_duration_seconds !== null && metadata.video_duration_seconds !== undefined
     && metadata.audio_duration_seconds !== null && metadata.audio_duration_seconds !== undefined
     && Math.abs(metadata.video_duration_seconds - metadata.audio_duration_seconds)
@@ -430,9 +442,16 @@ export async function validateExportOutput(
   )) {
     throw new Error('EXPORT_TIMESTAMP_INVALID');
   }
+  if (comparable(source.sample_aspect_ratio)) {
+    const ratio = (value: string) => { const [n, d] = value.split('/').map(Number); return n! / d!; };
+    const expected = orientation === 'normalized' ? displayedSar(source) : normalizedSar(source.sample_aspect_ratio);
+    if (!comparable(metadata.sample_aspect_ratio) || Math.abs(ratio(expected) - ratio(normalizedSar(metadata.sample_aspect_ratio))) > 0.0001) {
+      throw new Error('EXPORT_METADATA_MISMATCH:sample_aspect_ratio');
+    }
+  }
   const fields: Array<keyof Pick<VideoMetadata,
-    'sample_aspect_ratio' | 'color_range' | 'color_space' | 'color_transfer' | 'color_primaries'>> = [
-      'sample_aspect_ratio', 'color_range', 'color_space', 'color_transfer', 'color_primaries',
+    'color_range' | 'color_space' | 'color_transfer' | 'color_primaries'>> = [
+      'color_range', 'color_space', 'color_transfer', 'color_primaries',
     ];
   for (const field of fields) {
     const expected = comparable(source[field]);
@@ -523,7 +542,9 @@ function assertExportNotCancelled(taskId: string): void {
 function exportCode(error: unknown): string | null {
   if (!(error instanceof Error)) return null;
   const code = (error as Error & { exportCode?: unknown }).exportCode;
-  return typeof code === 'string' ? code : (/^[A-Z][A-Z0-9_]+$/.test(error.message) ? error.message : null);
+  if (typeof code === 'string') return code;
+  if ('code' in error && error.code === 'DYNAMIC_HDR_UNSUPPORTED') return error.code;
+  return /^[A-Z][A-Z0-9_]+$/.test(error.message) ? error.message : null;
 }
 
 function wrapExportError(error: unknown, code: string): Error {
@@ -532,6 +553,7 @@ function wrapExportError(error: unknown, code: string): Error {
     current === 'EXPORT_CANCELLED'
     || current === 'EXPORT_TERMINATED'
     || current === 'EXPORT_SEGMENT_INCOMPATIBLE'
+    || current === 'DYNAMIC_HDR_UNSUPPORTED'
   ) return error instanceof Error ? error : new Error(current);
   const wrapped = new Error(`${code}: ${error instanceof Error ? error.message : String(error)}`);
   Object.assign(wrapped, { exportCode: code, cause: error });
@@ -604,7 +626,7 @@ async function executeFastSegmented(
       taskId,
       'INFO',
       `Fast segment ${index + 1}/${groups.length}: range=${group.start.toFixed(6)}-${group.end.toFixed(6)}`
-        + ` seekStart=${seekStart.toFixed(6)} encoder=${components.mediaEncoder}`,
+        + ` seekStart=${seekStart.toFixed(6)} encoder=${selectMediaEncoder(analysisVideo, components.mediaEncoder)}`,
     );
     try {
       await runFfmpeg(
@@ -698,7 +720,7 @@ async function executeFastSingle(
     taskId,
     'INFO',
     `Fast single segment: range=${group.start.toFixed(6)}-${group.end.toFixed(6)}`
-      + ` seekStart=${seekStart.toFixed(6)} encoder=${components.mediaEncoder}`,
+      + ` seekStart=${seekStart.toFixed(6)} encoder=${selectMediaEncoder(analysisVideo, components.mediaEncoder)}`,
   );
   try {
     await runFfmpeg(
@@ -755,6 +777,7 @@ async function executeExport(
     terminalEvent = { type: 'error', taskId, code, message };
   };
   try {
+    assertMediaFidelity(analysis.video);
     await mkdir(tempDirectory, { recursive: true });
     const scoreboardAssets = scoreboards ? await writeScoreboardAssets(tempDirectory, analysis.video, scoreboards) : undefined;
     const requestedBudget = assessExportDuration(duration, duration, groups.length, analysis.video);
@@ -775,7 +798,7 @@ async function executeExport(
       signal,
     );
     assertExportNotCancelled(taskId);
-    if (!canCopy && highResolution && components.mediaEncoder !== 'libx264') {
+    if (!canCopy && highResolution && selectMediaEncoder(analysis.video, components.mediaEncoder) === 'libopenh264') {
       throw new Error('X264_COMPONENT_REQUIRED_FOR_HIGH_RESOLUTION');
     }
     if (canCopy) {
@@ -784,7 +807,7 @@ async function executeExport(
           window,
           taskId,
           components.ffmpeg,
-          buildStreamCopyArgs(analysis.video.path, partial, groups[0]!),
+          buildStreamCopyArgs(analysis.video.path, partial, groups[0]!, analysis.video),
           duration,
           'cutting',
           undefined,
@@ -1001,11 +1024,14 @@ async function executeCustomArtifactExport(
   let premiereXml: CustomArtifactExportResult['premiereXml'] = null;
   let xmlFailure: CustomArtifactFailure | null = null;
   const scoreboardDirectory = path.join(outputDirectory, `.ttcut-scoreboards-${taskId}`);
+  const rebuildXmlCfr = outputs.premiereXml && analysis.processing?.mode === 'normalized_cfr'
+    && process.platform === 'win32' && !analysis.video.media_fidelity;
   const sendError = (code: string, message: string) => {
     if (!terminalEvent && markTaskTerminal(taskId)) terminalEvent = { type: 'error', taskId, code, message };
   };
   try {
     const scoreboardAssets = scoreboards ? await writeScoreboardAssets(scoreboardDirectory, analysis.video, scoreboards) : undefined;
+    if (outputs.rallyVideos || rebuildXmlCfr) analysis.video = await exportSourceVideo(analysis, getTaskController(taskId)?.signal);
     const source = await stat(analysis.video.path).catch(() => null);
     if (!source?.isFile() || source.size <= 0) throw new Error('INPUT_MOVED');
     const signal = getTaskController(taskId)?.signal;
@@ -1025,13 +1051,25 @@ async function executeCustomArtifactExport(
         if (analysis.processing?.mode === 'normalized_cfr') {
           const cfrName = `${base}_TTcut_CFR.mp4`;
           const cfrPath = path.join(outputDirectory, cfrName);
-          cfrPartialPath = path.join(outputDirectory, `.${cfrName}.${taskId}.partial`);
-          await copyFile(analysis.video.path, cfrPartialPath);
+          cfrPartialPath = path.join(outputDirectory, `.${base}_TTcut_CFR.${taskId}.partial.mp4`);
+          if (rebuildXmlCfr) {
+            if (!components) throw new Error('MEDIA_COMPONENT_MISSING');
+            const targetRate = analysis.processing.target_fps_ratio ?? targetFrameRateRatio(analysis.video);
+            await runFfmpeg(window, taskId, components.ffmpeg,
+              buildCfrNormalizationArgs(analysis.video.path, cfrPartialPath, analysis.video, targetRate, components.mediaEncoder),
+              analysis.video.duration_seconds, 'preparing-artifacts');
+            const checked = await validateExportOutput(cfrPartialPath,
+              { targetSeconds: analysis.video.duration_seconds, segmentCount: 1 }, analysis.video, 'normalized', signal);
+            if (checked.metadata.variable_frame_rate) throw new Error('CFR_OUTPUT_NOT_CONSTANT');
+            xmlMetadata = checked.metadata;
+          } else {
+            await copyFile(analysis.video.path, cfrPartialPath);
+          }
           assertExportNotCancelled(taskId);
           await rename(cfrPartialPath, cfrPath);
           cfrPartialPath = null;
           cfrFinalPath = cfrPath;
-          xmlMetadata = { ...analysis.video, path: cfrPath };
+          xmlMetadata = { ...xmlMetadata, path: cfrPath };
         }
         const generated = buildPremiereXml(xmlMetadata, segments, `${base}_TTcut_自定义`);
         await writeFile(partialPath, generated.xml, 'utf8');
@@ -1227,7 +1265,8 @@ export async function startExport(window: BrowserWindow, rawRequest: ExportReque
     : [...createCutGroups(analysis, selection)].sort((left, right) => left.start - right.start);
   if (!groups.length) throw new Error('NO_RALLIES');
   if (artifactExport && (!customSegments || outputs.combinedVideo)) throw new Error('INVALID_EXPORT_OUTPUTS');
-  const needsMedia = outputs.combinedVideo || outputs.rallyVideos;
+  const needsMedia = outputs.combinedVideo || outputs.rallyVideos
+    || outputs.premiereXml && analysis.processing?.mode === 'normalized_cfr' && process.platform === 'win32' && !analysis.video.media_fidelity;
   const components = needsMedia ? await resolveUsableMediaComponents() : null;
   const mediaAvailable = Boolean(components?.ffmpeg && components.ffprobe && components.mediaEncoder !== 'unavailable');
   if (outputs.combinedVideo && !mediaAvailable) throw new Error('MEDIA_COMPONENT_MISSING');
@@ -1271,16 +1310,23 @@ export async function startExport(window: BrowserWindow, rawRequest: ExportReque
   const duration = expectedOutputDuration(groups);
   beginTrackedTask(taskId);
   try {
-    await assertExportPreconditions(analysis.video.path, path.dirname(output), taskId, duration, analysis.video, mediaComponents.mediaEncoder);
+    // Resolve legacy CFR histories before checking the input: their cached copy
+    // may be gone while the original is still available. Keep history unchanged.
+    const exportRecord = {
+      ...record,
+      analysis: { ...analysis, video: await exportSourceVideo(analysis, getTaskController(taskId)?.signal) },
+    };
+    const video = exportRecord.analysis.video;
+    await assertExportPreconditions(video.path, path.dirname(output), taskId, duration, video, mediaComponents.mediaEncoder);
     send(window, { type: 'progress', data: { taskId, kind: 'export', stage: 'preparing', percent: 0 } });
     await logLine(taskId, 'INFO', `Export target: ${output}`);
     await logLine(taskId, 'INFO', 'Export strategy: fast segmented');
-    await logLine(taskId, 'INFO', `Active media encoder: ${mediaComponents.mediaEncoder}`);
+    await logLine(taskId, 'INFO', `Selected media encoder: ${selectMediaEncoder(video, mediaComponents.mediaEncoder)}`);
     void executeExport(
       window,
       taskId,
       request,
-      record,
+      exportRecord,
       mediaComponents,
       groups,
       output,

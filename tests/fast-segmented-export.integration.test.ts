@@ -425,15 +425,8 @@ describe.each(cases)('fast segmented export with $encoder', ({ encoder, ffmpeg, 
           return name;
         });
 
-        const legacyManifest = path.join(directory, 'legacy.ffconcat');
-        writeFileSync(legacyManifest, buildConcatManifest(names), 'utf8');
-        const legacyOutput = path.join(directory, 'legacy.mp4');
-        const legacy = runWithStderr(
-          ffmpeg,
-          buildConcatArgs(legacyManifest, legacyOutput, metadata),
-        );
-        expect(legacy.stderr).toMatch(/Non-monotonic DTS/i);
-
+        // Preserving packet durations also fixes the former implicit-duration
+        // reproduction. Verify the production manifest's ordering directly.
         const fixedManifest = path.join(directory, 'fixed.ffconcat');
         writeFileSync(
           fixedManifest,
@@ -465,7 +458,7 @@ describe.each(cases)('fast segmented export with $encoder', ({ encoder, ffmpeg, 
   }, 240_000);
 
   it.skipIf(!syntheticFfmpeg || !syntheticFfprobe || !ffmpeg || !ffprobe)(
-    'clears abnormal frame durations before encoding',
+    'bounds abnormal frame durations while preserving the encoded timeline',
     () => {
       if (!syntheticFfmpeg || !syntheticFfprobe || !ffmpeg || !ffprobe) {
         throw new Error('Integration environment is incomplete.');
@@ -495,16 +488,8 @@ describe.each(cases)('fast segmented export with $encoder', ({ encoder, ffmpeg, 
           encoder,
         );
         const filterIndex = fixedArgs.indexOf('-filter_complex') + 1;
-        expect(fixedArgs[filterIndex]).toContain('setpts=PTS-STARTPTS:strip_fps=1');
-
-        const legacyOutput = path.join(directory, 'legacy.mp4');
-        const legacyArgs = [...fixedArgs];
-        legacyArgs[filterIndex] = legacyArgs[filterIndex]!.replace(':strip_fps=1', '');
-        legacyArgs[legacyArgs.length - 1] = legacyOutput;
-        run(ffmpeg, legacyArgs);
-        const legacy = probe(ffprobe, legacyOutput);
-        expect(Math.abs(streamDuration(legacy, 'video') - streamDuration(legacy, 'audio')))
-          .toBeGreaterThan(0.1);
+        expect(fixedArgs[filterIndex]).toContain('setpts=PTS-STARTPTS');
+        expect(fixedArgs[filterIndex]).not.toContain('strip_fps');
 
         run(ffmpeg, fixedArgs);
         const fixed = probe(ffprobe, fixedOutput);

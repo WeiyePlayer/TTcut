@@ -1,6 +1,12 @@
 import type { CutGroup, ScoreboardPosition, VideoMetadata } from '../shared/contracts';
 import type { MediaEncoder } from './components';
 import { scoreboardDimensions, scoreboardDisplayDimensions } from './scoreboard-image';
+import { assertMediaFidelity, outputVideoCodec } from '../domain/media-fidelity';
+
+export function selectMediaEncoder(metadata: VideoMetadata, sdrEncoder: MediaEncoder = 'libx264'): MediaEncoder {
+  assertMediaFidelity(metadata);
+  return outputVideoCodec(metadata) === 'hevc' ? 'libx265' : sdrEncoder === 'libx265' ? 'libx264' : sdrEncoder;
+}
 
 export type ScoreboardAsset = ScoreboardPosition & { imagePath: string };
 
@@ -39,6 +45,8 @@ export function canUseStreamCopy(
   audioPacketBoundaries: readonly number[],
   metadata: VideoMetadata,
 ): boolean {
+  assertMediaFidelity(metadata);
+  if (metadata.video_codec !== outputVideoCodec(metadata)) return false;
   if (groups.length !== 1 || metadata.variable_frame_rate || !hasStableTimeBase(metadata.video_time_base)) {
     return false;
   }
@@ -56,12 +64,14 @@ export function canUseStreamCopy(
   return true;
 }
 
-export function buildStreamCopyArgs(input: string, output: string, group: CutGroup): string[] {
+export function buildStreamCopyArgs(input: string, output: string, group: CutGroup, metadata?: VideoMetadata): string[] {
+  if (metadata) assertMediaFidelity(metadata);
   return [
     '-hide_banner', '-y', '-noautorotate',
     '-ss', group.start.toFixed(6), '-to', group.end.toFixed(6), '-i', input,
     '-map', '0:v:0', '-map', '0:a?', '-map_metadata', '0',
-    '-c', 'copy', '-avoid_negative_ts', 'make_zero', '-movflags', '+faststart',
+    '-c', 'copy', ...(metadata && outputVideoCodec(metadata) === 'hevc' ? ['-tag:v', 'hvc1'] : []),
+    '-avoid_negative_ts', 'make_zero', '-movflags', '+faststart+write_colr',
     '-progress', 'pipe:1', '-nostats', output,
   ];
 }
@@ -72,25 +82,53 @@ export function normalizedSar(value: string | null | undefined): string {
   return `${match[1]}/${match[2]}`;
 }
 
+export function displayedSar(metadata: Pick<VideoMetadata, 'sample_aspect_ratio' | 'rotation'>): string {
+  const sar = normalizedSar(metadata.sample_aspect_ratio);
+  const rotation = ((metadata.rotation ?? 0) % 360 + 360) % 360;
+  return rotation === 90 || rotation === 270 ? sar.split('/').reverse().join('/') : sar;
+}
+
 export function videoEncodingOptions(metadata: VideoMetadata, encoder: MediaEncoder): string[] {
+  const fidelity = assertMediaFidelity(metadata);
+  encoder = selectMediaEncoder(metadata, encoder);
+  const exactRate = [metadata.average_fps_ratio, metadata.nominal_fps_ratio].find((value) => {
+    const [n, d] = (value ?? '').split('/').map(Number);
+    return Number.isSafeInteger(n) && Number.isSafeInteger(d) && n! > 0 && d! > 0;
+  });
+  const frameRate = exactRate ?? (Number.isInteger(metadata.fps) ? `${metadata.fps}/1` : `${Math.round(metadata.fps * 1_000_000)}/1000000`);
+  if (encoder === 'libx265') {
+    const options = ['log-level=error', 'repeat-headers=1', `fps=${frameRate}`];
+    if (fidelity.hdr === 'hdr10') options.push('hdr10=1');
+    if (fidelity.mastering_display) options.push(`master-display=${fidelity.mastering_display}`);
+    if (fidelity.max_cll) options.push(`max-cll=${fidelity.max_cll}`);
+    for (const [name, value] of [['colorprim', metadata.color_primaries], ['transfer', metadata.color_transfer], ['colormatrix', metadata.color_space]]) {
+      if (value && value !== 'unknown') options.push(`${name}=${value}`);
+    }
+    return ['-c:v', 'libx265', '-preset', 'veryfast', '-crf', '18', '-x265-params', options.join(':'), '-tag:v', 'hvc1'];
+  }
   const sourceVideoBitrate = metadata.average_bitrate ?? 8_000_000;
   const videoBitrate = Math.round(Math.max(
     sourceVideoBitrate,
     Math.min(sourceVideoBitrate * 2, 50_000_000),
   ));
   return encoder === 'libx264'
-    ? ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18']
+    ? ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-x264-params', `fps=${frameRate}`]
     : ['-c:v', 'libopenh264', '-profile:v', 'high', '-b:v', String(videoBitrate)];
 }
 
 export function outputPixelFormat(metadata: VideoMetadata, encoder: MediaEncoder): string {
+  const fidelity = assertMediaFidelity(metadata);
+  if (selectMediaEncoder(metadata, encoder) === 'libx265') {
+    return `yuv${fidelity.chroma}p${fidelity.bit_depth === 10 ? '10le' : ''}`;
+  }
+  if (encoder === 'libopenh264' && (fidelity.bit_depth !== 8 || fidelity.chroma !== '420')) throw new Error('MEDIA_ENCODER_FIDELITY_UNSUPPORTED');
   const x264PixelFormats = new Set([
     'yuv420p', 'yuvj420p', 'yuv422p', 'yuvj422p', 'yuv444p', 'yuvj444p',
     'nv12', 'nv16', 'nv21', 'yuv420p10le', 'yuv422p10le', 'yuv444p10le',
     'nv20le', 'gray', 'gray10le',
   ]);
   if (encoder !== 'libx264' || !metadata.pixel_format || !x264PixelFormats.has(metadata.pixel_format)) {
-    return 'yuv420p';
+    return `yuv${fidelity.chroma}p${fidelity.bit_depth === 10 ? '10le' : ''}`;
   }
   // The legacy yuvj formats force full-range signaling in libx264. Some
   // cameras nevertheless label a yuvj source as limited-range; carrying both
@@ -226,7 +264,7 @@ export function buildOpenH264MetadataBitstreamFilter(metadata: ColorMetadata): s
 }
 
 export function appendAudioEncodingOptions(args: string[], metadata: VideoMetadata): void {
-  args.push('-c:a', 'aac', '-b:a', String(Math.round(metadata.audio_bitrate ?? 192_000)));
+  args.push('-c:a', 'aac', '-b:a', String(Math.round(Math.max(128_000, metadata.audio_bitrate ?? 192_000))));
   if (metadata.audio_sample_rate) args.push('-ar', String(metadata.audio_sample_rate));
   if (metadata.audio_channels) args.push('-ac', String(metadata.audio_channels));
 }
@@ -247,9 +285,9 @@ function appendMediaOutputOptions(
     '-fps_mode', outputIsCfr ? 'cfr' : 'vfr',
     '-max_muxing_queue_size', '2048',
   );
-  if (outputIsCfr) {
-    args.push('-r', metadata.nominal_fps_ratio ?? metadata.average_fps_ratio ?? String(metadata.fps));
-  }
+  if (outputIsCfr) args.push('-r', metadata.nominal_fps_ratio ?? metadata.average_fps_ratio ?? String(metadata.fps));
+  // Supply the encoder's nominal rate without quantizing VFR timestamps to that rate.
+  if (!outputIsCfr) args.push('-enc_time_base:v', 'filter');
   if (hasAudio) appendAudioEncodingOptions(args, metadata);
   args.push('-metadata:s:v:0', 'rotate=0');
   const colorOptions: Array<[string, string | null | undefined]> = [
@@ -261,11 +299,11 @@ function appendMediaOutputOptions(
   for (const [flag, value] of colorOptions) {
     if (value && value !== 'unknown') args.push(flag, value);
   }
-  if (encoder === 'libopenh264') {
+  if (selectMediaEncoder(metadata, encoder) === 'libopenh264') {
     const bitstreamFilter = buildOpenH264MetadataBitstreamFilter(metadata);
     if (bitstreamFilter) args.push('-bsf:v', bitstreamFilter);
   }
-  args.push('-movflags', '+faststart', '-progress', 'pipe:1', '-nostats');
+  args.push('-movflags', '+faststart+write_colr', '-progress', 'pipe:1', '-nostats');
 }
 
 export function buildTrimFilter(
@@ -276,7 +314,7 @@ export function buildTrimFilter(
   scoreboard?: ScoreboardAsset,
 ): { filter: string; maps: string[] } {
   const parts: string[] = [];
-  const sar = normalizedSar(metadata.sample_aspect_ratio);
+  const sar = displayedSar(metadata);
   const colorSetParams = buildColorSetParams(metadata);
   const outputFrameFilters = `setsar=sar=${sar}${colorSetParams ? `,${colorSetParams}` : ''}`;
   if (scoreboard && groups.length !== 1) throw new Error('INVALID_SCOREBOARD');
@@ -284,7 +322,7 @@ export function buildTrimFilter(
     const group = groups[0]!;
     parts.push(
       `[0:v:0]trim=start=${group.start.toFixed(6)}:end=${group.end.toFixed(6)},`
-      + `setpts=PTS-STARTPTS:strip_fps=1,${outputFrameFilters}[${scoreboard ? 'vbase' : 'vout'}]`,
+      + `setpts=PTS-STARTPTS,${outputFrameFilters}[${scoreboard ? 'vbase' : 'vout'}]`,
     );
     if (hasAudio) {
       parts.push(
@@ -302,7 +340,7 @@ export function buildTrimFilter(
     groups.forEach((group, index) => {
       parts.push(
         `[vsrc${index}]trim=start=${group.start.toFixed(6)}:end=${group.end.toFixed(6)},`
-        + `setpts=PTS-STARTPTS:strip_fps=1[v${index}]`,
+        + `setpts=PTS-STARTPTS[v${index}]`,
       );
       if (hasAudio) {
         parts.push(
@@ -356,6 +394,7 @@ export function buildReencodeArgs(
     '-filter_complex', filter.filter, ...filter.maps,
   ];
   appendMediaOutputOptions(args, metadata, encoder, hasAudio);
+  boundPacketDurations(args, expectedOutputDuration(groups));
   args.push(output);
   return args;
 }
@@ -371,7 +410,7 @@ export function buildCfrNormalizationArgs(
   const colorSetParams = buildColorSetParams(metadata);
   const filters = [
     `fps=${targetFpsRatio}`,
-    `setsar=${normalizedSar(metadata.sample_aspect_ratio)}`,
+    `setsar=${displayedSar(metadata)}`,
     ...(colorSetParams ? [colorSetParams] : []),
   ];
   const args = [
@@ -379,7 +418,7 @@ export function buildCfrNormalizationArgs(
     '-map', '0:v:0', '-map', '0:a?',
     '-vf', filters.join(','),
     '-map_metadata', '0', '-sn', '-dn',
-    ...videoEncodingOptions(metadata, encoder),
+    ...videoEncodingOptions({ ...metadata, average_fps_ratio: targetFpsRatio, nominal_fps_ratio: targetFpsRatio }, encoder),
     '-pix_fmt', outputPixelFormat(metadata, encoder),
     '-fps_mode:v', 'cfr',
     '-max_muxing_queue_size', '2048',
@@ -400,17 +439,34 @@ export function buildCfrNormalizationArgs(
   for (const [flag, value] of colorOptions) {
     if (value && value !== 'unknown') args.push(flag, value);
   }
-  if (encoder === 'libopenh264') {
+  if (selectMediaEncoder(metadata, encoder) === 'libopenh264') {
     const bitstreamFilter = buildOpenH264MetadataBitstreamFilter(metadata);
     if (bitstreamFilter) args.push('-bsf:v', bitstreamFilter);
   }
   args.push(
     '-metadata:s:v:0', 'rotate=0',
     '-avoid_negative_ts', 'make_zero',
-    '-movflags', '+faststart',
+    '-movflags', '+faststart+write_colr',
     '-progress', 'pipe:1', '-nostats', output,
   );
+  const destination = args.pop()!;
+  boundPacketDurations(args, metadata.duration_seconds);
+  args.push(destination);
   return args;
+}
+
+function packetDurationOptions(duration: number): string[] {
+  // Keep real PTS and per-frame durations, while preventing a malformed final
+  // source duration from extending a cut past its requested end. A positive
+  // last packet duration also keeps MP4 from excluding its last decoded frame.
+  return ['-bsf:v', `setts=pts=PTS:dts=DTS:duration='max(1,min(DURATION,ceil(${duration.toFixed(9)}/TB)-PTS))'`];
+}
+
+function boundPacketDurations(args: string[], duration: number): void {
+  const [, filter] = packetDurationOptions(duration);
+  const index = args.indexOf('-bsf:v');
+  if (index >= 0) args[index + 1] += `,${filter}`;
+  else args.push('-bsf:v', filter!);
 }
 
 export function buildSegmentReencodeArgs(
@@ -442,7 +498,8 @@ export function buildSegmentReencodeArgs(
   ];
   appendMediaOutputOptions(args, metadata, encoder, hasAudio);
   // Independently encoded MP4 segments need decode timestamps that remain ordered at concat boundaries.
-  if (encoder === 'libx264') args.push('-bf', '0');
+  if (selectMediaEncoder(metadata, encoder) !== 'libopenh264') args.push('-bf', '0');
+  boundPacketDurations(args, group.end - group.start);
   args.push(output);
   return args;
 }
@@ -477,11 +534,13 @@ export function buildConcatArgs(
   output: string,
   metadata: VideoMetadata,
 ): string[] {
+  assertMediaFidelity(metadata);
   const args = [
     '-hide_banner', '-y',
     '-f', 'concat', '-safe', '1', '-i', manifest,
     '-map', '0:v:0', '-map', '0:a?',
     '-c:v', 'copy',
+    ...(outputVideoCodec(metadata) === 'hevc' ? ['-tag:v', 'hvc1'] : []),
   ];
   if (metadata.audio_codec !== null) {
     appendAudioEncodingOptions(args, metadata);
@@ -491,7 +550,7 @@ export function buildConcatArgs(
     // MP4 represents AAC priming with an edit list. make_zero would shift the copied video
     // forward by the encoder delay; auto keeps both public stream start times at zero.
     '-avoid_negative_ts', 'auto',
-    '-movflags', '+faststart',
+    '-movflags', '+faststart+write_colr',
     '-progress', 'pipe:1', '-nostats', output,
   );
   return args;

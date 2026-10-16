@@ -9,7 +9,9 @@ import { IPC } from '../shared/ipc';
 import { createCutGroups, SelectionError } from '../domain/segments';
 import { getHistoryStore } from './history';
 import { resolveUsableMediaComponents } from './components';
-import { batchOutputProfile, batchSegmentDuration, buildBatchSegmentArgs } from './batch-media-plan';
+import { assertBatchFidelity, batchOutputProfile, batchSegmentDuration, buildBatchSegmentArgs } from './batch-media-plan';
+import { exportSourceVideo } from './export-source';
+import { outputVideoCodec } from '../domain/media-fidelity';
 import { buildConcatArgs, buildConcatManifest } from './media-plan';
 import { assertExportPreconditions, clearExportProgress, runFfmpeg, uniqueOutput, validateExportOutput } from './export';
 import { beginTrackedTask, endTrackedTask, markTaskTerminal } from './processes';
@@ -33,7 +35,7 @@ async function executeBatchExport(window: BrowserWindow, taskId: string, request
     }
     const skippedAnalysisIds: string[] = [];
     const segments: Array<{ video: VideoMetadata; group: CutGroup }> = [];
-    records.forEach((record, index) => {
+    for (const [index, record] of records.entries()) {
       let groups: CutGroup[];
       try {
         groups = [...createCutGroups(record.analysis, request.items[index]!.selection)]
@@ -42,9 +44,14 @@ async function executeBatchExport(window: BrowserWindow, taskId: string, request
         if (!(error instanceof SelectionError) || !['NO_RALLIES', 'NO_HIGHLIGHTS'].includes(error.code)) throw error;
         groups = [];
       }
-      if (!groups.length) skippedAnalysisIds.push(record.id);
-      for (const group of groups) segments.push({ video: record.analysis.video, group });
-    });
+      if (!groups.length) {
+        skippedAnalysisIds.push(record.id);
+        continue;
+      }
+      const video = await exportSourceVideo(record.analysis, signal);
+      signal.throwIfAborted();
+      for (const group of groups) segments.push({ video, group });
+    }
     if (!segments.length) throw new Error('BATCH_EXPORT_EMPTY');
     const components = await resolveUsableMediaComponents();
     if (!components.ffmpeg || !components.ffprobe || components.mediaEncoder === 'unavailable') {
@@ -52,11 +59,13 @@ async function executeBatchExport(window: BrowserWindow, taskId: string, request
     }
     const first = records[0]!;
     const source = first.analysis.source_video?.path ?? first.source.path;
-    const profile = batchOutputProfile(first.analysis.video, segments.some((segment) => segment.video.audio_codec !== null));
+    const profile = batchOutputProfile(segments[0]!.video, segments.some((segment) => segment.video.audio_codec !== null));
+    if (segments.some((segment) => outputVideoCodec(segment.video) === 'hevc')) profile.video_codec = 'hevc';
+    for (const segment of segments) assertBatchFidelity(segment.video, profile);
     const requestedDuration = segments.reduce((sum, segment) => sum + segment.group.end - segment.group.start, 0);
     const durations = segments.map((segment) => batchSegmentDuration(segment.group, profile));
     const duration = durations.reduce((sum, value) => sum + value, 0);
-    await assertExportPreconditions(first.analysis.video.path, path.dirname(source), taskId, duration, profile, components.mediaEncoder);
+    await assertExportPreconditions(segments[0]!.video.path, path.dirname(source), taskId, duration, profile, components.mediaEncoder);
     signal.throwIfAborted();
     temporaryDirectory = await mkdtemp(path.join(path.dirname(source), `.ttcut-batch-${taskId}-`));
     const names: string[] = [];

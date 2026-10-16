@@ -35,6 +35,7 @@ public struct VideoInfo: Codable, Equatable, Sendable {
   public var duration = 0.0
   public var fps = 30.0
   public var nominalFPS = 30.0
+  public var nominalFrameRate: String?
   public var frameRate = "30/1"
   public var frameCount: Int?
   public var variableFrameRate = false
@@ -87,9 +88,14 @@ public struct VideoInfo: Codable, Equatable, Sendable {
     guard width > 0, height > 0, duration.isFinite, duration > 0, fps.isFinite, fps > 0 else {
       throw TTError("INVALID_VIDEO", "视频元数据无效 / Invalid video metadata")
     }
+  }
+  /// Analysis and previews decode the base layer; faithful exports must retain dynamic metadata.
+  public func validateHDRExport() throws {
     if hdr == .dolbyVision || hdr == .hdr10Plus {
       throw TTError("DYNAMIC_HDR_UNSUPPORTED", "暂不支持 Dolby Vision / HDR10+ 保真剪辑")
     }
+    guard [8, 10].contains(bitDepth) else { throw TTError("BIT_DEPTH_UNSUPPORTED") }
+    guard ["420", "422", "444"].contains(chroma) else { throw TTError("CHROMA_UNSUPPORTED") }
   }
 }
 
