@@ -8,7 +8,7 @@ TTcut 是一款面向乒乓球爱好者的本地乒乓球视频自动剪辑工�
 
 视频、分析结果和历史记录只保存在本机；软件不要求登录、不上传视频、不采集遥测。Windows 完整安装包与 macOS 安装包已包含运行资源，安装完成后可以离线分析、预览和剪辑。
 
-> 当前 Windows x64 与 macOS 15+ Apple Silicon 稳定版本均为 `v1.3.8`。
+> 当前 Windows x64 与 macOS 15+ Apple Silicon 稳定版本均为 `v1.3.10`。
 
 ## 下载与安装
 
@@ -17,13 +17,13 @@ TTcut 是一款面向乒乓球爱好者的本地乒乓球视频自动剪辑工�
 3. Android 从 [TTcut-Mobile-Releases](https://github.com/WeiyePlayer/TTcut-Mobile-Releases/releases) 下载。
 4. Windows 完整安装包已包含分析模型、运行时和视频处理工具，安装后无需再下载或导入组件。
 
-## v1.3.8 更新
+## v1.3.10 更新
 
-- 新增编辑草稿保存、逐回合比分牌及成片叠加。
-- 新增回合循环播放，改善比分编辑和历史恢复。
-- Windows 新增原片预览并优化 DirectML 会话复用；macOS 保留原生 Core ML 与兼容预览。
+- 改善 HDR/HEVC 导出保真、VFR 时间戳与尾帧处理。
+- macOS 修复动态 HDR 导入和分析被误拦截，保留明确的动态 HDR 导出限制。
+- Windows 隔离随包 Python，并修复旧历史缓存缺失时的恢复与导出。
 
-详见 [v1.3.8 发布说明](docs/release-notes-v1.3.8.md)。
+详见 [v1.3.10 发布说明](docs/release-notes-v1.3.10.md)。
 
 ## 联系作者加微信 m2924931661
 

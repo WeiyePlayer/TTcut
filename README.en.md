@@ -8,7 +8,7 @@ TTcut is a local automatic table-tennis video cutter for players and enthusiasts
 
 Videos, analysis results, and history stay on the local computer. TTcut requires no account, uploads no video, and collects no telemetry. The Windows full installer and macOS packages include their runtime resources. Analysis, preview, and cutting can run offline after setup.
 
-> The current stable release for Windows x64 and macOS 15+ on Apple Silicon is `v1.3.8`.
+> The current stable release for Windows x64 and macOS 15+ on Apple Silicon is `v1.3.10`.
 
 ## Download and installation
 
@@ -19,13 +19,13 @@ Videos, analysis results, and history stay on the local computer. TTcut requires
 
 TTcut detects an NVIDIA GPU automatically and falls back to CPU if accelerated setup or its self-test fails. Its video-processing capability reads media information, cuts and joins segments, and validates exported files.
 
-## What's new in v1.3.8
+## What's new in v1.3.10
 
-- Save editing drafts and export per-rally scoreboard overlays.
-- Loop individual rallies with improved score editing and history restoration.
-- Windows adds original-media previews and DirectML session reuse; macOS retains native Core ML and compatible previews.
+- Improve HDR/HEVC export fidelity, VFR timestamps and final-frame handling.
+- macOS no longer blocks dynamic HDR import/analysis with export-only restrictions.
+- Windows isolates bundled Python and restores legacy exports when recoverable caches are missing.
 
-See the [v1.3.8 release notes](docs/release-notes-v1.3.8.en.md) for the complete details.
+See the [v1.3.10 release notes](docs/release-notes-v1.3.10.en.md) for the complete details.
 
 ## Contact the author on WeChat: m2924931661
 
