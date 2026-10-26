@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { buildHistoryCoverArgs, HistoryStore } from '../src/main/history';
 import type { AnalysisResultV1, Calibration } from '../src/shared/contracts';
 import { createCustomClipDraft, splitCustomClip } from '../src/domain/custom-clips';
+import nativeVideo from './fixtures/native-silent-hdr.json';
+import { nativeVideoSchema } from '../src/shared/native-contracts';
 
 const temporaryDirectories: string[] = [];
 
@@ -238,5 +240,33 @@ describe('analysis history', () => {
     result.processing = { mode: 'normalized_cfr', target_fps_ratio: '60/1', encoder: 'libx264', warning_code: null };
     const record = await store.upsert(result, calibration);
     await expect(store.open(record.id)).rejects.toThrow('HISTORY_PROCESSING_MEDIA_MISSING');
+  });
+
+  it.each(['win32', 'darwin'])('exports from the verified original when a %s CFR cache is missing without changing stored history', async (platform) => {
+    const actualPlatform = process.platform;
+    Object.defineProperty(process, 'platform', { value: platform });
+    try {
+      const { store, source, root } = await storeFixture();
+      const result = analysis(source);
+      result.source_video = { ...result.video, variable_frame_rate: true, fps: 30000 / 1001,
+        nominal_fps: 30000 / 1001, nominal_fps_ratio: '30000/1001' };
+      result.video = { ...result.video, path: path.join(root, 'deleted-cfr.mp4'),
+        media_fidelity: { hdr: 'sdr', bit_depth: 8, chroma: '420', mastering_display: null, max_cll: null },
+        ...(platform === 'darwin' ? { native_video: nativeVideoSchema.parse(nativeVideo) } : {}) };
+      result.processing = { mode: 'normalized_cfr', target_fps_ratio: '60/1', encoder: 'libx264', warning_code: null };
+      const record = await store.upsert(result, calibration);
+      const file = path.join(root, 'history/records', `${record.id}.json`);
+      const before = await readFile(file, 'utf8');
+      await expect(store.open(record.id)).rejects.toThrow('HISTORY_PROCESSING_MEDIA_MISSING');
+      const exported = await store.open(record.id, { purpose: 'export' });
+      expect(exported.analysis.video).toEqual(result.source_video);
+      expect(exported.analysis.processing).toBeUndefined();
+      expect(exported.analysis.rallies).toEqual(result.rallies);
+      expect(await readFile(file, 'utf8')).toBe(before);
+      await writeFile(source, 'changed-source');
+      await expect(store.open(record.id, { purpose: 'export' })).rejects.toThrow('HISTORY_SOURCE_CHANGED');
+    } finally {
+      Object.defineProperty(process, 'platform', { value: actualPlatform });
+    }
   });
 });

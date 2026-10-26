@@ -328,7 +328,7 @@ export class HistoryStore {
     return summaries;
   }
 
-  async open(id: string): Promise<HistoryRecordV1> {
+  async open(id: string, options?: { purpose: 'export' }): Promise<HistoryRecordV1> {
     const parsedId = z.string().uuid().parse(id);
     const record = await this.loadRecord(parsedId);
     if (!record) throw new Error('HISTORY_RECORD_INVALID');
@@ -336,11 +336,20 @@ export class HistoryStore {
     if (status === 'missing') throw new Error('HISTORY_SOURCE_MISSING');
     if (status === 'changed') throw new Error('HISTORY_SOURCE_CHANGED');
     if (record.analysis.processing?.mode === 'normalized_cfr') {
+      const original = record.analysis.source_video;
+      const verifiedOriginal = original
+        && normalizedIdentityPath(original.path) === normalizedIdentityPath(record.source.path);
+      // Export can reference the verified original without recreating the analysis cache.
+      // The clone is task-local: reopening/editing history retains its existing cache policy.
+      const originalForExport = () => options?.purpose === 'export' && verifiedOriginal
+        ? { ...record, analysis: { ...record.analysis, video: original, processing: undefined } }
+        : null;
       const processingInfo = await stat(record.analysis.video.path).catch(() => null);
       if (!processingInfo?.isFile() || processingInfo.size <= 0) {
-        const original = record.analysis.source_video;
+        const recovered = originalForExport();
+        if (recovered) return recovered;
         const canRecoverOriginal = process.platform === 'win32' && !record.analysis.video.media_fidelity
-          && original && normalizedIdentityPath(original.path) === normalizedIdentityPath(record.source.path);
+          && verifiedOriginal;
         // sourceStatus above already verified the original's stored fingerprint.
         if (!canRecoverOriginal) throw new Error('HISTORY_PROCESSING_MEDIA_MISSING');
       }
@@ -350,6 +359,8 @@ export class HistoryStore {
         if (!actual || actual.variable_frame_rate || actual.width !== expected.width || actual.height !== expected.height
           || Math.abs(actual.duration_seconds - expected.duration_seconds) > 0.1
           || actual.native_video?.bitDepth !== expected.native_video?.bitDepth || actual.native_video?.hdr !== expected.native_video?.hdr) {
+          const recovered = originalForExport();
+          if (recovered) return recovered;
           throw new Error('HISTORY_PROCESSING_MEDIA_CORRUPT');
         }
       }
