@@ -12,6 +12,7 @@ Approved scope: Windows and macOS; local tickets only. Integration branch `fix/h
 - Convert before scoreboard overlay, disable stream copy for conversion, remove dynamic/static HDR side data, and validate every segment and final output against the target. The result preview uses actual output color metadata.
 - Apply to Windows and native macOS single-source combined and independent-rally exports, including both existing native algorithms. Preserve analysis CFR-cache policy and do not expand mixed-HDR multi-source batch policy.
 - No mandatory new user request fields. Maintain compatibility with existing histories and native contracts. Output results expose actual color properties; artifact errors expose requested outputs and per-output failures.
+- A scoreboard score may carry optional `image_error: 'SCOREBOARD_RENDER_FAILED'` when renderer font/canvas preparation fails and XML was also requested. Main treats this as a video preparation failure and still writes XML; it must not silently export the video without its requested overlay.
 
 ## Validation and workflow
 
