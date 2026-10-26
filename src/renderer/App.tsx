@@ -450,12 +450,15 @@ export function App() {
     setStep('cutting'); setProgress({ percent: 0, stage: 'preparing' });
     try {
       if (selection.mode === 'custom' && customDraft) {
-        await window.ttcut.saveCustomEditorDraft(analysisId, {
+        customSaveRef.current = window.ttcut.saveCustomEditorDraft(analysisId, {
           schema_version: 1, clips: customDraft, playbackMode: customPlaybackMode, scoreboard: customScoreboard, outputs: outputs ?? customOutputs,
-        });
+        }).then(() => setCustomSaveError(false), () => setCustomSaveError(true));
+        // The current ranges are part of the export request even when draft
+        // persistence fails; Main separately validates their source for export.
+        await customSaveRef.current;
       }
       let scoreboardRequest: ExportRequest['scoreboard'];
-      if (selection.mode === 'custom' && customScoreboard.enabled && customDraft) {
+      if (mediaRequired && selection.mode === 'custom' && customScoreboard.enabled && customDraft) {
         if (document.fonts) {
           const names = `${scoreboardName(customScoreboard.left_name, 'A')}${scoreboardName(customScoreboard.right_name, 'B')}0123456789`;
           await document.fonts.load('800 24px "Noto Sans SC Variable"', names);
@@ -835,6 +838,9 @@ export function App() {
           </section>
         ) : (
           <section className="page auto-page">
+            {customSaveError && (step === 'cutting' || step === 'complete') && (
+              <div className="notice" role="alert">{t.customSaveFailed}<button className="text-button" type="button" onClick={() => setCustomSaveVersion((version) => version + 1)}>{t.retry}</button></div>
+            )}
             {bootstrap && !platformSupported && step === 'select' && (
               <div className="notice platform-notice"><strong>{t.platformUnsupported}</strong><span>{platformDetail}</span><button className="secondary" onClick={() => setView('settings')}>{t.openSetup}</button></div>
             )}
