@@ -134,8 +134,7 @@ final class MediaIntegrationTests: XCTestCase {
     }
   }
 
-  func testHDR10PlusCanBeProbedPreviewedAndAnalyzed() async throws {
-    let folder = try workspace()
+  func makeHDR10Plus(in folder: URL) async throws -> URL {
     let raw = folder.appendingPathComponent("hdr10.hevc")
     _ = try await ProcessRunner.run(paths.ffmpeg, [
       "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=12:duration=2",
@@ -184,6 +183,119 @@ final class MediaIntegrationTests: XCTestCase {
     _ = try await ProcessRunner.run(paths.ffmpeg, [
       "-v", "error", "-y", "-r", "12", "-i", taggedRaw.path, "-c", "copy", "-tag:v", "hvc1", source.path,
     ])
+
+    return source
+  }
+
+  func assertNoHDRFrameMetadata(_ output: URL) async throws {
+    let probed = try await ProcessRunner.run(paths.ffprobe, ["-v", "error", "-select_streams", "v:0", "-show_frames", "-show_entries", "frame_side_data", "-of", "json", output.path])
+    let document = try JSONSerialization.jsonObject(with: probed.stdout) as! [String: Any]
+    let frames = try XCTUnwrap(document["frames"] as? [[String: Any]])
+    XCTAssertFalse(frames.isEmpty)
+    for frame in frames {
+      for side in frame["side_data_list"] as? [[String: Any]] ?? [] {
+        let kind = side["side_data_type"] as? String ?? ""
+        XCTAssertFalse(["DOVI", "Dolby Vision", "HDR", "Mastering display", "Content light"].contains { kind.contains($0) }, kind)
+      }
+    }
+  }
+
+  func testHDR10PlusAutomaticallyExportsSDRForBothAlgorithms() async throws {
+    let folder = try workspace()
+    let source = try await makeHDR10Plus(in: folder)
+    let video = try await MediaProbe(paths: paths).inspect(source)
+    XCTAssertEqual(video.hdr, .hdr10Plus)
+    let exporter = MediaExporter(paths: paths)
+    for strategy in [ExportStrategy.compatible, .fastSegmented] {
+      let output = folder.appendingPathComponent("auto-sdr-" + strategy.rawValue + ".mp4")
+      try await exporter.merged(video: video, ranges: [CutRange(0.25, 0.75), CutRange(1.25, 1.75)], destination: output, strategy: strategy)
+      let actual = try await MediaProbe(paths: paths).inspect(output)
+      XCTAssertEqual(actual.hdr, .sdr)
+      XCTAssertEqual(actual.videoCodec, "h264")
+      XCTAssertEqual(actual.bitDepth, 8)
+      XCTAssertEqual(actual.chroma, "420")
+      XCTAssertEqual(actual.colorPrimaries, "bt709")
+      XCTAssertEqual(actual.colorTransfer, "bt709")
+      XCTAssertEqual(actual.colorSpace, "bt709")
+      XCTAssertEqual(actual.colorRange, "tv")
+      XCTAssertNil(actual.masteringDisplay)
+      XCTAssertNil(actual.maxCLL)
+      try await assertNoHDRFrameMetadata(output)
+      _ = try await ProcessRunner.run(paths.ffmpeg, ["-v", "error", "-xerror", "-i", output.path, "-f", "null", "-"])
+      let actualPixels = try await ProcessRunner.run(paths.ffmpeg, ["-v", "error", "-i", output.path, "-frames:v", "1", "-vf", "scale=32:18", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
+      let sourcePixels = try await ProcessRunner.run(paths.ffmpeg, ["-v", "error", "-ss", "0.25", "-i", source.path, "-frames:v", "1", "-vf", "scale=32:18", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
+      XCTAssertEqual(actualPixels.stdout.count, sourcePixels.stdout.count)
+      let delta = zip(actualPixels.stdout, sourcePixels.stdout).reduce(0.0) { $0 + abs(Double($1.0) - Double($1.1)) } / Double(actualPixels.stdout.count)
+      XCTAssertGreaterThan(delta, 5, "Tone mapping must alter samples, not merely their labels")
+    }
+  }
+
+  func testDolbyVisionProbePreservesBaseLayerCompatibility() async throws {
+    _ = try workspace()
+    for (key, compatibility) in [("TTCUT_DV81_INTEGRATION", 1), ("TTCUT_DV84_INTEGRATION", 4)] {
+      guard let file = ProcessInfo.processInfo.environment[key] else { throw XCTSkip("Provide real Dolby Vision originals") }
+      let video = try await MediaProbe(paths: paths).inspect(URL(fileURLWithPath: file))
+      XCTAssertEqual(video.hdr, .dolbyVision)
+      let document = try JSONSerialization.jsonObject(with: JSONEncoder().encode(video)) as! [String: Any]
+      let dv = try XCTUnwrap(document["dolbyVision"] as? [String: Any])
+      XCTAssertEqual(dv["profile"] as? Int, 8)
+      XCTAssertEqual(dv["baseLayerPresent"] as? Bool, true)
+      XCTAssertEqual(dv["signalCompatibilityID"] as? Int, compatibility)
+    }
+  }
+
+  func testCompatibleDolbyVisionExportsNonblackSDRForBothAlgorithms() async throws {
+    let folder = try workspace()
+    let exporter = MediaExporter(paths: paths)
+    for key in ["TTCUT_DV81_INTEGRATION", "TTCUT_DV84_INTEGRATION"] {
+      guard let file = ProcessInfo.processInfo.environment[key] else { throw XCTSkip("Provide real Dolby Vision originals") }
+      let video = try await MediaProbe(paths: paths).inspect(URL(fileURLWithPath: file))
+      for strategy in [ExportStrategy.compatible, .fastSegmented] {
+        let output = folder.appendingPathComponent("\(key)-\(strategy.rawValue).mp4")
+        try await exporter.merged(video: video, ranges: [CutRange(15, 15.5), CutRange(16, 16.5)], destination: output, strategy: strategy)
+        let actual = try await MediaProbe(paths: paths).inspect(output)
+        XCTAssertEqual(actual.hdr, .sdr)
+        XCTAssertEqual(actual.videoCodec, "h264")
+        XCTAssertEqual(actual.bitDepth, 8)
+        XCTAssertEqual(actual.colorTransfer, "bt709")
+        XCTAssertEqual(actual.colorPrimaries, "bt709")
+        XCTAssertEqual(actual.colorSpace, "bt709")
+        XCTAssertEqual(actual.colorRange, "tv")
+        XCTAssertNil(actual.dolbyVision)
+        try await assertNoHDRFrameMetadata(output)
+        _ = try await ProcessRunner.run(paths.ffmpeg, ["-v", "error", "-xerror", "-i", output.path, "-f", "null", "-"])
+        let pixels = try await ProcessRunner.run(paths.ffmpeg, ["-v", "error", "-i", output.path, "-frames:v", "1", "-vf", "scale=32:18", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
+        let average = pixels.stdout.reduce(0.0) { $0 + Double($1) } / Double(pixels.stdout.count)
+        XCTAssertGreaterThan(average, 5, "A black introductory cut cannot demonstrate real color conversion")
+      }
+    }
+  }
+
+  func testToneMappingPrecedesSDRScoreboardAndDoesNotChangeNormalizationPolicy() async throws {
+    let folder = try workspace()
+    let source = try await makeHDR10Plus(in: folder)
+    let video = try await MediaProbe(paths: paths).inspect(source)
+    let board = folder.appendingPathComponent("white-board.png")
+    _ = try await ProcessRunner.run(paths.ffmpeg, ["-v", "error", "-f", "lavfi", "-i", "color=c=white:s=90x18:d=1", "-frames:v", "1", "-update", "1", board.path])
+    let output = folder.appendingPathComponent("sdr-board.mp4")
+    let exporter = MediaExporter(paths: paths)
+    try await exporter.merged(video: video, ranges: [CutRange(0.25, 0.75)], destination: output, strategy: .fastSegmented,
+      scoreboards: [ScoreboardOverlay(x: 0, y: 0, scale: 1, imagePath: board.path)])
+    let pixels = try await ProcessRunner.run(paths.ffmpeg, ["-v", "error", "-i", output.path, "-vf", "crop=2:2:2:2", "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
+    XCTAssertGreaterThan(pixels.stdout.reduce(0.0) { $0 + Double($1) } / Double(pixels.stdout.count), 240, "SDR white must not be tone-mapped as HDR")
+    let normalization = folder.appendingPathComponent("normalized.mp4")
+    do {
+      try await exporter.encode(video: video, ranges: [CutRange(0, video.duration)], destination: normalization, normalizeFPS: true)
+      XCTFail("Analysis normalization must retain its preservation guard")
+    } catch let error as TTError {
+      XCTAssertEqual(error.code, "DYNAMIC_HDR_UNSUPPORTED")
+    }
+    XCTAssertFalse(FileManager.default.fileExists(atPath: normalization.path))
+  }
+
+  func testHDR10PlusCanBeProbedPreviewedAndAnalyzed() async throws {
+    let folder = try workspace()
+    let source = try await makeHDR10Plus(in: folder)
 
     let identity = try SourceIdentity(url: source)
     let video = try await MediaProbe(paths: paths).inspect(source)
