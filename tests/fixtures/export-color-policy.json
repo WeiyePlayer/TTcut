@@ -1,0 +1,12 @@
+[
+  {"name":"SDR AVC preserved","hdr":"sdr","codec":"h264","depth":8,"transfer":"bt709","outputHDR":"sdr","outputCodec":"h264","outputDepth":8},
+  {"name":"HLG preserved","hdr":"hlg","codec":"hevc","depth":10,"transfer":"arib-std-b67","outputHDR":"hlg","outputCodec":"hevc","outputDepth":10},
+  {"name":"HDR10 preserved","hdr":"hdr10","codec":"hevc","depth":10,"transfer":"smpte2084","outputHDR":"hdr10","outputCodec":"hevc","outputDepth":10},
+  {"name":"HDR10+ to SDR","hdr":"hdr10Plus","codec":"hevc","depth":10,"transfer":"smpte2084","outputHDR":"sdr","outputCodec":"h264","outputDepth":8},
+  {"name":"Dolby Vision 8.1 to SDR","hdr":"dolbyVision","codec":"hevc","depth":10,"transfer":"smpte2084","dolbyVision":{"profile":8,"baseLayerPresent":true,"signalCompatibilityID":1},"outputHDR":"sdr","outputCodec":"h264","outputDepth":8},
+  {"name":"Dolby Vision 8.4 to SDR","hdr":"dolbyVision","codec":"hevc","depth":10,"transfer":"arib-std-b67","dolbyVision":{"profile":8,"baseLayerPresent":true,"signalCompatibilityID":4},"outputHDR":"sdr","outputCodec":"h264","outputDepth":8},
+  {"name":"Unknown Dolby Vision rejected","hdr":"dolbyVision","codec":"hevc","depth":10,"error":"DYNAMIC_HDR_UNSUPPORTED"},
+  {"name":"Dolby Vision profile 5 rejected","hdr":"dolbyVision","codec":"hevc","depth":10,"dolbyVision":{"profile":5,"baseLayerPresent":true,"signalCompatibilityID":0},"error":"DYNAMIC_HDR_UNSUPPORTED"},
+  {"name":"Dolby Vision missing base rejected","hdr":"dolbyVision","codec":"hevc","depth":10,"dolbyVision":{"profile":8,"baseLayerPresent":false,"signalCompatibilityID":1},"error":"DYNAMIC_HDR_UNSUPPORTED"},
+  {"name":"Unsupported precision rejected","hdr":"hdr10Plus","codec":"hevc","depth":12,"transfer":"smpte2084","error":"BIT_DEPTH_UNSUPPORTED"}
+]

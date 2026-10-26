@@ -101,7 +101,12 @@ public struct MediaProbe: Sendable {
         info.rotation = ((-Int(num(side, "rotation")) % 360) + 360) % 360
       }
       if type.contains("DOVI") || type.contains("Dolby Vision") { info.hdr = .dolbyVision }
-      if type.contains("HDR10+") || type.contains("HDR Dynamic Metadata SMPTE2094-40") {
+      if let profile = side["dv_profile"] as? Int,
+        let present = side["bl_present_flag"] as? Int,
+        let compatibility = side["dv_bl_signal_compatibility_id"] as? Int {
+        info.dolbyVision = DolbyVisionInfo(profile: profile, baseLayerPresent: present == 1, signalCompatibilityID: compatibility)
+      }
+      if info.hdr != .dolbyVision && (type.contains("HDR10+") || type.contains("HDR Dynamic Metadata SMPTE2094-40")) {
         info.hdr = .hdr10Plus
       }
       if type.contains("Mastering display") {
