@@ -301,6 +301,7 @@ export async function runFfmpeg(
     child.stderr.setEncoding('utf8');
     let stdoutBuffer = '';
     let stderrTail = '';
+    let missingSeekParameterSets = false;
     child.stdout.on('data', (chunk: string) => {
       stdoutBuffer += chunk;
       const lines = stdoutBuffer.split(/\r?\n/);
@@ -328,6 +329,10 @@ export async function runFfmpeg(
     });
     child.stderr.on('data', (chunk: string) => {
       stderrTail = `${stderrTail}${chunk}`.slice(-16_384);
+      if ((detail?.seekStart ?? 0) > 0 && args.some((value) => value.includes('tonemap='))
+        && /(?:PPS|SPS|VPS)[^\n]*(?:out of range|not available|missing|non-existing)/i.test(stderrTail)) {
+        missingSeekParameterSets = true;
+      }
       void logLine(taskId, 'FFMPEG', chunk);
     });
     child.once('error', (error) => reject(error));
@@ -340,17 +345,18 @@ export async function runFfmpeg(
       const classification = classifyProcessExit(code, signal, cancellation);
       void logLine(
         taskId,
-        classification.kind === 'success' ? 'INFO' : 'ERROR',
+        classification.kind === 'success' && !missingSeekParameterSets ? 'INFO' : 'ERROR',
         `FFmpeg close: code=${String(code)} signal=${String(signal)} cancelReason=${String(cancellation.reason)}`
           + (detail?.segmentIndex === undefined ? '' : ` segment=${detail.segmentIndex}`)
           + (detail?.seekStart === undefined ? '' : ` seekStart=${detail.seekStart.toFixed(6)}`),
       );
-      if (classification.kind === 'success') {
+      if (classification.kind === 'success' && !missingSeekParameterSets) {
         resolve();
       } else {
         const exportFailure = !cancellation.requested && args.some((value) => value.includes('tonemap='))
           && /(?:No such filter|Filter not found).*?(?:tonemap|zscale)/is.test(stderrTail)
-          ? 'HDR_TONEMAP_UNAVAILABLE' : classification.code ?? 'EXPORT_FAILED';
+          ? 'HDR_TONEMAP_UNAVAILABLE' : !cancellation.requested && missingSeekParameterSets
+            ? 'EXPORT_SEEK_DECODE_FAILED' : classification.code ?? 'EXPORT_FAILED';
         const error = new Error(
           `${exportFailure}: exitCode=${String(code)} signal=${String(signal)}`
           + (detail?.segmentIndex === undefined ? '' : ` segment=${detail.segmentIndex}`)
@@ -602,6 +608,33 @@ async function writeScoreboardAssets(
   return assets;
 }
 
+async function encodeExportSegment(
+  window: BrowserWindow,
+  taskId: string,
+  components: { ffmpeg: string; mediaEncoder: MediaEncoder },
+  segment: {
+    video: VideoMetadata; group: CutGroup; output: string; seekStart: number;
+    stage: string; index: number; progressRange?: FfmpegProgressRange | undefined; scoreboard?: ScoreboardAsset | undefined;
+  },
+  signal?: AbortSignal,
+): Promise<ExportValidationResult> {
+  const { video, group, output } = segment;
+  const encode = (seekStart: number) => runFfmpeg(window, taskId, components.ffmpeg,
+    buildSegmentReencodeArgs(video.path, output, group, seekStart, video, components.mediaEncoder, segment.scoreboard),
+    group.end - group.start, segment.stage, { segmentIndex: segment.index, seekStart }, segment.progressRange);
+  try {
+    await encode(segment.seekStart);
+  } catch (error) {
+    if (exportCode(error) !== 'EXPORT_SEEK_DECODE_FAILED' || video.video_codec !== 'hevc'
+      || segment.seekStart <= 0 || !exportColorPlan(video).toneMapTransfer) throw error;
+    assertExportNotCancelled(taskId);
+    await logLine(taskId, 'WARN', `Sought HEVC segment is missing parameter sets; decoding from source start: segment=${segment.index}`);
+    await rm(output, { force: true });
+    await encode(0);
+  }
+  return validateExportOutput(output, { targetSeconds: group.end - group.start, segmentCount: 1 }, video, 'normalized', signal);
+}
+
 async function executeFastSegmented(
   window: BrowserWindow,
   taskId: string,
@@ -638,31 +671,10 @@ async function executeFastSegmented(
         + ` seekStart=${seekStart.toFixed(6)} encoder=${selectMediaEncoder(exportColorPlan(analysisVideo).target, components.mediaEncoder)}`,
     );
     try {
-      await runFfmpeg(
-        window,
-        taskId,
-        components.ffmpeg,
-        buildSegmentReencodeArgs(
-          analysisVideo.path,
-          segmentPath,
-          group,
-          seekStart,
-          analysisVideo,
-          components.mediaEncoder,
-          scoreboards?.[index],
-        ),
-        segmentDuration,
-        'cutting-and-exporting',
-        { segmentIndex: index + 1, seekStart },
-        progressRange,
-      );
-      const validation = await validateExportOutput(
-        segmentPath,
-        { targetSeconds: group.end - group.start, segmentCount: 1 },
-        analysisVideo,
-        'normalized',
-        signal,
-      );
+      const validation = await encodeExportSegment(window, taskId, components, {
+        video: analysisVideo, group, output: segmentPath, seekStart, stage: 'cutting-and-exporting',
+        index: index + 1, progressRange, scoreboard: scoreboards?.[index],
+      }, signal);
       encodedSegmentDurations.push(
         analysisVideo.audio_codec === null
           ? group.end - group.start
@@ -731,35 +743,15 @@ async function executeFastSingle(
     `Fast single segment: range=${group.start.toFixed(6)}-${group.end.toFixed(6)}`
       + ` seekStart=${seekStart.toFixed(6)} encoder=${selectMediaEncoder(exportColorPlan(analysisVideo).target, components.mediaEncoder)}`,
   );
+  let validation: ExportValidationResult;
   try {
-    await runFfmpeg(
-      window,
-      taskId,
-      components.ffmpeg,
-      buildSegmentReencodeArgs(
-        analysisVideo.path,
-        partial,
-        group,
-        seekStart,
-        analysisVideo,
-        components.mediaEncoder,
-        scoreboard,
-      ),
-      group.end - group.start,
-      'cutting-and-exporting',
-      { segmentIndex: 1, seekStart },
-      progressRange,
-    );
+    validation = await encodeExportSegment(window, taskId, components, {
+      video: analysisVideo, group, output: partial, seekStart, stage: 'cutting-and-exporting',
+      index: 1, progressRange, scoreboard,
+    }, signal);
   } catch (error) {
     throw wrapExportError(error, 'EXPORT_SEGMENT_FAILED');
   }
-  const validation = await validateExportOutput(
-    partial,
-    { targetSeconds: group.end - group.start, segmentCount: 1 },
-    analysisVideo,
-    'normalized',
-    signal,
-  );
   await logExportTiming(taskId, 'Fast single timing', validation.timing, analysisVideo);
   return validation;
 }
@@ -1158,31 +1150,10 @@ async function executeCustomArtifactExport(
             await renderMacMedia(taskId, 'export', video.path, partialPath, [segment], undefined, scoreboardAssets ? [scoreboardAssets[offset]!] : undefined);
           } else {
           const seekStart = selectSeekStart(segment.start, keyframes);
-          await runFfmpeg(
-            window,
-            taskId,
-            components.ffmpeg,
-            buildSegmentReencodeArgs(
-              video.path,
-              partialPath,
-              segment,
-              seekStart,
-              video,
-              components.mediaEncoder,
-              scoreboardAssets?.[offset],
-            ),
-            segmentDuration,
-            'exporting-rallies',
-            { segmentIndex: position, seekStart },
-            progressRange,
-          );
-          const validation = await validateExportOutput(
-            partialPath,
-            { targetSeconds: segment.end - segment.start, segmentCount: 1 },
-            video,
-            'normalized',
-            signal,
-          );
+          const validation = await encodeExportSegment(window, taskId, components, {
+            video, group: segment, output: partialPath, seekStart, stage: 'exporting-rallies',
+            index: position, progressRange, scoreboard: scoreboardAssets?.[offset],
+          }, signal);
           await logExportTiming(taskId, `Rally segment ${position} timing`, validation.timing, video);
           }
           assertExportNotCancelled(taskId);
