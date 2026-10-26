@@ -459,11 +459,6 @@ export function App() {
       }
       let scoreboardRequest: ExportRequest['scoreboard'];
       if (mediaRequired && selection.mode === 'custom' && customScoreboard.enabled && customDraft) {
-        if (document.fonts) {
-          const names = `${scoreboardName(customScoreboard.left_name, 'A')}${scoreboardName(customScoreboard.right_name, 'B')}0123456789`;
-          await document.fonts.load('800 24px "Noto Sans SC Variable"', names);
-        }
-        const display = scoreboardDisplayDimensions(analysis.video);
         const scores = resolvedSelectedClipScores(customDraft);
         scoreboardRequest = {
           x: customScoreboard.x,
@@ -472,15 +467,25 @@ export function App() {
           style: customScoreboard.style,
           left_name: customScoreboard.left_name,
           right_name: customScoreboard.right_name,
-          scores: customDraft.filter((clip) => clip.selected).map((clip) => {
-            const score = scores.get(clip.clipId)!;
-            return {
-              clip_id: clip.clipId,
-              ...score,
-              image_data: renderScoreboardImage(display.width, display.height, customScoreboard, score),
-            };
-          }),
+          scores: customDraft.filter((clip) => clip.selected).map((clip) => ({
+            clip_id: clip.clipId, ...scores.get(clip.clipId)!,
+          })),
         };
+        try {
+          if (document.fonts) {
+            const names = `${scoreboardName(customScoreboard.left_name, 'A')}${scoreboardName(customScoreboard.right_name, 'B')}0123456789`;
+            await document.fonts.load('800 24px "Noto Sans SC Variable"', names);
+          }
+          const display = scoreboardDisplayDimensions(analysis.video);
+          scoreboardRequest.scores = scoreboardRequest.scores.map((score) => ({
+            ...score, image_data: renderScoreboardImage(display.width, display.height, customScoreboard, score),
+          }));
+        } catch {
+          if (!outputs?.premiere_xml) throw new Error('SCOREBOARD_RENDER_FAILED');
+          // Keep both requested artifacts: Main can write XML independently and
+          // report the video preparation failure without dropping its overlay.
+          scoreboardRequest.scores = scoreboardRequest.scores.map((score) => ({ ...score, image_error: 'SCOREBOARD_RENDER_FAILED' }));
+        }
       }
       setActiveTask(await window.ttcut.startExport({
         analysis_id: analysisId,

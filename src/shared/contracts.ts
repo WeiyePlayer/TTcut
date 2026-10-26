@@ -886,6 +886,7 @@ export const exportScoreboardSchema = scoreboardPositionSchema.extend({
   scores: z.array(scoreboardScoreSchema.extend({
     clip_id: z.string().min(1),
     image_data: z.string().max(2_000_000).optional(),
+    image_error: z.literal('SCOREBOARD_RENDER_FAILED').optional(),
   }).strict()).min(1),
 }).strict();
 
