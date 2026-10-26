@@ -1148,12 +1148,19 @@ export type CustomArtifactFailure = {
   message: string;
 };
 
+export type CustomArtifactExportFailures = {
+  requestedOutputs: { rallyVideos: boolean; premiereXml: boolean };
+  failedRallies: CustomArtifactFailure[];
+  xmlFailure: CustomArtifactFailure | null;
+};
+
 export type CustomArtifactExportResult = {
   kind: 'custom-artifacts';
   taskId: string;
   analysisId: string;
   outputDirectory: string;
   partialSuccess: boolean;
+  requestedOutputs?: CustomArtifactExportFailures['requestedOutputs'];
   rallyVideos: Array<{
     clipId: string;
     rallyId?: string;

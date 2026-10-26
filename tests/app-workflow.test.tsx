@@ -698,6 +698,28 @@ describe('App workflow notices and multi-task entry', () => {
     expect(await screen.findByRole('heading', { name: 'Choose match videos' })).toBeVisible();
   });
 
+  it('shows the requested artifact and its specific failure without claiming XML also failed', async () => {
+    bootstrap.settings.language = 'en';
+    const selected = { path: 'C:\\video\\first.mp4', name: 'first.mp4', size: 100, mediaUrl: 'ttcut-media://first' };
+    selectVideos.mockResolvedValue([selected]);
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose or drop a file here' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start analysis' }));
+    act(() => taskListener?.({ type: 'analysis-result', taskId: 'analysis-task-1',
+      analysisId: '11111111-1111-4111-8111-111111111111', calibration,
+      data: { schema_version: 1, video: metadata(selected.path),
+        rallies: [{ id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 1, end_time_seconds: 5 }] } }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start cutting' }));
+    await screen.findByRole('heading', { name: 'Preparing' });
+    act(() => taskListener?.({ type: 'error', taskId: 'export-task-1', code: 'CUSTOM_ARTIFACT_EXPORT_FAILED', message: 'failed',
+      artifacts: { requestedOutputs: { rallyVideos: true, premiereXml: false },
+        failedRallies: [{ rallyIndex: 1, code: 'VIDEO_UNREADABLE', message: 'VIDEO_UNREADABLE' }], xmlFailure: null } }));
+    expect(await screen.findByText('Rally video export failed.')).toBeVisible();
+    expect(screen.getByText('The video is unreadable or damaged. Check the file and choose it again.')).toBeVisible();
+    expect(screen.queryByText(/Neither rally videos nor XML/)).toBeNull();
+    expect(screen.queryByText('Export XML')).toBeNull();
+  });
+
   it.each(['classic', 'classic-orange', 'classic-green', 'red-blue'] as const)('exports %s scoreboard names through the canvas text renderer after a settings change', async (style) => {
     bootstrap.settings.language = 'en';
     const selected = { path: 'C:\\video\\first.mp4', name: 'first.mp4', size: 100, mediaUrl: 'ttcut-media://first' };
