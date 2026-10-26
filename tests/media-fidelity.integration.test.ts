@@ -7,7 +7,16 @@ import type { CutGroup, HistoryRecordV1, VideoMetadata } from '../src/shared/con
 import type { AppEvent } from '../src/shared/api';
 import type { BrowserWindow } from 'electron';
 
-const historyState = vi.hoisted(() => ({ record: null as HistoryRecordV1 | null }));
+const historyState = vi.hoisted(() => ({ record: null as HistoryRecordV1 | null, denyXmlWrite: false }));
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return { ...actual, writeFile: (...args: Parameters<typeof actual.writeFile>) => {
+    if (historyState.denyXmlWrite && String(args[0]).endsWith('.xml')) {
+      return Promise.reject(Object.assign(new Error('permission denied writing XML'), { code: 'EACCES' }));
+    }
+    return actual.writeFile(...args);
+  } };
+});
 vi.mock('../src/main/history', () => ({ getHistoryStore: () => ({ open: async () => historyState.record, markVisible: vi.fn().mockResolvedValue(undefined) }) }));
 
 vi.mock('electron', () => ({ dialog: {}, app: { isPackaged: false, getAppPath: () => process.cwd(), getPath: () => os.tmpdir() } }));
@@ -222,7 +231,7 @@ describe.skipIf(!enabled)('real FFmpeg Windows export fidelity', () => {
     await decode(result.data.outputPath);
   }, 60_000);
 
-  it('rebuilds an old Windows CFR XML sidecar from the original HDR video', async () => {
+  it('references the original HDR video without rebuilding an old Windows CFR XML sidecar', async () => {
     const original = videos.get('vfr-hlg')!;
     const oldCache = path.join(root, 'legacy-cfr.mp4');
     await writeFile(oldCache, 'stale SDR cache that must never be copied');
@@ -245,10 +254,38 @@ describe.skipIf(!enabled)('real FFmpeg Windows export fidelity', () => {
     if (result?.type !== 'export-result' || result.data.kind !== 'custom-artifacts') throw new Error(JSON.stringify(result));
     expect(result.data.xmlFailure).toBeNull();
     const cfr = path.join(result.data.outputDirectory, `${path.basename(original.path, '.mp4')}_TTcut_CFR.mp4`);
-    const metadata = await probeVideo(cfr);
-    expect(metadata).toMatchObject({ video_codec: 'hevc', variable_frame_rate: false, fps: 24 });
-    expect(metadata.media_fidelity).toEqual(original.media_fidelity);
+    await expect(access(cfr)).rejects.toThrow();
+    expect(result.data.premiereXml!.quantizedForVfr).toBe(true);
+    const xml = await readFile(result.data.premiereXml!.outputPath, 'utf8');
+    expect(xml).toContain(original.path);
+    expect(xml).not.toContain('_TTcut_CFR.mp4');
     expect(await readFile(oldCache, 'utf8')).toBe('stale SDR cache that must never be copied');
-    await decode(cfr);
+  }, 60_000);
+
+  it('retains a decoded rally video when writing XML fails', async () => {
+    const source = videos.get('sdr-avc')!;
+    const id = '11111111-1111-4111-8111-111111111111';
+    historyState.record = { id,
+      source: { path: source.path, name: 'source.mp4', size: 1, modified_time_ms: 1 },
+      analysis: { schema_version: 1, video: source,
+        rallies: [{ id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 0.5, end_time_seconds: 0.75 }] },
+    } as HistoryRecordV1;
+    const events: AppEvent[] = [];
+    const window = { isDestroyed: () => false, webContents: { send: (_channel: string, event: AppEvent) => events.push(event) } } as unknown as BrowserWindow;
+    historyState.denyXmlWrite = true;
+    try {
+      await startExport(window, { analysis_id: id, destination: 'source',
+        selection: { mode: 'custom', segments: [{ rally_id: 'rally_001', start_time_seconds: 0.25, end_time_seconds: 1 }] },
+        outputs: { combined_video: false, rally_videos: true, premiere_xml: true } });
+      await vi.waitFor(() => expect(events.some((event) => event.type === 'export-result' || event.type === 'error')).toBe(true), { timeout: 60_000 });
+    } finally {
+      historyState.denyXmlWrite = false;
+    }
+    const result = events.find((event) => event.type === 'export-result' || event.type === 'error');
+    if (result?.type !== 'export-result' || result.data.kind !== 'custom-artifacts') throw new Error(JSON.stringify(result));
+    expect(result.data).toMatchObject({ partialSuccess: true, premiereXml: null,
+      xmlFailure: { code: 'OUTPUT_DIRECTORY_UNWRITABLE' }, failedRallies: [] });
+    expect(result.data.rallyVideos).toHaveLength(1);
+    await decode(result.data.rallyVideos[0]!.outputPath);
   }, 60_000);
 });

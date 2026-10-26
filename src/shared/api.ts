@@ -9,6 +9,7 @@ import type {
   TableAnalysis,
   ComponentStatus,
   CutSelectionV1,
+  CustomArtifactExportFailures,
   ExportResult,
   ExportTimingInfo,
   ExportRequest,
@@ -53,6 +54,7 @@ export type AppEvent =
     logPath?: string;
     recoveredOutputPath?: string;
     timing?: ExportTimingInfo;
+    artifacts?: CustomArtifactExportFailures;
   };
 
 export type HistoryOpenResultV1 = {
