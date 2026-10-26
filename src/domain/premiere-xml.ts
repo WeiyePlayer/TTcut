@@ -132,7 +132,9 @@ export function buildPremiereXml(
   sequenceName: string,
 ): PremiereXmlResult {
   const rate = xmlRate(metadata);
-  const sourceDuration = Math.max(1, Math.round(metadata.duration_seconds * rate.timebase));
+  // xmeml uses an integer timebase plus ntsc=TRUE to signal the fractional rate.
+  const framesPerSecond = rate.ntsc ? rate.timebase * 1000 / 1001 : rate.timebase;
+  const sourceDuration = Math.max(1, Math.round(metadata.duration_seconds * framesPerSecond));
   const sourcePath = escapeXml(pathToFileURL(metadata.path).href);
   const sourceName = escapeXml(metadata.path.split(/[\\/]/).at(-1) ?? 'source');
   const audio = sourceAudioLayout(metadata);
@@ -142,8 +144,8 @@ export function buildPremiereXml(
   const audioItems = audio ? Array.from({ length: audio.channelCount }, () => [] as string[]) : [];
 
   for (const [offset, segment] of segments.entries()) {
-    const sourceIn = Math.max(0, Math.min(sourceDuration - 1, Math.round(segment.start * rate.timebase)));
-    const sourceOut = Math.max(sourceIn + 1, Math.min(sourceDuration, Math.round(segment.end * rate.timebase)));
+    const sourceIn = Math.max(0, Math.min(sourceDuration - 1, Math.round(segment.start * framesPerSecond)));
+    const sourceOut = Math.max(sourceIn + 1, Math.min(sourceDuration, Math.round(segment.end * framesPerSecond)));
     const duration = sourceOut - sourceIn;
     const start = cursor;
     const end = start + duration;

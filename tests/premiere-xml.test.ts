@@ -81,8 +81,19 @@ describe('Premiere XML export', () => {
 
     expect(document.querySelector('sequence > rate > timebase')?.textContent).toBe('30');
     expect(document.querySelector('sequence > rate > ntsc')?.textContent).toBe('TRUE');
-    expect(document.querySelector('file > duration')?.textContent).toBe('1802');
+    expect(document.querySelector('file > duration')?.textContent).toBe('1800');
     expect(document.querySelector('audio')).toBeNull();
     expect(output.quantizedForVfr).toBe(true);
+  });
+
+  it.each([
+    { fps: 30000 / 1001, sourceIn: '17982', sourceOut: '19780' },
+    { fps: 60000 / 1001, sourceIn: '35964', sourceOut: '39560' },
+  ])('keeps a ten-minute NTSC source position accurate at $fps', ({ fps, sourceIn, sourceOut }) => {
+    const output = buildPremiereXml(metadata({ duration_seconds: 700, fps, nominal_fps: fps, variable_frame_rate: true }),
+      [{ ...segments[0]!, start: 600, end: 660 }], 'Long NTSC');
+    const document = new DOMParser().parseFromString(output.xml, 'text/xml');
+    expect(document.querySelector('video > track > clipitem > in')?.textContent).toBe(sourceIn);
+    expect(document.querySelector('video > track > clipitem > out')?.textContent).toBe(sourceOut);
   });
 });

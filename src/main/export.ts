@@ -39,14 +39,12 @@ import { buildPremiereXml } from '../domain/premiere-xml';
 import { normalizedVideoRotation } from '../domain/video-input';
 import { assertMediaFidelity, fidelityMismatch, outputVideoCodec } from '../domain/media-fidelity';
 import { exportSourceVideo } from './export-source';
-import { targetFrameRateRatio } from './processing-media';
 import { resolveUsableMediaComponents, type MediaEncoder } from './components';
 import { logLine } from './logger';
 import { getHistoryStore } from './history';
 import {
   buildConcatArgs,
   buildConcatManifest,
-  buildCfrNormalizationArgs,
   buildSegmentReencodeArgs,
   buildStreamCopyArgs,
   canUseStreamCopy,
@@ -995,13 +993,17 @@ function artifactFailure(
   fallbackCode: string,
   segment?: ValidatedCustomExportSegment,
 ): CustomArtifactFailure {
+  const filesystemCode = error instanceof Error && 'code' in error ? error.code : null;
+  const code = filesystemCode === 'ENOSPC' ? 'DISK_SPACE_LOW'
+    : ['EACCES', 'EPERM', 'EROFS'].includes(String(filesystemCode)) ? 'OUTPUT_DIRECTORY_UNWRITABLE'
+      : exportCode(error) ?? fallbackCode;
   return {
     ...(segment ? {
       clipId: segment.clipId,
       ...(segment.sourceRallyId ? { rallyId: segment.sourceRallyId } : {}),
       rallyIndex: segment.rallyIndex,
     } : {}),
-    code: exportCode(error) ?? fallbackCode,
+    code,
     message: error instanceof Error ? error.message : String(error),
   };
 }
@@ -1015,6 +1017,7 @@ async function executeCustomArtifactExport(
   outputDirectory: string,
   components: { ffmpeg: string; ffprobe: string; mediaEncoder: MediaEncoder } | null,
   scoreboards?: readonly ScoreboardRender[],
+  mediaFailure?: unknown,
 ): Promise<void> {
   const analysis = record.analysis;
   const sourceVideoPath = analysis.source_video?.path ?? analysis.video.path;
@@ -1024,16 +1027,13 @@ async function executeCustomArtifactExport(
   let premiereXml: CustomArtifactExportResult['premiereXml'] = null;
   let xmlFailure: CustomArtifactFailure | null = null;
   const scoreboardDirectory = path.join(outputDirectory, `.ttcut-scoreboards-${taskId}`);
-  const rebuildXmlCfr = outputs.premiereXml && analysis.processing?.mode === 'normalized_cfr'
-    && process.platform === 'win32' && !analysis.video.media_fidelity;
   const sendError = (code: string, message: string) => {
-    if (!terminalEvent && markTaskTerminal(taskId)) terminalEvent = { type: 'error', taskId, code, message };
+    if (!terminalEvent && markTaskTerminal(taskId)) terminalEvent = {
+      type: 'error', taskId, code, message,
+      artifacts: { requestedOutputs: outputs, failedRallies, xmlFailure },
+    };
   };
   try {
-    const scoreboardAssets = scoreboards ? await writeScoreboardAssets(scoreboardDirectory, analysis.video, scoreboards) : undefined;
-    if (outputs.rallyVideos || rebuildXmlCfr) analysis.video = await exportSourceVideo(analysis, getTaskController(taskId)?.signal);
-    const source = await stat(analysis.video.path).catch(() => null);
-    if (!source?.isFile() || source.size <= 0) throw new Error('INPUT_MOVED');
     const signal = getTaskController(taskId)?.signal;
     send(window, { type: 'progress', data: { taskId, kind: 'export', stage: 'preparing-artifacts', percent: 0, current: 0, total: segments.length } });
 
@@ -1047,24 +1047,23 @@ async function executeCustomArtifactExport(
         const base = path.basename(sourceVideoPath, path.extname(sourceVideoPath));
         const finalPath = path.join(outputDirectory, `${base}_TTcut_自定义.xml`);
         partialPath = path.join(outputDirectory, `.${base}_TTcut_自定义.${taskId}.partial.xml`);
+        const normalizedCfr = analysis.processing?.mode === 'normalized_cfr';
+        const trustedCfr = normalizedCfr && Boolean(analysis.video.media_fidelity || analysis.video.native_video);
         let xmlMetadata = analysis.video;
-        if (analysis.processing?.mode === 'normalized_cfr') {
+        let copyCfr = false;
+        const cachedSource = await stat(xmlMetadata.path).catch(() => null);
+        if (trustedCfr && cachedSource?.isFile() && cachedSource.size > 0) {
+          copyCfr = true;
+        } else if (normalizedCfr || !cachedSource?.isFile() || cachedSource.size <= 0) {
+          xmlMetadata = analysis.source_video ?? analysis.video;
+        }
+        const source = await stat(xmlMetadata.path).catch(() => null);
+        if (!source?.isFile() || source.size <= 0) throw new Error('INPUT_MOVED');
+        if (copyCfr) {
           const cfrName = `${base}_TTcut_CFR.mp4`;
           const cfrPath = path.join(outputDirectory, cfrName);
           cfrPartialPath = path.join(outputDirectory, `.${base}_TTcut_CFR.${taskId}.partial.mp4`);
-          if (rebuildXmlCfr) {
-            if (!components) throw new Error('MEDIA_COMPONENT_MISSING');
-            const targetRate = analysis.processing.target_fps_ratio ?? targetFrameRateRatio(analysis.video);
-            await runFfmpeg(window, taskId, components.ffmpeg,
-              buildCfrNormalizationArgs(analysis.video.path, cfrPartialPath, analysis.video, targetRate, components.mediaEncoder),
-              analysis.video.duration_seconds, 'preparing-artifacts');
-            const checked = await validateExportOutput(cfrPartialPath,
-              { targetSeconds: analysis.video.duration_seconds, segmentCount: 1 }, analysis.video, 'normalized', signal);
-            if (checked.metadata.variable_frame_rate) throw new Error('CFR_OUTPUT_NOT_CONSTANT');
-            xmlMetadata = checked.metadata;
-          } else {
-            await copyFile(analysis.video.path, cfrPartialPath);
-          }
+          await copyFile(xmlMetadata.path, cfrPartialPath);
           assertExportNotCancelled(taskId);
           await rename(cfrPartialPath, cfrPath);
           cfrPartialPath = null;
@@ -1090,31 +1089,29 @@ async function executeCustomArtifactExport(
     if (outputs.rallyVideos) {
       if (!components) {
         for (const segment of segments) {
-          failedRallies.push({
-            clipId: segment.clipId,
-            ...(segment.sourceRallyId ? { rallyId: segment.sourceRallyId } : {}),
-            rallyIndex: segment.rallyIndex,
-            code: 'MEDIA_COMPONENT_MISSING',
-            message: 'MEDIA_COMPONENT_MISSING',
-          });
+          failedRallies.push(artifactFailure(mediaFailure ?? new Error('MEDIA_COMPONENT_MISSING'), 'EXPORT_SEGMENT_FAILED', segment));
         }
       }
       if (!components) {
-        await logLine(taskId, 'ERROR', 'Rally segment export skipped: MEDIA_COMPONENT_MISSING');
+        await logLine(taskId, 'ERROR', `Rally segment export skipped: ${failedRallies[0]?.message}`);
       } else {
       const totalDuration = segments.reduce((total, segment) => total + segment.end - segment.start, 0);
       let completedDuration = 0;
       let keyframes: number[] | null = null;
+      let video = analysis.video;
+      let scoreboardAssets: ScoreboardAsset[] | undefined;
       try {
+        video = await exportSourceVideo(analysis, signal);
+        scoreboardAssets = scoreboards ? await writeScoreboardAssets(scoreboardDirectory, video, scoreboards) : undefined;
         await assertExportPreconditions(
-          analysis.video.path,
+          video.path,
           outputDirectory,
           taskId,
           totalDuration,
-          analysis.video,
+          video,
           components.mediaEncoder,
         );
-        keyframes = process.platform === 'darwin' ? [] : await probeExportKeyframes(taskId, analysis.video.path, components.ffprobe, signal);
+        keyframes = process.platform === 'darwin' ? [] : await probeExportKeyframes(taskId, video.path, components.ffprobe, signal);
       } catch (error) {
         if (exportCode(error) === 'EXPORT_CANCELLED' || getTaskController(taskId)?.cancelRequested) throw error;
         for (const segment of segments) failedRallies.push(artifactFailure(error, 'EXPORT_SEGMENT_FAILED', segment));
@@ -1135,7 +1132,7 @@ async function executeCustomArtifactExport(
         send(window, { type: 'progress', data: { taskId, kind: 'export', stage: 'exporting-rallies', percent, current: position, total: segments.length } });
         try {
           if (process.platform === 'darwin') {
-            await renderMacMedia(taskId, 'export', analysis.video.path, partialPath, [segment], undefined, scoreboardAssets ? [scoreboardAssets[offset]!] : undefined);
+            await renderMacMedia(taskId, 'export', video.path, partialPath, [segment], undefined, scoreboardAssets ? [scoreboardAssets[offset]!] : undefined);
           } else {
           const seekStart = selectSeekStart(segment.start, keyframes);
           await runFfmpeg(
@@ -1143,11 +1140,11 @@ async function executeCustomArtifactExport(
             taskId,
             components.ffmpeg,
             buildSegmentReencodeArgs(
-              analysis.video.path,
+              video.path,
               partialPath,
               segment,
               seekStart,
-              analysis.video,
+              video,
               components.mediaEncoder,
               scoreboardAssets?.[offset],
             ),
@@ -1159,11 +1156,11 @@ async function executeCustomArtifactExport(
           const validation = await validateExportOutput(
             partialPath,
             { targetSeconds: segment.end - segment.start, segmentCount: 1 },
-            analysis.video,
+            video,
             'normalized',
             signal,
           );
-          await logExportTiming(taskId, `Rally segment ${position} timing`, validation.timing, analysis.video);
+          await logExportTiming(taskId, `Rally segment ${position} timing`, validation.timing, video);
           }
           assertExportNotCancelled(taskId);
           await rename(partialPath, finalPath);
@@ -1195,6 +1192,7 @@ async function executeCustomArtifactExport(
       outputDirectory,
       partialSuccess: (rallyVideos.length > 0 || premiereXml !== null)
         && (failedRallies.length > 0 || xmlFailure !== null),
+      requestedOutputs: outputs,
       rallyVideos,
       failedRallies,
       premiereXml,
@@ -1265,12 +1263,15 @@ export async function startExport(window: BrowserWindow, rawRequest: ExportReque
     : [...createCutGroups(analysis, selection)].sort((left, right) => left.start - right.start);
   if (!groups.length) throw new Error('NO_RALLIES');
   if (artifactExport && (!customSegments || outputs.combinedVideo)) throw new Error('INVALID_EXPORT_OUTPUTS');
-  const needsMedia = outputs.combinedVideo || outputs.rallyVideos
-    || outputs.premiereXml && analysis.processing?.mode === 'normalized_cfr' && process.platform === 'win32' && !analysis.video.media_fidelity;
-  const components = needsMedia ? await resolveUsableMediaComponents() : null;
+  const needsMedia = outputs.combinedVideo || outputs.rallyVideos;
+  let mediaFailure: unknown;
+  const components = needsMedia ? await resolveUsableMediaComponents().catch((error: unknown) => {
+    if (!artifactExport) throw error;
+    mediaFailure = error;
+    return null;
+  }) : null;
   const mediaAvailable = Boolean(components?.ffmpeg && components.ffprobe && components.mediaEncoder !== 'unavailable');
   if (outputs.combinedVideo && !mediaAvailable) throw new Error('MEDIA_COMPONENT_MISSING');
-  if (outputs.rallyVideos && !outputs.premiereXml && !mediaAvailable) throw new Error('MEDIA_COMPONENT_MISSING');
   const taskId = randomUUID();
   if (artifactExport) {
     const outputDirectory = await createCustomArtifactDirectory(sourceVideoPath);
@@ -1289,6 +1290,7 @@ export async function startExport(window: BrowserWindow, rawRequest: ExportReque
           ? { ffmpeg: components.ffmpeg, ffprobe: components.ffprobe, mediaEncoder: components.mediaEncoder }
           : null,
         scoreboards,
+        mediaFailure,
       );
       return taskId;
     } catch (error) {

@@ -8,6 +8,7 @@ import {
   type AppSettings,
   type Calibration,
   type CutSelectionV1,
+  type CustomArtifactExportFailures,
   type ExportRequest,
   type ScoreboardPosition,
   type ExportResult,
@@ -77,6 +78,22 @@ function localizedError(code: string, translations: Messages): string {
   return translations.errors[code as keyof typeof translations.errors] ?? translations.errors.UNKNOWN;
 }
 
+function ArtifactFailureReasons({ failures, translations }: {
+  failures: Pick<CustomArtifactExportFailures, 'failedRallies' | 'xmlFailure'>;
+  translations: Messages;
+}) {
+  const videoCodes = [...new Set(failures.failedRallies.map((failure) => failure.code))];
+  if (!videoCodes.length && !failures.xmlFailure) return null;
+  return <div className="artifact-failures" role="status">
+    {videoCodes.map((code) => <div key={code}>
+      <strong>{translations.exportRallyVideos}</strong><span>{localizedError(code, translations)}</span><code>{code}</code>
+    </div>)}
+    {failures.xmlFailure && <div>
+      <strong>{translations.exportPremiereXml}</strong><span>{localizedError(failures.xmlFailure.code, translations)}</span><code>{failures.xmlFailure.code}</code>
+    </div>}
+  </div>;
+}
+
 function updateErrorMessage(code: string | null, language: Language): string {
   if (code === 'UPDATE_DOWNLOAD_FAILED') {
     return language === 'zh-CN'
@@ -136,7 +153,7 @@ export function App() {
   const [videoTaskOwner, setVideoTaskOwnerState] = useState<VideoTaskOwner>(null);
   const videoTaskOwnerRef = useRef<VideoTaskOwner>(null);
   const [exportResult, setExportResult] = useState<ExportResult | null>(null);
-  const [error, setError] = useState<{ code: string; recoveredOutputPath?: string } | null>(null);
+  const [error, setError] = useState<{ code: string; recoveredOutputPath?: string; artifacts?: CustomArtifactExportFailures } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [supportPromptVisible, setSupportPromptVisible] = useState(false);
   const [closeDialog, setCloseDialog] = useState(false);
@@ -249,6 +266,7 @@ export function App() {
         setError({
           code: event.code,
           ...(event.recoveredOutputPath ? { recoveredOutputPath: event.recoveredOutputPath } : {}),
+          ...(event.artifacts ? { artifacts: event.artifacts } : {}),
         });
         setStep('error');
       }
@@ -956,13 +974,14 @@ export function App() {
                 <div className="success-heading"><span>✓</span><div><p className="eyebrow">4 / 4</p><h1>{t.exportComplete}</h1></div></div>
                 <div className="card output-details custom-artifact-details">
                   <div><span>{t.outputPath}</span><strong>{exportResult.outputDirectory}</strong></div>
-                  <div><span>{t.exportRallyVideos}</span><strong>{interpolate(t.exportedRallyVideos, { count: exportResult.rallyVideos.length })}</strong></div>
-                  <div><span>{t.exportPremiereXml}</span><strong>{exportResult.premiereXml ? t.exported : t.notExported}</strong></div>
+                  {(exportResult.requestedOutputs?.rallyVideos ?? true) && <div><span>{t.exportRallyVideos}</span><strong>{interpolate(t.exportedRallyVideos, { count: exportResult.rallyVideos.length })}</strong></div>}
+                  {(exportResult.requestedOutputs?.premiereXml ?? true) && <div><span>{t.exportPremiereXml}</span><strong>{exportResult.premiereXml ? t.exported : t.notExported}</strong></div>}
                 </div>
                 {exportResult.partialSuccess && <div className="notice" role="status"><span>{t.partialExportNotice}</span></div>}
                 {exportResult.premiereXml?.quantizedForVfr && <div className="notice" role="status"><span>{t.xmlVfrNotice}</span></div>}
                 {exportResult.failedRallies.length > 0 && <div className="notice" role="status"><span>{interpolate(t.rallyExportFailures, { count: exportResult.failedRallies.length })} {interpolate(t.failedRallyDetails, { rallies: exportResult.failedRallies.map((failure) => failure.rallyIndex === undefined ? failure.rallyId ?? '?' : String(failure.rallyIndex)).join(', ') })}</span></div>}
                 {exportResult.xmlFailure && <div className="notice" role="status"><span>{t.xmlExportFailed}</span></div>}
+                <ArtifactFailureReasons failures={exportResult} translations={t} />
                 <div className="footer-actions"><button className="secondary" onClick={() => void window.ttcut.openOutputDirectory(exportResult.outputDirectory)}>{t.openFolder}</button><button className="primary" onClick={reset}>{t.cutAnother}</button></div>
               </div>
             )}
@@ -995,7 +1014,12 @@ export function App() {
 
             {step === 'error' && error && (
               <div className="empty-state error-state">
-                <span>!</span><h1>{t.errorTitle}</h1><p>{localizedError(error.code, t)}</p><code>{error.code}</code>
+                <span>!</span><h1>{t.errorTitle}</h1><p>{localizedError(error.artifacts
+                  ? error.artifacts.requestedOutputs.rallyVideos && error.artifacts.requestedOutputs.premiereXml
+                    ? 'CUSTOM_ARTIFACT_EXPORT_FAILED' : error.artifacts.requestedOutputs.premiereXml
+                      ? 'PREMIERE_XML_FAILED' : 'RALLY_VIDEOS_EXPORT_FAILED'
+                  : error.code, t)}</p><code>{error.code}</code>
+                {error.artifacts && <ArtifactFailureReasons failures={error.artifacts} translations={t} />}
                 {error.recoveredOutputPath && (
                   <div className="card output-details"><div><span>{t.recoveredOutput}</span><strong>{error.recoveredOutputPath}</strong></div></div>
                 )}
