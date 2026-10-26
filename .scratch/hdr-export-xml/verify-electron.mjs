@@ -1,7 +1,7 @@
 // Local acceptance: real Electron IPC, native worker and output-preview playback.
 import assert from 'node:assert/strict';
 import { _electron as electron, expect } from '@playwright/test';
-import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { randomUUID, createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
@@ -34,7 +34,7 @@ try {
   const bootstrap = await page.evaluate(() => window.ttcut.bootstrap());
   assert.equal(bootstrap.components.media.available, true, JSON.stringify(bootstrap.components));
   assert.equal(bootstrap.components.analysis.available, true, JSON.stringify(bootstrap.components));
-  for (const name of ['dv81', 'dv84']) {
+  for (const name of process.argv.includes('--xml-failures-only') ? [] : ['dv81', 'dv84']) {
     const source = path.join('/tmp/ttcut-hdr-export-samples', `${name}-original.mp4`);
     const sourceHash = await hash(source);
     const video = await page.evaluate(async (file) => { const selected = await window.ttcut.acceptDroppedVideo(file); return window.ttcut.probeVideo(selected.path); }, source);
@@ -79,6 +79,66 @@ try {
       report.checks.push({ name, artifacts, output: file, xml: artifacts ? event.data.premiereXml.outputPath : undefined, stream, sourceHash });
       console.log(`PASS ${name}: ${artifacts ? 'rally video and XML' : 'combined SDR output and real preview playback'}`);
     }
+  }
+  if (process.argv.includes('--xml-failures-only')) {
+    const source = '/tmp/ttcut-hdr-export-samples/dv84-original.mp4';
+    const cached = path.join(run, 'deleted-cfr.mp4');
+    await copyFile(source, cached);
+    const original = await page.evaluate(async (file) => { await window.ttcut.acceptDroppedVideo(file); return window.ttcut.probeVideo(file); }, source);
+    const id = randomUUID(), info = await stat(source);
+    const record = {
+      schema_version: 1, id, analyzed_at: new Date().toISOString(),
+      source: { path: source, name: path.basename(source), size: info.size, modified_time_ms: info.mtimeMs },
+      calibration: { video_width: 1920, video_height: 1080, points: { top_left: [480, 270], top_right: [1440, 270], bottom_right: [1560, 810], bottom_left: [360, 810] } },
+      analysis: { schema_version: 1, video: { ...original, path: cached, native_video: { ...original.native_video, path: cached } },
+        source_video: original, processing: { mode: 'normalized_cfr', target_fps_ratio: '24/1', encoder: 'libx265', warning_code: null },
+        rallies: [{ id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 15, end_time_seconds: 16 }] },
+    };
+    await writeFile(path.join(profile, 'history/records', `${id}.json`), JSON.stringify(record));
+    await page.getByRole('button', { name: 'History', exact: true }).click();
+    await page.locator('.history-open').filter({ hasText: path.basename(source) }).click();
+    await page.getByRole('button', { name: /Custom/ }).click();
+    await page.getByRole('button', { name: 'Scoreboard', exact: true }).click();
+    const start = page.getByRole('button', { name: 'Start cutting', exact: true });
+    await start.hover();
+    await page.getByRole('checkbox', { name: 'Export XML', exact: true }).check();
+    await rm(cached);
+    await page.evaluate(() => { document.fonts.load = () => Promise.reject(new Error('FONT_LOAD_FAILED')); });
+    await start.click();
+    await expect(page.getByRole('heading', { name: 'Export complete', exact: true })).toBeVisible();
+    const xmlOnly = await waitFor(() => report.events.find((event) => event.type === 'export-result' && event.data.requestedOutputs?.premiereXml));
+    assert.equal(xmlOnly.data.partialSuccess, false);
+    assert.deepEqual(xmlOnly.data.requestedOutputs, { rallyVideos: false, premiereXml: true });
+    const xml = await readFile(xmlOnly.data.premiereXml.outputPath, 'utf8');
+    assert.ok(xml.includes('dv84-original.mp4'));
+    assert.equal(JSON.parse(await readFile(path.join(profile, 'history/records', `${id}.json`), 'utf8')).analysis.video.path, cached);
+    await expect(page.getByRole('alert')).toContainText('Could not save custom edits');
+    await page.screenshot({ path: path.join(run, 'xml-after-cache-disappears.png') });
+    report.checks.push({ name: 'real custom-editor XML export survives missing CFR cache and enabled scoreboard font failure', xml: xmlOnly.data.premiereXml.outputPath });
+    console.log('PASS XML-only actual UI: missing cache, failed draft save, enabled scoreboard with unavailable fonts');
+    await page.getByRole('button', { name: 'Auto Cut', exact: true }).click();
+    // Reopen with a valid cache; the next failure belongs solely to scoreboard rendering.
+    await copyFile(source, cached);
+    await page.getByRole('button', { name: 'History', exact: true }).click();
+    await page.locator('.history-open').filter({ hasText: path.basename(source) }).click();
+    await page.getByRole('button', { name: /Custom/ }).click();
+    const scoreboard = page.getByRole('button', { name: 'Scoreboard', exact: true });
+    if (await scoreboard.getAttribute('aria-pressed') !== 'true') await scoreboard.click();
+    await start.hover();
+    await page.getByRole('checkbox', { name: 'Export XML', exact: true }).check();
+    await page.getByRole('checkbox', { name: 'Export rally videos', exact: true }).check();
+    const previous = report.events.length;
+    await start.click();
+    const partial = await waitFor(() => report.events.slice(previous).find((event) => ['error', 'export-result'].includes(event.type)));
+    assert.equal(partial.type, 'export-result', JSON.stringify(partial));
+    assert.equal(partial.data.partialSuccess, true);
+    assert.deepEqual(partial.data.requestedOutputs, { rallyVideos: true, premiereXml: true });
+    assert.equal(partial.data.failedRallies[0].code, 'SCOREBOARD_RENDER_FAILED');
+    assert.equal(partial.data.rallyVideos.length, 0);
+    assert.ok((await stat(partial.data.premiereXml.outputPath)).size > 0);
+    await page.screenshot({ path: path.join(run, 'xml-retained-scoreboard-failure.png') });
+    report.checks.push({ name: 'real custom-editor combined artifact request preserves XML and reports scoreboard video failure', result: partial.data });
+    console.log('PASS video + XML actual UI: scoreboard failure retains XML and reports video failure independently');
   }
   assert.deepEqual(report.errors, []);
   console.log(`Acceptance evidence: ${run}`);
