@@ -16,6 +16,8 @@ export function mediaFidelity(video: VideoMetadata): MediaFidelity {
     chroma: native?.chroma ?? (pixel.includes('444') ? '444' : pixel.includes('422') || pixel === 'nv16' || pixel.startsWith('nv20') ? '422' : '420'),
     mastering_display: native?.masteringDisplay ?? null,
     max_cll: native?.maxCLL ?? null,
+    ...(native?.dolbyVision ? { dolby_vision: { profile: native.dolbyVision.profile,
+      base_layer_present: native.dolbyVision.baseLayerPresent, signal_compatibility_id: native.dolbyVision.signalCompatibilityID } } : {}),
   };
 }
 

@@ -2,6 +2,7 @@ import type { CutGroup, ScoreboardPosition, VideoMetadata } from '../shared/cont
 import type { MediaEncoder } from './components';
 import { scoreboardDimensions, scoreboardDisplayDimensions } from './scoreboard-image';
 import { assertMediaFidelity, outputVideoCodec } from '../domain/media-fidelity';
+import { exportColorPlan, exportToneMapFilters, type ExportColorPlan } from '../domain/export-color-plan';
 
 export function selectMediaEncoder(metadata: VideoMetadata, sdrEncoder: MediaEncoder = 'libx264'): MediaEncoder {
   assertMediaFidelity(metadata);
@@ -45,7 +46,7 @@ export function canUseStreamCopy(
   audioPacketBoundaries: readonly number[],
   metadata: VideoMetadata,
 ): boolean {
-  assertMediaFidelity(metadata);
+  if (exportColorPlan(metadata).toneMapTransfer) return false;
   if (metadata.video_codec !== outputVideoCodec(metadata)) return false;
   if (groups.length !== 1 || metadata.variable_frame_rate || !hasStableTimeBase(metadata.video_time_base)) {
     return false;
@@ -312,11 +313,13 @@ export function buildTrimFilter(
   metadata: Pick<VideoMetadata,
     'width' | 'height' | 'rotation' | 'sample_aspect_ratio' | 'color_range' | 'color_primaries' | 'color_transfer' | 'color_space'>,
   scoreboard?: ScoreboardAsset,
+  colorPlan?: ExportColorPlan,
 ): { filter: string; maps: string[] } {
   const parts: string[] = [];
   const sar = displayedSar(metadata);
-  const colorSetParams = buildColorSetParams(metadata);
-  const outputFrameFilters = `setsar=sar=${sar}${colorSetParams ? `,${colorSetParams}` : ''}`;
+  const colorSetParams = buildColorSetParams(colorPlan?.target ?? metadata);
+  const outputFrameFilters = [...(colorPlan ? exportToneMapFilters(colorPlan) : []),
+    `setsar=sar=${sar}`, ...(colorSetParams ? [colorSetParams] : [])].join(',');
   if (scoreboard && groups.length !== 1) throw new Error('INVALID_SCOREBOARD');
   if (groups.length === 1) {
     const group = groups[0]!;
@@ -388,12 +391,13 @@ export function buildReencodeArgs(
   encoder: MediaEncoder = 'libx264',
 ): string[] {
   const hasAudio = metadata.audio_codec !== null;
-  const filter = buildTrimFilter(groups, hasAudio, metadata);
+  const plan = exportColorPlan(metadata);
+  const filter = buildTrimFilter(groups, hasAudio, metadata, undefined, plan);
   const args = [
     '-hide_banner', '-y', '-autorotate', '-i', input,
     '-filter_complex', filter.filter, ...filter.maps,
   ];
-  appendMediaOutputOptions(args, metadata, encoder, hasAudio);
+  appendMediaOutputOptions(args, plan.target, encoder, hasAudio);
   boundPacketDurations(args, expectedOutputDuration(groups));
   args.push(output);
   return args;
@@ -487,7 +491,8 @@ export function buildSegmentReencodeArgs(
     end: relativeEnd,
   };
   const hasAudio = metadata.audio_codec !== null;
-  const filter = buildTrimFilter([relativeGroup], hasAudio, metadata, scoreboard);
+  const plan = exportColorPlan(metadata);
+  const filter = buildTrimFilter([relativeGroup], hasAudio, metadata, scoreboard, plan);
   const args = [
     '-hide_banner', '-y', '-autorotate',
     '-ss', safeSeekStart.toFixed(6),
@@ -496,9 +501,9 @@ export function buildSegmentReencodeArgs(
     ...(scoreboard ? ['-loop', '1', '-i', scoreboard.imagePath] : []),
     '-filter_complex', filter.filter, ...filter.maps,
   ];
-  appendMediaOutputOptions(args, metadata, encoder, hasAudio);
+  appendMediaOutputOptions(args, plan.target, encoder, hasAudio);
   // Independently encoded MP4 segments need decode timestamps that remain ordered at concat boundaries.
-  if (selectMediaEncoder(metadata, encoder) !== 'libopenh264') args.push('-bf', '0');
+  if (selectMediaEncoder(plan.target, encoder) !== 'libopenh264') args.push('-bf', '0');
   boundPacketDurations(args, group.end - group.start);
   args.push(output);
   return args;
@@ -534,7 +539,7 @@ export function buildConcatArgs(
   output: string,
   metadata: VideoMetadata,
 ): string[] {
-  assertMediaFidelity(metadata);
+  metadata = exportColorPlan(metadata).target;
   const args = [
     '-hide_banner', '-y',
     '-f', 'concat', '-safe', '1', '-i', manifest,
