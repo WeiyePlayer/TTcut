@@ -11,6 +11,35 @@ const base: VideoMetadata = { path: 'source.mp4', duration_seconds: 2, width: 32
 const group: CutGroup = { start: 0, end: 1, rawStart: 0, rawEnd: 1, rallyIds: ['rally_001'] };
 
 describe('shared macOS and Windows fidelity policy', () => {
+  it('automatically tone maps a PQ HDR10+ rally to SDR H.264 before adding a scoreboard', () => {
+    const video: VideoMetadata = { ...base, video_codec: 'hevc', pixel_format: 'yuv420p10le',
+      color_transfer: 'smpte2084', color_primaries: 'bt2020', color_space: 'bt2020nc', color_range: 'tv',
+      media_fidelity: { hdr: 'hdr10Plus', bit_depth: 10, chroma: '420', mastering_display: null, max_cll: '1000,400' } };
+    const args = buildSegmentReencodeArgs(video.path, 'output.mp4', group, 0, video, 'libx264', { imagePath: 'score.png', x: 0, y: 0 });
+    expect(args[args.indexOf('-c:v') + 1]).toBe('libx264');
+    expect(args[args.indexOf('-pix_fmt') + 1]).toBe('yuv420p');
+    const filter = args[args.indexOf('-filter_complex') + 1]!;
+    expect(filter).toContain('tonemap=');
+    expect(filter.indexOf('tonemap=')).toBeLessThan(filter.indexOf('overlay='));
+    expect(args[args.indexOf('-color_trc') + 1]).toBe('bt709');
+    expect(canUseStreamCopy([group], [0, 1], [], { ...video, video_time_base: '1/90000' })).toBe(false);
+    expect(video.media_fidelity?.hdr).toBe('hdr10Plus');
+  });
+  it.each([{ compatibility: 1, transfer: 'smpte2084' }, { compatibility: 4, transfer: 'arib-std-b67' }])(
+    'converts confirmed Dolby Vision profile 8 compatibility $compatibility without relaxing preservation', ({ compatibility, transfer }) => {
+      const video: VideoMetadata = { ...base, video_codec: 'hevc', pixel_format: 'yuv420p10le',
+        media_fidelity: { hdr: 'dolbyVision', bit_depth: 10, chroma: '420', mastering_display: null, max_cll: null,
+          dolby_vision: { profile: 8, base_layer_present: true, signal_compatibility_id: compatibility } } };
+      const args = buildReencodeArgs(video.path, 'out.mp4', [group], video);
+      expect(args[args.indexOf('-c:v') + 1]).toBe('libx264');
+      expect(args[args.indexOf('-filter_complex') + 1]).toContain(`tin=${transfer}`);
+      expect(() => assertMediaFidelity(video)).toThrow('DYNAMIC_HDR_UNSUPPORTED');
+      expect(() => buildCfrNormalizationArgs(video.path, 'cfr.mp4', video, '60/1', 'libx264')).toThrow('DYNAMIC_HDR_UNSUPPORTED');
+      expect(() => batchOutputProfile(video, false)).toThrow('DYNAMIC_HDR_UNSUPPORTED');
+      expect(() => buildReencodeArgs(video.path, 'out.mp4', [group], { ...video,
+        media_fidelity: { ...video.media_fidelity!, dolby_vision: { profile: 5, base_layer_present: true, signal_compatibility_id: compatibility } } })).toThrow('DYNAMIC_HDR_UNSUPPORTED');
+    },
+  );
   it.each(policy)('$name', (test) => {
     const video: VideoMetadata = { ...base, video_codec: test.codec,
       pixel_format: `yuv${test.chroma}p${test.depth > 8 ? `${test.depth}le` : ''}`,

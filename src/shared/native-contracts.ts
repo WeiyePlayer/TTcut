@@ -13,6 +13,7 @@ export const nativeVideoSchema = z.object({
   bitrate: number.int().nonnegative(), sar: z.string(), rotation: number.int(),
   colorRange: z.string().optional(), colorPrimaries: z.string().optional(), colorTransfer: z.string().optional(), colorSpace: z.string().optional(),
   hdr: z.enum(['sdr', 'hdr10', 'hlg', 'dolbyVision', 'hdr10Plus']), masteringDisplay: z.string().optional(), maxCLL: z.string().optional(),
+  dolbyVision: z.object({ profile: number.int().nonnegative(), baseLayerPresent: z.boolean(), signalCompatibilityID: number.int().nonnegative() }).strict().optional(),
   keyframes: z.array(number), audioBoundaries: z.array(number),
 }).strict();
 const nativeTableSampleLabelSchema = z.string().regex(/^sample_(0[1-9]|1[01])$/);

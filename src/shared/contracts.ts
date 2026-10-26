@@ -334,6 +334,11 @@ export const mediaFidelitySchema = z.object({
   chroma: z.string().min(1),
   mastering_display: z.string().nullable(),
   max_cll: z.string().nullable(),
+  dolby_vision: z.object({
+    profile: z.number().int().nonnegative(),
+    base_layer_present: z.boolean(),
+    signal_compatibility_id: z.number().int().nonnegative(),
+  }).strict().optional(),
 }).strict();
 
 export const videoMetadataSchema = z.object({
@@ -1174,6 +1179,7 @@ export type CombinedVideoExportResult = {
   mediaUrl: string;
   timing: ExportTimingInfo;
   warning?: ExportWarning;
+  outputMediaFidelity?: z.infer<typeof mediaFidelitySchema>;
 };
 
 export type CustomArtifactFailure = {

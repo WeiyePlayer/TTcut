@@ -106,18 +106,17 @@ try {
   assert.equal(dynamicProbe.media_fidelity.hdr, 'hdr10Plus');
   report.checks.push({ name: 'packaged Windows detects HLG and frame-carried HDR10+', hlg: probe.media_fidelity, dynamic: dynamicProbe.media_fidelity });
   const dynamicHash = await hash(dynamic);
-  let rejected;
-  try {
-    rejected = await task('startExport', { analysis_id: dynamicId, destination: 'source', selection: { mode: 'all', pre_roll_seconds: 1.5, post_roll_seconds: 0.5 } }, 'error');
-  } catch (error) {
-    // Legacy source metadata is now checked during preflight, before a task ID
-    // is returned. It may reject IPC directly instead of emitting a task event.
-    assert.match(String(error), /DYNAMIC_HDR_UNSUPPORTED/);
-    rejected = { type: 'error', code: 'DYNAMIC_HDR_UNSUPPORTED', phase: 'preflight', message: String(error) };
-  }
-  assert.equal(rejected.code, 'DYNAMIC_HDR_UNSUPPORTED');
+  const converted = await task('startExport', { analysis_id: dynamicId, destination: 'source', selection: { mode: 'all', pre_roll_seconds: 1.5, post_roll_seconds: 0.5 } }, 'export-result');
+  const convertedVideo = await page.evaluate((file) => window.ttcut.probeVideo(file), converted.data.outputPath);
+  assert.equal(convertedVideo.video_codec, 'h264'); assert.equal(convertedVideo.pixel_format, 'yuv420p');
+  assert.equal(convertedVideo.color_transfer, 'bt709'); assert.equal(convertedVideo.color_primaries, 'bt709');
+  assert.equal(convertedVideo.color_space, 'bt709'); assert.equal(convertedVideo.color_range, 'tv');
+  assert.equal(converted.data.outputMediaFidelity.hdr, 'sdr');
+  const convertedFrames = JSON.parse(execute(ffprobe, ['-v', 'error', '-show_frames', '-of', 'json', converted.data.outputPath])).frames;
+  assert.equal(convertedFrames.some((frame) => frame.side_data_list?.some((side) => /DOVI|Dolby Vision|HDR|Mastering display|Content light/i.test(side.side_data_type))), false);
+  execute(ffmpeg, ['-v', 'error', '-xerror', '-i', converted.data.outputPath, '-f', 'null', '-']);
   assert.equal(await hash(dynamic), dynamicHash);
-  report.checks.push({ name: 'packaged Main IPC rejects lossy HDR10+ export from old history', event: rejected, sourceHash: dynamicHash });
+  report.checks.push({ name: 'packaged Main IPC automatically tone maps legacy HDR10+ to SDR H.264', event: converted, video: convertedVideo, sourceHash: dynamicHash });
   assert.equal(await stat(missingCache).catch(() => null), null);
   const openedLegacy = await page.evaluate((id) => window.ttcut.openHistory(id), legacyId);
   assert.equal(openedLegacy.video.path, source);
