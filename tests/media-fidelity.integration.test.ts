@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, copyFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -79,14 +79,45 @@ describe.skipIf(!enabled)(`real FFmpeg Windows export arguments on ${platform}`,
       expect(video.media_fidelity).toMatchObject({ hdr: 'dolbyVision',
         dolby_vision: { profile: 8, base_layer_present: true, signal_compatibility_id: compatibility } });
       const output = path.join(root, `${kind}-sdr.mp4`);
-      await runProcess(ffmpeg!, buildSegmentReencodeArgs(source!, output, group(0.25, 0.75), 0, video), { timeoutMs: 60_000 });
-      const checked = await validateExportOutput(output, { targetSeconds: 0.5, segmentCount: 1 }, video, 'normalized');
+      const id = '11111111-1111-4111-8111-111111111111';
+      historyState.record = { id, analysis: { schema_version: 1, video,
+        rallies: [{ id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 15, end_time_seconds: 16.5 }] } } as HistoryRecordV1;
+      const events: AppEvent[] = [];
+      const window = { isDestroyed: () => false, webContents: { send: (_channel: string, event: AppEvent) => events.push(event) } } as unknown as BrowserWindow;
+      const ranges = kind === 'DV84' ? [[15, 15.5], [16, 16.5]] : [[15, 16]];
+      await startExport(window, { analysis_id: id, destination: 'source', selection: { mode: 'custom',
+        segments: ranges.map(([start, end], index) => ({ source: 'detected', rally_id: 'rally_001',
+          clip_id: `part_${index}`, display_index: index + 1, start_time_seconds: start!, end_time_seconds: end! })) } });
+      await vi.waitFor(() => expect(events.some((event) => event.type === 'export-result' || event.type === 'error')).toBe(true), { timeout: 60_000 });
+      const terminal = events.find((event) => event.type === 'export-result' || event.type === 'error');
+      if (terminal?.type !== 'export-result' || terminal.data.kind === 'custom-artifacts') throw new Error(JSON.stringify(terminal));
+      await copyFile(terminal.data.outputPath, output);
+      await rm(terminal.data.outputPath);
+      const checked = await validateExportOutput(output, { targetSeconds: 1, segmentCount: 1 }, video, 'normalized');
       expect(checked.metadata).toMatchObject({ video_codec: 'h264', pixel_format: 'yuv420p',
         color_transfer: 'bt709', color_primaries: 'bt709', color_space: 'bt709', color_range: 'tv',
         media_fidelity: { hdr: 'sdr', bit_depth: 8, chroma: '420', mastering_display: null, max_cll: null } });
       const frames = JSON.parse((await runProcess(ffprobe!, ['-v', 'error', '-show_frames', '-of', 'json', output])).stdout).frames;
       expect(frames.some((frame: { side_data_list?: Array<{ side_data_type?: string }> }) =>
         frame.side_data_list?.some((side) => /DOVI|Dolby Vision|HDR|Mastering display|Content light/i.test(side.side_data_type ?? '')))).toBe(false);
+      const image = path.join(root, `${kind}-sdr.rgb`);
+      await runProcess(ffmpeg!, ['-v', 'error', '-y', '-i', output, '-vf', 'scale=320:180,format=rgb24', '-frames:v', '1', '-f', 'rawvideo', image]);
+      const pixels = await readFile(image);
+      expect(pixels.reduce((sum, value) => sum + value, 0) / pixels.length).toBeGreaterThan(5);
+      expect(pixels.reduce((max, value) => Math.max(max, value), 0)).toBeGreaterThan(180);
+      let coloredPixels = 0;
+      for (let offset = 0; offset < pixels.length; offset += 3) {
+        if (Math.max(pixels[offset]!, pixels[offset + 1]!, pixels[offset + 2]!)
+          - Math.min(pixels[offset]!, pixels[offset + 1]!, pixels[offset + 2]!) > 40) coloredPixels += 1;
+      }
+      expect(coloredPixels / (pixels.length / 3)).toBeGreaterThan(0.05);
+      const retagged = path.join(root, `${kind}-retagged.rgb`);
+      await runProcess(ffmpeg!, ['-v', 'error', '-y', '-i', source!, '-ss', '15',
+        '-vf', 'scale=320:180,format=yuv420p,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709,format=rgb24',
+        '-frames:v', '1', '-f', 'rawvideo', retagged], { timeoutMs: 60_000 });
+      const wrongPixels = await readFile(retagged);
+      const difference = pixels.reduce((sum, value, index) => sum + Math.abs(value - wrongPixels[index]!), 0) / pixels.length;
+      expect(difference).toBeGreaterThan(5);
       await decode(output);
     }, 60_000);
   }
