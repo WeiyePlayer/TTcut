@@ -77,7 +77,10 @@ import {
   spawnTracked,
 } from './processes';
 
-type ScoreboardRender = ScoreboardPosition & ScoreboardScore & { image_data?: string | undefined };
+type ScoreboardRender = ScoreboardPosition & ScoreboardScore & {
+  image_data?: string | undefined;
+  image_error?: 'SCOREBOARD_RENDER_FAILED' | undefined;
+};
 
 const lastExportProgress = new Map<string, number>();
 const AV_SYNC_TOLERANCE_SECONDS = 0.1;
@@ -580,6 +583,7 @@ async function writeScoreboardAssets(
   video: VideoMetadata,
   scoreboards: readonly ScoreboardRender[],
 ): Promise<ScoreboardAsset[]> {
+  if (scoreboards.some((scoreboard) => scoreboard.image_error)) throw new Error('SCOREBOARD_RENDER_FAILED');
   await mkdir(directory, { recursive: true });
   const display = scoreboardDisplayDimensions(video);
   const assets: ScoreboardAsset[] = [];

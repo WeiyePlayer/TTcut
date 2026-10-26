@@ -346,6 +346,23 @@ describe('export task start and terminal lifecycle', () => {
     });
   });
 
+  it('retains XML and reports scoreboard preparation failure for requested rally videos', async () => {
+    const taskId = await startExport(windowMock() as never, {
+      analysis_id: request.analysis_id,
+      selection: { mode: 'custom', segments: [{ rally_id: 'rally_001', start_time_seconds: 8, end_time_seconds: 14 }] },
+      scoreboard: { x: 0, y: 0, scores: [{ clip_id: 'rally_001', left: 0, right: 0, image_error: 'SCOREBOARD_RENDER_FAILED' }] },
+      destination: 'source', outputs: { combined_video: false, rally_videos: true, premiere_xml: true },
+    });
+    await waitForTaskEnd(taskId);
+    const result = state.events.find((event) => event.type === 'export-result');
+    expect(result).toMatchObject({ data: { kind: 'custom-artifacts', partialSuccess: true,
+      requestedOutputs: { rallyVideos: true, premiereXml: true }, rallyVideos: [], xmlFailure: null,
+      failedRallies: [{ code: 'SCOREBOARD_RENDER_FAILED' }] } });
+    if (result?.type !== 'export-result' || result.data.kind !== 'custom-artifacts') throw new Error('Missing XML');
+    expect(await readFile(result.data.premiereXml!.outputPath, 'utf8')).toContain('source.mp4');
+    expect(state.keyframes).not.toHaveBeenCalled();
+  });
+
   it('retains XML when video source probing fails before segment export', async () => {
     state.analysis = {
       schema_version: 1,

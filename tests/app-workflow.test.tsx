@@ -787,6 +787,42 @@ describe('App workflow notices and multi-task entry', () => {
     }
   });
 
+  it.each(['font', 'canvas'] as const)('preserves XML and both requested outputs when scoreboard %s preparation fails', async (failure) => {
+    bootstrap.settings.language = 'en';
+    const selected = { path: 'C:/video/first.mp4', name: 'first.mp4', size: 100, mediaUrl: 'ttcut-media://first' };
+    selectVideos.mockResolvedValue([selected]);
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose or drop a file here' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start analysis' }));
+    act(() => taskListener?.({ type: 'analysis-result', taskId: 'analysis-task-1', analysisId: '11111111-1111-4111-8111-111111111111', calibration,
+      data: { schema_version: 1, video: metadata(selected.path), rallies: [
+        { id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 1, end_time_seconds: 5 },
+      ] } }));
+    fireEvent.click(await screen.findByRole('button', { name: /Custom/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Scoreboard' }));
+    fireEvent.pointerEnter(screen.getByRole('button', { name: 'Start cutting' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Export rally videos' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Export XML' }));
+    const fonts = Object.getOwnPropertyDescriptor(document, 'fonts');
+    const load = failure === 'font' ? vi.fn().mockRejectedValue(new Error('FONT_LOAD_FAILED')) : vi.fn().mockResolvedValue([]);
+    if (failure === 'canvas') vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => { throw new Error('CANVAS_FAILED'); });
+    Object.defineProperty(document, 'fonts', { configurable: true, value: { load } });
+    const draw = vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockImplementation(() => { throw new Error('CANVAS_FAILED'); });
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Start cutting' }));
+      await waitFor(() => expect(window.ttcut.startExport).toHaveBeenCalledTimes(1));
+      const request = vi.mocked(window.ttcut.startExport).mock.calls[0]![0];
+      expect(request.outputs).toEqual({ combined_video: false, rally_videos: true, premiere_xml: true });
+      expect(request.scoreboard?.scores).toEqual([expect.objectContaining({ clip_id: 'rally_001', image_error: 'SCOREBOARD_RENDER_FAILED' })]);
+      expect(request.scoreboard?.scores[0]).not.toHaveProperty('image_data');
+      expect(load).toHaveBeenCalledOnce();
+      expect(draw).not.toHaveBeenCalled();
+    } finally {
+      if (fonts) Object.defineProperty(document, 'fonts', fonts);
+      else Reflect.deleteProperty(document, 'fonts');
+    }
+  });
+
   it.each(['classic', 'classic-orange', 'classic-green', 'red-blue'] as const)('exports %s scoreboard names through the canvas text renderer after a settings change', async (style) => {
     bootstrap.settings.language = 'en';
     const selected = { path: 'C:\\video\\first.mp4', name: 'first.mp4', size: 100, mediaUrl: 'ttcut-media://first' };
