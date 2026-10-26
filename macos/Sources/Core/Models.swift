@@ -18,6 +18,17 @@ public enum RallyRecognitionMethod: String, Codable, Sendable {
 public enum ExportStrategy: String, Codable, Sendable { case fastSegmented, compatible }
 public enum HDRKind: String, Codable, Sendable { case sdr, hdr10, hlg, dolbyVision, hdr10Plus }
 
+public struct DolbyVisionInfo: Codable, Equatable, Sendable {
+  public var profile: Int
+  public var baseLayerPresent: Bool
+  public var signalCompatibilityID: Int
+  public init(profile: Int, baseLayerPresent: Bool, signalCompatibilityID: Int) {
+    self.profile = profile
+    self.baseLayerPresent = baseLayerPresent
+    self.signalCompatibilityID = signalCompatibilityID
+  }
+}
+
 public struct Point: Codable, Hashable, Sendable {
   public var x: Double
   public var y: Double
@@ -62,6 +73,7 @@ public struct VideoInfo: Codable, Equatable, Sendable {
   public var colorTransfer: String?
   public var colorSpace: String?
   public var hdr: HDRKind = .sdr
+  public var dolbyVision: DolbyVisionInfo?
   public var masteringDisplay: String?
   public var maxCLL: String?
   public var keyframes: [Double] = []
