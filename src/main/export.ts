@@ -1226,7 +1226,7 @@ export async function startExport(window: BrowserWindow, rawRequest: ExportReque
   }
   const request = parsedRequest.data;
   const selection = request.selection;
-  const record = await getHistoryStore().open(request.analysis_id);
+  const record = await getHistoryStore().open(request.analysis_id, { purpose: 'export' });
   const analysis = record.analysis;
   const sourceVideoPath = analysis.source_video?.path ?? analysis.video.path;
   if (hasActiveTasks()) throw new Error('TASK_BUSY');
