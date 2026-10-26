@@ -37,7 +37,8 @@ import {
 } from '../domain/custom-clips';
 import { buildPremiereXml } from '../domain/premiere-xml';
 import { normalizedVideoRotation } from '../domain/video-input';
-import { assertMediaFidelity, fidelityMismatch, outputVideoCodec } from '../domain/media-fidelity';
+import { fidelityMismatch, mediaFidelity, outputVideoCodec } from '../domain/media-fidelity';
+import { exportColorPlan } from '../domain/export-color-plan';
 import { exportSourceVideo } from './export-source';
 import { targetFrameRateRatio } from './processing-media';
 import { resolveUsableMediaComponents, type MediaEncoder } from './components';
@@ -245,7 +246,7 @@ export async function assertExportPreconditions(
   metadata: VideoMetadata,
   encoder: MediaEncoder,
 ): Promise<void> {
-  assertMediaFidelity(metadata);
+  exportColorPlan(metadata);
   const inputInfo = await stat(input).catch(() => null);
   if (!inputInfo?.isFile() || inputInfo.size <= 0) throw new Error('INPUT_MOVED');
 
@@ -349,8 +350,11 @@ export async function runFfmpeg(
       if (classification.kind === 'success') {
         resolve();
       } else {
+        const exportFailure = !cancellation.requested && args.some((value) => value.includes('tonemap='))
+          && /(?:No such filter|Filter not found).*?(?:tonemap|zscale)/is.test(stderrTail)
+          ? 'HDR_TONEMAP_UNAVAILABLE' : classification.code ?? 'EXPORT_FAILED';
         const error = new Error(
-          `${classification.code}: exitCode=${String(code)} signal=${String(signal)}`
+          `${exportFailure}: exitCode=${String(code)} signal=${String(signal)}`
           + (detail?.segmentIndex === undefined ? '' : ` segment=${detail.segmentIndex}`)
           + (stderrTail.trim() ? `: ${stderrTail.trim()}` : ''),
         );
@@ -359,7 +363,7 @@ export async function runFfmpeg(
           exitCode?: number | null;
           signal?: NodeJS.Signals | null;
           stderrTail?: string;
-        }).exportCode = classification.code ?? 'EXPORT_FAILED';
+        }).exportCode = exportFailure;
         Object.assign(error, {
           exitCode: code,
           signal,
@@ -404,6 +408,8 @@ export async function validateExportOutput(
   orientation: 'preserved' | 'normalized' = 'preserved',
   signal?: AbortSignal,
 ): Promise<ExportValidationResult> {
+  const colorPlan = exportColorPlan(source);
+  source = colorPlan.target;
   const info = await stat(output);
   if (!info.isFile() || info.size < 1024) throw new Error('EXPORT_INVALID');
   const metadata = await probeVideo(output, signal);
@@ -413,6 +419,10 @@ export async function validateExportOutput(
   if (metadata.video_codec !== outputVideoCodec(source)) throw new Error('EXPORT_CODEC_UNSUPPORTED');
   const fidelityError = fidelityMismatch(source, metadata);
   if (fidelityError) throw new Error(fidelityError);
+  const actualFidelity = mediaFidelity(metadata);
+  if (colorPlan.toneMapTransfer && (actualFidelity.mastering_display || actualFidelity.max_cll || actualFidelity.dolby_vision)) {
+    throw new Error('EXPORT_HDR_MISMATCH');
+  }
   if ((source.audio_codec !== null) !== (metadata.audio_codec !== null)) {
     throw new Error('EXPORT_AUDIO_MISSING');
   }
@@ -554,6 +564,7 @@ function wrapExportError(error: unknown, code: string): Error {
     || current === 'EXPORT_TERMINATED'
     || current === 'EXPORT_SEGMENT_INCOMPATIBLE'
     || current === 'DYNAMIC_HDR_UNSUPPORTED'
+    || current === 'HDR_TONEMAP_UNAVAILABLE'
   ) return error instanceof Error ? error : new Error(current);
   const wrapped = new Error(`${code}: ${error instanceof Error ? error.message : String(error)}`);
   Object.assign(wrapped, { exportCode: code, cause: error });
@@ -626,7 +637,7 @@ async function executeFastSegmented(
       taskId,
       'INFO',
       `Fast segment ${index + 1}/${groups.length}: range=${group.start.toFixed(6)}-${group.end.toFixed(6)}`
-        + ` seekStart=${seekStart.toFixed(6)} encoder=${selectMediaEncoder(analysisVideo, components.mediaEncoder)}`,
+        + ` seekStart=${seekStart.toFixed(6)} encoder=${selectMediaEncoder(exportColorPlan(analysisVideo).target, components.mediaEncoder)}`,
     );
     try {
       await runFfmpeg(
@@ -720,7 +731,7 @@ async function executeFastSingle(
     taskId,
     'INFO',
     `Fast single segment: range=${group.start.toFixed(6)}-${group.end.toFixed(6)}`
-      + ` seekStart=${seekStart.toFixed(6)} encoder=${selectMediaEncoder(analysisVideo, components.mediaEncoder)}`,
+      + ` seekStart=${seekStart.toFixed(6)} encoder=${selectMediaEncoder(exportColorPlan(analysisVideo).target, components.mediaEncoder)}`,
   );
   try {
     await runFfmpeg(
@@ -772,12 +783,13 @@ async function executeExport(
   const tempDirectory = path.join(path.dirname(output), `.ttcut-${taskId}-segments`);
   let terminalEvent: Extract<AppEvent, { type: 'export-result' | 'error' }> | null = null;
   let finalTiming: ExportTimingAssessment | null = null;
+  let finalMetadata: VideoMetadata | null = null;
   const sendError = async (code: string, message: string): Promise<void> => {
     if (terminalEvent || !markTaskTerminal(taskId)) return;
     terminalEvent = { type: 'error', taskId, code, message };
   };
   try {
-    assertMediaFidelity(analysis.video);
+    const colorPlan = exportColorPlan(analysis.video);
     await mkdir(tempDirectory, { recursive: true });
     const scoreboardAssets = scoreboards ? await writeScoreboardAssets(tempDirectory, analysis.video, scoreboards) : undefined;
     const requestedBudget = assessExportDuration(duration, duration, groups.length, analysis.video);
@@ -786,6 +798,7 @@ async function executeExport(
     if (process.platform === 'darwin') {
       const rendered = await renderMacMedia(taskId, 'export', analysis.video.path, partial, groups, (percent) => send(window, { type: 'progress', data: { taskId, kind: 'export', stage: 'cutting', percent } }), scoreboardAssets);
       if (!rendered) throw new Error('EXPORT_INVALID');
+      finalMetadata = rendered;
       finalTiming = assessExportDuration(rendered.duration_seconds, duration, groups.length, analysis.video);
       if (!finalTiming.withinTolerance) throw new ExportDurationMismatchError(finalTiming);
     } else {
@@ -798,7 +811,7 @@ async function executeExport(
       signal,
     );
     assertExportNotCancelled(taskId);
-    if (!canCopy && highResolution && selectMediaEncoder(analysis.video, components.mediaEncoder) === 'libopenh264') {
+    if (!canCopy && highResolution && selectMediaEncoder(colorPlan.target, components.mediaEncoder) === 'libopenh264') {
       throw new Error('X264_COMPONENT_REQUIRED_FOR_HIGH_RESOLUTION');
     }
     if (canCopy) {
@@ -824,6 +837,7 @@ async function executeExport(
           signal,
         );
         finalTiming = validation.timing;
+        finalMetadata = validation.metadata;
         await logExportTiming(taskId, 'Stream-copy final timing', validation.timing, analysis.video);
       } catch (error) {
         const code = exportCode(error);
@@ -845,6 +859,7 @@ async function executeExport(
           scoreboardAssets?.[0],
         );
         finalTiming = validation.timing;
+        finalMetadata = validation.metadata;
       }
     } else if (groups.length > 1) {
       const encodedSegmentDurations = await executeFastSegmented(
@@ -881,6 +896,7 @@ async function executeExport(
       ).requestedClips;
       if (!requestedTiming.withinTolerance) throw new ExportDurationMismatchError(requestedTiming);
       finalTiming = requestedTiming;
+      finalMetadata = concatValidation.metadata;
       await logExportTiming(taskId, 'Fast final requested timing', requestedTiming, analysis.video);
     } else {
       const validation = await executeFastSingle(
@@ -895,9 +911,10 @@ async function executeExport(
         scoreboardAssets?.[0],
       );
       finalTiming = validation.timing;
+      finalMetadata = validation.metadata;
     }
     }
-    if (!finalTiming) throw new Error('EXPORT_INVALID');
+    if (!finalTiming || !finalMetadata) throw new Error('EXPORT_INVALID');
     if (await available(output)) throw new Error('OUTPUT_COLLISION');
     await rename(partial, output);
     await logLine(taskId, 'INFO', 'Export output published; updating history').catch(() => undefined);
@@ -908,6 +925,7 @@ async function executeExport(
       outputName: path.basename(output),
       mediaUrl: registerMediaPath(output),
       timing: timingInfo(finalTiming),
+      outputMediaFidelity: mediaFidelity(finalMetadata),
     };
     send(window, { type: 'progress', data: { taskId, kind: 'export', stage: 'complete', percent: 100 } });
     lastExportProgress.set(taskId, 100);
@@ -924,7 +942,11 @@ async function executeExport(
     const cancelledForExit = code === 'EXPORT_CANCELLED' && controller?.cancelReason === 'app-exit';
     await logLine(taskId, cancelledForExit ? 'INFO' : 'ERROR', `${code}: ${message}`);
 
-    if (code !== 'EXPORT_CANCELLED') {
+    // A readable file alone cannot prove an HDR-to-SDR conversion was valid.
+    // Timing errors are raised only after its codec/color/fidelity checks pass.
+    const sourceHdr = mediaFidelity(analysis.video).hdr;
+    const convertingDynamicHdr = sourceHdr === 'hdr10Plus' || sourceHdr === 'dolbyVision';
+    if (code !== 'EXPORT_CANCELLED' && (!convertingDynamicHdr || error instanceof ExportDurationMismatchError)) {
       try {
         const retained = await retainUsableExportOutput(partial, output, async (candidate) => {
           try {
@@ -959,6 +981,7 @@ async function executeExport(
             outputName: path.basename(retained.path),
             mediaUrl: registerMediaPath(retained.path),
             timing: timingInfo(recoveredTiming),
+            outputMediaFidelity: mediaFidelity(recoveredMetadata),
             warning: { code, message },
           };
           send(window, { type: 'progress', data: { taskId, kind: 'export', stage: 'complete', percent: 100 } });
@@ -1321,7 +1344,7 @@ export async function startExport(window: BrowserWindow, rawRequest: ExportReque
     send(window, { type: 'progress', data: { taskId, kind: 'export', stage: 'preparing', percent: 0 } });
     await logLine(taskId, 'INFO', `Export target: ${output}`);
     await logLine(taskId, 'INFO', 'Export strategy: fast segmented');
-    await logLine(taskId, 'INFO', `Selected media encoder: ${selectMediaEncoder(video, mediaComponents.mediaEncoder)}`);
+    await logLine(taskId, 'INFO', `Selected media encoder: ${selectMediaEncoder(exportColorPlan(video).target, mediaComponents.mediaEncoder)}`);
     void executeExport(
       window,
       taskId,

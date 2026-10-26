@@ -27,7 +27,7 @@ const platform = process.platform;
 const enabled = Boolean(ffmpeg && ffprobe);
 const group = (start: number, end: number): CutGroup => ({ start, end, rawStart: start, rawEnd: end, rallyIds: ['rally_001'] });
 
-describe.skipIf(!enabled)('real FFmpeg Windows export fidelity', () => {
+describe.skipIf(!enabled)(`real FFmpeg Windows export arguments on ${platform}`, () => {
   let root: string;
   const videos = new Map<string, VideoMetadata>();
   beforeAll(async () => {
@@ -61,6 +61,25 @@ describe.skipIf(!enabled)('real FFmpeg Windows export fidelity', () => {
   }
   async function decode(file: string) {
     await runProcess(ffmpeg!, ['-v', 'error', '-xerror', '-i', file, '-f', 'null', '-'], { timeoutMs: 60_000 });
+  }
+
+  for (const [kind, compatibility] of [['DV81', 1], ['DV84', 4]] as const) {
+    const source = process.env[`TTCUT_${kind}_INTEGRATION`];
+    it.skipIf(!source)(`automatically converts a real Dolby Vision ${kind} compatible base layer`, async () => {
+      const video = await probeVideo(source!);
+      expect(video.media_fidelity).toMatchObject({ hdr: 'dolbyVision',
+        dolby_vision: { profile: 8, base_layer_present: true, signal_compatibility_id: compatibility } });
+      const output = path.join(root, `${kind}-sdr.mp4`);
+      await runProcess(ffmpeg!, buildSegmentReencodeArgs(source!, output, group(0.25, 0.75), 0, video), { timeoutMs: 60_000 });
+      const checked = await validateExportOutput(output, { targetSeconds: 0.5, segmentCount: 1 }, video, 'normalized');
+      expect(checked.metadata).toMatchObject({ video_codec: 'h264', pixel_format: 'yuv420p',
+        color_transfer: 'bt709', color_primaries: 'bt709', color_space: 'bt709', color_range: 'tv',
+        media_fidelity: { hdr: 'sdr', bit_depth: 8, chroma: '420', mastering_display: null, max_cll: null } });
+      const frames = JSON.parse((await runProcess(ffprobe!, ['-v', 'error', '-show_frames', '-of', 'json', output])).stdout).frames;
+      expect(frames.some((frame: { side_data_list?: Array<{ side_data_type?: string }> }) =>
+        frame.side_data_list?.some((side) => /DOVI|Dolby Vision|HDR|Mastering display|Content light/i.test(side.side_data_type ?? '')))).toBe(false);
+      await decode(output);
+    }, 60_000);
   }
 
   it.each(['sdr-avc', 'sdr-hevc', 'hlg', 'hdr10', 'vfr-hlg'])('preserves %s through independent cuts, concatenation and validation', async (kind) => {
@@ -147,7 +166,7 @@ describe.skipIf(!enabled)('real FFmpeg Windows export fidelity', () => {
     await decode(output);
   }, 60_000);
 
-  it('detects real frame-carried HDR10+ and rejects video export before metadata can be lost', async () => {
+  it('detects real frame-carried HDR10+ and exports tone-mapped SDR pixels without HDR metadata', async () => {
     const raw = path.join(root, 'hdr10plus.hevc');
     await runProcess(ffmpeg!, ['-hide_banner', '-y', '-i', videos.get('hdr10')!.path, '-map', '0:v:0', '-c:v', 'copy', '-bsf:v', 'hevc_mp4toannexb', '-f', 'hevc', raw]);
     const bytes = await readFile(raw), starts: Array<{ start: number; header: number }> = [];
@@ -170,7 +189,55 @@ describe.skipIf(!enabled)('real FFmpeg Windows export fidelity', () => {
     await runProcess(ffmpeg!, ['-hide_banner', '-y', '-r', '24', '-i', raw, '-c', 'copy', '-tag:v', 'hvc1', source]);
     const video = await probeVideo(source);
     expect(video.media_fidelity?.hdr).toBe('hdr10Plus');
-    expect(() => buildSegmentReencodeArgs(source, path.join(root, 'rejected.mp4'), group(0, 1), 0, video)).toThrow('DYNAMIC_HDR_UNSUPPORTED');
+    const output = path.join(root, 'hdr10plus-sdr.mp4');
+    const original = await readFile(source);
+    await runProcess(ffmpeg!, buildSegmentReencodeArgs(source, output, group(0, 1), 0, video), { timeoutMs: 60_000 });
+    const checked = await validateExportOutput(output, { targetSeconds: 1, segmentCount: 1 }, video, 'normalized');
+    expect(checked.metadata).toMatchObject({ video_codec: 'h264', pixel_format: 'yuv420p',
+      color_transfer: 'bt709', color_primaries: 'bt709', color_space: 'bt709', color_range: 'tv',
+      media_fidelity: { hdr: 'sdr', bit_depth: 8, chroma: '420', mastering_display: null, max_cll: null } });
+    const decoded = JSON.parse((await runProcess(ffprobe!, ['-v', 'error', '-show_frames', '-of', 'json', output])).stdout);
+    expect(decoded.frames.some((frame: { side_data_list?: Array<{ side_data_type?: string }> }) =>
+      frame.side_data_list?.some((side) => /DOVI|Dolby Vision|HDR|Mastering display|Content light/i.test(side.side_data_type ?? '')))).toBe(false);
+    const mapped = path.join(root, 'hdr10plus-sdr.rgb'), retagged = path.join(root, 'hdr10plus-retagged.rgb');
+    for (const [input, destination, filters] of [[output, mapped, 'format=rgb24'],
+      [source, retagged, 'format=yuv420p,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709,format=rgb24']]) {
+      await runProcess(ffmpeg!, ['-v', 'error', '-y', '-i', input!, '-vf', filters!, '-frames:v', '1', '-f', 'rawvideo', destination!]);
+    }
+    const pixels = await readFile(mapped), wrongPixels = await readFile(retagged);
+    expect(pixels.length).toBe(320 * 180 * 3);
+    const difference = pixels.reduce((sum, value, index) => sum + Math.abs(value - wrongPixels[index]!), 0) / pixels.length;
+    expect(difference).toBeGreaterThan(12);
+    expect(pixels.reduce((max, value) => Math.max(max, value), 0)).toBeGreaterThan(180);
+    expect(pixels.reduce((min, value) => Math.min(min, value), 255)).toBeLessThan(40);
+    await decode(output);
+    expect(await readFile(source)).toEqual(original);
+    const id = '11111111-1111-4111-8111-111111111111';
+    historyState.record = { id, analysis: { schema_version: 1, video,
+      rallies: [{ id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 0.125, end_time_seconds: 1.75 }] } } as HistoryRecordV1;
+    for (const independent of [false, true]) {
+      const events: AppEvent[] = [];
+      const window = { isDestroyed: () => false, webContents: { send: (_channel: string, event: AppEvent) => events.push(event) } } as unknown as BrowserWindow;
+      await startExport(window, { analysis_id: id, destination: 'source', selection: { mode: 'custom', segments: [
+        { source: 'detected', display_index: 1, rally_id: 'rally_001', clip_id: 'first', start_time_seconds: 0.125, end_time_seconds: 0.75 },
+        { source: 'detected', display_index: 2, rally_id: 'rally_001', clip_id: 'second', start_time_seconds: 1.125, end_time_seconds: 1.75 },
+      ] }, ...(independent ? { outputs: { combined_video: false, rally_videos: true, premiere_xml: true } } : {}) });
+      await vi.waitFor(() => expect(events.some((event) => event.type === 'export-result' || event.type === 'error')).toBe(true), { timeout: 60_000 });
+      const terminal = events.find((event) => event.type === 'export-result' || event.type === 'error');
+      if (terminal?.type !== 'export-result') throw new Error(JSON.stringify(terminal));
+      if (terminal.data.kind === 'custom-artifacts') {
+        expect(terminal.data.rallyVideos).toHaveLength(2);
+        expect(terminal.data.failedRallies).toEqual([]);
+        expect(terminal.data.premiereXml).not.toBeNull();
+        for (const rally of terminal.data.rallyVideos) {
+          expect((await probeVideo(rally.outputPath)).media_fidelity?.hdr).toBe('sdr');
+          await decode(rally.outputPath);
+        }
+      } else {
+        expect(terminal.data.outputMediaFidelity?.hdr).toBe('sdr');
+        await decode(terminal.data.outputPath);
+      }
+    }
   }, 60_000);
 
   it('rejects a readable HEVC output when static HDR metadata has been stripped', async () => {

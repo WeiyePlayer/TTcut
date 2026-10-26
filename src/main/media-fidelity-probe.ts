@@ -18,6 +18,13 @@ export function probeMediaFidelity(
   for (const side of sides) {
     const type = String(side.side_data_type ?? '');
     if (/DOVI|Dolby Vision/.test(type)) result.hdr = 'dolbyVision';
+    if (type === 'DOVI configuration record') {
+      const profile = Number(side.dv_profile), compatibility = Number(side.dv_bl_signal_compatibility_id);
+      if (Number.isSafeInteger(profile) && profile >= 0 && Number.isSafeInteger(compatibility) && compatibility >= 0
+        && [0, 1].includes(Number(side.bl_present_flag))) {
+        result.dolby_vision = { profile, base_layer_present: Number(side.bl_present_flag) === 1, signal_compatibility_id: compatibility };
+      }
+    }
     if (/HDR10\+|HDR Dynamic Metadata SMPTE2094-40/.test(type) && result.hdr !== 'dolbyVision') result.hdr = 'hdr10Plus';
     if (type.includes('Mastering display')) {
       const unit = (key: string, scale: number) => {

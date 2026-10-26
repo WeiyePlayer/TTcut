@@ -974,7 +974,7 @@ export function App() {
                     allowed: exportResult.timing.allowedDriftSeconds.toFixed(2),
                   })}</span></div>
                 )}
-                <ExportVideoPreview hdr={Boolean(analysis && (analysis.video.media_fidelity?.hdr ?? analysis.video.native_video?.hdr ?? 'sdr') !== 'sdr')} className="output-preview" src={exportResult.mediaUrl} controls preload="metadata" />
+                <ExportVideoPreview hdr={(exportResult.outputMediaFidelity?.hdr ?? analysis?.video.media_fidelity?.hdr ?? analysis?.video.native_video?.hdr ?? 'sdr') !== 'sdr'} className="output-preview" src={exportResult.mediaUrl} controls preload="metadata" />
                 <div className="card output-details"><div><span>{t.outputName}</span><strong>{exportResult.outputName}</strong></div><div><span>{t.outputPath}</span><strong>{exportResult.outputPath}</strong></div></div>
                 <div className="footer-actions"><button className="secondary" onClick={() => void window.ttcut.revealOutput(exportResult.outputPath)}>{t.openFolder}</button><button className="primary" onClick={reset}>{t.cutAnother}</button></div>
                 {exportResult.warning && (
