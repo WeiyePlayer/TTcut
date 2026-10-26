@@ -29,6 +29,7 @@ const waitFor = async (condition, timeout = 120000) => {
 try {
   page.on('pageerror', (error) => report.errors.push(error.message));
   await page.waitForFunction(() => Boolean(window.ttcut));
+  await page.evaluate(() => localStorage.setItem('ttcut.customEditingGuide.seen.v1', '1'));
   await page.exposeFunction('hdrAcceptanceEvent', (event) => report.events.push(event));
   await page.evaluate(() => window.ttcut.onTaskEvent((event) => window.hdrAcceptanceEvent(event)));
   const bootstrap = await page.evaluate(() => window.ttcut.bootstrap());
@@ -81,7 +82,9 @@ try {
     }
   }
   if (process.argv.includes('--xml-failures-only')) {
-    const source = '/tmp/ttcut-hdr-export-samples/dv84-original.mp4';
+    const source = path.join(run, 'original.mp4');
+    execute(ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=24:duration=4',
+      '-c:v', 'libx264', '-preset', 'ultrafast', source]);
     const cached = path.join(run, 'deleted-cfr.mp4');
     await copyFile(source, cached);
     const original = await page.evaluate(async (file) => { await window.ttcut.acceptDroppedVideo(file); return window.ttcut.probeVideo(file); }, source);
@@ -89,10 +92,10 @@ try {
     const record = {
       schema_version: 1, id, analyzed_at: new Date().toISOString(),
       source: { path: source, name: path.basename(source), size: info.size, modified_time_ms: info.mtimeMs },
-      calibration: { video_width: 1920, video_height: 1080, points: { top_left: [480, 270], top_right: [1440, 270], bottom_right: [1560, 810], bottom_left: [360, 810] } },
+      calibration: { video_width: 320, video_height: 180, points: { top_left: [80, 40], top_right: [240, 40], bottom_right: [280, 150], bottom_left: [40, 150] } },
       analysis: { schema_version: 1, video: { ...original, path: cached, native_video: { ...original.native_video, path: cached } },
         source_video: original, processing: { mode: 'normalized_cfr', target_fps_ratio: '24/1', encoder: 'libx265', warning_code: null },
-        rallies: [{ id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 15, end_time_seconds: 16 }] },
+        rallies: [{ id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 1, end_time_seconds: 2 }] },
     };
     await writeFile(path.join(profile, 'history/records', `${id}.json`), JSON.stringify(record));
     await page.getByRole('button', { name: 'History', exact: true }).click();
@@ -100,8 +103,13 @@ try {
     await page.getByRole('button', { name: /Custom/ }).click();
     await page.getByRole('button', { name: 'Scoreboard', exact: true }).click();
     const start = page.getByRole('button', { name: 'Start cutting', exact: true });
-    await start.hover();
-    await page.getByRole('checkbox', { name: 'Export XML', exact: true }).check();
+    const selectOutput = async (name) => {
+      const checkbox = page.getByRole('checkbox', { name, exact: true });
+      if (!await checkbox.isChecked()) await checkbox.locator('..').click();
+      await expect(checkbox).toBeChecked();
+    };
+    await start.focus();
+    await selectOutput('Export XML');
     await rm(cached);
     await page.evaluate(() => { document.fonts.load = () => Promise.reject(new Error('FONT_LOAD_FAILED')); });
     await start.click();
@@ -110,7 +118,7 @@ try {
     assert.equal(xmlOnly.data.partialSuccess, false);
     assert.deepEqual(xmlOnly.data.requestedOutputs, { rallyVideos: false, premiereXml: true });
     const xml = await readFile(xmlOnly.data.premiereXml.outputPath, 'utf8');
-    assert.ok(xml.includes('dv84-original.mp4'));
+    assert.ok(xml.includes('original.mp4'));
     assert.equal(JSON.parse(await readFile(path.join(profile, 'history/records', `${id}.json`), 'utf8')).analysis.video.path, cached);
     await expect(page.getByRole('alert')).toContainText('Could not save custom edits');
     await page.screenshot({ path: path.join(run, 'xml-after-cache-disappears.png') });
@@ -124,9 +132,9 @@ try {
     await page.getByRole('button', { name: /Custom/ }).click();
     const scoreboard = page.getByRole('button', { name: 'Scoreboard', exact: true });
     if (await scoreboard.getAttribute('aria-pressed') !== 'true') await scoreboard.click();
-    await start.hover();
-    await page.getByRole('checkbox', { name: 'Export XML', exact: true }).check();
-    await page.getByRole('checkbox', { name: 'Export rally videos', exact: true }).check();
+    await start.focus();
+    await selectOutput('Export XML');
+    await selectOutput('Export rally videos');
     const previous = report.events.length;
     await start.click();
     const partial = await waitFor(() => report.events.slice(previous).find((event) => ['error', 'export-result'].includes(event.type)));
