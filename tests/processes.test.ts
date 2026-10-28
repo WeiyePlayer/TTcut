@@ -138,6 +138,25 @@ describe('tracked task lifecycle', () => {
     });
   });
 
+  it('bounds diagnostics when requested while streaming stdout, retaining the first failure details', async () => {
+    const chunks: string[] = [];
+    const result = runProcess(process.execPath, [
+      '-e',
+      "process.stdout.write('frame'); process.stderr.write('first failure: ' + 'x'.repeat(2_000_000), () => process.exit(7));",
+    ], { onStdout: (chunk) => chunks.push(chunk), stderrMaxChars: 1024 });
+
+    try {
+      await result;
+      throw new Error('Expected process failure');
+    } catch (error) {
+      expect(error).toMatchObject({ name: 'ProcessExecutionError', exitCode: 7 });
+      const stderr = (error as { stderr: string }).stderr;
+      expect(stderr).toHaveLength(1024);
+      expect(stderr.startsWith('first failure: ')).toBe(true);
+      expect(chunks.join('')).toBe('frame');
+    }
+  });
+
   it('aborts the signal exposed by a tracked task when cancelled', async () => {
     beginTrackedTask('signal');
     const signal = getTaskController('signal')?.signal;

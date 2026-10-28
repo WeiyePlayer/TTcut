@@ -320,6 +320,7 @@ export function runProcess(executable: string, args: readonly string[], options:
   timeoutMs?: number;
   signal?: AbortSignal;
   onStdout?: (chunk: string) => void;
+  stderrMaxChars?: number;
 } = {}): Promise<ProcessResult> {
   return new Promise((resolve, reject) => {
     const cancellationError = () => Object.assign(new Error('PROCESS_CANCELLED'), { name: 'AbortError' });
@@ -343,7 +344,10 @@ export function runProcess(executable: string, args: readonly string[], options:
       if (options.onStdout) options.onStdout(chunk);
       else stdout += chunk;
     });
-    child.stderr.on('data', (chunk: string) => { stderr += chunk; });
+    child.stderr.on('data', (chunk: string) => {
+      if (options.stderrMaxChars === undefined) stderr += chunk;
+      else stderr += chunk.slice(0, Math.max(0, options.stderrMaxChars - stderr.length));
+    });
     const timer = options.timeoutMs ? setTimeout(() => { void terminateChild(child); }, options.timeoutMs) : null;
     const abort = () => { void terminateChild(child); };
     const cleanup = () => {
