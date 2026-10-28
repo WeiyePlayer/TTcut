@@ -421,6 +421,49 @@ describe('multi-task clipping', () => {
     expect(await screen.findByText('CFR_PREFLIGHT_FAILED')).toBeVisible();
   });
 
+  it('queues cancellation until an analysis task ID is returned', async () => {
+    let reply!: (taskId: string) => void;
+    startAnalysis.mockReset().mockReturnValue(new Promise<string>((resolve) => { reply = resolve; }));
+    render(<MultiTaskPage initialVideos={[videos[0]!]} preRoll={2.5} postRoll={1} onOpenAnalysis={vi.fn()} />);
+    await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledOnce());
+    await finishCalibration('calibration-task-1');
+    fireEvent.click(await screen.findByRole('button', { name: '开始分析剪辑' }));
+    await waitFor(() => expect(startAnalysis).toHaveBeenCalledOnce());
+    fireEvent.click(screen.getByRole('button', { name: '取消 first.mp4' }));
+    expect(window.ttcut.cancelTask).not.toHaveBeenCalled();
+    await act(async () => { reply('analysis-task-1'); });
+    await waitFor(() => expect(window.ttcut.cancelTask).toHaveBeenCalledExactlyOnceWith('analysis-task-1'));
+    act(() => listener?.({ type: 'error', taskId: 'analysis-task-1', code: 'ANALYSIS_CANCELLED', message: 'cancelled' }));
+    await waitFor(() => expect(document.querySelector('.batch-row.cancelled')).not.toBeNull());
+  });
+
+  it('shows an analysis failure received before its ID instead of treating queued cancellation as success', async () => {
+    let reply!: (taskId: string) => void;
+    startAnalysis.mockReset().mockReturnValue(new Promise<string>((resolve) => { reply = resolve; }));
+    render(<MultiTaskPage initialVideos={[videos[0]!]} preRoll={2.5} postRoll={1} onOpenAnalysis={vi.fn()} />);
+    await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledOnce());
+    await finishCalibration('calibration-task-1');
+    fireEvent.click(await screen.findByRole('button', { name: '开始分析剪辑' }));
+    await waitFor(() => expect(startAnalysis).toHaveBeenCalledOnce());
+    fireEvent.click(screen.getByRole('button', { name: '取消 first.mp4' }));
+    act(() => listener?.({ type: 'error', taskId: 'analysis-task-1', code: 'INFERENCE_FAILED', message: 'inference failed' }));
+    await act(async () => { reply('analysis-task-1'); });
+    expect(await screen.findByText('INFERENCE_FAILED')).toBeVisible();
+    expect(window.ttcut.cancelTask).not.toHaveBeenCalled();
+  });
+
+  it('preserves a specific analysis failure after a cancellation request', async () => {
+    render(<MultiTaskPage initialVideos={[videos[0]!]} preRoll={2.5} postRoll={1} onOpenAnalysis={vi.fn()} />);
+    await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledOnce());
+    await finishCalibration('calibration-task-1');
+    fireEvent.click(await screen.findByRole('button', { name: '开始分析剪辑' }));
+    await waitFor(() => expect(startAnalysis).toHaveBeenCalledOnce());
+    fireEvent.click(screen.getByRole('button', { name: '取消 first.mp4' }));
+    await waitFor(() => expect(window.ttcut.cancelTask).toHaveBeenCalledWith('analysis-task-1'));
+    act(() => listener?.({ type: 'error', taskId: 'analysis-task-1', code: 'INFERENCE_FAILED', message: 'inference failed' }));
+    expect(await screen.findByText('INFERENCE_FAILED')).toBeVisible();
+  });
+
   it('queues cancellation until an export task ID is returned', async () => {
     let reply!: (taskId: string) => void;
     startExport.mockReset().mockReturnValue(new Promise<string>((resolve) => { reply = resolve; }));

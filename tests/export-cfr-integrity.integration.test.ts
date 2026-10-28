@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { access, chmod, copyFile, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { access, chmod, copyFile, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -8,10 +8,19 @@ import type { AppEvent } from '../src/shared/api';
 import type { Calibration } from '../src/shared/contracts';
 import type { HistoryStore as Store } from '../src/main/history';
 
-const state = vi.hoisted(() => ({ store: null as Store | null, ffprobe: '', unavailable: false, denyCfrCopy: false, afterXml: null as (() => Promise<void>) | null, afterCfrCopy: null as (() => Promise<void>) | null }));
+const state = vi.hoisted(() => ({ store: null as Store | null, ffprobe: '', ffmpegOverride: '', unavailable: false, denyCfrCopy: false, preflightFault: '' as '' | 'space' | 'write', output: '', runtime: '', afterXml: null as (() => Promise<void>) | null, afterCfrCopy: null as (() => Promise<void>) | null, afterSegment: null as (() => Promise<void>) | null, afterXmlWrite: null as (() => Promise<void>) | null }));
 vi.mock('node:fs/promises', async (original) => {
   const real = await original<typeof import('node:fs/promises')>();
-  return { ...real, copyFile: (...args: Parameters<typeof real.copyFile>) => {
+  return { ...real, writeFile: (...args: Parameters<typeof real.writeFile>) => real.writeFile(...args).then(async () => {
+    if (String(args[0]).endsWith('.partial.xml') && state.afterXmlWrite) {
+      const action = state.afterXmlWrite; state.afterXmlWrite = null; await action();
+    }
+  }),
+  statfs: (...args: Parameters<typeof real.statfs>) => state.preflightFault === 'space'
+    ? Promise.resolve({ bavail: 0n, bsize: 1n }) : real.statfs(...args),
+  open: (...args: Parameters<typeof real.open>) => state.preflightFault === 'write' && String(args[0]).endsWith('.write-test')
+    ? Promise.reject(Object.assign(new Error('write denied'), { code: 'EACCES' })) : real.open(...args),
+  copyFile: (...args: Parameters<typeof real.copyFile>) => {
     if (state.denyCfrCopy && String(args[1]).includes('_TTcut_CFR.') && String(args[1]).endsWith('.partial.mp4')) {
       return Promise.reject(Object.assign(new Error('cache copy denied'), { code: 'EACCES' }));
     }
@@ -27,17 +36,20 @@ vi.mock('../src/main/history', async (original) => ({
 }));
 vi.mock('../src/main/components', () => ({ resolveUsableMediaComponents: async () => {
   if (state.unavailable) throw new Error('MEDIA_COMPONENT_MISSING');
-  return { ffmpeg: process.env.TTCUT_FFMPEG_INTEGRATION!, ffprobe: state.ffprobe, mediaEncoder: 'libx264' };
+  return { ffmpeg: state.ffmpegOverride || process.env.TTCUT_FFMPEG_INTEGRATION!, ffprobe: state.ffprobe, mediaEncoder: 'libx264' };
 } }));
 vi.mock('../src/main/macos/runtime', () => ({
-  macRuntimeRoot: () => process.env.TTCUT_MAC_MEDIA_RUNTIME!, verifyMacRuntime: async () => {},
+  macRuntimeRoot: () => state.runtime || process.env.TTCUT_MAC_MEDIA_RUNTIME!, verifyMacRuntime: async () => {},
 }));
 vi.mock('../src/main/logger', () => ({ logLine: vi.fn(async (_task: string, _level: string, message: string) => {
   if (message.startsWith('Premiere XML written:') && state.afterXml) {
     const action = state.afterXml; state.afterXml = null; await action();
   }
+  if (message.startsWith('Rally segment 1 timing') && state.afterSegment) {
+    const action = state.afterSegment; state.afterSegment = null; await action();
+  }
 }) }));
-vi.mock('electron', () => ({ app: { isPackaged: false, getAppPath: () => os.tmpdir(), getPath: () => os.tmpdir() }, dialog: {} }));
+vi.mock('electron', () => ({ app: { isPackaged: false, getAppPath: () => os.tmpdir(), getPath: () => os.tmpdir() }, dialog: { showSaveDialog: async () => ({ canceled: false, filePath: state.output }) } }));
 
 import { HistoryStore } from '../src/main/history';
 import { hasHdrFrameSideData, probeVideo } from '../src/main/probe';
@@ -70,7 +82,7 @@ describe.skipIf(!ffmpeg || !ffprobe)('CFR content integrity through HistoryStore
     if (root) await rm(root, { recursive: true, force: true });
   });
 
-  async function makeHistory(platform: 'win32' | 'darwin', scenario: 'valid' | 'all-video' | 'partial-video' | 'audio' | 'audio-lost' | 'unavailable', input = source) {
+  async function makeHistory(platform: 'win32' | 'darwin', scenario: 'valid' | 'all-video' | 'partial-video' | 'audio' | 'audio-lost' | 'audio-timing' | 'unavailable', input = source) {
     Object.defineProperty(process, 'platform', { value: platform });
     state.ffprobe = ffprobe!;
     state.unavailable = false;
@@ -89,7 +101,7 @@ describe.skipIf(!ffmpeg || !ffprobe)('CFR content integrity through HistoryStore
       expect(inspection.stderr.length).toBeGreaterThan(0);
       if (scenario !== 'all-video') expect(Number(JSON.parse(inspection.stdout).streams[0].nb_read_frames)).toBeGreaterThan(0);
     }
-    if (scenario === 'audio-lost') {
+    if (scenario === 'audio-lost' || scenario === 'audio-timing') {
       const bytes = await readFile(cache);
       const boxes = (start: number, end: number) => {
         const result: Array<{ start: number; end: number; type: string }> = [];
@@ -112,15 +124,25 @@ describe.skipIf(!ffmpeg || !ffprobe)('CFR content integrity through HistoryStore
         const handler = child(child(trak, 'mdia'), 'hdlr');
         return bytes.toString('ascii', handler.start + 16, handler.start + 20) === 'soun';
       })!;
-      const stsz = child(child(child(child(audioTrack, 'mdia'), 'minf'), 'stbl'), 'stsz');
-      const count = bytes.readUInt32BE(stsz.start + 16);
-      expect(count).toBeGreaterThan(100);
-      for (let index = 30; index < count; index++) bytes.writeUInt32BE(0, stsz.start + 20 + index * 4);
+      const stbl = child(child(child(audioTrack, 'mdia'), 'minf'), 'stbl');
+      if (scenario === 'audio-lost') {
+        const stsz = child(stbl, 'stsz');
+        const count = bytes.readUInt32BE(stsz.start + 16);
+        expect(count).toBeGreaterThan(100);
+        for (let index = 30; index < count; index++) bytes.writeUInt32BE(0, stsz.start + 20 + index * 4);
+      } else {
+        const stts = child(stbl, 'stts').start;
+        expect([bytes.readUInt32BE(stts + 12), bytes.readUInt32BE(stts + 16), bytes.readUInt32BE(stts + 20),
+          bytes.readUInt32BE(stts + 24), bytes.readUInt32BE(stts + 28)]).toEqual([2, 188, 1024, 1, 512]);
+        bytes.writeUInt32BE(512, stts + 20); bytes.writeUInt32BE(96768, stts + 28);
+      }
       await writeFile(cache, bytes);
       const inspection = await runProcess(ffprobe!, ['-v', 'error', '-count_frames', '-select_streams', 'a:0',
         '-show_entries', 'stream=nb_frames,nb_read_frames', '-of', 'json', cache]);
       expect(inspection.stderr).toBe('');
-      expect(Number(JSON.parse(inspection.stdout).streams[0].nb_read_frames)).toBe(29);
+      const frames = Number(JSON.parse(inspection.stdout).streams[0].nb_read_frames);
+      if (scenario === 'audio-lost') expect(frames).toBe(29);
+      else expect(frames).toBeGreaterThan(180);
     }
     state.store = new HistoryStore(path.join(root, `history-${platform}-${scenario}`), async (_input, cover) => { await writeFile(cover, 'cover'); });
     const record = await state.store.upsert({ schema_version: 1, source_video: original,
@@ -132,9 +154,9 @@ describe.skipIf(!ffmpeg || !ffprobe)('CFR content integrity through HistoryStore
   }
 
   it.each([
-    ...(['valid', 'all-video', 'partial-video', 'audio', 'audio-lost', 'unavailable'] as const).map((scenario) => ['win32', scenario] as const),
+    ...(['valid', 'all-video', 'partial-video', 'audio', 'audio-lost', 'audio-timing', 'unavailable'] as const).map((scenario) => ['win32', scenario] as const),
     ...((actualPlatform === 'darwin' && process.env.TTCUT_MAC_MEDIA_RUNTIME)
-      ? (['valid', 'all-video', 'partial-video', 'audio', 'audio-lost', 'unavailable'] as const).map((scenario) => ['darwin', scenario] as const) : []),
+      ? (['valid', 'all-video', 'partial-video', 'audio', 'audio-lost', 'audio-timing', 'unavailable'] as const).map((scenario) => ['darwin', scenario] as const) : []),
   ])('%s XML uses only complete and verifiable CFR content (%s)', async (platform, scenario) => {
     const record = await makeHistory(platform, scenario);
     const events: AppEvent[] = [];
@@ -179,6 +201,30 @@ describe.skipIf(!ffmpeg || !ffprobe)('CFR content integrity through HistoryStore
     expect(stored.analysis.video.path).toBe(record.analysis.video.path);
     expect(stored.completion_kind).toBe('export');
   }, 60_000);
+
+  it.each([['space', 'DISK_SPACE_LOW'], ['write', 'OUTPUT_DIRECTORY_UNWRITABLE']] as const)(
+    'reports %s preflight failure without adopting an existing output', async (fault, code) => {
+      const record = await makeHistory('win32', 'valid');
+      const recordPath = path.join(root, 'history-win32-valid', 'records', `${record.id}.json`);
+      const persistedBefore = await readFile(recordPath);
+      const output = path.join(root, `existing-${fault}.mp4`);
+      await copyFile(source, output);
+      const outputBefore = await readFile(output);
+      const events: AppEvent[] = [];
+      const window = { isDestroyed: () => false, webContents: { send: (_: string, event: AppEvent) => events.push(event) } } as unknown as BrowserWindow;
+      state.output = output; state.preflightFault = fault;
+      try {
+        const taskId = await startExport(window, { analysis_id: record.id, destination: 'prompt',
+          selection: { mode: 'custom', segments: [{ rally_id: 'rally_001', start_time_seconds: 1, end_time_seconds: 2 }] },
+          outputs: { combined_video: true, rally_videos: false, premiere_xml: false } });
+        await vi.waitFor(() => expect(events.some((event) => event.type === 'export-result' || event.type === 'error')).toBe(true), { timeout: 30_000 });
+        expect(events.filter((event) => event.type === 'export-result' || event.type === 'error')).toEqual([
+          expect.objectContaining({ type: 'error', taskId, code }),
+        ]);
+        expect(await readFile(output)).toEqual(outputBefore);
+        expect(await readFile(recordPath)).toEqual(persistedBefore);
+      } finally { state.preflightFault = ''; state.output = ''; }
+    }, 45_000);
 
   it.each([
     ...(['libmp3lame', 'alac'] as const).map((codec) => ['win32', codec] as const),
@@ -299,6 +345,163 @@ describe.skipIf(!ffmpeg || !ffprobe)('CFR content integrity through HistoryStore
       state.ffprobe = ffprobe!;
     }
   }, 30_000);
+
+  it.skipIf(actualPlatform !== 'darwin' || !process.env.TTCUT_MAC_MEDIA_RUNTIME)(
+    'registers a macOS export before probing its CFR cache and cancels the native probe', async () => {
+      const record = await makeHistory('darwin', 'valid');
+      const runtime = path.join(root, 'slow-native-runtime');
+      const worker = path.join(runtime, 'bin', 'TTcutMediaWorker');
+      const marker = path.join(root, 'native-probe-pid');
+      const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+      await mkdir(path.dirname(worker), { recursive: true });
+      await writeFile(worker, `#!/bin/sh\necho $$ > ${shellQuote(marker)}\nexec /bin/sleep 30\n`);
+      await chmod(worker, 0o755);
+      state.runtime = runtime;
+      const events: AppEvent[] = [];
+      const window = { isDestroyed: () => false, webContents: { send: (_: string, event: AppEvent) => events.push(event) } } as unknown as BrowserWindow;
+      const pending = startExport(window, { analysis_id: record.id, destination: 'source',
+        selection: { mode: 'custom', segments: [{ rally_id: 'rally_001', start_time_seconds: 1, end_time_seconds: 2 }] },
+        outputs: { combined_video: true, rally_videos: false, premiere_xml: false } });
+      try {
+        await vi.waitFor(async () => { await access(marker); }, { timeout: 10_000 });
+        const taskId = await Promise.race([pending, new Promise<never>((_, reject) => setTimeout(() => reject(new Error('startExport still pending')), 500))]);
+        expect(events).toContainEqual(expect.objectContaining({ type: 'progress', data: expect.objectContaining({ taskId, stage: 'preparing' }) }));
+        await cancelTask(taskId, 'user');
+        await vi.waitFor(() => expect(events.some((event) => event.type === 'error')).toBe(true), { timeout: 10_000 });
+        expect(events.filter((event) => event.type === 'error' || event.type === 'export-result')).toEqual([
+          expect.objectContaining({ type: 'error', taskId, code: 'EXPORT_CANCELLED' }),
+        ]);
+      } finally {
+        state.runtime = '';
+        const pid = Number(await readFile(marker, 'utf8').catch(() => '0'));
+        if (pid > 0) { try { process.kill(-pid, 'SIGKILL'); } catch { /* probe already stopped */ } }
+        for (const task of activeTaskIds()) await cancelTask(task, 'user');
+        await pending.catch(() => undefined);
+      }
+    }, 30_000);
+
+  it.skipIf(actualPlatform === 'win32').each(['xml', 'combined', 'both'] as const)(
+    'rejects %s fallback if the verified original changes during cache validation', async (scenario) => {
+      const input = path.join(root, `changing-${scenario}.mp4`);
+      const replacement = path.join(root, `replacement-${scenario}.mp4`);
+      await copyFile(source, input);
+      await runProcess(ffmpeg!, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=blue:s=160x90:r=30:d=4',
+        '-c:v', 'libx264', '-pix_fmt', 'yuv420p', replacement]);
+      const record = await makeHistory('win32', 'partial-video', input);
+      const marker = path.join(root, `source-scan-${scenario}`);
+      const release = path.join(root, `source-release-${scenario}`);
+      const wrapper = path.join(root, `source-ffprobe-${scenario}.sh`);
+      const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+      await writeFile(wrapper, `#!/bin/sh\ncase " $* " in *" -count_frames "*) touch ${shellQuote(marker)}; while [ ! -f ${shellQuote(release)} ]; do sleep 0.05; done;; esac\nexec ${shellQuote(ffprobe!)} "$@"\n`);
+      await chmod(wrapper, 0o755); state.ffprobe = wrapper;
+      const events: AppEvent[] = [];
+      const window = { isDestroyed: () => false, webContents: { send: (_: string, event: AppEvent) => events.push(event) } } as unknown as BrowserWindow;
+      try {
+        const taskId = await startExport(window, { analysis_id: record.id, destination: 'source',
+          selection: { mode: 'custom', segments: [{ rally_id: 'rally_001', start_time_seconds: 1, end_time_seconds: 2 }] },
+          outputs: { combined_video: scenario === 'combined', rally_videos: scenario === 'both', premiere_xml: scenario !== 'combined' } });
+        await vi.waitFor(async () => { await access(marker); }, { timeout: 10_000 });
+        await copyFile(replacement, input); await writeFile(release, 'release');
+        await vi.waitFor(() => expect(events.some((event) => event.type === 'error' || event.type === 'export-result')).toBe(true), { timeout: 30_000 });
+        const terminal = events.filter((event) => event.type === 'error' || event.type === 'export-result');
+        expect(terminal).toHaveLength(1);
+        if (scenario === 'combined') expect(terminal[0]).toMatchObject({ type: 'error', taskId, code: 'HISTORY_SOURCE_CHANGED' });
+        else expect(terminal[0]).toMatchObject({ type: 'error', taskId, artifacts: { xmlFailure: { code: 'HISTORY_SOURCE_CHANGED' },
+          ...(scenario === 'both' ? { failedRallies: [{ code: 'HISTORY_SOURCE_CHANGED' }] } : {}) } });
+      } finally { await writeFile(release, 'release').catch(() => undefined); state.ffprobe = ffprobe!; }
+    }, 45_000);
+
+  it('does not publish XML if its source changes while the XML is being written', async () => {
+    const input = path.join(root, 'source-change-during-xml.mp4');
+    await copyFile(source, input);
+    const record = await makeHistory('win32', 'valid', input);
+    state.afterXmlWrite = async () => { await writeFile(input, 'source replaced during XML write'); };
+    const events: AppEvent[] = [];
+    const window = { isDestroyed: () => false, webContents: { send: (_: string, event: AppEvent) => events.push(event) } } as unknown as BrowserWindow;
+    try {
+      const taskId = await startExport(window, { analysis_id: record.id, destination: 'source',
+        selection: { mode: 'custom', segments: [{ rally_id: 'rally_001', start_time_seconds: 1, end_time_seconds: 2 }] },
+        outputs: { combined_video: false, rally_videos: false, premiere_xml: true } });
+      await vi.waitFor(() => expect(events.some((event) => event.type === 'error' || event.type === 'export-result')).toBe(true), { timeout: 30_000 });
+      expect(events.filter((event) => event.type === 'error' || event.type === 'export-result')).toEqual([
+        expect.objectContaining({ type: 'error', taskId, artifacts: expect.objectContaining({ xmlFailure: expect.objectContaining({ code: 'HISTORY_SOURCE_CHANGED' }) }) }),
+      ]);
+      expect((await readdir(root)).some((name) => name.startsWith('source-change-during-xml_TTcut_'))).toBe(false);
+    } finally { state.afterXmlWrite = null; }
+  }, 45_000);
+
+  it('retains published XML when the source changes before video preparation', async () => {
+    const input = path.join(root, 'source-change-after-xml.mp4');
+    await copyFile(source, input);
+    const record = await makeHistory('win32', 'valid', input);
+    state.afterXml = async () => { await writeFile(input, 'source replaced after XML'); };
+    const events: AppEvent[] = [];
+    const window = { isDestroyed: () => false, webContents: { send: (_: string, event: AppEvent) => events.push(event) } } as unknown as BrowserWindow;
+    try {
+      await startExport(window, { analysis_id: record.id, destination: 'source',
+        selection: { mode: 'custom', segments: [{ rally_id: 'rally_001', start_time_seconds: 1, end_time_seconds: 2 }] },
+        outputs: { combined_video: false, rally_videos: true, premiere_xml: true } });
+      await vi.waitFor(() => expect(events.some((event) => event.type === 'error' || event.type === 'export-result')).toBe(true), { timeout: 30_000 });
+      const result = events.find((event) => event.type === 'export-result');
+      if (result?.type !== 'export-result' || result.data.kind !== 'custom-artifacts') throw new Error(JSON.stringify(events));
+      expect(result.data).toMatchObject({ partialSuccess: true, failedRallies: [{ code: 'HISTORY_SOURCE_CHANGED' }], rallyVideos: [] });
+      expect(result.data.premiereXml).not.toBeNull();
+      await expect(access(result.data.premiereXml!.outputPath)).resolves.toBeUndefined();
+    } finally { state.afterXml = null; }
+  }, 45_000);
+
+  it('does not publish a segment when the source changes during rendering', async () => {
+    const input = path.join(root, 'source-change-during-render.mp4');
+    await copyFile(source, input);
+    const record = await makeHistory('win32', 'valid', input);
+    state.afterSegment = async () => { await writeFile(input, 'source replaced during render'); };
+    const events: AppEvent[] = [];
+    const window = { isDestroyed: () => false, webContents: { send: (_: string, event: AppEvent) => events.push(event) } } as unknown as BrowserWindow;
+    try {
+      const taskId = await startExport(window, { analysis_id: record.id, destination: 'source',
+        selection: { mode: 'custom', segments: [{ rally_id: 'rally_001', start_time_seconds: 1, end_time_seconds: 2 }] },
+        outputs: { combined_video: false, rally_videos: true, premiere_xml: false } });
+      await vi.waitFor(() => expect(events.some((event) => event.type === 'error' || event.type === 'export-result')).toBe(true), { timeout: 30_000 });
+      expect(events.filter((event) => event.type === 'error' || event.type === 'export-result')).toEqual([
+        expect.objectContaining({ type: 'error', taskId, artifacts: expect.objectContaining({ failedRallies: [expect.objectContaining({ code: 'HISTORY_SOURCE_CHANGED' })] }) }),
+      ]);
+    } finally { state.afterSegment = null; }
+  }, 45_000);
+
+  it.skipIf(actualPlatform !== 'darwin' || !process.env.TTCUT_MAC_MEDIA_RUNTIME)(
+    'keeps ordinary macOS history opening strict while export defers the cache probe', async () => {
+      const record = await makeHistory('darwin', 'valid');
+      await writeFile(record.analysis.video.path, 'not media');
+      await expect(state.store!.open(record.id)).rejects.toThrow('HISTORY_PROCESSING_MEDIA_CORRUPT');
+      await expect(state.store!.open(record.id, { purpose: 'export' })).resolves.toMatchObject({
+        analysis: { video: { path: record.analysis.video.path }, processing: { mode: 'normalized_cfr' } },
+      });
+    });
+
+  it.skipIf(actualPlatform === 'win32')('never retains a failed partial when its source changed during rendering', async () => {
+    const input = path.join(root, 'source-change-failed-render.mp4');
+    const replacement = path.join(root, 'replacement-failed-render.mp4');
+    await copyFile(source, input);
+    await runProcess(ffmpeg!, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=blue:s=160x90:r=30:d=4',
+      '-c:v', 'libx264', '-pix_fmt', 'yuv420p', replacement]);
+    const record = await makeHistory('win32', 'valid', input);
+    const wrapper = path.join(root, 'source-change-failed-render.sh');
+    const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+    await writeFile(wrapper, `#!/bin/sh\n${shellQuote(ffmpeg!)} "$@" || exit $?\ncp ${shellQuote(replacement)} ${shellQuote(input)}\nexit 1\n`);
+    await chmod(wrapper, 0o755); state.ffmpegOverride = wrapper;
+    const events: AppEvent[] = [];
+    const window = { isDestroyed: () => false, webContents: { send: (_: string, event: AppEvent) => events.push(event) } } as unknown as BrowserWindow;
+    try {
+      const taskId = await startExport(window, { analysis_id: record.id, destination: 'source',
+        selection: { mode: 'custom', segments: [{ rally_id: 'rally_001', start_time_seconds: 1, end_time_seconds: 2 }] },
+        outputs: { combined_video: true, rally_videos: false, premiere_xml: false } });
+      await vi.waitFor(() => expect(events.some((event) => event.type === 'error' || event.type === 'export-result')).toBe(true), { timeout: 30_000 });
+      expect(events.filter((event) => event.type === 'error' || event.type === 'export-result')).toEqual([
+        expect.objectContaining({ type: 'error', taskId, code: 'HISTORY_SOURCE_CHANGED' }),
+      ]);
+      expect((await readdir(root)).some((name) => name.includes('source-change-failed-render_TTcut'))).toBe(false);
+    } finally { state.ffmpegOverride = ''; }
+  }, 45_000);
 
   it.skipIf(actualPlatform === 'win32')('cancels the full-content check without writing XML or falling back', async () => {
     const record = await makeHistory('win32', 'valid');

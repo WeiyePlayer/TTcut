@@ -340,6 +340,16 @@ export class HistoryStore {
     return record;
   }
 
+  /** Recheck the persisted source identity immediately before export uses or publishes it. */
+  async assertExportSource(expected: HistoryRecordV1): Promise<void> {
+    const current = await this.loadRecord(expected.id);
+    if (!current) throw new Error('HISTORY_RECORD_INVALID');
+    if (!sameSource(current.source, expected.source)) throw new Error('HISTORY_SOURCE_CHANGED');
+    const status = await this.sourceStatus(expected.source);
+    if (status === 'missing') throw new Error('HISTORY_SOURCE_MISSING');
+    if (status === 'changed') throw new Error('HISTORY_SOURCE_CHANGED');
+  }
+
   async open(id: string, options?: { purpose: 'export' }): Promise<HistoryRecordV1> {
     let record = await this.verifiedRecord(id);
     // Only the source whose identity was checked above may be used as an
@@ -367,7 +377,9 @@ export class HistoryStore {
         // sourceStatus above already verified the original's stored fingerprint.
         if (!canRecoverOriginal) throw new Error('HISTORY_PROCESSING_MEDIA_MISSING');
       }
-      if (process.platform === 'darwin' && record.analysis.video.native_video) {
+      // Export validates the cache inside its cancellable task; normal history
+      // activation still performs its existing strict native probe here.
+      if (options?.purpose !== 'export' && process.platform === 'darwin' && record.analysis.video.native_video) {
         const expected = record.analysis.video;
         const actual = await probeMacVideo(expected.path).catch(() => null);
         if (!actual || actual.variable_frame_rate || actual.width !== expected.width || actual.height !== expected.height
