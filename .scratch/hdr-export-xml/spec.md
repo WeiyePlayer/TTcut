@@ -14,6 +14,15 @@ Approved scope: Windows and macOS; local tickets only. Integration branch `fix/h
 - No mandatory new user request fields. Maintain compatibility with existing histories and native contracts. Output results expose actual color properties; artifact errors expose requested outputs and per-output failures.
 - A scoreboard score may carry optional `image_error: 'SCOREBOARD_RENDER_FAILED'` when renderer font/canvas preparation fails and XML was also requested. Main treats this as a video preparation failure and still writes XML; it must not silently export the video without its requested overlay.
 
+## Audit remediation
+
+- Export-only CFR selection validates the existing cache's actual CFR, frame rate, duration, geometry, audio and color against its recorded properties. Missing, corrupt, unprobeable, mismatched or uncopyable caches fall back to the original only when its path matches the source identity verified by history. XML requires no encoder or new CFR transcode.
+- Export history completion updates the original stored analysis after source identity validation; it does not re-require a missing analysis cache or persist a task-local fallback. A failed history write after the video has been validated and published yields a successful result with `EXPORT_HISTORY_UPDATE_FAILED` warning.
+- A media-component failure does not preempt an XML request. Existing selected video can always be deselected. Export logging is non-fatal, including asynchronous subprocess logging; non-cancellation failures preserve published artifacts and clean up unpublished files.
+- Dynamic HDR-to-SDR validation checks every output frame's HDR side-data names with bounded-memory streaming, for each segment and final output, on both platforms. Ordinary SDR and HDR10/HLG retain their existing validation policy. This adds a full decode pass per validated dynamic-HDR segment/final file; performance has not been characterized.
+- Missing PPS/SPS/VPS diagnostics on a sought dynamic-HDR HEVC segment trigger at most one retry from the source beginning, retaining ranges and color plan; unrelated failures and cancellation do not trigger retry.
+- Combined and individual-rally results expose optional `outputColor` containing the actual output's `video_codec`, `pixel_format`, `color_range`, `color_space`, `color_transfer`, `color_primaries` and `media_fidelity`; unknown values are null. The old `outputMediaFidelity` remains supported. Preview prefers actual output color information.
+
 ## Validation and workflow
 
 - Use implement-spec: isolated ticket worktrees/branches, TDD at existing approved public seams, merge through a merger agent, two-axis code-review, fix findings, then clean up ticket worktrees. Local issue statuses reflect completed implementation and evidence, including explicit validation limits.
@@ -27,3 +36,4 @@ Approved scope: Windows and macOS; local tickets only. Integration branch `fix/h
 1. XML independent export and accurate feedback (no blockers).
 2. Windows automatic dynamic HDR to SDR (no blockers).
 3. macOS automatic conversion and integrated validation (blocked by 2).
+4. Audit remediation for independent artifacts, history and output-color validation (implementation based on `4dd3525c`).

@@ -13,6 +13,7 @@ vi.mock('electron', () => ({
 }));
 
 vi.mock('../src/main/probe', () => ({
+  hasHdrFrameSideData: vi.fn().mockResolvedValue(false),
   probeAudioPacketBoundaries: vi.fn(),
   probeKeyframes: vi.fn(),
   probeStreamSignature: vi.fn(),

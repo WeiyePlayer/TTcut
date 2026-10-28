@@ -416,7 +416,7 @@ describe('export task start and terminal lifecycle', () => {
     expect(state.analysis.video.path).toBe(cache);
   });
 
-  it('copies a trustworthy CFR source for XML even when the original has gone', async () => {
+  it('copies a CFR source for XML after validating its recorded properties', async () => {
     const cache = path.join(directory, 'trusted-cfr.mp4');
     await writeFile(cache, 'trusted CFR bytes');
     state.analysis = { schema_version: 1,
@@ -428,7 +428,7 @@ describe('export task start and terminal lifecycle', () => {
       processing: { mode: 'normalized_cfr', target_fps_ratio: '30/1', encoder: 'libx265', warning_code: null },
       rallies: [{ id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 10, end_time_seconds: 12 }],
     };
-    await rm(state.source);
+    vi.mocked(probeVideo).mockResolvedValue(state.analysis.video);
     const taskId = await startExport(windowMock() as never, { analysis_id: request.analysis_id,
       selection: { mode: 'custom', segments: [{ rally_id: 'rally_001', start_time_seconds: 8, end_time_seconds: 14 }] },
       destination: 'source', outputs: { combined_video: false, rally_videos: false, premiere_xml: true } });
@@ -438,7 +438,6 @@ describe('export task start and terminal lifecycle', () => {
     expect(result.data.premiereXml!.quantizedForVfr).toBe(false);
     expect(await readFile(path.join(result.data.outputDirectory, 'source_TTcut_CFR.mp4'), 'utf8')).toBe('trusted CFR bytes');
     expect(await readFile(result.data.premiereXml!.outputPath, 'utf8')).toContain('source_TTcut_CFR.mp4');
-    expect(resolveUsableMediaComponents).not.toHaveBeenCalled();
   });
 
   it('reports video-only failures without claiming XML was requested', async () => {
@@ -458,6 +457,24 @@ describe('export task start and terminal lifecycle', () => {
         failedRallies: [{ code: 'DYNAMIC_HDR_UNSUPPORTED', rallyIndex: 1 }], xmlFailure: null,
       },
     });
+  });
+
+  it('retains XML and reports the video failure after an unexpected video-stage exception', async () => {
+    state.keyframes.mockImplementationOnce(async () => []);
+    const window = { isDestroyed: () => false, webContents: { send: (_channel: string, event: AppEvent) => {
+      if (event.type === 'progress' && event.data.stage === 'exporting-rallies') throw new Error('VIDEO_STAGE_FAILED');
+      state.events.push(event);
+    } } };
+    const taskId = await startExport(window as never, { analysis_id: request.analysis_id,
+      selection: { mode: 'custom', segments: [{ rally_id: 'rally_001', start_time_seconds: 8, end_time_seconds: 14 }] },
+      destination: 'source', outputs: { combined_video: false, rally_videos: true, premiere_xml: true } });
+    await waitForTaskEnd(taskId);
+    const terminal = state.events.filter((event) => event.type === 'error' || event.type === 'export-result');
+    expect(terminal).toHaveLength(1);
+    const result = terminal[0];
+    if (result?.type !== 'export-result' || result.data.kind !== 'custom-artifacts') throw new Error(JSON.stringify(result));
+    expect(result.data).toMatchObject({ partialSuccess: true, failedRallies: [{ code: 'VIDEO_STAGE_FAILED' }], xmlFailure: null });
+    expect(await readFile(result.data.premiereXml!.outputPath, 'utf8')).toContain('source.mp4');
   });
 
   it('exports XML when media component validation fails', async () => {
