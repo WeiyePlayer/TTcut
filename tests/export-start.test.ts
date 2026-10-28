@@ -51,6 +51,7 @@ vi.mock('../src/main/media-protocol', () => ({
 }));
 
 vi.mock('../src/main/probe', () => ({
+  hasCompleteCfrContent: vi.fn().mockResolvedValue(true),
   probeAudioPacketBoundaries: vi.fn().mockResolvedValue([]),
   probeKeyframes: state.keyframes,
   probeStreamSignature: vi.fn(),

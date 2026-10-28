@@ -197,6 +197,7 @@ export async function hasHdrFrameSideData(videoPath: string, signal?: AbortSigna
   await runProcess(ffprobe, ['-v', 'error', '-select_streams', 'v:0', '-show_frames',
     '-show_entries', 'frame=:frame_side_data=side_data_type', '-of', 'compact=p=0:nk=1', videoPath], {
     ...(signal ? { signal } : {}),
+    stderrMaxChars: 16_384,
     onStdout: (chunk) => {
       const text = `${tail}${chunk}`;
       if (/DOVI|Dolby Vision|HDR|Mastering display|Content light/i.test(text)) found = true;
@@ -204,6 +205,24 @@ export async function hasHdrFrameSideData(videoPath: string, signal?: AbortSigna
     },
   });
   return found;
+}
+
+/** A readable container header is insufficient: decode the complete CFR audio and video streams. */
+export async function hasCompleteCfrContent(videoPath: string, hasAudio: boolean, signal?: AbortSignal): Promise<boolean> {
+  const { ffprobe } = await resolveUsableMediaComponents();
+  if (!ffprobe) throw new Error('MEDIA_COMPONENT_MISSING');
+  for (const stream of hasAudio ? ['v:0', 'a:0'] : ['v:0']) {
+    const result = await runProcess(ffprobe, ['-v', 'error', '-threads', '0', '-err_detect', 'explode', '-select_streams', stream,
+      '-count_frames', '-show_entries', 'stream=nb_frames,nb_read_frames', '-of', 'json', videoPath], {
+      ...(signal ? { signal } : {}), stderrMaxChars: 16_384,
+    });
+    if (result.stderr.trim()) return false;
+    const info = parseJson<{ streams?: ProbeStream[] }>(result.stdout).streams?.[0];
+    const decoded = optionalInteger(info?.nb_read_frames);
+    const declared = optionalInteger(info?.nb_frames);
+    if (!decoded || (stream === 'v:0' && declared !== null && decoded !== declared)) return false;
+  }
+  return true;
 }
 
 export async function probeKeyframes(

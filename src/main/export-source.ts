@@ -1,5 +1,5 @@
 import type { AnalysisResultV1, VideoMetadata } from '../shared/contracts';
-import { probeVideo } from './probe';
+import { hasCompleteCfrContent, probeVideo } from './probe';
 import { fidelityMismatch, mediaFidelity } from '../domain/media-fidelity';
 
 /** An existing cache is usable for export only if its current contents still match its recorded properties. */
@@ -7,6 +7,7 @@ export async function usableExportCfr(analysis: AnalysisResultV1, signal?: Abort
   const expected = analysis.video;
   if (analysis.processing?.mode !== 'normalized_cfr' || !(expected.media_fidelity || expected.native_video)) return null;
   try {
+    if (!await hasCompleteCfrContent(expected.path, expected.audio_codec !== null, signal)) return null;
     const actual = await probeVideo(expected.path, signal, 'interactive');
     const recordedFidelity = mediaFidelity(expected);
     const actualFidelity = mediaFidelity(actual);
