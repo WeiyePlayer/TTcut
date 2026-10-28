@@ -721,6 +721,27 @@ describe('App workflow notices and multi-task entry', () => {
     expect(screen.queryByText('Export XML')).toBeNull();
   });
 
+  it('does not restore an active export after cancellation arrived before its task ID', async () => {
+    bootstrap.settings.language = 'en';
+    const selected = { path: 'C:/video/first.mp4', name: 'first.mp4', size: 100, mediaUrl: 'ttcut-media://first' };
+    selectVideos.mockResolvedValue([selected]);
+    let reply!: (taskId: string) => void;
+    vi.mocked(window.ttcut.startExport).mockReturnValue(new Promise<string>((resolve) => { reply = resolve; }));
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose or drop a file here' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start analysis' }));
+    act(() => taskListener?.({ type: 'analysis-result', taskId: 'analysis-task-1', analysisId: '11111111-1111-4111-8111-111111111111', calibration,
+      data: { schema_version: 1, video: metadata(selected.path), rallies: [
+        { id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 1, end_time_seconds: 5 },
+      ] } }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start cutting' }));
+    await waitFor(() => expect(window.ttcut.startExport).toHaveBeenCalledOnce());
+    act(() => taskListener?.({ type: 'error', taskId: 'export-task-1', code: 'EXPORT_CANCELLED', message: 'cancelled' }));
+    expect(await screen.findByRole('button', { name: 'Back' })).toBeVisible();
+    await act(async () => { reply('export-task-1'); });
+    expect(screen.getByRole('button', { name: 'Back' })).toBeVisible();
+  });
+
   it('exports current custom ranges when draft persistence fails after the CFR cache disappears', async () => {
     bootstrap.settings.language = 'en';
     const selected = { path: 'C:/video/first.mp4', name: 'first.mp4', size: 100, mediaUrl: 'ttcut-media://first' };
