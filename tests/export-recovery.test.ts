@@ -25,7 +25,7 @@ describe('usable export output recovery', () => {
     const output = path.join(directory, 'output.mp4');
     await writeFile(partial, 'completed output');
 
-    const retained = await retainUsableExportOutput(partial, output, async () => true);
+    const retained = await retainUsableExportOutput(partial, output, async () => true, { partial: true, output: false });
 
     expect(retained).toEqual({ path: output, renamed: true });
     await expect(access(output)).resolves.toBeUndefined();
@@ -40,7 +40,7 @@ describe('usable export output recovery', () => {
     await writeFile(output, 'occupied output');
     await writeFile(firstRecovery, 'older recovery');
 
-    const retained = await retainUsableExportOutput(partial, output, async () => true);
+    const retained = await retainUsableExportOutput(partial, output, async () => true, { partial: true, output: false });
 
     expect(retained).toEqual({ path: path.join(directory, 'output_with_warning_2.mp4'), renamed: true });
     await expect(access(retained!.path)).resolves.toBeUndefined();
@@ -52,7 +52,7 @@ describe('usable export output recovery', () => {
     const output = path.join(directory, 'missing', 'output.mp4');
     await writeFile(partial, 'completed output');
 
-    const retained = await retainUsableExportOutput(partial, output, async () => true);
+    const retained = await retainUsableExportOutput(partial, output, async () => true, { partial: true, output: false });
 
     expect(retained).toEqual({ path: partial, renamed: false });
     await expect(access(partial)).resolves.toBeUndefined();
@@ -63,7 +63,7 @@ describe('usable export output recovery', () => {
     const output = path.join(directory, 'output.mp4');
     await writeFile(partial, 'broken output');
 
-    const retained = await retainUsableExportOutput(partial, output, async () => false);
+    const retained = await retainUsableExportOutput(partial, output, async () => false, { partial: true, output: false });
 
     expect(retained).toBeNull();
     await expect(access(partial)).resolves.toBeUndefined();
@@ -74,8 +74,20 @@ describe('usable export output recovery', () => {
     const output = path.join(directory, 'output.mp4');
     await writeFile(output, 'completed output');
 
-    const retained = await retainUsableExportOutput(partial, output, async () => true);
+    const retained = await retainUsableExportOutput(partial, output, async () => true, { partial: false, output: true });
 
     expect(retained).toEqual({ path: output, renamed: false });
+  });
+
+  it('does not adopt a file that the task did not create or publish', async () => {
+    const partial = path.join(directory, '.output.partial.mp4');
+    const output = path.join(directory, 'output.mp4');
+    await writeFile(partial, 'someone else partial');
+    await writeFile(output, 'someone else output');
+
+    const retained = await retainUsableExportOutput(partial, output, async () => true, { partial: false, output: false });
+    expect(retained).toBeNull();
+    await expect(access(partial)).resolves.toBeUndefined();
+    await expect(access(output)).resolves.toBeUndefined();
   });
 });
