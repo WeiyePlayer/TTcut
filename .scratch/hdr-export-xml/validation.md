@@ -20,6 +20,8 @@
 - 2026-10-27 补充修复：真实 [FF Pictures HDR10+ 实景测试片](https://ff.de/hdr10plus-metadata-test/) 从 [Internet Archive 镜像](https://archive.org/details/hdr10test_lake_2021_02_01) 获取，522323676 字节，SHA-256 `ff0aa117f4622387d7d76a33fb6094cb576dab8b8cb59fe18047a614c0e92a5f`；其 MD5 与镜像发布记录一致，官方网页未提供哈希。16–16.5 秒非黑画面在 macOS 原生 compatible／fast 算法以及 macOS 主机模拟 Windows TypeScript 路径均已导出 SDR，完整解码、逐帧 HDR 元数据清除、与仅改标签的像素差大于 5、源文件 SHA-256 前后不变。此项仍不代表 Windows 实机验收。
 - 审计修复定向检查：TypeScript 9 个文件 **113 passed，3 skipped**，类型检查通过；真实 FFmpeg 媒体集成 **26 passed**。原生真实 HDR10+、DV8.1／8.4、HDR10／HLG、后续帧静态 HDR 残留及 seek 参数集测试通过（5 项）；HDR10+ 两种原生算法的 SDR 与仅改标签对照平均 RGB 差均为 26.735。转换输出校验增加逐帧流式解码检查，性能开销尚未独立测量。
 - 2026-10-27 审计发现的六项 Spec 缺口及 HEVC seek 重试风险按本地工单 04 修复；集成两轴复审、最终 Electron 验证、Windows 实机及 Premiere 导入仍待完成。
+- 2026-10-28 集成复审补充：真实 HistoryStore + startExport 和生成的 H.264/AAC 文件验证缓存视频全损、后半段损坏、音频损坏、完整缓存、探测不可用、检查中取消及回源合并视频并写回历史；macOS arm64 原生 probe／worker 与 macOS 上模拟 Windows 路由均通过。使用随包 macOS FFprobe 的相关定向测试 **14 passed**，相关 TypeScript 测试 **45 passed，1 skipped**，类型检查通过。流式 HDR 校验的异常 stderr 由实际高输出子进程验证上限 16,384 字符。新增完整音视频解码带来的性能开销尚未测量；合法无报错的内容变化因旧缓存无内容哈希仍无法证明不存在。Windows 实机和 Premiere 导入仍待验收。
+- 同日 macOS arm64 并行负载下，对真实 4K/60 HDR10+ 视频的同一 5 秒窗口做 ffprobe 视频帧扫描：默认线程约 4.05 秒，输入参数 `-threads 0` 约 1.67 秒；完整 CFR 检查采用自动解码线程。此为单次比较，非完整 CFR 导出耗时或其他平台的性能保证，音频扫描也会另加开销。
 
 - 集成后的 App、export-start、export-history、history 定向检查：**78 passed，3 skipped**；类型检查、脚本语法和 `git diff --check` 通过。共享两平台自动色彩策略 10 项通过。
 - 在 `bb5405d2` 执行一次全量 TypeScript 测试：**633 passed，12 failed，48 skipped**，未宣称全量全绿。对未修改基线独立执行得到 **602 passed，12 failed，45 skipped**：既有失败包含 analysis-cleanup、Windows 路径布局、Windows probe 测试桩及缺失 `powershell.exe`。本分支已修正已有的 batch 测试平台断言；全量中另一次进程组时序失败在隔离复查通过（2 passed），analysis-cleanup 两项与基线一致仍失败。本次未扩大到无关运行时修复。
