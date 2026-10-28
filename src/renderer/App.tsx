@@ -150,6 +150,7 @@ export function App() {
   });
   const [progress, setProgress] = useState({ percent: 0, stage: 'probe' });
   const [activeTask, setActiveTask] = useState<string | null>(null);
+  const pendingExportStartRef = useRef<{ terminalTaskIds: Set<string> } | null>(null);
   const [videoTaskOwner, setVideoTaskOwnerState] = useState<VideoTaskOwner>(null);
   const videoTaskOwnerRef = useRef<VideoTaskOwner>(null);
   const [exportResult, setExportResult] = useState<ExportResult | null>(null);
@@ -201,6 +202,9 @@ export function App() {
     });
     const removeTask = window.ttcut.onTaskEvent((event: AppEvent) => {
       if (multiActiveRef.current) return;
+      if (event.type === 'export-result' || event.type === 'error') {
+        pendingExportStartRef.current?.terminalTaskIds.add(event.taskId);
+      }
       if (event.type === 'progress') {
         setActiveTask(event.data.taskId);
         setProgress({ percent: event.data.percent, stage: event.data.stage });
@@ -487,14 +491,19 @@ export function App() {
           scoreboardRequest.scores = scoreboardRequest.scores.map((score) => ({ ...score, image_error: 'SCOREBOARD_RENDER_FAILED' }));
         }
       }
-      setActiveTask(await window.ttcut.startExport({
+      const pending = { terminalTaskIds: new Set<string>() };
+      pendingExportStartRef.current = pending;
+      const taskId = await window.ttcut.startExport({
         analysis_id: analysisId,
         selection,
         destination: 'source',
         ...(scoreboardRequest ? { scoreboard: scoreboardRequest } : {}),
         ...(outputs ? { outputs } : {}),
-      }));
+      });
+      if (!pending.terminalTaskIds.has(taskId)) setActiveTask(taskId);
+      if (pendingExportStartRef.current === pending) pendingExportStartRef.current = null;
     } catch (caught) {
+      pendingExportStartRef.current = null;
       if (videoTaskOwnerRef.current === 'single') updateVideoTaskOwner(null);
       setError({ code: errorCode(caught) }); setStep('error');
     }

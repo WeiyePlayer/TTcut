@@ -1,4 +1,5 @@
 import type { AnalysisResultV1, VideoMetadata } from '../shared/contracts';
+import { stat } from 'node:fs/promises';
 import { hasCompleteCfrContent, probeVideo } from './probe';
 import { fidelityMismatch, mediaFidelity } from '../domain/media-fidelity';
 
@@ -41,10 +42,40 @@ export async function usableExportCfr(analysis: AnalysisResultV1, signal?: Abort
   }
 }
 
-export async function exportSourceVideo(analysis: AnalysisResultV1, signal?: AbortSignal): Promise<VideoMetadata> {
+/** Cache validation belongs to one task and is reused only while file identity is unchanged. */
+export function createExportCfrResolver(analysis: AnalysisResultV1, signal?: AbortSignal) {
+  let verified: { identity: string; metadata: VideoMetadata } | null = null;
+  const identity = async (): Promise<string | null> => {
+    if (signal?.aborted) throw Object.assign(new Error('PROCESS_CANCELLED'), { name: 'AbortError' });
+    const info = await stat(analysis.video.path, { bigint: true }).catch(() => null);
+    if (signal?.aborted) throw Object.assign(new Error('PROCESS_CANCELLED'), { name: 'AbortError' });
+    return info?.isFile() ? [info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs].join(':') : null;
+  };
+  return {
+    async resolve(): Promise<VideoMetadata | null> {
+      const before = await identity();
+      if (!before) { verified = null; return null; }
+      if (verified?.identity === before) return verified.metadata;
+      verified = null;
+      const metadata = await usableExportCfr(analysis, signal);
+      if (!metadata || await identity() !== before) return null;
+      verified = { identity: before, metadata };
+      return metadata;
+    },
+    async isCurrent(): Promise<boolean> {
+      return Boolean(verified && await identity() === verified.identity);
+    },
+  };
+}
+
+export async function exportSourceVideo(
+  analysis: AnalysisResultV1,
+  signal?: AbortSignal,
+  cfr = createExportCfrResolver(analysis, signal),
+): Promise<VideoMetadata> {
   let video = analysis.video;
   if (analysis.processing?.mode === 'normalized_cfr') {
-    const cached = await usableExportCfr(analysis, signal);
+    const cached = await cfr.resolve();
     if (cached) video = cached;
     else if (analysis.source_video) video = analysis.source_video;
     else throw new Error('HISTORY_PROCESSING_MEDIA_CORRUPT');

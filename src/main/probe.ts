@@ -211,18 +211,49 @@ export async function hasHdrFrameSideData(videoPath: string, signal?: AbortSigna
 export async function hasCompleteCfrContent(videoPath: string, hasAudio: boolean, signal?: AbortSignal): Promise<boolean> {
   const { ffprobe } = await resolveUsableMediaComponents();
   if (!ffprobe) throw new Error('MEDIA_COMPONENT_MISSING');
-  for (const stream of hasAudio ? ['v:0', 'a:0'] : ['v:0']) {
-    const result = await runProcess(ffprobe, ['-v', 'error', '-threads', '0', '-err_detect', 'explode', '-select_streams', stream,
-      '-count_frames', '-show_entries', 'stream=nb_frames,nb_read_frames', '-of', 'json', videoPath], {
-      ...(signal ? { signal } : {}), stderrMaxChars: 16_384,
-    });
-    if (result.stderr.trim()) return false;
-    const info = parseJson<{ streams?: ProbeStream[] }>(result.stdout).streams?.[0];
-    const decoded = optionalInteger(info?.nb_read_frames);
-    const declared = optionalInteger(info?.nb_frames);
-    if (!decoded || (stream === 'v:0' && declared !== null && decoded !== declared)) return false;
-  }
-  return true;
+  const video = await runProcess(ffprobe, ['-v', 'error', '-threads', '0', '-err_detect', 'explode', '-select_streams', 'v:0',
+    '-count_frames', '-show_entries', 'stream=nb_frames,nb_read_frames', '-of', 'json', videoPath], {
+    ...(signal ? { signal } : {}), stderrMaxChars: 16_384,
+  });
+  if (video.stderr.trim()) return false;
+  const info = parseJson<{ streams?: ProbeStream[] }>(video.stdout).streams?.[0];
+  const decoded = optionalInteger(info?.nb_read_frames);
+  const declared = optionalInteger(info?.nb_frames);
+  if (!decoded || (declared !== null && decoded !== declared)) return false;
+  if (!hasAudio) return true;
+
+  let pending = '';
+  let samples = 0;
+  let largestFrame = 0;
+  let sampleRate = 0;
+  let duration = 0;
+  let malformed = false;
+  const consume = (line: string) => {
+    if (line.startsWith('frame|')) {
+      const frame = Number(line.match(/(?:^|\|)nb_samples=(\d+)(?:\||$)/)?.[1]);
+      if (!Number.isSafeInteger(frame) || frame <= 0 || !Number.isSafeInteger(samples + frame)) malformed = true;
+      else { samples += frame; largestFrame = Math.max(largestFrame, frame); }
+    } else if (line.startsWith('stream|')) {
+      sampleRate = Number(line.match(/(?:^|\|)sample_rate=(\d+)(?:\||$)/)?.[1]);
+      duration = Number(line.match(/(?:^|\|)duration=([\d.]+)(?:\||$)/)?.[1]);
+    }
+  };
+  const audio = await runProcess(ffprobe, ['-v', 'error', '-threads', '0', '-err_detect', 'explode', '-select_streams', 'a:0',
+    '-count_frames', '-show_frames', '-show_entries', 'frame=nb_samples:stream=sample_rate,duration', '-of', 'compact=p=1', videoPath], {
+    ...(signal ? { signal } : {}), stderrMaxChars: 16_384,
+    onStdout: (chunk) => {
+      const lines = `${pending}${chunk}`.split('\n');
+      pending = lines.pop() ?? '';
+      for (const line of lines) consume(line.trim());
+      if (pending.length > 4096) { malformed = true; pending = pending.slice(-4096); }
+    },
+  });
+  if (pending) consume(pending.trim());
+  if (audio.stderr.trim() || malformed || !samples || !Number.isFinite(sampleRate) || sampleRate <= 0
+    || !Number.isFinite(duration) || duration <= 0) return false;
+  // Decode priming and the final partial frame vary by codec and container.
+  const tolerance = Math.min(0.25, Math.max(0.1, 2 * largestFrame / sampleRate));
+  return samples / sampleRate + tolerance >= duration;
 }
 
 export async function probeKeyframes(

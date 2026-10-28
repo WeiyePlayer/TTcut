@@ -21,7 +21,8 @@
 - 审计修复定向检查：TypeScript 9 个文件 **113 passed，3 skipped**，类型检查通过；真实 FFmpeg 媒体集成 **26 passed**。原生真实 HDR10+、DV8.1／8.4、HDR10／HLG、后续帧静态 HDR 残留及 seek 参数集测试通过（5 项）；HDR10+ 两种原生算法的 SDR 与仅改标签对照平均 RGB 差均为 26.735。转换输出校验增加逐帧流式解码检查，性能开销尚未独立测量。
 - 2026-10-27 审计发现的六项 Spec 缺口及 HEVC seek 重试风险按本地工单 04 修复；集成两轴复审、最终 Electron 验证、Windows 实机及 Premiere 导入仍待完成。
 - 2026-10-28 集成复审补充：真实 HistoryStore + startExport 和生成的 H.264/AAC 文件验证缓存视频全损、后半段损坏、音频损坏、完整缓存、探测不可用、检查中取消及回源合并视频并写回历史；macOS arm64 原生 probe／worker 与 macOS 上模拟 Windows 路由均通过。使用随包 macOS FFprobe 的相关定向测试 **14 passed**，相关 TypeScript 测试 **45 passed，1 skipped**，类型检查通过。流式 HDR 校验的异常 stderr 由实际高输出子进程验证上限 16,384 字符。新增完整音视频解码带来的性能开销尚未测量；合法无报错的内容变化因旧缓存无内容哈希仍无法证明不存在。Windows 实机和 Premiere 导入仍待验收。
-- 同日 macOS arm64 并行负载下，对真实 4K/60 HDR10+ 视频的同一 5 秒窗口做 ffprobe 视频帧扫描：默认线程约 4.05 秒，输入参数 `-threads 0` 约 1.67 秒；完整 CFR 检查采用自动解码线程。此为单次比较，非完整 CFR 导出耗时或其他平台的性能保证，音频扫描也会另加开销。
+- 同日 macOS arm64 并行负载下，对真实 4K/60 HDR10+ 16–21 秒湖景窗口做 ffprobe 视频帧扫描：`-threads 1` 为 20.581 秒、`-threads 0` 为 10.970 秒。此为原始动态 HDR 视频的单次比较，不是实际分析 CFR 缓存或完整导出耗时；音频扫描也会另加开销，不能外推到其他素材和平台。完整扫描可能慢于实时。整片单线程扫描运行约 98 秒仍未结束并被终止，不报告整片耗时。
+- 后续复审：在真实 HistoryStore 和 startExport 边界覆盖合并导出预检期间的取消、无解码错误的 AAC 音频尾段丢失、健康 AAC/MP3/ALAC、双产物复用及文件改写／替换／复制中变更／复制失败。延迟 IPC 回复的页面回归覆盖批量页早到失败、取消，以及单视频页取消后不恢复已结束任务。相关真实媒体测试 **27 passed**，TypeScript 与页面定向测试 **123 passed，1 skipped**；额外的真实 HDR10+／DV 媒体回归 **26 passed**。这些 Windows 路由仍在 macOS 模拟运行。
 
 - 集成后的 App、export-start、export-history、history 定向检查：**78 passed，3 skipped**；类型检查、脚本语法和 `git diff --check` 通过。共享两平台自动色彩策略 10 项通过。
 - 在 `bb5405d2` 执行一次全量 TypeScript 测试：**633 passed，12 failed，48 skipped**，未宣称全量全绿。对未修改基线独立执行得到 **602 passed，12 failed，45 skipped**：既有失败包含 analysis-cleanup、Windows 路径布局、Windows probe 测试桩及缺失 `powershell.exe`。本分支已修正已有的 batch 测试平台断言；全量中另一次进程组时序失败在隔离复查通过（2 passed），analysis-cleanup 两项与基线一致仍失败。本次未扩大到无关运行时修复。
