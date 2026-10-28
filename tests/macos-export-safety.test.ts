@@ -7,7 +7,7 @@ import type { BrowserWindow } from 'electron';
 const state=vi.hoisted(()=>({root:'',record:{} as any,fault:'',render:vi.fn()}));
 vi.mock('electron',()=>({app:{},dialog:{}}));
 vi.mock('../src/main/logger',()=>({logLine:vi.fn().mockResolvedValue(undefined)}));
-vi.mock('../src/main/history',()=>({getHistoryStore:()=>({open:async()=>state.record})}));
+vi.mock('../src/main/history',()=>({getHistoryStore:()=>({open:async()=>state.record,assertExportSource:async()=>{}})}));
 vi.mock('../src/main/components',()=>({resolveUsableMediaComponents:async()=>({ffmpeg:'bundled',ffprobe:'bundled',mediaEncoder:'libx264'})}));
 vi.mock('../src/main/macos/client',()=>({renderMacMedia:state.render}));
 vi.mock('node:fs/promises',async(importOriginal)=>{

@@ -25,7 +25,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     return actual.writeFile(...args);
   } };
 });
-vi.mock('../src/main/history', () => ({ getHistoryStore: () => ({ open: async () => historyState.record, markVisible: async () => {
+vi.mock('../src/main/history', () => ({ getHistoryStore: () => ({ open: async () => historyState.record, assertExportSource: async () => {}, markVisible: async () => {
   if (historyState.historyFailure) throw new Error('HISTORY_WRITE_FAILED');
 } }) }));
 

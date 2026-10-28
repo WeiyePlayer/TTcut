@@ -192,8 +192,9 @@ export async function retainUsableExportOutput(
   partial: string,
   output: string,
   isUsable: (candidate: string) => Promise<boolean>,
+  owned: { partial: boolean; output: boolean },
 ): Promise<{ path: string; renamed: boolean } | null> {
-  if (await available(partial)) {
+  if (owned.partial && await available(partial)) {
     if (!(await isUsable(partial))) return null;
     const candidate = await available(output) ? await uniqueWarningOutput(output) : output;
     try {
@@ -204,7 +205,7 @@ export async function retainUsableExportOutput(
       throw error;
     }
   }
-  if (await available(output) && await isUsable(output)) return { path: output, renamed: false };
+  if (owned.output && await available(output) && await isUsable(output)) return { path: output, renamed: false };
   return null;
 }
 
@@ -793,22 +794,28 @@ async function executeExport(
   let terminalEvent: Extract<AppEvent, { type: 'export-result' | 'error' }> | null = null;
   let finalTiming: ExportTimingAssessment | null = null;
   let finalMetadata: VideoMetadata | null = null;
+  let ownsPartial = false;
+  let publishedOutput = false;
+  let usesCfr = false;
+  const signal = getTaskController(taskId)?.signal;
+  const cfr = createExportCfrResolver(analysis, signal);
   const sendError = async (code: string, message: string): Promise<void> => {
     if (terminalEvent || !markTaskTerminal(taskId)) return;
     terminalEvent = { type: 'error', taskId, code, message };
   };
   try {
-    const signal = getTaskController(taskId)?.signal;
-    const cfr = createExportCfrResolver(analysis, signal);
     send(window, { type: 'progress', data: { taskId, kind: 'export', stage: 'preparing', percent: 0 } });
     // Resolve the task-local source only after the task is registered, so the
     // complete CFR check can be cancelled while the renderer has its task ID.
     analysis = { ...analysis, video: await exportSourceVideo(analysis, signal, cfr) };
-    const usesCfr = record.analysis.processing?.mode === 'normalized_cfr' && analysis.video.path === record.analysis.video.path;
+    usesCfr = record.analysis.processing?.mode === 'normalized_cfr' && analysis.video.path === record.analysis.video.path;
     assertExportNotCancelled(taskId);
+    await getHistoryStore().assertExportSource(record);
     await assertExportPreconditions(analysis.video.path, path.dirname(output), taskId, duration, analysis.video, components.mediaEncoder);
     assertExportNotCancelled(taskId);
     if (usesCfr && !await cfr.isCurrent()) throw new Error('HISTORY_PROCESSING_MEDIA_CORRUPT');
+    if (await available(partial)) throw new Error('OUTPUT_COLLISION');
+    ownsPartial = true;
     await logLine(taskId, 'INFO', `Export target: ${output}`);
     await logLine(taskId, 'INFO', 'Export strategy: fast segmented');
     await logLine(taskId, 'INFO', `Selected media encoder: ${selectMediaEncoder(exportColorPlan(analysis.video).target, components.mediaEncoder)}`);
@@ -939,8 +946,11 @@ async function executeExport(
     }
     if (!finalTiming || !finalMetadata) throw new Error('EXPORT_INVALID');
     if (usesCfr && !await cfr.isCurrent()) throw new Error('HISTORY_PROCESSING_MEDIA_CORRUPT');
+    await getHistoryStore().assertExportSource(record);
     if (await available(output)) throw new Error('OUTPUT_COLLISION');
     await rename(partial, output);
+    ownsPartial = false;
+    publishedOutput = true;
     await logLine(taskId, 'INFO', 'Export output published; updating history').catch(() => undefined);
     let historyWarning: { code: string; message: string } | undefined;
     try {
@@ -969,8 +979,19 @@ async function executeExport(
   } catch (error) {
     const controller = getTaskController(taskId);
     const cancelled = controller?.cancelRequested ?? false;
-    const message = cancelled ? 'EXPORT_CANCELLED' : error instanceof Error ? error.message : String(error);
-    const code = cancelled ? 'EXPORT_CANCELLED' : exportCode(error) ?? 'EXPORT_FAILED';
+    let message = cancelled ? 'EXPORT_CANCELLED' : error instanceof Error ? error.message : String(error);
+    let code = cancelled ? 'EXPORT_CANCELLED' : exportCode(error) ?? 'EXPORT_FAILED';
+    let sourceInvalid = false;
+    if (!cancelled && ownsPartial) {
+      try {
+        if (usesCfr && !await cfr.isCurrent()) throw new Error('HISTORY_PROCESSING_MEDIA_CORRUPT');
+        await getHistoryStore().assertExportSource(record);
+      } catch (sourceError) {
+        sourceInvalid = true;
+        message = sourceError instanceof Error ? sourceError.message : String(sourceError);
+        code = exportCode(sourceError) ?? 'EXPORT_FAILED';
+      }
+    }
     const cancelledForExit = code === 'EXPORT_CANCELLED' && controller?.cancelReason === 'app-exit';
     await logLine(taskId, cancelledForExit ? 'INFO' : 'ERROR', `${code}: ${message}`);
 
@@ -978,7 +999,8 @@ async function executeExport(
     // Timing errors are raised only after its codec/color/fidelity checks pass.
     const sourceHdr = mediaFidelity(analysis.video).hdr;
     const convertingDynamicHdr = sourceHdr === 'hdr10Plus' || sourceHdr === 'dolbyVision';
-    if (code !== 'EXPORT_CANCELLED' && code !== 'HISTORY_PROCESSING_MEDIA_CORRUPT'
+    if (!sourceInvalid && code !== 'EXPORT_CANCELLED' && code !== 'HISTORY_PROCESSING_MEDIA_CORRUPT'
+      && code !== 'HISTORY_SOURCE_CHANGED' && code !== 'HISTORY_SOURCE_MISSING'
       && (!convertingDynamicHdr || error instanceof ExportDurationMismatchError)) {
       try {
         const retained = await retainUsableExportOutput(partial, output, async (candidate) => {
@@ -989,7 +1011,7 @@ async function executeExport(
             await logLine(taskId, 'WARN', `Generated output is not playable and will not be retained: ${String(probeError)}`);
             return false;
           }
-        });
+        }, { partial: ownsPartial, output: publishedOutput });
         if (retained) {
           const recoveredMetadata = await probeVideo(retained.path);
           const recoveredTiming = error instanceof ExportDurationMismatchError
@@ -1030,7 +1052,7 @@ async function executeExport(
       }
     }
 
-    await rm(partial, { force: true }).catch(() => undefined);
+    if (ownsPartial) await rm(partial, { force: true }).catch(() => undefined);
     if (!cancelledForExit) {
       await sendError(code, message);
     } else {
@@ -1121,6 +1143,7 @@ async function executeCustomArtifactExport(
         } else if (!cachedSource?.isFile() || cachedSource.size <= 0) {
           xmlMetadata = analysis.source_video ?? analysis.video;
         }
+        await getHistoryStore().assertExportSource(record);
         const source = await stat(xmlMetadata.path).catch(() => null);
         if (!source?.isFile() || source.size <= 0) throw new Error('INPUT_MOVED');
         if (copyCfr) {
@@ -1150,6 +1173,7 @@ async function executeCustomArtifactExport(
         const generated = buildPremiereXml(xmlMetadata, segments, `${base}_TTcut_自定义`);
         await writeFile(partialPath, generated.xml, 'utf8');
         assertExportNotCancelled(taskId);
+        await getHistoryStore().assertExportSource(record);
         await rename(partialPath, finalPath);
         partialFiles.delete(partialPath);
         premiereXml = { outputPath: finalPath, quantizedForVfr: generated.quantizedForVfr };
@@ -1180,6 +1204,7 @@ async function executeCustomArtifactExport(
       let scoreboardAssets: ScoreboardAsset[] | undefined;
       try {
         video = await exportSourceVideo(analysis, signal, cfr);
+        await getHistoryStore().assertExportSource(record);
         scoreboardAssets = scoreboards ? await writeScoreboardAssets(scoreboardDirectory, video, scoreboards) : undefined;
         await assertExportPreconditions(
           video.path,
@@ -1212,6 +1237,7 @@ async function executeCustomArtifactExport(
         try {
           const usesCfr = analysis.processing?.mode === 'normalized_cfr' && video.path === analysis.video.path;
           if (usesCfr && !await cfr.isCurrent()) throw new Error('HISTORY_PROCESSING_MEDIA_CORRUPT');
+          await getHistoryStore().assertExportSource(record);
           let outputMetadata: VideoMetadata | null;
           if (process.platform === 'darwin') {
             outputMetadata = await renderMacMedia(taskId, 'export', video.path, partialPath, [segment], undefined, scoreboardAssets ? [scoreboardAssets[offset]!] : undefined);
@@ -1227,6 +1253,7 @@ async function executeCustomArtifactExport(
           if (!outputMetadata) throw new Error('EXPORT_INVALID');
           assertExportNotCancelled(taskId);
           if (usesCfr && !await cfr.isCurrent()) throw new Error('HISTORY_PROCESSING_MEDIA_CORRUPT');
+          await getHistoryStore().assertExportSource(record);
           await rename(partialPath, finalPath);
           partialFiles.delete(partialPath);
           rallyVideos.push({
