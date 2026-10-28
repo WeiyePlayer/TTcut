@@ -188,6 +188,24 @@ export async function probeVideo(videoPath: string, signal?: AbortSignal, mode: 
   });
 }
 
+/** Stream all output frame side-data names without buffering a long video in memory. */
+export async function hasHdrFrameSideData(videoPath: string, signal?: AbortSignal): Promise<boolean> {
+  const { ffprobe } = await resolveUsableMediaComponents();
+  if (!ffprobe) throw new Error('MEDIA_COMPONENT_MISSING');
+  let found = false;
+  let tail = '';
+  await runProcess(ffprobe, ['-v', 'error', '-select_streams', 'v:0', '-show_frames',
+    '-show_entries', 'frame=:frame_side_data=side_data_type', '-of', 'compact=p=0:nk=1', videoPath], {
+    ...(signal ? { signal } : {}),
+    onStdout: (chunk) => {
+      const text = `${tail}${chunk}`;
+      if (/DOVI|Dolby Vision|HDR|Mastering display|Content light/i.test(text)) found = true;
+      tail = text.slice(-64);
+    },
+  });
+  return found;
+}
+
 export async function probeKeyframes(
   videoPath: string,
   ffprobeOverride?: string,

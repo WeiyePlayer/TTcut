@@ -264,7 +264,9 @@ export class HistoryStore {
   }
 
   private async markRecordVisible(id: string, completionKind: 'analysis' | 'export', outputPath: string | null): Promise<void> {
-    const record = await this.open(id);
+    // Export completion updates the persisted analysis, not its task-local
+    // fallback, and does not depend on an analysis cache that may have vanished.
+    const record = completionKind === 'export' ? await this.verifiedRecord(id) : await this.open(id);
     const updated = historyRecordSchema.parse({
       ...record,
       analyzed_at: new Date().toISOString(),
@@ -328,13 +330,25 @@ export class HistoryStore {
     return summaries;
   }
 
-  async open(id: string, options?: { purpose: 'export' }): Promise<HistoryRecordV1> {
+  private async verifiedRecord(id: string): Promise<HistoryRecordV1> {
     const parsedId = z.string().uuid().parse(id);
     const record = await this.loadRecord(parsedId);
     if (!record) throw new Error('HISTORY_RECORD_INVALID');
     const status = await this.sourceStatus(record.source);
     if (status === 'missing') throw new Error('HISTORY_SOURCE_MISSING');
     if (status === 'changed') throw new Error('HISTORY_SOURCE_CHANGED');
+    return record;
+  }
+
+  async open(id: string, options?: { purpose: 'export' }): Promise<HistoryRecordV1> {
+    let record = await this.verifiedRecord(id);
+    // Only the source whose identity was checked above may be used as an
+    // export fallback. Historic or damaged records can contain another path.
+    if (options?.purpose === 'export' && record.analysis.source_video
+      && normalizedIdentityPath(record.analysis.source_video.path) !== normalizedIdentityPath(record.source.path)) {
+      const { source_video: _unverified, ...analysis } = record.analysis;
+      record = { ...record, analysis };
+    }
     if (record.analysis.processing?.mode === 'normalized_cfr') {
       const original = record.analysis.source_video;
       const verifiedOriginal = original

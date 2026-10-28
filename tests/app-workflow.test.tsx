@@ -130,6 +130,7 @@ describe('App workflow notices and multi-task entry', () => {
   afterEach(() => {
     bootstrap.settings.language = 'zh-CN';
     bootstrap.components.analysis.acceleration = 'cuda';
+    bootstrap.components.media.available = true;
     window.localStorage.clear();
     cleanup();
     vi.useRealTimers();
@@ -1098,6 +1099,48 @@ describe('App workflow notices and multi-task entry', () => {
     expect(screen.getByRole('checkbox', { name: 'Rally 2' })).not.toBeChecked();
     expect(screen.getByRole('button', { name: 'Loop playback' })).toBeVisible();
     expect(screen.getByRole('checkbox', { name: 'Export XML' })).toBeChecked();
+  });
+
+  it('attempts XML and allows deselecting video when restored outputs include unavailable media', async () => {
+    bootstrap.settings.language = 'en';
+    const id = '11111111-1111-4111-8111-111111111111';
+    const selected = { path: 'C:/video/match.mp4', name: 'match.mp4', size: 100, mediaUrl: 'ttcut-media://match' };
+    const analysis = analysisResultSchema.parse({ schema_version: 1, video: metadata(selected.path), rallies: [
+      { id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 1, end_time_seconds: 2 },
+    ] });
+    let saved: CustomEditorDraft | undefined;
+    vi.mocked(window.ttcut.saveCustomEditorDraft).mockImplementation(async (_id, draft) => { saved = structuredClone(draft); });
+    window.ttcut.openHistory = vi.fn(async () => ({ analysisId: id, video: selected, analysis, calibration,
+      ...(saved ? { customEditorDraft: structuredClone(saved) } : {}) }));
+    vi.mocked(window.ttcut.listHistory).mockResolvedValue([{ schema_version: 1, id, analyzed_at: '2026-09-27',
+      video_name: selected.name, rally_count: 1, duration_seconds: 10, cover_url: null, source_status: 'available',
+      completion_kind: 'analysis', output_path: null }]);
+    const openEditor = async () => {
+      fireEvent.click(await screen.findByRole('button', { name: 'History' }));
+      fireEvent.click((await screen.findByText('match.mp4')).closest('button')!);
+      fireEvent.click(await screen.findByRole('button', { name: /Custom/ }));
+    };
+    render(<App />);
+    await openEditor();
+    fireEvent.pointerEnter(screen.getByRole('button', { name: 'Start cutting' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Export rally videos' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Export XML' }));
+    await waitFor(() => expect(saved?.outputs).toMatchObject({ rally_videos: true, premiere_xml: true }));
+    cleanup();
+    bootstrap.components.media.available = false;
+    render(<App />);
+    await openEditor();
+    const video = screen.getByRole('checkbox', { name: 'Export rally videos' });
+    expect(video).toBeChecked();
+    expect(video).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Start cutting' }));
+    await waitFor(() => expect(window.ttcut.startExport).toHaveBeenCalledWith(expect.objectContaining({
+      outputs: { combined_video: false, rally_videos: true, premiere_xml: true },
+    })));
+    act(() => taskListener?.({ type: 'error', taskId: 'export-task-1', code: 'EXPORT_CANCELLED', message: 'EXPORT_CANCELLED' }));
+    expect(await screen.findByRole('checkbox', { name: 'Export rally videos' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Export rally videos' }));
+    expect(screen.getByRole('checkbox', { name: 'Export rally videos' })).not.toBeChecked();
   });
 
   it('retains playback mode within a custom draft when reentering the editor', async () => {

@@ -846,7 +846,7 @@ export function CustomCutPage({
             <div className={`custom-export-launcher floating-launcher${exportOptionsOpen ? ' is-open' : ''}`} onPointerLeave={scheduleExportClose}>
               <div className="custom-export-options floating-launch-options" role="group" aria-label={translations.customExportOptions} onPointerEnter={cancelExportClose} onPointerLeave={scheduleExportClose}>
                 <label className="export-checkbox">
-                  <input type="checkbox" checked={outputs.rally_videos} disabled={!mediaAvailable} onChange={(event) => updateExportOutputs({ combined_video: false, rally_videos: event.currentTarget.checked, premiere_xml: outputs.premiere_xml })} />
+                  <input type="checkbox" checked={outputs.rally_videos} disabled={!mediaAvailable && !outputs.rally_videos} onChange={(event) => updateExportOutputs({ combined_video: false, rally_videos: event.currentTarget.checked, premiere_xml: outputs.premiere_xml })} />
                   <span className="export-checkbox-control" aria-hidden="true"><span className="export-checkbox-gloss" /></span>
                   <span className="export-checkbox-text">{translations.exportRallyVideos}</span>
                 </label>

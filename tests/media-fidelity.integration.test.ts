@@ -1,5 +1,7 @@
 // @vitest-environment node
-import { access, copyFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, chmod, copyFile, link, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -7,23 +9,32 @@ import type { CutGroup, HistoryRecordV1, VideoMetadata } from '../src/shared/con
 import type { AppEvent } from '../src/shared/api';
 import type { BrowserWindow } from 'electron';
 
-const historyState = vi.hoisted(() => ({ record: null as HistoryRecordV1 | null, denyXmlWrite: false }));
+const historyState = vi.hoisted(() => ({ record: null as HistoryRecordV1 | null, denyXmlWrite: false, historyFailure: false,
+  denyCfrCopy: false, probeUnavailable: false, logFailure: false, ffmpegOverride: null as string | null }));
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
-  return { ...actual, writeFile: (...args: Parameters<typeof actual.writeFile>) => {
+  return { ...actual, copyFile: (...args: Parameters<typeof actual.copyFile>) => {
+    if (historyState.denyCfrCopy && String(args[1]).includes('_TTcut_CFR.') && String(args[1]).endsWith('.partial.mp4')) {
+      return Promise.reject(Object.assign(new Error('cache unreadable'), { code: 'EACCES' }));
+    }
+    return actual.copyFile(...args);
+  }, writeFile: (...args: Parameters<typeof actual.writeFile>) => {
     if (historyState.denyXmlWrite && String(args[0]).endsWith('.xml')) {
       return Promise.reject(Object.assign(new Error('permission denied writing XML'), { code: 'EACCES' }));
     }
     return actual.writeFile(...args);
   } };
 });
-vi.mock('../src/main/history', () => ({ getHistoryStore: () => ({ open: async () => historyState.record, markVisible: vi.fn().mockResolvedValue(undefined) }) }));
+vi.mock('../src/main/history', () => ({ getHistoryStore: () => ({ open: async () => historyState.record, markVisible: async () => {
+  if (historyState.historyFailure) throw new Error('HISTORY_WRITE_FAILED');
+} }) }));
 
 vi.mock('electron', () => ({ dialog: {}, app: { isPackaged: false, getAppPath: () => process.cwd(), getPath: () => os.tmpdir() } }));
-vi.mock('../src/main/logger', () => ({ logLine: vi.fn().mockResolvedValue(undefined) }));
-vi.mock('../src/main/components', () => ({ resolveUsableMediaComponents: async () => ({
-  ffmpeg: process.env.TTCUT_FFMPEG_INTEGRATION, ffprobe: process.env.TTCUT_FFPROBE_INTEGRATION, mediaEncoder: 'libx264',
-}) }));
+vi.mock('../src/main/logger', () => ({ logLine: vi.fn(async () => { if (historyState.logFailure) throw new Error('LOG_WRITE_FAILED'); }) }));
+vi.mock('../src/main/components', () => ({ resolveUsableMediaComponents: async () => {
+  if (historyState.probeUnavailable) throw new Error('MEDIA_COMPONENT_MISSING');
+  return { ffmpeg: historyState.ffmpegOverride ?? process.env.TTCUT_FFMPEG_INTEGRATION, ffprobe: process.env.TTCUT_FFPROBE_INTEGRATION, mediaEncoder: 'libx264' };
+} }));
 import { runProcess } from '../src/main/processes';
 import { probeVideo } from '../src/main/probe';
 import { buildConcatArgs, buildConcatManifest, buildCfrNormalizationArgs, buildReencodeArgs, buildSegmentReencodeArgs } from '../src/main/media-plan';
@@ -35,6 +46,11 @@ const ffprobe = process.env.TTCUT_FFPROBE_INTEGRATION;
 const platform = process.platform;
 const enabled = Boolean(ffmpeg && ffprobe);
 const group = (start: number, end: number): CutGroup => ({ start, end, rawStart: start, rawEnd: end, rallyIds: ['rally_001'] });
+async function fileHash(file: string): Promise<string> {
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(file)) hash.update(chunk as Buffer);
+  return hash.digest('hex');
+}
 
 describe.skipIf(!enabled)(`real FFmpeg Windows export arguments on ${platform}`, () => {
   let root: string;
@@ -121,6 +137,78 @@ describe.skipIf(!enabled)(`real FFmpeg Windows export arguments on ${platform}`,
       await decode(output);
     }, 60_000);
   }
+
+  it.skipIf(platform !== 'darwin' || !process.env.TTCUT_DV81_INTEGRATION)('retries a missing PPS seek once from source start', async () => {
+    const source = path.join(root, 'retry-dv81.mp4');
+    await link(process.env.TTCUT_DV81_INTEGRATION!, source);
+    const video = await probeVideo(source);
+    const script = path.join(root, 'ffmpeg-retry.sh');
+    const calls = path.join(root, 'retry-calls.txt');
+    const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+    await writeFile(script, `#!/bin/sh\nprintf '%s\\n' "$*" >> ${quote(calls)}\ncase "$*" in *'-ss 0.000000'*) exec ${quote(ffmpeg!)} "$@";; esac\necho 'non-existing PPS 0 referenced' >&2\nexit 1\n`);
+    await chmod(script, 0o755);
+    const id = '11111111-1111-4111-8111-111111111111';
+    historyState.record = { id, analysis: { schema_version: 1, video,
+      rallies: [{ id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 15, end_time_seconds: 16 }] } } as HistoryRecordV1;
+    const events: AppEvent[] = [];
+    const window = { isDestroyed: () => false, webContents: { send: (_channel: string, event: AppEvent) => events.push(event) } } as unknown as BrowserWindow;
+    historyState.ffmpegOverride = script;
+    try {
+      await startExport(window, { analysis_id: id, destination: 'source', selection: { mode: 'custom', segments: [
+        { rally_id: 'rally_001', start_time_seconds: 15, end_time_seconds: 16 },
+      ] } });
+      await vi.waitFor(() => expect(events.some((event) => event.type === 'export-result' || event.type === 'error')).toBe(true), { timeout: 60_000 });
+    } finally { historyState.ffmpegOverride = null; }
+    const terminal = events.find((event) => event.type === 'export-result' || event.type === 'error');
+    if (terminal?.type !== 'export-result' || terminal.data.kind === 'custom-artifacts') throw new Error(JSON.stringify(terminal));
+    const invocations = (await readFile(calls, 'utf8')).trim().split('\n');
+    expect(invocations).toHaveLength(2);
+    expect(invocations[0]).not.toContain('-ss 0.000000');
+    expect(invocations[1]).toContain('-ss 0.000000');
+    expect(invocations[1]).toContain('tonemap=');
+    await decode(terminal.data.outputPath);
+  }, 90_000);
+
+  it.skipIf(!process.env.TTCUT_HDR10PLUS_INTEGRATION)('exports a real HDR10+ scene as decoded SDR video', async () => {
+    const source = path.join(root, 'real-hdr10plus.mp4');
+    await link(process.env.TTCUT_HDR10PLUS_INTEGRATION!, source);
+    const beforeHash = await fileHash(source);
+    const video = await probeVideo(source);
+    expect(video.media_fidelity?.hdr).toBe('hdr10Plus');
+    const id = '11111111-1111-4111-8111-111111111111';
+    historyState.record = { id, analysis: { schema_version: 1, video,
+      rallies: [{ id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 16, end_time_seconds: 16.5 }] } } as HistoryRecordV1;
+    const events: AppEvent[] = [];
+    const window = { isDestroyed: () => false, webContents: { send: (_channel: string, event: AppEvent) => events.push(event) } } as unknown as BrowserWindow;
+    await startExport(window, { analysis_id: id, destination: 'source', selection: { mode: 'custom', segments: [
+      { rally_id: 'rally_001', start_time_seconds: 16, end_time_seconds: 16.5 },
+    ] } });
+    await vi.waitFor(() => expect(events.some((event) => event.type === 'export-result' || event.type === 'error')).toBe(true), { timeout: 120_000 });
+    const result = events.find((event) => event.type === 'export-result' || event.type === 'error');
+    if (result?.type !== 'export-result' || result.data.kind === 'custom-artifacts') throw new Error(JSON.stringify(result));
+    expect(result.data.outputColor).toMatchObject({ video_codec: 'h264', pixel_format: 'yuv420p',
+      color_range: 'tv', color_primaries: 'bt709', color_transfer: 'bt709', color_space: 'bt709',
+      media_fidelity: { hdr: 'sdr', bit_depth: 8, chroma: '420' } });
+    await decode(result.data.outputPath);
+    const frames = JSON.parse((await runProcess(ffprobe!, ['-v', 'error', '-select_streams', 'v:0', '-show_frames', '-of', 'json', result.data.outputPath])).stdout).frames;
+    expect(frames.some((frame: { side_data_list?: Array<{ side_data_type?: string }> }) =>
+      frame.side_data_list?.some((side) => /DOVI|Dolby Vision|HDR|Mastering display|Content light/i.test(side.side_data_type ?? '')))).toBe(false);
+    const rgb = path.join(root, 'real-hdr10plus.rgb');
+    await runProcess(ffmpeg!, ['-v', 'error', '-y', '-i', result.data.outputPath, '-vf', 'scale=320:180,format=rgb24', '-frames:v', '1', '-f', 'rawvideo', rgb]);
+    const pixels = await readFile(rgb);
+    expect(pixels.reduce((sum, value) => sum + value, 0) / pixels.length).toBeGreaterThan(5);
+    expect(pixels.reduce((max, value) => Math.max(max, value), 0)).toBeGreaterThan(150);
+    const retagged = path.join(root, 'real-hdr10plus-retagged.rgb');
+    await runProcess(ffmpeg!, ['-v', 'error', '-y', '-i', source, '-ss', '16', '-vf',
+      'scale=320:180,format=yuv420p,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709,format=rgb24',
+      '-frames:v', '1', '-f', 'rawvideo', retagged], { timeoutMs: 60_000 });
+    const baseline = await readFile(retagged);
+    expect(baseline.length).toBe(pixels.length);
+    const delta = pixels.reduce((sum, value, index) => sum + Math.abs(value - baseline[index]!), 0) / pixels.length;
+    expect(delta).toBeGreaterThan(5);
+    console.log(`real HDR10+ SDR vs retag-only mean RGB delta: ${delta.toFixed(3)}`);
+    expect(await fileHash(source)).toBe(beforeHash);
+  }, 180_000);
 
   it.each(['sdr-avc', 'sdr-hevc', 'hlg', 'hdr10', 'vfr-hlg'])('preserves %s through independent cuts, concatenation and validation', async (kind) => {
     const video = videos.get(kind)!;
@@ -280,6 +368,36 @@ describe.skipIf(!enabled)(`real FFmpeg Windows export arguments on ${platform}`,
     }
   }, 60_000);
 
+  it('rejects residual HDR metadata on an output frame outside the normal probe samples', async () => {
+    const raw = path.join(root, 'late-hdr-sei.h264');
+    await runProcess(ffmpeg!, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=12:duration=8',
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-bf', '0', '-g', '120', '-pix_fmt', 'yuv420p',
+      '-color_primaries', 'bt709', '-color_trc', 'bt709', '-colorspace', 'bt709', '-color_range', 'tv', '-f', 'h264', raw]);
+    const bytes = await readFile(raw), frames: number[] = [];
+    for (let i = 0; i < bytes.length - 5;) {
+      const prefix = bytes[i] === 0 && bytes[i + 1] === 0
+        ? (bytes[i + 2] === 1 ? 3 : bytes[i + 2] === 0 && bytes[i + 3] === 1 ? 4 : 0) : 0;
+      if (!prefix) { i++; continue; }
+      if ([1, 5].includes(bytes[i + prefix]! & 0x1f)) frames.push(i);
+      i += prefix + 1;
+    }
+    expect(frames.length).toBeGreaterThan(60);
+    const sei = Buffer.from('0000000106891833c286c41d4c0bb884d03e803d134042009896800000030032900403e8019080', 'hex');
+    await writeFile(raw, Buffer.concat([bytes.subarray(0, frames[60]), sei, bytes.subarray(frames[60])]));
+    const output = path.join(root, 'late-hdr-sei.mp4');
+    await runProcess(ffmpeg!, ['-v', 'error', '-y', '-r', '12', '-i', raw, '-c', 'copy',
+      '-bsf:v', 'h264_metadata=colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1:video_full_range_flag=0', output]);
+    const actual = await probeVideo(output);
+    expect(actual.media_fidelity?.mastering_display).toBeNull();
+    const allFrames = await runProcess(ffprobe!, ['-v', 'error', '-select_streams', 'v:0', '-show_frames',
+      '-show_entries', 'frame=:frame_side_data=side_data_type', '-of', 'compact=p=0:nk=1', output]);
+    expect(allFrames.stdout).toContain('Mastering display metadata');
+    const source: VideoMetadata = { ...actual, video_codec: 'hevc', pixel_format: 'yuv420p10le',
+      color_transfer: 'smpte2084', color_primaries: 'bt2020', color_space: 'bt2020nc',
+      media_fidelity: { hdr: 'hdr10Plus', bit_depth: 10, chroma: '420', mastering_display: null, max_cll: null } };
+    await expect(validateExportOutput(output, { targetSeconds: 8, segmentCount: 1 }, source, 'normalized')).rejects.toThrow('EXPORT_HDR_MISMATCH');
+  }, 60_000);
+
   it('rejects a readable HEVC output when static HDR metadata has been stripped', async () => {
     const source = videos.get('hdr10')!;
     const output = path.join(root, 'hdr10-stripped.mp4');
@@ -329,6 +447,31 @@ describe.skipIf(!enabled)(`real FFmpeg Windows export arguments on ${platform}`,
     await decode(result.data.outputPath);
   }, 60_000);
 
+  it('returns a validated video with a warning when history cannot be updated', async () => {
+    const video = videos.get('sdr-avc')!;
+    const id = '11111111-1111-4111-8111-111111111111';
+    historyState.record = { id, analysis: { schema_version: 1, video,
+      rallies: [{ id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 0.25, end_time_seconds: 1.5 }] } } as HistoryRecordV1;
+    const events: AppEvent[] = [];
+    const window = { isDestroyed: () => false, webContents: { send: (_channel: string, event: AppEvent) => events.push(event) } } as unknown as BrowserWindow;
+    historyState.historyFailure = true;
+    try {
+      await startExport(window, { analysis_id: id, destination: 'source', selection: { mode: 'custom', segments: [
+        { rally_id: 'rally_001', start_time_seconds: 0.25, end_time_seconds: 1.5 },
+      ] } });
+      await vi.waitFor(() => expect(events.some((event) => event.type === 'export-result' || event.type === 'error')).toBe(true), { timeout: 60_000 });
+    } finally { historyState.historyFailure = false; }
+    const terminal = events.filter((event) => event.type === 'export-result' || event.type === 'error');
+    expect(terminal).toHaveLength(1);
+    const result = terminal[0];
+    if (result?.type !== 'export-result' || result.data.kind === 'custom-artifacts') throw new Error(JSON.stringify(result));
+    expect(result.data.warning?.code).toBe('EXPORT_HISTORY_UPDATE_FAILED');
+    expect(result.data.outputColor).toMatchObject({ video_codec: 'h264', pixel_format: 'yuv420p',
+      color_primaries: null, color_transfer: null, color_space: 'bt709', color_range: 'tv',
+      media_fidelity: { hdr: 'sdr', bit_depth: 8, chroma: '420' } });
+    await decode(result.data.outputPath);
+  }, 60_000);
+
   it('references the original HDR video without rebuilding an old Windows CFR XML sidecar', async () => {
     const original = videos.get('vfr-hlg')!;
     const oldCache = path.join(root, 'legacy-cfr.mp4');
@@ -360,6 +503,39 @@ describe.skipIf(!enabled)(`real FFmpeg Windows export arguments on ${platform}`,
     expect(await readFile(oldCache, 'utf8')).toBe('stale SDR cache that must never be copied');
   }, 60_000);
 
+  it.each(['valid', 'corrupt', 'mismatch', 'probe-unavailable', 'copy-failure'] as const)(
+    'references a CFR cache for XML only when it is validated and readable (%s)', async (scenario) => {
+      const source = videos.get('sdr-avc')!;
+      const cache = path.join(root, `cache-${scenario}.mp4`);
+      if (scenario === 'corrupt') await writeFile(cache, 'not a video');
+      else await copyFile(source.path, cache);
+      const expected = { ...source, path: cache, variable_frame_rate: false,
+        ...(scenario === 'mismatch' ? { width: source.width + 2 } : {}) };
+      const id = '11111111-1111-4111-8111-111111111111';
+      historyState.record = { id, source: { path: source.path, name: 'source.mp4', size: 1, modified_time_ms: 1 },
+        analysis: { schema_version: 1, video: expected, source_video: { ...source, variable_frame_rate: true },
+          processing: { mode: 'normalized_cfr', target_fps_ratio: '24/1', encoder: 'libx264', warning_code: null },
+          rallies: [{ id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 0.5, end_time_seconds: 0.75 }] } } as HistoryRecordV1;
+      const events: AppEvent[] = [];
+      const window = { isDestroyed: () => false, webContents: { send: (_channel: string, event: AppEvent) => events.push(event) } } as unknown as BrowserWindow;
+      historyState.denyCfrCopy = scenario === 'copy-failure';
+      historyState.probeUnavailable = scenario === 'probe-unavailable';
+      try {
+        await startExport(window, { analysis_id: id, destination: 'source',
+          selection: { mode: 'custom', segments: [{ rally_id: 'rally_001', start_time_seconds: 0.25, end_time_seconds: 1 }] },
+          outputs: { combined_video: false, rally_videos: false, premiere_xml: true } });
+        await vi.waitFor(() => expect(events.some((event) => event.type === 'export-result' || event.type === 'error')).toBe(true), { timeout: 60_000 });
+      } finally { historyState.denyCfrCopy = false; historyState.probeUnavailable = false; }
+      const terminal = events.filter((event) => event.type === 'export-result' || event.type === 'error');
+      expect(terminal).toHaveLength(1);
+      const result = terminal[0];
+      if (result?.type !== 'export-result' || result.data.kind !== 'custom-artifacts') throw new Error(JSON.stringify(result));
+      const xml = await readFile(result.data.premiereXml!.outputPath, 'utf8');
+      expect(xml.includes('_TTcut_CFR.mp4')).toBe(scenario === 'valid');
+      if (scenario !== 'valid') expect(xml).toContain(source.path);
+      expect(result.data.premiereXml!.quantizedForVfr).toBe(scenario !== 'valid');
+    }, 60_000);
+
   it('retains a decoded rally video when writing XML fails', async () => {
     const source = videos.get('sdr-avc')!;
     const id = '11111111-1111-4111-8111-111111111111';
@@ -384,6 +560,33 @@ describe.skipIf(!enabled)(`real FFmpeg Windows export arguments on ${platform}`,
     expect(result.data).toMatchObject({ partialSuccess: true, premiereXml: null,
       xmlFailure: { code: 'OUTPUT_DIRECTORY_UNWRITABLE' }, failedRallies: [] });
     expect(result.data.rallyVideos).toHaveLength(1);
+    expect(result.data.rallyVideos[0]?.outputColor).toMatchObject({ video_codec: 'h264', pixel_format: 'yuv420p',
+      color_primaries: null, color_transfer: null, color_space: 'bt709', color_range: 'tv',
+      media_fidelity: { hdr: 'sdr', bit_depth: 8, chroma: '420' } });
+    await decode(result.data.rallyVideos[0]!.outputPath);
+  }, 60_000);
+
+  it('exports video and XML despite failing synchronous and FFmpeg process logging', async () => {
+    const video = videos.get('sdr-avc')!;
+    const id = '11111111-1111-4111-8111-111111111111';
+    historyState.record = { id, analysis: { schema_version: 1, video,
+      rallies: [{ id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 0.25, end_time_seconds: 1 }] } } as HistoryRecordV1;
+    const events: AppEvent[] = [];
+    const window = { isDestroyed: () => false, webContents: { send: (_channel: string, event: AppEvent) => events.push(event) } } as unknown as BrowserWindow;
+    historyState.logFailure = true;
+    try {
+      await startExport(window, { analysis_id: id, destination: 'source',
+        selection: { mode: 'custom', segments: [{ rally_id: 'rally_001', start_time_seconds: 0.25, end_time_seconds: 1 }] },
+        outputs: { combined_video: false, rally_videos: true, premiere_xml: true } });
+      await vi.waitFor(() => expect(events.some((event) => event.type === 'export-result' || event.type === 'error')).toBe(true), { timeout: 60_000 });
+    } finally { historyState.logFailure = false; }
+    const terminal = events.filter((event) => event.type === 'export-result' || event.type === 'error');
+    expect(terminal).toHaveLength(1);
+    const result = terminal[0];
+    if (result?.type !== 'export-result' || result.data.kind !== 'custom-artifacts') throw new Error(JSON.stringify(result));
+    expect(result.data.partialSuccess).toBe(false);
+    expect(result.data.failedRallies).toEqual([]);
+    expect(await readFile(result.data.premiereXml!.outputPath, 'utf8')).toContain('sdr-avc.mp4');
     await decode(result.data.rallyVideos[0]!.outputPath);
   }, 60_000);
 });
