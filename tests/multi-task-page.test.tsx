@@ -464,6 +464,19 @@ describe('multi-task clipping', () => {
     expect(await screen.findByText('INFERENCE_FAILED')).toBeVisible();
   });
 
+  it('keeps a real worker exit failure when cancellation arrives before its delayed event', async () => {
+    render(<MultiTaskPage initialVideos={[videos[0]!]} preRoll={2.5} postRoll={1} onOpenAnalysis={vi.fn()} />);
+    await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledOnce());
+    await finishCalibration('calibration-task-1');
+    fireEvent.click(await screen.findByRole('button', { name: '开始分析剪辑' }));
+    await waitFor(() => expect(startAnalysis).toHaveBeenCalledOnce());
+    fireEvent.click(screen.getByRole('button', { name: '取消 first.mp4' }));
+    await waitFor(() => expect(window.ttcut.cancelTask).toHaveBeenCalledWith('analysis-task-1'));
+    act(() => listener?.({ type: 'error', taskId: 'analysis-task-1', code: 'WORKER_EXITED', message: 'worker crashed' }));
+    expect(await screen.findByText('WORKER_EXITED')).toHaveAttribute('title', 'worker crashed');
+    expect(document.querySelector('.batch-row.cancelled')).toBeNull();
+  });
+
   it('queues cancellation until an export task ID is returned', async () => {
     let reply!: (taskId: string) => void;
     startExport.mockReset().mockReturnValue(new Promise<string>((resolve) => { reply = resolve; }));
@@ -814,7 +827,7 @@ describe('multi-task clipping', () => {
     await waitFor(() => expect(window.ttcut.cancelTask).toHaveBeenCalledWith('analysis-task-1'));
 
     act(() => listener?.({
-      type: 'error', taskId: 'analysis-task-1', code: 'WORKER_EXITED', message: 'cancelled',
+      type: 'error', taskId: 'analysis-task-1', code: 'ANALYSIS_CANCELLED', message: 'cancelled',
     }));
     await waitFor(() => expect(startAnalysis).toHaveBeenCalledTimes(2));
     act(() => listener?.({

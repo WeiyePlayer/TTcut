@@ -1,5 +1,5 @@
 import { renderMacMedia } from './macos/client';
-import { access, copyFile, mkdir, open, rename, rm, stat, statfs, writeFile } from 'node:fs/promises';
+import { access, mkdir, open, rename, rm, stat, statfs, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { dialog, type BrowserWindow } from 'electron';
@@ -41,6 +41,7 @@ import { normalizedVideoRotation } from '../domain/video-input';
 import { fidelityMismatch, mediaFidelity, outputVideoCodec } from '../domain/media-fidelity';
 import { exportColorPlan } from '../domain/export-color-plan';
 import { createExportCfrResolver, exportSourceVideo } from './export-source';
+import { copyExportCfr } from './export-copy';
 import { resolveUsableMediaComponents, type MediaEncoder } from './components';
 import { logLine as writeLogLine } from './logger';
 import { getHistoryStore } from './history';
@@ -193,17 +194,26 @@ export async function retainUsableExportOutput(
   output: string,
   isUsable: (candidate: string) => Promise<boolean>,
   owned: { partial: boolean; output: boolean },
+  assertActive: () => void = () => undefined,
 ): Promise<{ path: string; renamed: boolean } | null> {
   if (owned.partial && await available(partial)) {
+    assertActive();
     if (!(await isUsable(partial))) return null;
+    assertActive();
     const candidate = await available(output) ? await uniqueWarningOutput(output) : output;
+    assertActive();
     try {
       await rename(partial, candidate);
-      return { path: candidate, renamed: true };
     } catch (error) {
-      if (await available(partial)) return { path: partial, renamed: false };
+      assertActive();
+      if (await available(partial)) { assertActive(); return { path: partial, renamed: false }; }
       throw error;
     }
+    try { assertActive(); } catch (error) {
+      await rm(candidate, { force: true }).catch(() => undefined);
+      throw error;
+    }
+    return { path: candidate, renamed: true };
   }
   if (owned.output && await available(output) && await isUsable(output)) return { path: output, renamed: false };
   return null;
@@ -796,6 +806,7 @@ async function executeExport(
   let finalMetadata: VideoMetadata | null = null;
   let ownsPartial = false;
   let publishedOutput = false;
+  let committedOutput = false;
   let usesCfr = false;
   const signal = getTaskController(taskId)?.signal;
   const cfr = createExportCfrResolver(analysis, signal);
@@ -947,10 +958,16 @@ async function executeExport(
     if (!finalTiming || !finalMetadata) throw new Error('EXPORT_INVALID');
     if (usesCfr && !await cfr.isCurrent()) throw new Error('HISTORY_PROCESSING_MEDIA_CORRUPT');
     await getHistoryStore().assertExportSource(record);
+    assertExportNotCancelled(taskId);
     if (await available(output)) throw new Error('OUTPUT_COLLISION');
+    assertExportNotCancelled(taskId);
     await rename(partial, output);
     ownsPartial = false;
     publishedOutput = true;
+    assertExportNotCancelled(taskId);
+    // Publication is the commit point: a later cancellation cannot undo a
+    // completed file while its history record is being written.
+    committedOutput = true;
     await logLine(taskId, 'INFO', 'Export output published; updating history').catch(() => undefined);
     let historyWarning: { code: string; message: string } | undefined;
     try {
@@ -978,7 +995,7 @@ async function executeExport(
     }
   } catch (error) {
     const controller = getTaskController(taskId);
-    const cancelled = controller?.cancelRequested ?? false;
+    let cancelled = Boolean(controller?.cancelRequested && !committedOutput);
     let message = cancelled ? 'EXPORT_CANCELLED' : error instanceof Error ? error.message : String(error);
     let code = cancelled ? 'EXPORT_CANCELLED' : exportCode(error) ?? 'EXPORT_FAILED';
     let sourceInvalid = false;
@@ -992,8 +1009,10 @@ async function executeExport(
         code = exportCode(sourceError) ?? 'EXPORT_FAILED';
       }
     }
-    const cancelledForExit = code === 'EXPORT_CANCELLED' && controller?.cancelReason === 'app-exit';
-    await logLine(taskId, cancelledForExit ? 'INFO' : 'ERROR', `${code}: ${message}`);
+    if (controller?.cancelRequested && !committedOutput) {
+      cancelled = true; code = 'EXPORT_CANCELLED'; message = 'EXPORT_CANCELLED';
+    }
+    await logLine(taskId, cancelled && controller?.cancelReason === 'app-exit' ? 'INFO' : 'ERROR', `${code}: ${message}`);
 
     // A readable file alone cannot prove an HDR-to-SDR conversion was valid.
     // Timing errors are raised only after its codec/color/fidelity checks pass.
@@ -1002,18 +1021,33 @@ async function executeExport(
     if (!sourceInvalid && code !== 'EXPORT_CANCELLED' && code !== 'HISTORY_PROCESSING_MEDIA_CORRUPT'
       && code !== 'HISTORY_SOURCE_CHANGED' && code !== 'HISTORY_SOURCE_MISSING'
       && (!convertingDynamicHdr || error instanceof ExportDurationMismatchError)) {
+      let retained: Awaited<ReturnType<typeof retainUsableExportOutput>> = null;
       try {
-        const retained = await retainUsableExportOutput(partial, output, async (candidate) => {
+        const recovery = { metadata: null as VideoMetadata | null };
+        const assertRecoveryActive = () => { if (!committedOutput) assertExportNotCancelled(taskId); };
+        const verifyRecoverySource = async () => {
+          if (committedOutput) return;
+          if (usesCfr && !await cfr.isCurrent()) throw new Error('HISTORY_PROCESSING_MEDIA_CORRUPT');
+          await getHistoryStore().assertExportSource(record);
+          assertRecoveryActive();
+        };
+        retained = await retainUsableExportOutput(partial, output, async (candidate) => {
           try {
-            await probeVideo(candidate);
+            recovery.metadata = await probeVideo(candidate, committedOutput ? undefined : signal);
+            await verifyRecoverySource();
+            assertRecoveryActive();
             return true;
           } catch (probeError) {
+            assertRecoveryActive();
+            if (['HISTORY_SOURCE_CHANGED', 'HISTORY_SOURCE_MISSING', 'HISTORY_RECORD_INVALID', 'HISTORY_PROCESSING_MEDIA_CORRUPT'].includes(exportCode(probeError) ?? '')) throw probeError;
             await logLine(taskId, 'WARN', `Generated output is not playable and will not be retained: ${String(probeError)}`);
             return false;
           }
-        }, { partial: ownsPartial, output: publishedOutput });
-        if (retained) {
-          const recoveredMetadata = await probeVideo(retained.path);
+        }, { partial: ownsPartial, output: publishedOutput }, assertRecoveryActive);
+        if (retained && recovery.metadata) {
+          const recoveredMetadata = recovery.metadata;
+          await verifyRecoverySource();
+          assertRecoveryActive();
           const recoveredTiming = error instanceof ExportDurationMismatchError
             ? error.timing
             : finalTiming ?? assessExportDuration(
@@ -1026,6 +1060,11 @@ async function executeExport(
             await logLine(taskId, 'WARN', 'Could not rename usable warning output; original partial retained');
           }
           await logLine(taskId, 'WARN', `Retained usable output after ${code}: ${retained.path}`);
+          await verifyRecoverySource();
+          assertRecoveryActive();
+          // From this point the recovered file is committed, so history write
+          // cannot race with cancellation-driven deletion of that file.
+          committedOutput = true;
           await getHistoryStore().markVisible(record.id, 'export', retained.path).catch(async (historyError) => {
             await logLine(taskId, 'WARN', `Could not update export history after recovery: ${String(historyError)}`);
           });
@@ -1048,11 +1087,24 @@ async function executeExport(
           return;
         }
       } catch (recoveryError) {
+        if (controller?.cancelRequested && !committedOutput) {
+          if (retained?.renamed) await rm(retained.path, { force: true }).catch(() => undefined);
+          cancelled = true; code = 'EXPORT_CANCELLED'; message = 'EXPORT_CANCELLED';
+        } else if (['HISTORY_SOURCE_CHANGED', 'HISTORY_SOURCE_MISSING', 'HISTORY_RECORD_INVALID', 'HISTORY_PROCESSING_MEDIA_CORRUPT'].includes(exportCode(recoveryError) ?? '')) {
+          if (retained?.renamed && !committedOutput) await rm(retained.path, { force: true }).catch(() => undefined);
+          code = exportCode(recoveryError)!;
+          message = recoveryError instanceof Error ? recoveryError.message : String(recoveryError);
+        }
         await logLine(taskId, 'WARN', `Could not retain usable warning output: ${String(recoveryError)}`);
       }
     }
 
+    if (controller?.cancelRequested && !committedOutput) {
+      cancelled = true; code = 'EXPORT_CANCELLED'; message = 'EXPORT_CANCELLED';
+    }
     if (ownsPartial) await rm(partial, { force: true }).catch(() => undefined);
+    if (cancelled && publishedOutput) await rm(output, { force: true }).catch(() => undefined);
+    const cancelledForExit = cancelled && controller?.cancelReason === 'app-exit';
     if (!cancelledForExit) {
       await sendError(code, message);
     } else {
@@ -1152,13 +1204,15 @@ async function executeCustomArtifactExport(
           cfrPartialPath = path.join(outputDirectory, `.${base}_TTcut_CFR.${taskId}.partial.mp4`);
           partialFiles.add(cfrPartialPath);
           try {
-            await copyFile(xmlMetadata.path, cfrPartialPath);
+            await copyExportCfr(xmlMetadata.path, cfrPartialPath, signal);
             assertExportNotCancelled(taskId);
             if (!await cfr.isCurrent()) throw new Error('HISTORY_PROCESSING_MEDIA_CORRUPT');
+            assertExportNotCancelled(taskId);
             await rename(cfrPartialPath, cfrPath);
             partialFiles.delete(cfrPartialPath);
             cfrPartialPath = null;
             cfrFinalPath = cfrPath;
+            assertExportNotCancelled(taskId);
             xmlMetadata = { ...xmlMetadata, path: cfrPath };
           } catch (error) {
             assertExportNotCancelled(taskId);
@@ -1174,9 +1228,11 @@ async function executeCustomArtifactExport(
         await writeFile(partialPath, generated.xml, 'utf8');
         assertExportNotCancelled(taskId);
         await getHistoryStore().assertExportSource(record);
+        assertExportNotCancelled(taskId);
         await rename(partialPath, finalPath);
         partialFiles.delete(partialPath);
         premiereXml = { outputPath: finalPath, quantizedForVfr: generated.quantizedForVfr };
+        assertExportNotCancelled(taskId);
         await logLine(taskId, 'INFO', `Premiere XML written: ${finalPath}`);
       } catch (error) {
         assertExportNotCancelled(taskId);
@@ -1254,8 +1310,10 @@ async function executeCustomArtifactExport(
           assertExportNotCancelled(taskId);
           if (usesCfr && !await cfr.isCurrent()) throw new Error('HISTORY_PROCESSING_MEDIA_CORRUPT');
           await getHistoryStore().assertExportSource(record);
+          assertExportNotCancelled(taskId);
           await rename(partialPath, finalPath);
           partialFiles.delete(partialPath);
+          assertExportNotCancelled(taskId);
           rallyVideos.push({
             clipId: segment.clipId,
             ...(segment.sourceRallyId ? { rallyId: segment.sourceRallyId } : {}),
