@@ -263,6 +263,11 @@ describe('analysis history', () => {
       expect(exported.analysis.processing).toBeUndefined();
       expect(exported.analysis.rallies).toEqual(result.rallies);
       expect(await readFile(file, 'utf8')).toBe(before);
+      const output = path.join(root, 'output.mp4');
+      await store.markVisible(record.id, 'export', output);
+      const persisted = JSON.parse(await readFile(file, 'utf8'));
+      expect(persisted.analysis).toEqual(result);
+      expect(persisted.output_path).toBe(output);
       await writeFile(source, 'changed-source');
       await expect(store.open(record.id, { purpose: 'export' })).rejects.toThrow('HISTORY_SOURCE_CHANGED');
     } finally {

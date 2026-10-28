@@ -1,6 +1,19 @@
 import Foundation
 import TTcutCore
 
+private final class HDRSideDataScan: @unchecked Sendable {
+  private let lock = NSLock()
+  private var found = false
+
+  func inspect(_ line: String) {
+    let name = line.lowercased()
+    guard ["dovi", "dolby vision", "hdr", "mastering display", "content light"].contains(where: name.contains) else { return }
+    lock.lock(); found = true; lock.unlock()
+  }
+
+  var hasHDR: Bool { lock.lock(); defer { lock.unlock() }; return found }
+}
+
 public struct ScoreboardOverlay: Codable, Sendable {
   public let x: Double
   public let y: Double
@@ -191,7 +204,7 @@ public struct MediaExporter: Sendable {
       + (try Self.encoding(encodingVideo)) + (shortHEVC ? ["-bf", "0"] : []) + ["-bsf:v", packetDuration, destination.path]
     do {
       let result = try await run(args, duration: duration, progress: progress)
-      if colorPlan?.toneMapTransfer != nil, (seekStart ?? 0) > 0,
+      if colorPlan?.toneMapTransfer != nil, video.videoCodec == "hevc", (seekStart ?? 0) > 0,
         Self.missingParameterSets(result.stderr) {
         throw TTError("EXPORT_SEEK_DECODE_FAILED", result.stderr)
       }
@@ -199,7 +212,7 @@ public struct MediaExporter: Sendable {
       throw CancellationError()
     } catch {
       let message = error.localizedDescription
-      if colorPlan?.toneMapTransfer != nil, (seekStart ?? 0) > 0,
+      if colorPlan?.toneMapTransfer != nil, video.videoCodec == "hevc", (seekStart ?? 0) > 0,
         Self.missingParameterSets(message) {
         // Some Dolby Vision MP4s keep SPS/PPS in the initial packets instead of
         // hvcC. Decode from the beginning while retaining this segment's exact
@@ -218,13 +231,25 @@ public struct MediaExporter: Sendable {
   }
 
   private static func missingParameterSets(_ message: String) -> Bool {
-    message.contains("PPS id out of range") || message.contains("SPS 0 does not exist")
-      || message.contains("VPS 0 does not exist") || message.contains("non-existing PPS")
+    message.range(of: #"(?:(?:PPS|SPS|VPS)[^\n]*(?:out of range|not available|missing|non-existing|does not exist)|(?:missing|non-existing)[^\n]*(?:PPS|SPS|VPS))"#,
+      options: [.regularExpression, .caseInsensitive]) != nil
   }
-  public func validate(_ url: URL, source: VideoInfo, duration: Double, segments: Int) async throws
+  public func validate(_ url: URL, source: VideoInfo, duration: Double, segments: Int, requireSDRMetadata: Bool = false) async throws
     -> VideoInfo
   {
     let info = try await MediaProbe(paths: paths).inspect(url)
+    if requireSDRMetadata && (info.hdr != .sdr || info.dolbyVision != nil || info.masteringDisplay != nil || info.maxCLL != nil) {
+      throw TTError("EXPORT_HDR_MISMATCH", "SDR 输出仍包含 HDR 元数据")
+    }
+    if requireSDRMetadata {
+      // HDR SEI can occur outside the probe's bounded sample windows. Stream
+      // the small side-data names while decoding every output frame.
+      let scan = HDRSideDataScan()
+      _ = try await ProcessRunner.run(paths.ffprobe, ["-v", "error", "-select_streams", "v:0", "-show_frames",
+        "-show_entries", "frame=:frame_side_data=side_data_type", "-of", "compact=p=0:nk=1", url.path],
+        onLine: { scan.inspect($0) })
+      if scan.hasHDR { throw TTError("EXPORT_HDR_MISMATCH", "SDR 输出仍包含 HDR 元数据") }
+    }
     let tolerance = Segments.durationTolerance(segments: segments, video: source)
     guard info.width == source.width, info.height == source.height,
       info.bitDepth == source.bitDepth,
@@ -313,7 +338,7 @@ public struct MediaExporter: Sendable {
         ) { part in
           progress((Double(index) + part) / Double(ranges.count + 1))
         }
-        _ = try await validate(segment, source: colorPlan.target, duration: range.duration, segments: 1)
+        _ = try await validate(segment, source: colorPlan.target, duration: range.duration, segments: 1, requireSDRMetadata: colorPlan.toneMapTransfer != nil)
         lines.append("file '\(index).mp4'")
       }
       let list = work.appendingPathComponent("segments.txt")
@@ -325,7 +350,7 @@ public struct MediaExporter: Sendable {
         ], duration: duration
       ) { part in progress((Double(ranges.count) + part) / Double(ranges.count + 1)) }
     }
-    _ = try await validate(destination, source: colorPlan.target, duration: duration, segments: ranges.count)
+    _ = try await validate(destination, source: colorPlan.target, duration: duration, segments: ranges.count, requireSDRMetadata: colorPlan.toneMapTransfer != nil)
   }
   public func cover(video: VideoInfo, destination: URL) async throws {
     let tone =

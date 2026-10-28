@@ -319,6 +319,7 @@ export function runProcess(executable: string, args: readonly string[], options:
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
   signal?: AbortSignal;
+  onStdout?: (chunk: string) => void;
 } = {}): Promise<ProcessResult> {
   return new Promise((resolve, reject) => {
     const cancellationError = () => Object.assign(new Error('PROCESS_CANCELLED'), { name: 'AbortError' });
@@ -338,7 +339,10 @@ export function runProcess(executable: string, args: readonly string[], options:
     let stderr = '';
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
-    child.stdout.on('data', (chunk: string) => { stdout += chunk; });
+    child.stdout.on('data', (chunk: string) => {
+      if (options.onStdout) options.onStdout(chunk);
+      else stdout += chunk;
+    });
     child.stderr.on('data', (chunk: string) => { stderr += chunk; });
     const timer = options.timeoutMs ? setTimeout(() => { void terminateChild(child); }, options.timeoutMs) : null;
     const abort = () => { void terminateChild(child); };

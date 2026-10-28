@@ -6,8 +6,8 @@
 
 | 路径 | 证据与结果 |
 | --- | --- |
-| Windows TypeScript 导出路径 | macOS 主机运行真实 FFmpeg，并模拟 `win32` 路由。HDR10+ 真实 T.35 元数据、Dolby Vision 8.1／8.4 原始位流均转为 H.264、8-bit、4:2:0、有限范围 BT.709；完整解码、像素与仅改标签对照、所有帧无 HDR side data 均通过。此项不代表 Windows 实机通过。 |
-| macOS 原生媒体导出 | 新增媒体 4 项、相关回归 10 项通过。覆盖两种算法、单段／多段、非黑场 Dolby 素材、HDR10+、转换后记分牌白色、音画同步、VFR、旋转／SAR、取消及 HDR10／HLG 保真。分析 CFR 归一化仍保留原保护策略。 |
+| Windows TypeScript 导出路径 | macOS 主机运行真实 FFmpeg，并模拟 `win32` 路由。原有 HDR10+ 测试使用 `testsrc2` 合成画面和有效 T.35 元数据，不是真实 HDR 成片；Dolby Vision 8.1／8.4 使用原始位流。此项不代表 Windows 实机通过。 |
+| macOS 原生媒体导出 | 原有新增媒体 4 项、相关回归 10 项通过。原有 HDR10+ 测试使用合成画面；非黑场 Dolby 位流为真实素材。分析 CFR 归一化仍保留原保护策略。 |
 | 实际 Electron + 原生 worker | DV8.1／8.4 各完成合并视频、分段视频 + XML；结果页真实播放并推进解码帧，源文件 SHA-256 不变。截图已检查，包含实际颜色与高光画面。 |
 | XML 与视频隔离 | 真实文件系统验证视频准备失败/XML 成功，以及 XML 写入失败/视频成功并完整解码；保留成功文件，只报告实际请求的产物。 |
 | 实际自定义界面故障 | 缓存消失后草稿保存失败仍导出 XML，且不改写持久分析记录；XML-only 跳过已启用的记分牌字体／图像准备。同时请求视频和 XML 时，字体失败通过受限的 `SCOREBOARD_RENDER_FAILED` 交给 Main，视频明确失败而 XML 保留。 |
@@ -16,6 +16,10 @@
 真实 Dolby 位流在非零 seek 后会出现缺失 HEVC 参数集的错误，测试先复现导出失败，再验证只对相应诊断重试从源起点解码；剪辑边界、颜色目标与算法不变。验收采用 15 秒处的非黑画面，开头黑场仅用于早期解码检查，不作为颜色证据。
 
 ## 检查结果与限制
+
+- 2026-10-27 补充修复：真实 [FF Pictures HDR10+ 实景测试片](https://ff.de/hdr10plus-metadata-test/) 从 [Internet Archive 镜像](https://archive.org/details/hdr10test_lake_2021_02_01) 获取，522323676 字节，SHA-256 `ff0aa117f4622387d7d76a33fb6094cb576dab8b8cb59fe18047a614c0e92a5f`；其 MD5 与镜像发布记录一致，官方网页未提供哈希。16–16.5 秒非黑画面在 macOS 原生 compatible／fast 算法以及 macOS 主机模拟 Windows TypeScript 路径均已导出 SDR，完整解码、逐帧 HDR 元数据清除、与仅改标签的像素差大于 5、源文件 SHA-256 前后不变。此项仍不代表 Windows 实机验收。
+- 审计修复定向检查：TypeScript 9 个文件 **113 passed，3 skipped**，类型检查通过；真实 FFmpeg 媒体集成 **26 passed**。原生真实 HDR10+、DV8.1／8.4、HDR10／HLG、后续帧静态 HDR 残留及 seek 参数集测试通过（5 项）；HDR10+ 两种原生算法的 SDR 与仅改标签对照平均 RGB 差均为 26.735。转换输出校验增加逐帧流式解码检查，性能开销尚未独立测量。
+- 2026-10-27 审计发现的六项 Spec 缺口及 HEVC seek 重试风险按本地工单 04 修复；集成两轴复审、最终 Electron 验证、Windows 实机及 Premiere 导入仍待完成。
 
 - 集成后的 App、export-start、export-history、history 定向检查：**78 passed，3 skipped**；类型检查、脚本语法和 `git diff --check` 通过。共享两平台自动色彩策略 10 项通过。
 - 在 `bb5405d2` 执行一次全量 TypeScript 测试：**633 passed，12 failed，48 skipped**，未宣称全量全绿。对未修改基线独立执行得到 **602 passed，12 failed，45 skipped**：既有失败包含 analysis-cleanup、Windows 路径布局、Windows probe 测试桩及缺失 `powershell.exe`。本分支已修正已有的 batch 测试平台断言；全量中另一次进程组时序失败在隔离复查通过（2 passed），analysis-cleanup 两项与基线一致仍失败。本次未扩大到无关运行时修复。

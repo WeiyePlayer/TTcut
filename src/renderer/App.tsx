@@ -434,7 +434,7 @@ export function App() {
 
   const startCutting = async (preparedSelection?: CutSelectionV1, outputs?: ExportRequest['outputs']) => {
     const mediaRequired = (outputs?.combined_video ?? true) || outputs?.rally_videos === true;
-    if (!analysis || !analysisId || !platformSupported || (mediaRequired && !bootstrap?.components.media.available)) return;
+    if (!analysis || !analysisId || !platformSupported || (mediaRequired && !outputs?.premiere_xml && !bootstrap?.components.media.available)) return;
     if (!preparedSelection && selectedCount === 0) return;
     let selection: CutSelectionV1;
     const common = { pre_roll_seconds: settings.pre_roll_seconds, post_roll_seconds: settings.post_roll_seconds } as const;
@@ -1006,7 +1006,9 @@ export function App() {
                     allowed: exportResult.timing.allowedDriftSeconds.toFixed(2),
                   })}</span></div>
                 )}
-                <ExportVideoPreview hdr={(exportResult.outputMediaFidelity?.hdr ?? analysis?.video.media_fidelity?.hdr ?? analysis?.video.native_video?.hdr ?? 'sdr') !== 'sdr'} className="output-preview" src={exportResult.mediaUrl} controls preload="metadata" />
+                <ExportVideoPreview hdr={(exportResult.outputColor
+                  ? exportResult.outputColor.media_fidelity?.hdr ?? exportResult.outputMediaFidelity?.hdr ?? 'sdr'
+                  : exportResult.outputMediaFidelity?.hdr ?? analysis?.video.media_fidelity?.hdr ?? analysis?.video.native_video?.hdr ?? 'sdr') !== 'sdr'} className="output-preview" src={exportResult.mediaUrl} controls preload="metadata" />
                 <div className="card output-details"><div><span>{t.outputName}</span><strong>{exportResult.outputName}</strong></div><div><span>{t.outputPath}</span><strong>{exportResult.outputPath}</strong></div></div>
                 <div className="footer-actions"><button className="secondary" onClick={() => void window.ttcut.revealOutput(exportResult.outputPath)}>{t.openFolder}</button><button className="primary" onClick={reset}>{t.cutAnother}</button></div>
                 {exportResult.warning && (

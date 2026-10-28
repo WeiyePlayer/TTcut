@@ -1171,6 +1171,16 @@ export type ExportWarning = {
   message: string;
 };
 
+export type ExportOutputColor = {
+  video_codec: string | null;
+  pixel_format: string | null;
+  color_range: string | null;
+  color_space: string | null;
+  color_transfer: string | null;
+  color_primaries: string | null;
+  media_fidelity: z.infer<typeof mediaFidelitySchema> | null;
+};
+
 export type CombinedVideoExportResult = {
   kind?: 'combined-video';
   taskId: string;
@@ -1181,6 +1191,7 @@ export type CombinedVideoExportResult = {
   timing: ExportTimingInfo;
   warning?: ExportWarning;
   outputMediaFidelity?: z.infer<typeof mediaFidelitySchema>;
+  outputColor?: ExportOutputColor;
 };
 
 export type CustomArtifactFailure = {
@@ -1209,6 +1220,7 @@ export type CustomArtifactExportResult = {
     rallyId?: string;
     rallyIndex: number;
     outputPath: string;
+    outputColor?: ExportOutputColor;
   }>;
   failedRallies: CustomArtifactFailure[];
   premiereXml: {
