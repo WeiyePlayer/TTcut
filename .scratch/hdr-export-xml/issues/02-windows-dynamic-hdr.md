@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately).
 
-**Status:** complete
+**Status:** code implemented and simulated-route checks complete; Windows-host acceptance pending.
 
 - [x] Probe and persist optional DV compatibility information; reprobe older dynamic-HDR records.
 - [x] Use a separate source/target color plan for combined and independent-rally output.

@@ -4,7 +4,7 @@
 
 **Blocked by:** 02: Windows 动态 HDR 自动转 SDR.
 
-**Status:** complete
+**Status:** code implemented and macOS scenarios verified; Windows-host and Premiere acceptance pending.
 
 - [x] Share DV compatibility fields and automatic source/target policy with Windows; keep old native/history payloads readable.
 - [x] Tone-map eligible dynamic HDR before overlays and validate each segment/final output as SDR across compatible and fast algorithms.
