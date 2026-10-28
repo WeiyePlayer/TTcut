@@ -13,16 +13,18 @@ const historyState = vi.hoisted(() => ({ record: null as HistoryRecordV1 | null,
   denyCfrCopy: false, probeUnavailable: false, logFailure: false, ffmpegOverride: null as string | null }));
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
-  return { ...actual, copyFile: (...args: Parameters<typeof actual.copyFile>) => {
-    if (historyState.denyCfrCopy && String(args[1]).includes('_TTcut_CFR.') && String(args[1]).endsWith('.partial.mp4')) {
-      return Promise.reject(Object.assign(new Error('cache unreadable'), { code: 'EACCES' }));
-    }
-    return actual.copyFile(...args);
-  }, writeFile: (...args: Parameters<typeof actual.writeFile>) => {
+  return { ...actual, writeFile: (...args: Parameters<typeof actual.writeFile>) => {
     if (historyState.denyXmlWrite && String(args[0]).endsWith('.xml')) {
       return Promise.reject(Object.assign(new Error('permission denied writing XML'), { code: 'EACCES' }));
     }
     return actual.writeFile(...args);
+  } };
+});
+vi.mock('../src/main/export-copy', async (original) => {
+  const real = await original<typeof import('../src/main/export-copy')>();
+  return { ...real, copyExportCfr: async (...args: Parameters<typeof real.copyExportCfr>) => {
+    if (historyState.denyCfrCopy) throw Object.assign(new Error('cache unreadable'), { code: 'EACCES' });
+    return real.copyExportCfr(...args);
   } };
 });
 vi.mock('../src/main/history', () => ({ getHistoryStore: () => ({ open: async () => historyState.record, assertExportSource: async () => {}, markVisible: async () => {

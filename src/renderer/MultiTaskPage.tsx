@@ -49,6 +49,7 @@ type BatchItem = {
   recoveredOutputPath: string | null;
   exportWarning: ExportWarning | null;
   error: string | null;
+  errorDetail: { code: string; message: string } | null;
 };
 
 interface MultiTaskPageProps {
@@ -95,6 +96,7 @@ async function createItems(videos: SelectedVideo[], firstOrder = 0): Promise<Bat
       recoveredOutputPath: null,
       exportWarning: null,
       error,
+      errorDetail: null,
     };
   }));
 }
@@ -155,7 +157,6 @@ export function MultiTaskPage({
   const activeRef = useRef<{ taskId: string | null; itemId: string; phase: ActivePhase } | null>(null);
   const runningRef = useRef(false);
   const cancelRequested = useRef(false);
-  const cancelSentForTask = useRef<string | null>(null);
   const autoCalibrationAvailableRef = useRef(true);
   const pendingTaskStartRef = useRef<Promise<string> | null>(null);
   const earlyTaskEventsRef = useRef(new Map<string, { progress?: AppEvent; terminal?: AppEvent }>());
@@ -354,11 +355,10 @@ export function MultiTaskPage({
       return;
     }
     cancelRequested.current = false;
-    cancelSentForTask.current = null;
     setActiveItem(candidate.id);
     if (candidate.analysisId && candidate.analysis && candidate.processingStatus !== 'failed' && candidate.mode !== 'analyze-only') {
       earlyTaskEventsRef.current.clear();
-      updateItem(candidate.id, (item) => ({ ...item, processingStatus: 'exporting', progress: 70, error: null }));
+      updateItem(candidate.id, (item) => ({ ...item, processingStatus: 'exporting', progress: 70, error: null, errorDetail: null }));
       activeRef.current = { taskId: null, itemId: candidate.id, phase: 'export' };
       setActivePhase('export');
       const selection = selectionFor(candidate);
@@ -397,6 +397,7 @@ export function MultiTaskPage({
       outputPath: null,
       outputMediaUrl: null,
       error: null,
+      errorDetail: null,
     }));
     const calibrationChoice = candidate.calibration
       ? {
@@ -429,7 +430,6 @@ export function MultiTaskPage({
       if (early?.progress) taskEventHandlerRef.current(early.progress);
       if (early?.terminal) taskEventHandlerRef.current(early.terminal);
       if (cancelRequested.current && activeRef.current?.taskId === taskId) {
-        cancelSentForTask.current = taskId;
         void window.ttcut.cancelTask(taskId);
       }
     }).catch((caught) => {
@@ -601,8 +601,7 @@ export function MultiTaskPage({
       setTimeout(() => scheduleRef.current(), 0);
       return;
     }
-    const cancelled = event.code === 'EXPORT_CANCELLED' || event.code === 'ANALYSIS_CANCELLED'
-      || (active.phase === 'analysis' && event.code === 'WORKER_EXITED' && cancelSentForTask.current === taskId);
+    const cancelled = event.code === 'EXPORT_CANCELLED' || event.code === 'ANALYSIS_CANCELLED';
     updateItem(active.itemId, (item) => ({
       ...item,
       processingStatus: cancelled ? 'cancelled' : 'failed',
@@ -612,6 +611,7 @@ export function MultiTaskPage({
       recoveredOutputPath: event.recoveredOutputPath ?? null,
       exportWarning: item.exportWarning,
       error: cancelled ? null : event.code,
+      errorDetail: cancelled ? null : { code: event.code, message: event.message },
     }));
     if (cancelled) {
       replaceItems((current) => {
@@ -706,10 +706,7 @@ export function MultiTaskPage({
     const active = activeRef.current;
     if (!active || active.phase === 'calibration') return;
     cancelRequested.current = true;
-    if (active.taskId) {
-      cancelSentForTask.current = active.taskId;
-      await window.ttcut.cancelTask(active.taskId);
-    }
+    if (active.taskId) await window.ttcut.cancelTask(active.taskId);
   };
 
   const remove = async (item: BatchItem) => {
@@ -850,7 +847,7 @@ export function MultiTaskPage({
                 <strong title={item.video.name}>{item.video.name}</strong>
                 {item.metadata && <span>{formatTimestamp(item.metadata.duration_seconds)} · {item.metadata.width} × {item.metadata.height} · {item.metadata.fps.toFixed(3)} fps</span>}
                 {mergeWorkflow && done && item.mode !== 'analyze-only' && batchExport.status !== 'done' && <span>{text.mergeWaiting}</span>}
-                {item.error && !manualRequired && <small>{item.error}</small>}
+                {item.error && !manualRequired && <small title={item.errorDetail?.code === item.error ? item.errorDetail.message : undefined}>{item.error}</small>}
                 {item.exportWarning && (
                   <div className="batch-export-warning" role="alert">
                     <span><b>{item.analysis?.processing?.mode === 'vfr_fallback' ? text.processingWarning : text.warning}</b><code>{item.exportWarning.code}</code></span>

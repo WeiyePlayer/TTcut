@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { access, chmod, copyFile, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
+import { Readable } from 'node:stream';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { BrowserWindow } from 'electron';
@@ -8,10 +9,22 @@ import type { AppEvent } from '../src/shared/api';
 import type { Calibration } from '../src/shared/contracts';
 import type { HistoryStore as Store } from '../src/main/history';
 
-const state = vi.hoisted(() => ({ store: null as Store | null, ffprobe: '', ffmpegOverride: '', unavailable: false, denyCfrCopy: false, preflightFault: '' as '' | 'space' | 'write', output: '', runtime: '', afterXml: null as (() => Promise<void>) | null, afterCfrCopy: null as (() => Promise<void>) | null, afterSegment: null as (() => Promise<void>) | null, afterXmlWrite: null as (() => Promise<void>) | null }));
+const state = vi.hoisted(() => ({ store: null as Store | null, ffprobe: '', ffmpegOverride: '', unavailable: false, denyCfrCopy: false, preflightFault: '' as '' | 'space' | 'write', output: '', runtime: '', afterXml: null as (() => Promise<void>) | null, afterCfrCopy: null as (() => Promise<void>) | null, afterSegment: null as (() => Promise<void>) | null, afterXmlWrite: null as (() => Promise<void>) | null, injectRenameFailure: false, renameFailed: false, afterPublishRename: null as (() => Promise<void>) | null, afterRecoveryProbe: null as (() => Promise<void>) | null, afterRecoveryLog: null as (() => Promise<void>) | null, slowCopySource: '', slowCopyStream: null as (() => Readable) | null }));
 vi.mock('node:fs/promises', async (original) => {
   const real = await original<typeof import('node:fs/promises')>();
-  return { ...real, writeFile: (...args: Parameters<typeof real.writeFile>) => real.writeFile(...args).then(async () => {
+  return { ...real, rename: (...args: Parameters<typeof real.rename>) => {
+    if (state.injectRenameFailure && String(args[0]).endsWith('.partial.mp4')) {
+      state.injectRenameFailure = false; state.renameFailed = true;
+      return Promise.reject(Object.assign(new Error('temporary rename failure'), { code: 'EACCES' }));
+    }
+    return real.rename(...args).then(async () => {
+      if ((String(args[0]).endsWith('.partial.mp4') || String(args[0]).endsWith('.partial.xml'))
+        && !String(args[0]).includes('_TTcut_CFR.') && state.afterPublishRename) {
+        const action = state.afterPublishRename; state.afterPublishRename = null; await action();
+      }
+    });
+  },
+  writeFile: (...args: Parameters<typeof real.writeFile>) => real.writeFile(...args).then(async () => {
     if (String(args[0]).endsWith('.partial.xml') && state.afterXmlWrite) {
       const action = state.afterXmlWrite; state.afterXmlWrite = null; await action();
     }
@@ -20,15 +33,20 @@ vi.mock('node:fs/promises', async (original) => {
     ? Promise.resolve({ bavail: 0n, bsize: 1n }) : real.statfs(...args),
   open: (...args: Parameters<typeof real.open>) => state.preflightFault === 'write' && String(args[0]).endsWith('.write-test')
     ? Promise.reject(Object.assign(new Error('write denied'), { code: 'EACCES' })) : real.open(...args),
-  copyFile: (...args: Parameters<typeof real.copyFile>) => {
-    if (state.denyCfrCopy && String(args[1]).includes('_TTcut_CFR.') && String(args[1]).endsWith('.partial.mp4')) {
-      return Promise.reject(Object.assign(new Error('cache copy denied'), { code: 'EACCES' }));
-    }
-    return real.copyFile(...args).then(async () => {
-      if (String(args[1]).includes('_TTcut_CFR.') && state.afterCfrCopy) {
-        const action = state.afterCfrCopy; state.afterCfrCopy = null; await action();
-      }
-    });
+  };
+});
+vi.mock('node:fs', async (original) => {
+  const real = await original<typeof import('node:fs')>();
+  return { ...real, createReadStream: (...args: Parameters<typeof real.createReadStream>) =>
+    String(args[0]) === state.slowCopySource && state.slowCopyStream
+      ? state.slowCopyStream() as unknown as ReturnType<typeof real.createReadStream> : real.createReadStream(...args) };
+});
+vi.mock('../src/main/export-copy', async (original) => {
+  const real = await original<typeof import('../src/main/export-copy')>();
+  return { ...real, copyExportCfr: async (...args: Parameters<typeof real.copyExportCfr>) => {
+    if (state.denyCfrCopy) throw Object.assign(new Error('cache copy denied'), { code: 'EACCES' });
+    await real.copyExportCfr(...args);
+    if (state.afterCfrCopy) { const action = state.afterCfrCopy; state.afterCfrCopy = null; await action(); }
   } };
 });
 vi.mock('../src/main/history', async (original) => ({
@@ -38,12 +56,25 @@ vi.mock('../src/main/components', () => ({ resolveUsableMediaComponents: async (
   if (state.unavailable) throw new Error('MEDIA_COMPONENT_MISSING');
   return { ffmpeg: state.ffmpegOverride || process.env.TTCUT_FFMPEG_INTEGRATION!, ffprobe: state.ffprobe, mediaEncoder: 'libx264' };
 } }));
+vi.mock('../src/main/probe', async (original) => {
+  const real = await original<typeof import('../src/main/probe')>();
+  return { ...real, probeVideo: async (...args: Parameters<typeof real.probeVideo>) => {
+    const result = await real.probeVideo(...args);
+    if (state.renameFailed && String(args[0]).endsWith('.partial.mp4') && state.afterRecoveryProbe) {
+      const action = state.afterRecoveryProbe; state.afterRecoveryProbe = null; await action();
+    }
+    return result;
+  } };
+});
 vi.mock('../src/main/macos/runtime', () => ({
   macRuntimeRoot: () => state.runtime || process.env.TTCUT_MAC_MEDIA_RUNTIME!, verifyMacRuntime: async () => {},
 }));
 vi.mock('../src/main/logger', () => ({ logLine: vi.fn(async (_task: string, _level: string, message: string) => {
   if (message.startsWith('Premiere XML written:') && state.afterXml) {
     const action = state.afterXml; state.afterXml = null; await action();
+  }
+  if (message.startsWith('Retained usable output after') && state.afterRecoveryLog) {
+    const action = state.afterRecoveryLog; state.afterRecoveryLog = null; await action();
   }
   if (message.startsWith('Rally segment 1 timing') && state.afterSegment) {
     const action = state.afterSegment; state.afterSegment = null; await action();
@@ -502,6 +533,201 @@ describe.skipIf(!ffmpeg || !ffprobe)('CFR content integrity through HistoryStore
       expect((await readdir(root)).some((name) => name.includes('source-change-failed-render_TTcut'))).toBe(false);
     } finally { state.ffmpegOverride = ''; }
   }, 45_000);
+
+  it.each([['combined', 2], ['xml', 2], ['rallies', 3], ['both', 5]] as const)(
+    'honors cancellation during final source validation for %s', async (scenario, lastCheck) => {
+      const input = path.join(root, `cancel-final-${scenario}.mp4`);
+      await copyFile(source, input);
+      const record = await makeHistory('win32', 'valid', input);
+      const storedBefore = await readFile(path.join(root, 'history-win32-valid', 'records', `${record.id}.json`));
+      const originalCheck = state.store!.assertExportSource.bind(state.store!);
+      let seen = 0; let mark!: () => void; let release!: () => void;
+      const reached = new Promise<void>((resolve) => { mark = resolve; });
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      state.store!.assertExportSource = async (value) => { await originalCheck(value); if (++seen === lastCheck) { mark(); await gate; } };
+      const events: AppEvent[] = [];
+      const window = { isDestroyed: () => false, webContents: { send: (_: string, event: AppEvent) => events.push(event) } } as unknown as BrowserWindow;
+      try {
+        const taskId = await startExport(window, { analysis_id: record.id, destination: 'source',
+          selection: { mode: 'custom', segments: [{ rally_id: 'rally_001', start_time_seconds: 1, end_time_seconds: 2 }] },
+          outputs: { combined_video: scenario === 'combined', rally_videos: scenario === 'rallies' || scenario === 'both', premiere_xml: scenario === 'xml' || scenario === 'both' } });
+        await Promise.race([reached, new Promise<never>((_, reject) => setTimeout(() => reject(new Error('final check not reached')), 10_000))]);
+        await cancelTask(taskId, 'user'); release();
+        await vi.waitFor(() => expect(events.some((event) => event.type === 'error' || event.type === 'export-result')).toBe(true), { timeout: 30_000 });
+        expect(events.filter((event) => event.type === 'error' || event.type === 'export-result')).toEqual([
+          expect.objectContaining({ type: 'error', taskId, code: 'EXPORT_CANCELLED' }),
+        ]);
+        expect((await readdir(root)).some((name) => name.startsWith(`cancel-final-${scenario}_TTcut_`))).toBe(false);
+        expect(await readFile(path.join(root, 'history-win32-valid', 'records', `${record.id}.json`))).toEqual(storedBefore);
+      } finally { release(); }
+    }, 45_000);
+
+  it.each(['combined', 'xml', 'rallies'] as const)(
+    'cleans %s output when cancellation arrives during the publishing rename', async (scenario) => {
+      const input = path.join(root, `cancel-rename-${scenario}.mp4`);
+      await copyFile(source, input);
+      const record = await makeHistory('win32', 'valid', input);
+      const recordPath = path.join(root, 'history-win32-valid', 'records', `${record.id}.json`);
+      const storedBefore = await readFile(recordPath);
+      let mark!: () => void; let release!: () => void;
+      const reached = new Promise<void>((resolve) => { mark = resolve; });
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      state.afterPublishRename = async () => { mark(); await gate; };
+      const events: AppEvent[] = [];
+      const window = { isDestroyed: () => false, webContents: { send: (_: string, event: AppEvent) => events.push(event) } } as unknown as BrowserWindow;
+      try {
+        const taskId = await startExport(window, { analysis_id: record.id, destination: 'source',
+          selection: { mode: 'custom', segments: [{ rally_id: 'rally_001', start_time_seconds: 1, end_time_seconds: 2 }] },
+          outputs: { combined_video: scenario === 'combined', rally_videos: scenario === 'rallies', premiere_xml: scenario === 'xml' } });
+        await Promise.race([reached, new Promise<never>((_, reject) => setTimeout(() => reject(new Error('rename not reached')), 10_000))]);
+        await cancelTask(taskId, 'user'); release();
+        await vi.waitFor(() => expect(events.some((event) => event.type === 'error' || event.type === 'export-result')).toBe(true), { timeout: 30_000 });
+        expect(events.filter((event) => event.type === 'error' || event.type === 'export-result')).toEqual([
+          expect.objectContaining({ type: 'error', taskId, code: 'EXPORT_CANCELLED' }),
+        ]);
+        expect((await readdir(root)).some((name) => name.startsWith(`cancel-rename-${scenario}_TTcut_`))).toBe(false);
+        expect(await readFile(recordPath)).toEqual(storedBefore);
+      } finally { release(); state.afterPublishRename = null; }
+    }, 45_000);
+
+  it('retains a committed combined export when cancellation arrives during history writing', async () => {
+    const input = path.join(root, 'cancel-after-commit.mp4');
+    await copyFile(source, input);
+    const record = await makeHistory('win32', 'valid', input);
+    const originalMark = state.store!.markVisible.bind(state.store!);
+    let mark!: () => void; let release!: () => void;
+    const reached = new Promise<void>((resolve) => { mark = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    state.store!.markVisible = async (...args) => { mark(); await gate; return originalMark(...args); };
+    const events: AppEvent[] = [];
+    const window = { isDestroyed: () => false, webContents: { send: (_: string, event: AppEvent) => events.push(event) } } as unknown as BrowserWindow;
+    try {
+      const taskId = await startExport(window, { analysis_id: record.id, destination: 'source',
+        selection: { mode: 'custom', segments: [{ rally_id: 'rally_001', start_time_seconds: 1, end_time_seconds: 2 }] },
+        outputs: { combined_video: true, rally_videos: false, premiere_xml: false } });
+      await Promise.race([reached, new Promise<never>((_, reject) => setTimeout(() => reject(new Error('history write not reached')), 10_000))]);
+      await cancelTask(taskId, 'user'); release();
+      await vi.waitFor(() => expect(events.some((event) => event.type === 'error' || event.type === 'export-result')).toBe(true), { timeout: 30_000 });
+      const terminal = events.filter((event) => event.type === 'error' || event.type === 'export-result');
+      expect(terminal).toHaveLength(1);
+      const result = terminal[0];
+      if (result?.type !== 'export-result' || result.data.kind === 'custom-artifacts') throw new Error(JSON.stringify(result));
+      await expect(access(result.data.outputPath)).resolves.toBeUndefined();
+      const persisted = JSON.parse(await readFile(path.join(root, 'history-win32-valid', 'records', `${record.id}.json`), 'utf8'));
+      expect(persisted.output_path).toBe(result.data.outputPath);
+    } finally { release(); }
+  }, 45_000);
+
+  it('honors cancellation while validating a failed export for recovery', async () => {
+    const input = path.join(root, 'cancel-recovery.mp4');
+    await copyFile(source, input);
+    const record = await makeHistory('win32', 'valid', input);
+    const recordPath = path.join(root, 'history-win32-valid', 'records', `${record.id}.json`);
+    const storedBefore = await readFile(recordPath);
+    let mark!: () => void; let release!: () => void;
+    const reached = new Promise<void>((resolve) => { mark = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    state.injectRenameFailure = true; state.renameFailed = false;
+    state.afterRecoveryProbe = async () => { mark(); await gate; };
+    const events: AppEvent[] = [];
+    const window = { isDestroyed: () => false, webContents: { send: (_: string, event: AppEvent) => events.push(event) } } as unknown as BrowserWindow;
+    try {
+      const taskId = await startExport(window, { analysis_id: record.id, destination: 'source',
+        selection: { mode: 'custom', segments: [{ rally_id: 'rally_001', start_time_seconds: 1, end_time_seconds: 2 }] },
+        outputs: { combined_video: true, rally_videos: false, premiere_xml: false } });
+      await Promise.race([reached, new Promise<never>((_, reject) => setTimeout(() => reject(new Error('recovery check not reached')), 10_000))]);
+      await cancelTask(taskId, 'user'); release();
+      await vi.waitFor(() => expect(events.some((event) => event.type === 'error' || event.type === 'export-result')).toBe(true), { timeout: 30_000 });
+      expect(events.filter((event) => event.type === 'error' || event.type === 'export-result')).toEqual([
+        expect.objectContaining({ type: 'error', taskId, code: 'EXPORT_CANCELLED' }),
+      ]);
+      expect((await readdir(root)).some((name) => name.startsWith('cancel-recovery_TTcut_') || name.includes('cancel-recovery_TTcut_custom.') && name.endsWith('.partial.mp4'))).toBe(false);
+      expect(await readFile(recordPath)).toEqual(storedBefore);
+    } finally { release(); state.injectRenameFailure = false; state.renameFailed = false; state.afterRecoveryProbe = null; }
+  }, 45_000);
+
+  it.each(['source', 'cache'] as const)('does not retain a partial if %s changes during recovery probe', async (changed) => {
+    const input = path.join(root, `recovery-${changed}-change.mp4`);
+    await copyFile(source, input);
+    const record = await makeHistory('win32', 'valid', input);
+    state.injectRenameFailure = true; state.renameFailed = false;
+    state.afterRecoveryProbe = async () => { await writeFile(changed === 'source' ? input : record.analysis.video.path, 'changed during recovery'); };
+    const events: AppEvent[] = [];
+    const window = { isDestroyed: () => false, webContents: { send: (_: string, event: AppEvent) => events.push(event) } } as unknown as BrowserWindow;
+    try {
+      const taskId = await startExport(window, { analysis_id: record.id, destination: 'source',
+        selection: { mode: 'custom', segments: [{ rally_id: 'rally_001', start_time_seconds: 1, end_time_seconds: 2 }] },
+        outputs: { combined_video: true, rally_videos: false, premiere_xml: false } });
+      await vi.waitFor(() => expect(events.some((event) => event.type === 'error' || event.type === 'export-result')).toBe(true), { timeout: 30_000 });
+      expect(events.filter((event) => event.type === 'error' || event.type === 'export-result')).toEqual([
+        expect.objectContaining({ type: 'error', taskId, code: changed === 'source' ? 'HISTORY_SOURCE_CHANGED' : 'HISTORY_PROCESSING_MEDIA_CORRUPT' }),
+      ]);
+      expect((await readdir(root)).some((name) => name.includes(`recovery-${changed}-change_TTcut_`))).toBe(false);
+    } finally { state.injectRenameFailure = false; state.renameFailed = false; state.afterRecoveryProbe = null; }
+  }, 45_000);
+
+  it.each(['rename', 'log'] as const)('honors cancellation during recovery %s before commit', async (stage) => {
+    const input = path.join(root, `cancel-recovery-${stage}.mp4`);
+    await copyFile(source, input);
+    const record = await makeHistory('win32', 'valid', input);
+    const recordPath = path.join(root, 'history-win32-valid', 'records', `${record.id}.json`);
+    const storedBefore = await readFile(recordPath);
+    let mark!: () => void; let release!: () => void;
+    const reached = new Promise<void>((resolve) => { mark = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    state.injectRenameFailure = true; state.renameFailed = false;
+    const pause = async () => { mark(); await gate; };
+    if (stage === 'rename') state.afterPublishRename = pause;
+    else state.afterRecoveryLog = pause;
+    const events: AppEvent[] = [];
+    const window = { isDestroyed: () => false, webContents: { send: (_: string, event: AppEvent) => events.push(event) } } as unknown as BrowserWindow;
+    try {
+      const taskId = await startExport(window, { analysis_id: record.id, destination: 'source',
+        selection: { mode: 'custom', segments: [{ rally_id: 'rally_001', start_time_seconds: 1, end_time_seconds: 2 }] },
+        outputs: { combined_video: true, rally_videos: false, premiere_xml: false } });
+      await Promise.race([reached, new Promise<never>((_, reject) => setTimeout(() => reject(new Error('recovery stage not reached')), 10_000))]);
+      await cancelTask(taskId, 'user'); release();
+      await vi.waitFor(() => expect(events.some((event) => event.type === 'error' || event.type === 'export-result')).toBe(true), { timeout: 30_000 });
+      expect(events.filter((event) => event.type === 'error' || event.type === 'export-result')).toEqual([
+        expect.objectContaining({ type: 'error', taskId, code: 'EXPORT_CANCELLED' }),
+      ]);
+      expect((await readdir(root)).some((name) => name.includes(`cancel-recovery-${stage}_TTcut_`))).toBe(false);
+      expect(await readFile(recordPath)).toEqual(storedBefore);
+    } finally { release(); state.injectRenameFailure = false; state.renameFailed = false; state.afterPublishRename = null; state.afterRecoveryLog = null; }
+  }, 45_000);
+
+  it('stops a stalled CFR copy immediately on cancellation and cleans its temporary file', async () => {
+    const input = path.join(root, 'cancel-copy-source.mp4');
+    await copyFile(source, input);
+    const record = await makeHistory('win32', 'valid', input);
+    let mark!: () => void;
+    const reached = new Promise<void>((resolve) => { mark = resolve; });
+    let streamDestroyed = false; let started = false;
+    state.slowCopySource = record.analysis.video.path;
+    state.slowCopyStream = () => new Readable({
+      read() { if (!started) { started = true; this.push(Buffer.alloc(65_536)); mark(); } },
+      destroy(error, done) { streamDestroyed = true; done(error); },
+    });
+    const events: AppEvent[] = [];
+    const window = { isDestroyed: () => false, webContents: { send: (_: string, event: AppEvent) => events.push(event) } } as unknown as BrowserWindow;
+    let taskId = '';
+    try {
+      taskId = await startExport(window, { analysis_id: record.id, destination: 'source',
+        selection: { mode: 'custom', segments: [{ rally_id: 'rally_001', start_time_seconds: 1, end_time_seconds: 2 }] },
+        outputs: { combined_video: false, rally_videos: false, premiere_xml: true } });
+      await Promise.race([reached, new Promise<never>((_, reject) => setTimeout(() => reject(new Error('copy not reached')), 10_000))]);
+      await cancelTask(taskId, 'user');
+      await vi.waitFor(() => expect(events.some((event) => event.type === 'error')).toBe(true), { timeout: 2_000 });
+      expect(events.filter((event) => event.type === 'error' || event.type === 'export-result')).toEqual([
+        expect.objectContaining({ type: 'error', taskId, code: 'EXPORT_CANCELLED' }),
+      ]);
+      expect(streamDestroyed).toBe(true);
+      expect((await readdir(root)).some((name) => name.startsWith('cancel-copy-source_TTcut_'))).toBe(false);
+    } finally {
+      state.slowCopySource = ''; state.slowCopyStream = null;
+      if (activeTaskIds().includes(taskId)) await vi.waitFor(() => expect(activeTaskIds()).not.toContain(taskId), { timeout: 10_000 });
+    }
+  }, 30_000);
 
   it.skipIf(actualPlatform === 'win32')('cancels the full-content check without writing XML or falling back', async () => {
     const record = await makeHistory('win32', 'valid');
