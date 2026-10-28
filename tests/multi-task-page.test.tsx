@@ -407,6 +407,52 @@ describe('multi-task clipping', () => {
     expect(startAnalysis.mock.calls[1]?.[0]).toMatchObject({ videoPath: videos[1]!.path });
   });
 
+  it('reports an export failure received before its task ID is returned', async () => {
+    let reply!: (taskId: string) => void;
+    startExport.mockReset().mockReturnValue(new Promise<string>((resolve) => { reply = resolve; }));
+    render(<MultiTaskPage initialVideos={[videos[0]!]} preRoll={2.5} postRoll={1} onOpenAnalysis={vi.fn()} />);
+    await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledOnce());
+    await finishCalibration('calibration-task-1');
+    fireEvent.click(await screen.findByRole('button', { name: '开始分析剪辑' }));
+    await finishAnalysis(1);
+    await waitFor(() => expect(startExport).toHaveBeenCalledOnce());
+    act(() => listener?.({ type: 'error', taskId: 'export-task-1', code: 'CFR_PREFLIGHT_FAILED', message: 'preflight failed' }));
+    await act(async () => { reply('export-task-1'); });
+    expect(await screen.findByText('CFR_PREFLIGHT_FAILED')).toBeVisible();
+  });
+
+  it('queues cancellation until an export task ID is returned', async () => {
+    let reply!: (taskId: string) => void;
+    startExport.mockReset().mockReturnValue(new Promise<string>((resolve) => { reply = resolve; }));
+    render(<MultiTaskPage initialVideos={[videos[0]!]} preRoll={2.5} postRoll={1} onOpenAnalysis={vi.fn()} />);
+    await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledOnce());
+    await finishCalibration('calibration-task-1');
+    fireEvent.click(await screen.findByRole('button', { name: '开始分析剪辑' }));
+    await finishAnalysis(1);
+    await waitFor(() => expect(startExport).toHaveBeenCalledOnce());
+    fireEvent.click(screen.getByRole('button', { name: '取消 first.mp4' }));
+    expect(window.ttcut.cancelTask).not.toHaveBeenCalled();
+    await act(async () => { reply('export-task-1'); });
+    await waitFor(() => expect(window.ttcut.cancelTask).toHaveBeenCalledExactlyOnceWith('export-task-1'));
+    act(() => listener?.({ type: 'error', taskId: 'export-task-1', code: 'EXPORT_CANCELLED', message: 'cancelled' }));
+    await waitFor(() => expect(document.querySelector('.batch-row.cancelled')).not.toBeNull());
+  });
+
+  it('handles an export cancellation received before its task ID is returned', async () => {
+    let reply!: (taskId: string) => void;
+    startExport.mockReset().mockReturnValue(new Promise<string>((resolve) => { reply = resolve; }));
+    render(<MultiTaskPage initialVideos={[videos[0]!]} preRoll={2.5} postRoll={1} onOpenAnalysis={vi.fn()} />);
+    await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledOnce());
+    await finishCalibration('calibration-task-1');
+    fireEvent.click(await screen.findByRole('button', { name: '开始分析剪辑' }));
+    await finishAnalysis(1);
+    await waitFor(() => expect(startExport).toHaveBeenCalledOnce());
+    act(() => listener?.({ type: 'error', taskId: 'export-task-1', code: 'EXPORT_CANCELLED', message: 'cancelled' }));
+    await act(async () => { reply('export-task-1'); });
+    await waitFor(() => expect(document.querySelector('.batch-row.cancelled')).not.toBeNull());
+    expect(window.ttcut.cancelTask).not.toHaveBeenCalled();
+  });
+
   it('shows manual calibration for an automatic failure without exposing the raw code', async () => {
     render(<MultiTaskPage initialVideos={videos} preRoll={2.5} postRoll={1} onOpenAnalysis={vi.fn()} />);
     await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledTimes(1));
