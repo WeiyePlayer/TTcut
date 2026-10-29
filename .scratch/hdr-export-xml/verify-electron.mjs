@@ -1,9 +1,10 @@
 // Local acceptance: real Electron IPC, native worker and output-preview playback.
 import assert from 'node:assert/strict';
-import { _electron as electron, expect } from '@playwright/test';
+import { _electron as electron, chromium, expect } from '@playwright/test';
 import { copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { randomUUID, createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
+import { createServer } from 'node:net';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
@@ -19,13 +20,26 @@ const hash = async (file) => createHash('sha256').update(await readFile(file)).d
 const report = { host: process.platform, run, checks: [], errors: [], events: [] };
 const environment = { ...process.env, TTCUT_E2E: '1', TTCUT_E2E_USER_DATA: profile };
 delete environment.ELECTRON_RUN_AS_NODE;
-const instance = await electron.launch({ executablePath: path.join(root, 'node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'), args: [root], env: environment });
-const page = await instance.firstWindow();
 const waitFor = async (condition, timeout = 120000) => {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) { const result = await condition(); if (result) return result; await delay(100); }
   throw new Error('Acceptance condition timed out');
 };
+let instance, page;
+if (process.env.TTCUT_MACOS_ACCEPTANCE_APP) {
+  const server = createServer();
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  await new Promise(resolve => server.close(resolve));
+  const child = spawn(process.env.TTCUT_MACOS_ACCEPTANCE_APP, [`--user-data-dir=${profile}`, `--remote-debugging-port=${port}`], { env: environment, stdio: 'ignore' });
+  await waitFor(() => fetch(`http://127.0.0.1:${port}/json/version`).then(response => response.ok).catch(() => false), 45000);
+  const browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
+  page = await waitFor(() => browser.contexts().flatMap(context => context.pages()).find(candidate => candidate.url().startsWith('file:')), 45000);
+  instance = { close: async () => { await browser.close(); if (child.exitCode === null) child.kill('SIGTERM'); } };
+} else {
+  instance = await electron.launch({ executablePath: path.join(root, 'node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'), args: [root], env: environment });
+  page = await instance.firstWindow();
+}
 try {
   page.on('pageerror', (error) => report.errors.push(error.message));
   await page.waitForFunction(() => Boolean(window.ttcut));
