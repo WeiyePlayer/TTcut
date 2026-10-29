@@ -8,7 +8,7 @@ TTcut is a local automatic table-tennis video cutter for players and enthusiasts
 
 Videos, analysis results, and history stay on the local computer. TTcut requires no account, uploads no video, and collects no telemetry. The Windows full installer and macOS packages include their runtime resources. Analysis, preview, and cutting can run offline after setup.
 
-> Windows `v1.3.10` is prepared as a stable release draft and is not publicly available yet. The current downloadable stable release is `v1.3.9` for both Windows and macOS 15+ Apple Silicon.
+> Windows `v1.3.11` is being prepared as an unpublished stable release draft. The current downloadable Windows stable release is `v1.3.10`.
 
 ## Download and installation
 
@@ -19,14 +19,14 @@ Videos, analysis results, and history stay on the local computer. TTcut requires
 
 TTcut detects an NVIDIA GPU automatically and falls back to CPU if accelerated setup or its self-test fails. Its video-processing capability reads media information, cuts and joins segments, and validates exported files.
 
-## What's new in v1.3.10
+## What's new in v1.3.11
 
-- Isolated bundled Python prevents system environment variables and external packages from interfering with analysis, calibration, and component checks.
-- Improved HDR10/HLG, HEVC, and VFR exports preserve supported bit depth, color metadata, and timestamps; exports that would lose dynamic HDR metadata are rejected.
-- Legacy histories can reopen and export from an unchanged original when their CFR cache is missing.
-- Improved compatible previews for HDR/HEVC exports; batch export no longer checks unselected sources.
+- Single-source HDR10+ and compatible Dolby Vision 8.1/8.4 exports automatically tone-map to SDR without a new setting.
+- Premiere XML is independent of video encoding and scoreboard preparation, with results reported per requested artifact.
+- Stronger original-source recovery, CFR cache integrity checks, and cancellation handling prevent damaged-cache reuse and leftover cancelled outputs.
+- Initial custom-editing drafts respect confirmed hybrid v4 excluded ranges while remaining manually adjustable.
 
-See the [v1.3.10 release notes](docs/release-notes-v1.3.10.en.md) for the complete details.
+See the [v1.3.11 release notes](docs/release-notes-v1.3.11.en.md) for the complete details.
 
 ## Contact the author on WeChat: m2924931661
 

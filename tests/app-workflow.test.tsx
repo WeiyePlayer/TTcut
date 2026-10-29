@@ -10,7 +10,7 @@ import hybridProvenance from './fixtures/hybrid-provenance.json';
 import sourceTimeProvenance from './fixtures/hybrid-provenance-v4.json';
 
 const bootstrap: BootstrapData = {
-  version: '1.3.10',
+  version: '1.3.11',
   settings: {
     language: 'zh-CN',
     calibration_method: 'automatic',
