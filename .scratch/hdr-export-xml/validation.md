@@ -1,5 +1,7 @@
 # HDR 导出与 XML 修复验收
 
+Windows 实机后续验收见 [2026-10-29 Windows 验收记录](../../docs/windows-hdr-export-xml-validation-2026-10-29.md)。下方为此前 macOS 主机上的实现和验收记录。
+
 2026-10-26，macOS arm64。分支 `fix/hdr-export-xml` 基于 Windows 1.3.10 的 `285fa450cd8f31fc79502cc0db5803ab8626033a`。3 张本地工单均已实现；未发布安装包、远端工单或 PR。
 
 ## 已验证行为

@@ -4,6 +4,7 @@ import { createReadStream } from 'node:fs';
 import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { CutGroup, HistoryRecordV1, VideoMetadata } from '../src/shared/contracts';
 import type { AppEvent } from '../src/shared/api';
@@ -54,6 +55,12 @@ async function fileHash(file: string): Promise<string> {
   return hash.digest('hex');
 }
 
+function xmlReferencedPath(xml: string): string {
+  const match = /<pathurl>([^<]+)<\/pathurl>/.exec(xml);
+  if (!match) throw new Error('XML source path is missing');
+  return fileURLToPath(match[1]!);
+}
+
 describe.skipIf(!enabled)(`real FFmpeg Windows export arguments on ${platform}`, () => {
   let root: string;
   const videos = new Map<string, VideoMetadata>();
@@ -93,6 +100,7 @@ describe.skipIf(!enabled)(`real FFmpeg Windows export arguments on ${platform}`,
   for (const [kind, compatibility] of [['DV81', 1], ['DV84', 4]] as const) {
     const source = process.env[`TTCUT_${kind}_INTEGRATION`];
     it.skipIf(!source)(`automatically converts a real Dolby Vision ${kind} compatible base layer`, async () => {
+      const originalHash = await fileHash(source!);
       const video = await probeVideo(source!);
       expect(video.media_fidelity).toMatchObject({ hdr: 'dolbyVision',
         dolby_vision: { profile: 8, base_layer_present: true, signal_compatibility_id: compatibility } });
@@ -137,6 +145,7 @@ describe.skipIf(!enabled)(`real FFmpeg Windows export arguments on ${platform}`,
       const difference = pixels.reduce((sum, value, index) => sum + Math.abs(value - wrongPixels[index]!), 0) / pixels.length;
       expect(difference).toBeGreaterThan(5);
       await decode(output);
+      expect(await fileHash(source!)).toBe(originalHash);
     }, 60_000);
   }
 
@@ -174,16 +183,18 @@ describe.skipIf(!enabled)(`real FFmpeg Windows export arguments on ${platform}`,
   it.skipIf(!process.env.TTCUT_HDR10PLUS_INTEGRATION)('exports a real HDR10+ scene as decoded SDR video', async () => {
     const source = path.join(root, 'real-hdr10plus.mp4');
     await link(process.env.TTCUT_HDR10PLUS_INTEGRATION!, source);
+    const sceneStart = Number(process.env.TTCUT_HDR10PLUS_START ?? '16');
+    expect(Number.isFinite(sceneStart) && sceneStart >= 0).toBe(true);
     const beforeHash = await fileHash(source);
     const video = await probeVideo(source);
     expect(video.media_fidelity?.hdr).toBe('hdr10Plus');
     const id = '11111111-1111-4111-8111-111111111111';
     historyState.record = { id, analysis: { schema_version: 1, video,
-      rallies: [{ id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 16, end_time_seconds: 16.5 }] } } as HistoryRecordV1;
+      rallies: [{ id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: sceneStart, end_time_seconds: sceneStart + 0.5 }] } } as HistoryRecordV1;
     const events: AppEvent[] = [];
     const window = { isDestroyed: () => false, webContents: { send: (_channel: string, event: AppEvent) => events.push(event) } } as unknown as BrowserWindow;
     await startExport(window, { analysis_id: id, destination: 'source', selection: { mode: 'custom', segments: [
-      { rally_id: 'rally_001', start_time_seconds: 16, end_time_seconds: 16.5 },
+      { rally_id: 'rally_001', start_time_seconds: sceneStart, end_time_seconds: sceneStart + 0.5 },
     ] } });
     await vi.waitFor(() => expect(events.some((event) => event.type === 'export-result' || event.type === 'error')).toBe(true), { timeout: 120_000 });
     const result = events.find((event) => event.type === 'export-result' || event.type === 'error');
@@ -201,7 +212,7 @@ describe.skipIf(!enabled)(`real FFmpeg Windows export arguments on ${platform}`,
     expect(pixels.reduce((sum, value) => sum + value, 0) / pixels.length).toBeGreaterThan(5);
     expect(pixels.reduce((max, value) => Math.max(max, value), 0)).toBeGreaterThan(150);
     const retagged = path.join(root, 'real-hdr10plus-retagged.rgb');
-    await runProcess(ffmpeg!, ['-v', 'error', '-y', '-i', source, '-ss', '16', '-vf',
+    await runProcess(ffmpeg!, ['-v', 'error', '-y', '-i', source, '-ss', String(sceneStart), '-vf',
       'scale=320:180,format=yuv420p,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709,format=rgb24',
       '-frames:v', '1', '-f', 'rawvideo', retagged], { timeoutMs: 60_000 });
     const baseline = await readFile(retagged);
@@ -500,7 +511,7 @@ describe.skipIf(!enabled)(`real FFmpeg Windows export arguments on ${platform}`,
     await expect(access(cfr)).rejects.toThrow();
     expect(result.data.premiereXml!.quantizedForVfr).toBe(true);
     const xml = await readFile(result.data.premiereXml!.outputPath, 'utf8');
-    expect(xml).toContain(original.path);
+    expect(xmlReferencedPath(xml)).toBe(original.path);
     expect(xml).not.toContain('_TTcut_CFR.mp4');
     expect(await readFile(oldCache, 'utf8')).toBe('stale SDR cache that must never be copied');
   }, 60_000);
@@ -534,7 +545,7 @@ describe.skipIf(!enabled)(`real FFmpeg Windows export arguments on ${platform}`,
       if (result?.type !== 'export-result' || result.data.kind !== 'custom-artifacts') throw new Error(JSON.stringify(result));
       const xml = await readFile(result.data.premiereXml!.outputPath, 'utf8');
       expect(xml.includes('_TTcut_CFR.mp4')).toBe(scenario === 'valid');
-      if (scenario !== 'valid') expect(xml).toContain(source.path);
+      if (scenario !== 'valid') expect(xmlReferencedPath(xml)).toBe(source.path);
       expect(result.data.premiereXml!.quantizedForVfr).toBe(scenario !== 'valid');
     }, 60_000);
 

@@ -7,6 +7,7 @@ import type { AppEvent, BootstrapData, SelectedVideo, TTcutApi } from '../src/sh
 import type { CustomEditorDraft, UpdateState, VideoMetadata } from '../src/shared/contracts';
 import { analysisResultSchema } from '../src/shared/contracts';
 import hybridProvenance from './fixtures/hybrid-provenance.json';
+import sourceTimeProvenance from './fixtures/hybrid-provenance-v4.json';
 
 const bootstrap: BootstrapData = {
   version: '1.3.10',
@@ -740,6 +741,53 @@ describe('App workflow notices and multi-task entry', () => {
     expect(await screen.findByRole('button', { name: 'Back' })).toBeVisible();
     await act(async () => { reply('export-task-1'); });
     expect(screen.getByRole('button', { name: 'Back' })).toBeVisible();
+  });
+
+  it('keeps source-time exclusions out of the initial custom export ranges', async () => {
+    bootstrap.settings.language = 'en';
+    const selected = { path: 'C:/video/first.mp4', name: 'first.mp4', size: 100, mediaUrl: 'ttcut-media://first' };
+    selectVideos.mockResolvedValue([selected]);
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose or drop a file here' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start analysis' }));
+    const data = analysisResultSchema.parse({ schema_version: 3, video: metadata(selected.path), calibration,
+      rally_recognition: sourceTimeProvenance,
+      rallies: [
+        { id: 'rally_001', index: 1, bounce_count: 2, start_time_seconds: 1, end_time_seconds: 4 },
+        { id: 'rally_002', index: 2, bounce_count: 2, start_time_seconds: 6, end_time_seconds: 8 },
+      ],
+      bounce_times_seconds: [1.5, 3, 6.5, 7.5],
+      excluded_fragments: [{ start_time_seconds: 4.5, end_time_seconds: 5.5, evidence: [{ reason: 'observed_pause' }] }],
+    });
+    act(() => taskListener?.({ type: 'analysis-result', taskId: 'analysis-task-1',
+      analysisId: '11111111-1111-4111-8111-111111111111', calibration, data }));
+    fireEvent.click(await screen.findByRole('button', { name: /Custom/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start cutting' }));
+    await waitFor(() => expect(window.ttcut.startExport).toHaveBeenCalledWith(expect.objectContaining({
+      selection: { mode: 'custom', segments: [
+        expect.objectContaining({ rally_id: 'rally_001', start_time_seconds: 0, end_time_seconds: 4.5 }),
+        expect.objectContaining({ rally_id: 'rally_002', start_time_seconds: 5.5, end_time_seconds: 9 }),
+      ] },
+    })));
+  });
+
+  it('returns invalid custom ranges to the editor so they can be adjusted', async () => {
+    bootstrap.settings.language = 'en';
+    const selected = { path: 'C:/video/first.mp4', name: 'first.mp4', size: 100, mediaUrl: 'ttcut-media://first' };
+    selectVideos.mockResolvedValue([selected]);
+    vi.mocked(window.ttcut.startExport).mockRejectedValue(new Error('INVALID_CUSTOM_SEGMENTS'));
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose or drop a file here' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start analysis' }));
+    act(() => taskListener?.({ type: 'analysis-result', taskId: 'analysis-task-1', analysisId: '11111111-1111-4111-8111-111111111111', calibration,
+      data: { schema_version: 1, video: metadata(selected.path), rallies: [
+        { id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 1, end_time_seconds: 5 },
+      ] } }));
+    fireEvent.click(await screen.findByRole('button', { name: /Custom/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start cutting' }));
+    expect(await screen.findByText(/shorter than one frame/)).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(await screen.findByRole('region', { name: 'Custom cut timeline' })).toBeVisible();
   });
 
   it('exports current custom ranges when draft persistence fails after the CFR cache disappears', async () => {

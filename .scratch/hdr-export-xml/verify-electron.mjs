@@ -1,32 +1,57 @@
-// Local acceptance: real Electron IPC, native worker and output-preview playback.
+// Local acceptance: real Electron IPC, packaged or native media and output playback.
 import assert from 'node:assert/strict';
-import { _electron as electron, expect } from '@playwright/test';
+import { _electron as electron, chromium, expect } from '@playwright/test';
 import { copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { randomUUID, createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
+import { createServer } from 'node:net';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const root = process.cwd();
+await mkdir(path.join(root, 'output/hdr-export-xml'), { recursive: true });
 const run = await mkdtemp(path.join(root, 'output/hdr-export-xml/electron-'));
 const profile = path.join(run, 'profile');
 await mkdir(path.join(profile, 'history/records'), { recursive: true });
 await writeFile(path.join(profile, 'settings.json'), JSON.stringify({ language: 'en', calibration_method: 'manual', pre_roll_seconds: 1.5, post_roll_seconds: 0.5, normalize_variable_frame_rate: false }));
-const ffmpeg = path.join(root, '.runtime/macos/bin/ffmpeg');
-const ffprobe = path.join(root, '.runtime/macos/bin/ffprobe');
+const windowsApp = process.platform === 'win32' ? process.env.TTCUT_WINDOWS_ACCEPTANCE_APP : null;
+if (process.platform === 'win32' && !windowsApp) throw new Error('TTCUT_WINDOWS_ACCEPTANCE_APP must name the packaged Windows executable');
+const mediaRoot = windowsApp ? path.join(path.dirname(windowsApp), 'resources/windows/ffmpeg') : path.join(root, '.runtime/macos/bin');
+const ffmpeg = path.join(mediaRoot, windowsApp ? 'ffmpeg.exe' : 'ffmpeg');
+const ffprobe = path.join(mediaRoot, windowsApp ? 'ffprobe.exe' : 'ffprobe');
 const execute = (file, args) => execFileSync(file, args, { encoding: 'utf8', timeout: 120000, maxBuffer: 8 * 1024 * 1024 });
 const hash = async (file) => createHash('sha256').update(await readFile(file)).digest('hex');
 const report = { host: process.platform, run, checks: [], errors: [], events: [] };
 const environment = { ...process.env, TTCUT_E2E: '1', TTCUT_E2E_USER_DATA: profile };
 delete environment.ELECTRON_RUN_AS_NODE;
-const instance = await electron.launch({ executablePath: path.join(root, 'node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'), args: [root], env: environment });
-const page = await instance.firstWindow();
+const executablePath = windowsApp ?? path.join(root, 'node_modules/electron/dist/Electron.app/Contents/MacOS/Electron');
 const waitFor = async (condition, timeout = 120000) => {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) { const result = await condition(); if (result) return result; await delay(100); }
   throw new Error('Acceptance condition timed out');
 };
+let instance, browser, child, exited, page;
 try {
+  if (windowsApp) {
+    const server = createServer();
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = server.address().port;
+    await new Promise((resolve) => server.close(resolve));
+    child = spawn(executablePath, [`--user-data-dir=${profile}`, `--remote-debugging-port=${port}`],
+      { env: environment, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    exited = new Promise((resolve) => child.once('exit', (code, signal) => resolve({ code, signal })));
+    child.stdout.resume();
+    let stderr = ''; child.stderr.on('data', (chunk) => { stderr += String(chunk); });
+    await waitFor(() => {
+      if (child.exitCode !== null) throw new Error(`TTcut exited early: ${stderr}`);
+      return fetch(`http://127.0.0.1:${port}/json/version`).then((response) => response.ok).catch(() => false);
+    }, 45000);
+    browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
+    page = await waitFor(() => browser.contexts().flatMap((context) => context.pages()).find((candidate) => candidate.url().startsWith('file:')), 45000);
+  } else {
+    instance = await electron.launch({ executablePath, args: [root], env: environment });
+    page = await instance.firstWindow();
+  }
   page.on('pageerror', (error) => report.errors.push(error.message));
   await page.waitForFunction(() => Boolean(window.ttcut));
   await page.evaluate(() => localStorage.setItem('ttcut.customEditingGuide.seen.v1', '1'));
@@ -36,7 +61,7 @@ try {
   assert.equal(bootstrap.components.media.available, true, JSON.stringify(bootstrap.components));
   assert.equal(bootstrap.components.analysis.available, true, JSON.stringify(bootstrap.components));
   for (const name of process.argv.includes('--xml-failures-only') ? [] : ['dv81', 'dv84']) {
-    const source = path.join('/tmp/ttcut-hdr-export-samples', `${name}-original.mp4`);
+    const source = path.join(process.env.TTCUT_HDR_SAMPLES_DIR ?? '/tmp/ttcut-hdr-export-samples', `${name}-original.mp4`);
     const sourceHash = await hash(source);
     const video = await page.evaluate(async (file) => { const selected = await window.ttcut.acceptDroppedVideo(file); return window.ttcut.probeVideo(selected.path); }, source);
     assert.equal(video.media_fidelity.hdr, 'dolbyVision');
@@ -93,7 +118,7 @@ try {
       schema_version: 1, id, analyzed_at: new Date().toISOString(),
       source: { path: source, name: path.basename(source), size: info.size, modified_time_ms: info.mtimeMs },
       calibration: { video_width: 320, video_height: 180, points: { top_left: [80, 40], top_right: [240, 40], bottom_right: [280, 150], bottom_left: [40, 150] } },
-      analysis: { schema_version: 1, video: { ...original, path: cached, native_video: { ...original.native_video, path: cached } },
+      analysis: { schema_version: 1, video: { ...original, path: cached, ...(original.native_video ? { native_video: { ...original.native_video, path: cached } } : {}) },
         source_video: original, processing: { mode: 'normalized_cfr', target_fps_ratio: '24/1', encoder: 'libx265', warning_code: null },
         rallies: [{ id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 1, end_time_seconds: 2 }] },
     };
@@ -152,10 +177,15 @@ try {
   console.log(`Acceptance evidence: ${run}`);
 } catch (error) {
   report.failure = String(error.stack);
-  await page.screenshot({ path: path.join(run, 'failure.png') }).catch(() => {});
+  if (page) await page.screenshot({ path: path.join(run, 'failure.png') }).catch(() => {});
   throw error;
 } finally {
+  if (page && !page.isClosed()) await page.evaluate(() => window.ttcut.confirmClose('exit')).catch(() => {});
+  if (instance) await instance.close();
+  if (browser) await browser.close().catch(() => {});
+  if (exited) {
+    report.shutdown = await Promise.race([exited, delay(30000, null, { ref: false })]);
+    if (!report.shutdown) { child.kill(); report.failure ??= 'TTcut did not exit cleanly'; process.exitCode = 1; }
+  }
   await writeFile(path.join(run, 'report.json'), JSON.stringify(report, null, 2));
-  await page.evaluate(() => window.ttcut.confirmClose('exit')).catch(() => {});
-  await instance.close();
 }

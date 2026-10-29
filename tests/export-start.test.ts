@@ -176,7 +176,6 @@ describe('export task start and terminal lifecycle', () => {
     const original: AnalysisResultV1['video'] = {
       path: state.source, duration_seconds: 30, width: 1280, height: 720, fps: 30,
       variable_frame_rate: true, video_codec: 'hevc', pixel_format: 'yuv420p10le', audio_codec: null, container: 'mp4',
-      media_fidelity: { hdr: 'hlg', bit_depth: 10, chroma: '420', mastering_display: null, max_cll: null },
     };
     const cache = path.join(directory, 'missing-cfr.mp4');
     state.analysis = {
@@ -186,7 +185,9 @@ describe('export task start and terminal lifecycle', () => {
       processing: { mode: 'normalized_cfr', target_fps_ratio: '30/1', encoder: 'libx264', warning_code: null },
       rallies: [{ id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 10, end_time_seconds: 12 }],
     };
-    vi.mocked(probeVideo).mockResolvedValue(original);
+    vi.mocked(probeVideo).mockResolvedValue({
+      ...original, media_fidelity: { hdr: 'hlg', bit_depth: 10, chroma: '420', mastering_display: null, max_cll: null },
+    });
     await expect(access(cache)).rejects.toThrow();
 
     const taskId = await startExport(windowMock() as never, request);

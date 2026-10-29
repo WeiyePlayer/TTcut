@@ -1,5 +1,7 @@
 // @vitest-environment node
 import { access, chmod, copyFile, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import { Readable } from 'node:stream';
 import path from 'node:path';
@@ -83,13 +85,14 @@ vi.mock('../src/main/logger', () => ({ logLine: vi.fn(async (_task: string, _lev
 vi.mock('electron', () => ({ app: { isPackaged: false, getAppPath: () => os.tmpdir(), getPath: () => os.tmpdir() }, dialog: { showSaveDialog: async () => ({ canceled: false, filePath: state.output }) } }));
 
 import { HistoryStore } from '../src/main/history';
-import { hasHdrFrameSideData, probeVideo } from '../src/main/probe';
+import { hasCompleteCfrContent, hasHdrFrameSideData, probeVideo } from '../src/main/probe';
 import { activeTaskIds, runProcess, cancelTask } from '../src/main/processes';
 import { startExport } from '../src/main/export';
 
 const ffmpeg = process.env.TTCUT_FFMPEG_INTEGRATION;
 const ffprobe = process.env.TTCUT_FFPROBE_INTEGRATION;
 const actualPlatform = process.platform;
+const windowsCompiler = path.join(process.env.WINDIR ?? 'C:/Windows', 'Microsoft.NET/Framework64/v4.0.30319/csc.exe');
 
 describe.skipIf(!ffmpeg || !ffprobe)('CFR content integrity through HistoryStore and XML export', () => {
   let root: string;
@@ -133,7 +136,7 @@ describe.skipIf(!ffmpeg || !ffprobe)('CFR content integrity through HistoryStore
       if (scenario !== 'all-video') expect(Number(JSON.parse(inspection.stdout).streams[0].nb_read_frames)).toBeGreaterThan(0);
     }
     if (scenario === 'audio-lost' || scenario === 'audio-timing') {
-      const bytes = await readFile(cache);
+      let bytes = await readFile(cache);
       const boxes = (start: number, end: number) => {
         const result: Array<{ start: number; end: number; type: string }> = [];
         for (let pos = start; pos + 8 <= end;) {
@@ -155,17 +158,43 @@ describe.skipIf(!ffmpeg || !ffprobe)('CFR content integrity through HistoryStore
         const handler = child(child(trak, 'mdia'), 'hdlr');
         return bytes.toString('ascii', handler.start + 16, handler.start + 20) === 'soun';
       })!;
-      const stbl = child(child(child(audioTrack, 'mdia'), 'minf'), 'stbl');
+      const mdia = child(audioTrack, 'mdia');
+      const minf = child(mdia, 'minf');
+      const stbl = child(minf, 'stbl');
       if (scenario === 'audio-lost') {
         const stsz = child(stbl, 'stsz');
         const count = bytes.readUInt32BE(stsz.start + 16);
         expect(count).toBeGreaterThan(100);
         for (let index = 30; index < count; index++) bytes.writeUInt32BE(0, stsz.start + 20 + index * 4);
       } else {
-        const stts = child(stbl, 'stts').start;
-        expect([bytes.readUInt32BE(stts + 12), bytes.readUInt32BE(stts + 16), bytes.readUInt32BE(stts + 20),
-          bytes.readUInt32BE(stts + 24), bytes.readUInt32BE(stts + 28)]).toEqual([2, 188, 1024, 1, 512]);
-        bytes.writeUInt32BE(512, stts + 20); bytes.writeUInt32BE(96768, stts + 28);
+        const stts = child(stbl, 'stts');
+        const entryCount = bytes.readUInt32BE(stts.start + 12);
+        const entries = Array.from({ length: entryCount }, (_, index) => ({
+          count: bytes.readUInt32BE(stts.start + 16 + index * 8),
+          duration: bytes.readUInt32BE(stts.start + 20 + index * 8),
+        }));
+        const totalSamples = entries.reduce((sum, entry) => sum + entry.count, 0);
+        const totalDuration = entries.reduce((sum, entry) => sum + entry.count * entry.duration, 0);
+        expect(totalSamples).toBeGreaterThan(100);
+        const overlappingDuration = Math.floor(entries[0]!.duration / 2);
+        const finalDuration = totalDuration - (totalSamples - 1) * overlappingDuration;
+        expect(overlappingDuration).toBeGreaterThan(0);
+        expect(finalDuration).toBeGreaterThan(overlappingDuration);
+        if (entryCount === 1) {
+          // Windows FFmpeg may use one stts entry; expand the trailing moov box
+          // without shifting mdat offsets, then store the equivalent two entries.
+          const mdat = boxes(0, bytes.length).find((box) => box.type === 'mdat')!;
+          expect(mdat.end).toBeLessThanOrEqual(moov.start);
+          bytes = Buffer.concat([bytes.subarray(0, stts.end), Buffer.alloc(8), bytes.subarray(stts.end)]);
+          for (const box of [stts, stbl, minf, mdia, audioTrack, moov]) {
+            bytes.writeUInt32BE(box.end - box.start + 8, box.start);
+          }
+        }
+        bytes.writeUInt32BE(2, stts.start + 12);
+        bytes.writeUInt32BE(totalSamples - 1, stts.start + 16);
+        bytes.writeUInt32BE(overlappingDuration, stts.start + 20);
+        bytes.writeUInt32BE(1, stts.start + 24);
+        bytes.writeUInt32BE(finalDuration, stts.start + 28);
       }
       await writeFile(cache, bytes);
       const inspection = await runProcess(ffprobe!, ['-v', 'error', '-count_frames', '-select_streams', 'a:0',
@@ -173,7 +202,12 @@ describe.skipIf(!ffmpeg || !ffprobe)('CFR content integrity through HistoryStore
       expect(inspection.stderr).toBe('');
       const frames = Number(JSON.parse(inspection.stdout).streams[0].nb_read_frames);
       if (scenario === 'audio-lost') expect(frames).toBe(29);
-      else expect(frames).toBeGreaterThan(180);
+      else {
+        expect(frames).toBeGreaterThan(180);
+        const damaged = await probeVideo(cache);
+        expect(damaged.audio_duration_seconds).toBeCloseTo(original.audio_duration_seconds!, 2);
+        expect(await hasCompleteCfrContent(cache, true)).toBe(false);
+      }
     }
     state.store = new HistoryStore(path.join(root, `history-${platform}-${scenario}`), async (_input, cover) => { await writeFile(cover, 'cover'); });
     const record = await state.store.upsert({ schema_version: 1, source_video: original,
@@ -373,6 +407,56 @@ describe.skipIf(!ffmpeg || !ffprobe)('CFR content integrity through HistoryStore
     } finally {
       for (const task of activeTaskIds()) await cancelTask(task, 'user');
       await pending.catch(() => undefined);
+      state.ffprobe = ffprobe!;
+    }
+  }, 30_000);
+
+  it.skipIf(actualPlatform !== 'win32' || !existsSync(windowsCompiler))('cancels a running Windows CFR probe without publishing an output', async () => {
+    const record = await makeHistory('win32', 'valid');
+    const marker = path.join(root, 'windows-probe-started');
+    const helperSource = path.join(root, 'slow-probe.cs');
+    const helper = path.join(root, 'slow-probe.exe');
+    await writeFile(helperSource, [
+      'using System; using System.IO; using System.Threading; using System.Diagnostics;',
+      'class SlowProbe { static int Main() {',
+      'File.WriteAllText(Environment.GetEnvironmentVariable("TTCUT_TEST_CFR_MARKER"), Process.GetCurrentProcess().Id.ToString());',
+      'Thread.Sleep(30000); return 0; } }',
+    ].join('\n'));
+    execFileSync(windowsCompiler, ['/nologo', '/target:exe', `/out:${helper}`, helperSource], { windowsHide: true });
+    state.ffprobe = helper;
+    const oldMarker = process.env.TTCUT_TEST_CFR_MARKER;
+    process.env.TTCUT_TEST_CFR_MARKER = marker;
+    const existing = (await readdir(root)).sort();
+    const events: AppEvent[] = [];
+    const window = { isDestroyed: () => false, webContents: { send: (_: string, event: AppEvent) => events.push(event) } } as unknown as BrowserWindow;
+    const pending = startExport(window, { analysis_id: record.id, destination: 'source',
+      selection: { mode: 'custom', segments: [{ rally_id: 'rally_001', start_time_seconds: 1, end_time_seconds: 2 }] },
+      outputs: { combined_video: true, rally_videos: false, premiere_xml: false } });
+    let helperPid = 0;
+    try {
+      await vi.waitFor(async () => { await access(marker); }, { timeout: 10_000 });
+      helperPid = Number(await readFile(marker, 'utf8'));
+      expect(helperPid).toBeGreaterThan(0);
+      const taskId = await Promise.race([pending, new Promise<never>((_, reject) => setTimeout(() => reject(new Error('startExport still pending')), 500))]);
+      expect(events).toContainEqual(expect.objectContaining({ type: 'progress', data: expect.objectContaining({ taskId, stage: 'preparing' }) }));
+      await cancelTask(taskId, 'user');
+      await vi.waitFor(() => expect(events.some((event) => event.type === 'error')).toBe(true), { timeout: 10_000 });
+      expect(events.filter((event) => event.type === 'error' || event.type === 'export-result')).toEqual([
+        expect.objectContaining({ type: 'error', taskId, code: 'EXPORT_CANCELLED' }),
+      ]);
+      await vi.waitFor(() => {
+        try { process.kill(helperPid, 0); throw new Error('Probe process is still running'); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error; }
+      }, { timeout: 10_000 });
+      helperPid = 0;
+      await rm(marker);
+      expect((await readdir(root)).sort()).toEqual(existing);
+    } finally {
+      for (const task of activeTaskIds()) await cancelTask(task, 'user');
+      await pending.catch(() => undefined);
+      if (helperPid) { try { process.kill(helperPid); } catch { /* helper already exited */ } }
+      if (oldMarker === undefined) delete process.env.TTCUT_TEST_CFR_MARKER;
+      else process.env.TTCUT_TEST_CFR_MARKER = oldMarker;
       state.ffprobe = ffprobe!;
     }
   }, 30_000);

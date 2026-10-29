@@ -21,6 +21,7 @@ import {
 import type { AppEvent, BootstrapData, SelectedVideo } from '../shared/api';
 import { DONATION_URL, GITHUB_URL, RELEASES_URL, WEBSITE_URL } from '../shared/urls';
 import { formatTimestamp } from '../domain/time';
+import { exportExclusions } from '../domain/segments';
 import { scoreboardDisplayDimensions, scoreboardName } from '../domain/scoreboard';
 import { createCustomClipDraft, customExportSegments, resolvedSelectedClipScores, setCustomClipSelected, type CustomRallyClip } from '../domain/custom-clips';
 import type { CustomPlaybackMode } from '../domain/custom-playback';
@@ -401,6 +402,7 @@ export function App() {
       analysis.video.duration_seconds,
       analysis.video.fps,
       rallyRecognitionMethod(analysis),
+      exportExclusions(analysis),
     ));
     setCustomPlaybackMode('source');
     setCustomScoreboard(DEFAULT_SCOREBOARD);
@@ -1047,7 +1049,11 @@ export function App() {
                 <div className="error-actions">
                   <button className="secondary" onClick={() => void window.ttcut.revealLogs()}>{t.logs}</button>
                   {error.recoveredOutputPath && <button className="secondary" onClick={() => void window.ttcut.revealOutput(error.recoveredOutputPath!)}>{t.openRecoveredOutput}</button>}
-                  <button className="primary" onClick={() => { setError(null); setStep(video && metadata ? 'calibrate' : 'select'); }}>{t.retry}</button>
+                  <button className="primary" onClick={() => {
+                    const returnToCustom = error.code === 'INVALID_CUSTOM_SEGMENTS' && exportOriginRef.current === 'custom' && analysis;
+                    setError(null);
+                    setStep(returnToCustom ? 'custom' : video && metadata ? 'calibrate' : 'select');
+                  }}>{t.retry}</button>
                 </div>
               </div>
             )}

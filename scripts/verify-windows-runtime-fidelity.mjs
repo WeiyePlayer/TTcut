@@ -29,12 +29,14 @@ for (const name of ['numpy', 'cv2', 'onnxruntime']) await writeFile(path.join(po
 const source = path.join(run, 'HLG 乒乓.mp4');
 await copyFile(path.join(mediaDirectory, 'hlg.mp4'), source);
 const dynamic = path.join(run, 'HDR10plus.mp4');
-await copyFile(path.join(mediaDirectory, 'hdr10plus.mp4'), dynamic);
+await copyFile(process.env.TTCUT_HDR10PLUS_SOURCE ?? path.join(mediaDirectory, 'hdr10plus.mp4'), dynamic);
 const realVideo = path.join(run, '真实比赛.mp4');
-execute(ffmpeg, ['-v', 'error', '-y', '-ss', '8', '-i', match, '-t', '4', '-an', '-c:v', 'libx264', '-preset', 'ultrafast', realVideo]);
+if (process.env.TTCUT_MATCH_IS_CLIP === '1') await copyFile(match, realVideo);
+else execute(ffmpeg, ['-v', 'error', '-y', '-ss', '8', '-i', match, '-t', '4', '-an', '-c:v', 'libx264', '-preset', 'ultrafast', realVideo]);
 const id = randomUUID();
 const dynamicId = randomUUID();
 const legacyId = randomUUID();
+const exclusionId = randomUUID();
 const template = JSON.parse(await readFile(templateFile, 'utf8'));
 const info = await stat(source);
 const record = {
@@ -60,7 +62,26 @@ const legacyRecord = { ...record, id: legacyId, analysis: {
   processing: { mode: 'normalized_cfr', target_fps_ratio: '24/1', encoder: 'libx264', warning_code: null },
 } };
 await writeFile(path.join(profile, 'history/records', `${legacyId}.json`), JSON.stringify(legacyRecord));
-await writeFile(path.join(profile, 'history/index.json'), JSON.stringify({ schema_version: 1, entries: [id, dynamicId, legacyId].map((id) => ({ id, analyzed_at: record.analyzed_at })) }));
+const exclusionSource = path.join(run, 'excluded-fragment-input.mp4');
+await copyFile(realVideo, exclusionSource);
+const exclusionInfo = await stat(exclusionSource);
+const sourceTimeProvenance = JSON.parse(await readFile('tests/fixtures/hybrid-provenance-v4.json', 'utf8'));
+const exclusionRecord = { ...record, id: exclusionId,
+  source: { path: exclusionSource, name: path.basename(exclusionSource), size: exclusionInfo.size, modified_time_ms: exclusionInfo.mtimeMs },
+  analysis: { schema_version: 3,
+    video: { path: exclusionSource, duration_seconds: 4.004, width: 1280, height: 720, fps: 30000 / 1001,
+      variable_frame_rate: false, video_codec: 'h264', audio_codec: null, container: 'mp4' },
+    rally_recognition: sourceTimeProvenance,
+    rallies: [
+      { id: 'rally_001', index: 1, bounce_count: 2, start_time_seconds: 0.2, end_time_seconds: 1 },
+      { id: 'rally_002', index: 2, bounce_count: 2, start_time_seconds: 2, end_time_seconds: 3 },
+    ],
+    bounce_times_seconds: [0.3, 0.8, 2.2, 2.7],
+    excluded_fragments: [{ start_time_seconds: 1.2, end_time_seconds: 1.7, evidence: [{ reason: 'observed_pause' }] }],
+  },
+};
+await writeFile(path.join(profile, 'history/records', `${exclusionId}.json`), JSON.stringify(exclusionRecord));
+await writeFile(path.join(profile, 'history/index.json'), JSON.stringify({ schema_version: 1, entries: [id, dynamicId, legacyId, exclusionId].map((id) => ({ id, analyzed_at: record.analyzed_at })) }));
 await writeFile(path.join(profile, 'settings.json'), JSON.stringify({ language: 'en', calibration_method: 'automatic', pre_roll_seconds: 1.5, post_roll_seconds: 0.5, normalize_variable_frame_rate: false }));
 const server = createServer();
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -153,6 +174,31 @@ try {
   assert.equal(await hash(source), originalHash); assert.equal(await hash(outputPath), outputHash);
   assert.deepEqual(pageErrors, []);
   report.checks.push({ name: 'actual Windows HDR export, full decode, result proxy playback and seeking preserve originals', outputPath, stream, playback, sought, sourceHash: originalHash, outputHash });
+
+  const exclusionHash = await hash(exclusionSource);
+  await page.evaluate(() => {
+    localStorage.setItem('ttcut.customEditingGuide.seen.v1', '1');
+    window.ttcut.onTaskEvent((event) => window.fidelityEvent(event));
+  });
+  await page.getByRole('button', { name: 'History', exact: true }).click();
+  await page.locator('.history-open').filter({ hasText: path.basename(exclusionSource) }).click();
+  await page.getByRole('button', { name: /Custom/ }).click();
+  const handles = [];
+  for (const index of [1, 2]) {
+    handles.push([
+      Number(await page.getByRole('slider', { name: `Resize clip start ${index}` }).getAttribute('aria-valuenow')),
+      Number(await page.getByRole('slider', { name: `Resize clip end ${index}` }).getAttribute('aria-valuenow')),
+    ]);
+  }
+  assert.deepEqual(handles, [[0, 1.2], [1.7, 3.5]]);
+  await page.getByRole('button', { name: 'Start cutting', exact: true }).click();
+  const customResult = await waitFor(() => report.events.find((event) => event.type === 'export-result' && event.data?.analysisId === exclusionId), 120_000);
+  assert.equal(customResult.data.timing.segmentCount, 2);
+  assert.equal(customResult.data.timing.targetSeconds, 3);
+  execute(ffmpeg, ['-v', 'error', '-xerror', '-i', customResult.data.outputPath, '-f', 'null', '-']);
+  assert.equal(await hash(exclusionSource), exclusionHash);
+  assert.deepEqual(pageErrors, []);
+  report.checks.push({ name: 'actual Windows custom editor excludes observed pauses from the default export', handles, event: customResult, sourceHash: exclusionHash });
   passed = true;
 } catch (error) {
   report.error = String(error); console.error(error);
