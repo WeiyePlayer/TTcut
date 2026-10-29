@@ -7,7 +7,7 @@ import type {
   RallyRecognitionMethod,
   ScoreboardScore,
 } from '../shared/contracts';
-import { finalRallyTailSeconds, rallyLeadInStart } from './segments';
+import { clampRollToExclusions, finalRallyTailSeconds, rallyLeadInStart, type ExcludedRange } from './segments';
 
 const EPSILON = 1e-6;
 const PRECISION = 1_000_000;
@@ -131,10 +131,17 @@ function normalizeSelected(
     const left = selected[index]!;
     const right = selected[index + 1]!;
     if (left.end <= right.start + EPSILON) continue;
-    const minimumBoundary = Math.max(lowerBound, left.start + minimumDuration);
-    const maximumBoundary = Math.min(upperBound, right.end - minimumDuration);
+    const overlapStart = Math.max(lowerBound, left.start, right.start);
+    const overlapEnd = Math.min(upperBound, left.end, right.end);
+    if (overlapStart > overlapEnd) continue;
+    const minimumBoundary = Math.max(overlapStart, left.start + minimumDuration);
+    const maximumBoundary = Math.min(overlapEnd, right.end - minimumDuration);
     const midpoint = (left.end + right.start) / 2;
-    const boundary = seconds(Math.max(minimumBoundary, Math.min(maximumBoundary, midpoint)));
+    // If two one-frame clips cannot fit, split only within their overlap.
+    // The resulting short clips are rejected by export validation until edited.
+    const boundary = seconds(minimumBoundary <= maximumBoundary
+      ? Math.max(minimumBoundary, Math.min(maximumBoundary, midpoint))
+      : (overlapStart + overlapEnd) / 2);
     left.end = boundary;
     right.start = boundary;
   }
@@ -148,15 +155,29 @@ export function createCustomClipDraft(
   videoDuration: number,
   fps: number,
   recognitionMethod: RallyRecognitionMethod = 'bounce_events',
+  excluded: readonly ExcludedRange[] = [],
 ): CustomRallyClip[] {
   const minimumDuration = frameDuration(fps);
   const clips = orderedRallies(rallies).map((rally) => {
-    const defaultStart = seconds(rallyLeadInStart(rally, preRollSeconds, recognitionMethod));
-    const defaultEnd = seconds(Math.min(
-      videoDuration,
-      rally.end_time_seconds + finalRallyTailSeconds(recognitionMethod) + postRollSeconds,
-    ));
-    const end = Math.max(defaultEnd, seconds(Math.min(videoDuration, defaultStart + minimumDuration)));
+    const [boundedStart, boundedEnd] = clampRollToExclusions(
+      rallyLeadInStart(rally, preRollSeconds, recognitionMethod),
+      Math.min(videoDuration, rally.end_time_seconds + finalRallyTailSeconds(recognitionMethod) + postRollSeconds),
+      rally.start_time_seconds, rally.end_time_seconds, excluded,
+    );
+    let defaultStart = seconds(boundedStart);
+    const defaultEnd = seconds(boundedEnd);
+    let end = Math.max(defaultEnd, seconds(Math.min(videoDuration, defaultStart + minimumDuration)));
+    if (excluded.length) {
+      const [safeStart, safeEnd] = clampRollToExclusions(0, videoDuration, rally.start_time_seconds, rally.end_time_seconds, excluded);
+      if (end > safeEnd) {
+        end = seconds(safeEnd);
+        // A very short rally can need a frame of padding. Prefer the safe side;
+        // if neither side has room, keep the range short for export validation.
+        if (end - defaultStart + EPSILON < minimumDuration) {
+          defaultStart = seconds(Math.max(safeStart, end - minimumDuration));
+        }
+      }
+    }
     return {
       clipId: rally.id,
       source: 'detected' as const,

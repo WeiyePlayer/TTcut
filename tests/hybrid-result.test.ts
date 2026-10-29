@@ -4,8 +4,8 @@ import legacyProvenance from './fixtures/hybrid-provenance-v1.json';
 import previousProvenance from './fixtures/hybrid-provenance-v2.json';
 import sourceTimeProvenance from './fixtures/hybrid-provenance-v4.json';
 import { analysisResultSchema, hasBounceCounts, hybridAnalysisResultV3Schema } from '../src/shared/contracts';
-import { buildCutGroups, createCutGroups, selectRallies } from '../src/domain/segments';
-import { calculateManualBounceCount } from '../src/domain/custom-clips';
+import { buildCutGroups, createCutGroups, exportExclusions, selectRallies } from '../src/domain/segments';
+import { calculateManualBounceCount, createCustomClipDraft, customExportSegments, resizeCustomClip, setCustomClipSelected, validateCustomExportSegments } from '../src/domain/custom-clips';
 
 const rally = (start: number, end: number, index = 1, count = 4) => ({
   id: `rally_${String(index).padStart(3, '0')}`, index, start_time_seconds: start, end_time_seconds: end, bounce_count: count,
@@ -31,6 +31,13 @@ describe('hybrid result and editing/export rules', () => {
     expect(groups.map(group => [group.start, group.end, group.rallyIds])).toEqual([
       [0, 5.2, ['rally_001']], [5.8, 11, ['rally_002']],
     ]);
+    const clips = createCustomClipDraft(result.rallies, 2.5, 2, 30, 30, 'hybrid_motion_bounce', result.excluded_fragments);
+    expect(clips.map(clip => [clip.start, clip.end, clip.defaultStart, clip.defaultEnd])).toEqual([
+      [0, 5.2, 0, 5.2], [5.8, 11, 5.8, 11],
+    ]);
+    expect(resizeCustomClip(clips, 'rally_001', 'end', 5.5, 30, 30)[0]?.end).toBe(5.5);
+    expect(exportExclusions(result)).toEqual(result.excluded_fragments);
+    expect(exportExclusions(analysisResultSchema.parse(fixture()))).toEqual([]);
     expect(hybridAnalysisResultV3Schema.safeParse({ ...result, rally_recognition: provenance }).success).toBe(false);
     expect(hybridAnalysisResultV3Schema.safeParse({
       ...result, rally_recognition: { ...sourceTimeProvenance, timebase: { ...sourceTimeProvenance.timebase, maximum_clock_hz: 120 } },
@@ -40,6 +47,46 @@ describe('hybrid result and editing/export rules', () => {
     const result = analysisResultSchema.parse(fixture());
     expect(hasBounceCounts(result)).toBe(true);
     expect(result.schema_version).toBe(3);
+  });
+  it('keeps sub-frame defaults out of exclusions and fills a frame from the safe side when possible', () => {
+    const observedPause = (start_time_seconds: number, end_time_seconds: number) => ({
+      start_time_seconds, end_time_seconds, evidence: [{ reason: 'observed_pause' }],
+    });
+    const base = {
+      ...fixture(), video: { ...fixture().video, fps: 24 }, rally_recognition: sourceTimeProvenance,
+      rallies: [rally(5, 5.02, 1, 1)], bounce_times_seconds: [5.01],
+    };
+    const result = hybridAnalysisResultV3Schema.parse({ ...base, excluded_fragments: [observedPause(5.021, 5.6)] });
+    const clips = createCustomClipDraft(result.rallies, 0, 1, 30, 24, 'hybrid_motion_bounce', exportExclusions(result));
+    expect(clips[0]).toMatchObject({ start: 4.979333, end: 5.021, defaultStart: 4.979333, defaultEnd: 5.021 });
+    expect(validateCustomExportSegments(result, customExportSegments(clips))).toHaveLength(1);
+
+    const enclosed = hybridAnalysisResultV3Schema.parse({
+      ...base, excluded_fragments: [observedPause(4, 5), observedPause(5.021, 5.6)],
+    });
+    const short = createCustomClipDraft(enclosed.rallies, 0, 1, 30, 24, 'hybrid_motion_bounce', exportExclusions(enclosed));
+    expect(short[0]).toMatchObject({ start: 5, end: 5.021, selected: true });
+    expect(() => validateCustomExportSegments(enclosed, customExportSegments(short))).toThrow('INVALID_CUSTOM_SEGMENTS');
+  });
+  it('does not push crowded default ranges into exclusions when normalizing or reselecting', () => {
+    const result = hybridAnalysisResultV3Schema.parse({
+      ...fixture(), video: { ...fixture().video, fps: 24 }, rally_recognition: sourceTimeProvenance,
+      rallies: [rally(4.991, 4.994, 1, 1), rally(4.996, 5, 2, 1)], bounce_times_seconds: [4.992, 4.998],
+      excluded_fragments: [
+        { start_time_seconds: 4.9, end_time_seconds: 4.99, evidence: [{ reason: 'observed_pause' }] },
+        { start_time_seconds: 5.001, end_time_seconds: 5.6, evidence: [{ reason: 'observed_pause' }] },
+      ],
+    });
+    const clips = createCustomClipDraft(result.rallies, 0, 1, 30, 24, 'hybrid_motion_bounce', exportExclusions(result));
+    const assertSafe = (ranges: typeof clips) => {
+      expect(ranges.every(clip => clip.start >= 4.99 && clip.end <= 5.001 && clip.end >= clip.start)).toBe(true);
+      expect(ranges[0]!.end).toBeLessThanOrEqual(ranges[1]!.start);
+    };
+    assertSafe(clips);
+    const hidden = setCustomClipSelected(clips, 'rally_002', false, 30, 24);
+    expect(() => validateCustomExportSegments(result, customExportSegments(hidden))).toThrow('INVALID_CUSTOM_SEGMENTS');
+    const extended = resizeCustomClip(hidden, 'rally_001', 'end', 5.1, 30, 24);
+    assertSafe(setCustomClipSelected(extended, 'rally_002', true, 30, 24));
   });
   it('reads v1/v2 history unchanged and rejects mislabelled safeguard versions', () => {
     for (const rally_recognition of [legacyProvenance, previousProvenance]) {

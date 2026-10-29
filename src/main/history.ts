@@ -264,7 +264,9 @@ export class HistoryStore {
   }
 
   private async markRecordVisible(id: string, completionKind: 'analysis' | 'export', outputPath: string | null): Promise<void> {
-    const record = await this.open(id);
+    // Export completion updates the persisted analysis, not its task-local
+    // fallback, and does not depend on an analysis cache that may have vanished.
+    const record = completionKind === 'export' ? await this.verifiedRecord(id) : await this.open(id);
     const updated = historyRecordSchema.parse({
       ...record,
       analyzed_at: new Date().toISOString(),
@@ -328,28 +330,63 @@ export class HistoryStore {
     return summaries;
   }
 
-  async open(id: string): Promise<HistoryRecordV1> {
+  private async verifiedRecord(id: string): Promise<HistoryRecordV1> {
     const parsedId = z.string().uuid().parse(id);
     const record = await this.loadRecord(parsedId);
     if (!record) throw new Error('HISTORY_RECORD_INVALID');
     const status = await this.sourceStatus(record.source);
     if (status === 'missing') throw new Error('HISTORY_SOURCE_MISSING');
     if (status === 'changed') throw new Error('HISTORY_SOURCE_CHANGED');
+    return record;
+  }
+
+  /** Recheck the persisted source identity immediately before export uses or publishes it. */
+  async assertExportSource(expected: HistoryRecordV1): Promise<void> {
+    const current = await this.loadRecord(expected.id);
+    if (!current) throw new Error('HISTORY_RECORD_INVALID');
+    if (!sameSource(current.source, expected.source)) throw new Error('HISTORY_SOURCE_CHANGED');
+    const status = await this.sourceStatus(expected.source);
+    if (status === 'missing') throw new Error('HISTORY_SOURCE_MISSING');
+    if (status === 'changed') throw new Error('HISTORY_SOURCE_CHANGED');
+  }
+
+  async open(id: string, options?: { purpose: 'export' }): Promise<HistoryRecordV1> {
+    let record = await this.verifiedRecord(id);
+    // Only the source whose identity was checked above may be used as an
+    // export fallback. Historic or damaged records can contain another path.
+    if (options?.purpose === 'export' && record.analysis.source_video
+      && normalizedIdentityPath(record.analysis.source_video.path) !== normalizedIdentityPath(record.source.path)) {
+      const { source_video: _unverified, ...analysis } = record.analysis;
+      record = { ...record, analysis };
+    }
     if (record.analysis.processing?.mode === 'normalized_cfr') {
+      const original = record.analysis.source_video;
+      const verifiedOriginal = original
+        && normalizedIdentityPath(original.path) === normalizedIdentityPath(record.source.path);
+      // Export can reference the verified original without recreating the analysis cache.
+      // The clone is task-local: reopening/editing history retains its existing cache policy.
+      const originalForExport = () => options?.purpose === 'export' && verifiedOriginal
+        ? { ...record, analysis: { ...record.analysis, video: original, processing: undefined } }
+        : null;
       const processingInfo = await stat(record.analysis.video.path).catch(() => null);
       if (!processingInfo?.isFile() || processingInfo.size <= 0) {
-        const original = record.analysis.source_video;
+        const recovered = originalForExport();
+        if (recovered) return recovered;
         const canRecoverOriginal = process.platform === 'win32' && !record.analysis.video.media_fidelity
-          && original && normalizedIdentityPath(original.path) === normalizedIdentityPath(record.source.path);
+          && verifiedOriginal;
         // sourceStatus above already verified the original's stored fingerprint.
         if (!canRecoverOriginal) throw new Error('HISTORY_PROCESSING_MEDIA_MISSING');
       }
-      if (process.platform === 'darwin' && record.analysis.video.native_video) {
+      // Export validates the cache inside its cancellable task; normal history
+      // activation still performs its existing strict native probe here.
+      if (options?.purpose !== 'export' && process.platform === 'darwin' && record.analysis.video.native_video) {
         const expected = record.analysis.video;
         const actual = await probeMacVideo(expected.path).catch(() => null);
         if (!actual || actual.variable_frame_rate || actual.width !== expected.width || actual.height !== expected.height
           || Math.abs(actual.duration_seconds - expected.duration_seconds) > 0.1
           || actual.native_video?.bitDepth !== expected.native_video?.bitDepth || actual.native_video?.hdr !== expected.native_video?.hdr) {
+          const recovered = originalForExport();
+          if (recovered) return recovered;
           throw new Error('HISTORY_PROCESSING_MEDIA_CORRUPT');
         }
       }

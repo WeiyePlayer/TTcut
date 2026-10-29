@@ -8,6 +8,8 @@ timestamps. This supersedes the H.264-only media decision in ADR 0017; the
 Windows analysis runtime remains unchanged. The bundled FFmpeg must provide
 x264 and x265, without a user-installed encoder fallback.
 
+ADR 0019 supersedes the following rejection for compatible single-source
+dynamic-HDR exports with an automatic, explicit-in-code SDR conversion.
 Faithful Dolby Vision/HDR10+ re-encoding remains unsupported on both platforms:
 analysis and previews may decode the base layer, but video export rejects these
 inputs before copy or re-encoding can discard their dynamic metadata. Unsupported

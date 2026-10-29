@@ -7,7 +7,7 @@ import type { BrowserWindow } from 'electron';
 const state=vi.hoisted(()=>({root:'',record:{} as any,fault:'',render:vi.fn()}));
 vi.mock('electron',()=>({app:{},dialog:{}}));
 vi.mock('../src/main/logger',()=>({logLine:vi.fn().mockResolvedValue(undefined)}));
-vi.mock('../src/main/history',()=>({getHistoryStore:()=>({open:async()=>state.record})}));
+vi.mock('../src/main/history',()=>({getHistoryStore:()=>({open:async()=>state.record,assertExportSource:async()=>{}})}));
 vi.mock('../src/main/components',()=>({resolveUsableMediaComponents:async()=>({ffmpeg:'bundled',ffprobe:'bundled',mediaEncoder:'libx264'})}));
 vi.mock('../src/main/macos/client',()=>({renderMacMedia:state.render}));
 vi.mock('node:fs/promises',async(importOriginal)=>{
@@ -40,7 +40,9 @@ describe.skipIf(process.platform!=='darwin')('Mac export filesystem failures',()
   });
   it.each([['space','DISK_SPACE_LOW'],['write','OUTPUT_DIRECTORY_UNWRITABLE']])('preserves source and completed output when %s fails',async(fault,code)=>{
     state.fault=fault;
-    await expect(startExport({isDestroyed:()=>false,webContents:{send:vi.fn()}} as unknown as BrowserWindow,{analysis_id:id,destination:'source',selection:{mode:'all',pre_roll_seconds:1.5,post_roll_seconds:0.5}})).rejects.toThrow(code);
+    const send=vi.fn();
+    const taskId=await startExport({isDestroyed:()=>false,webContents:{send}} as unknown as BrowserWindow,{analysis_id:id,destination:'source',selection:{mode:'all',pre_roll_seconds:1.5,post_roll_seconds:0.5}});
+    await vi.waitFor(()=>expect(send).toHaveBeenCalledWith(expect.any(String),expect.objectContaining({type:'error',taskId,code})));
     expect(state.render).not.toHaveBeenCalled();expect(hasActiveTasks()).toBe(false);
     expect(await readFile(path.join(state.root,'source.mp4'),'utf8')).toBe('source fixture');expect(await readFile(path.join(state.root,'finished.mp4'),'utf8')).toBe('completed export');expect((await readdir(state.root)).sort()).toEqual(['finished.mp4','source.mp4']);
   });

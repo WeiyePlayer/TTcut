@@ -7,6 +7,7 @@ import type { AppEvent, BootstrapData, SelectedVideo, TTcutApi } from '../src/sh
 import type { CustomEditorDraft, UpdateState, VideoMetadata } from '../src/shared/contracts';
 import { analysisResultSchema } from '../src/shared/contracts';
 import hybridProvenance from './fixtures/hybrid-provenance.json';
+import sourceTimeProvenance from './fixtures/hybrid-provenance-v4.json';
 
 const bootstrap: BootstrapData = {
   version: '1.3.10',
@@ -130,6 +131,7 @@ describe('App workflow notices and multi-task entry', () => {
   afterEach(() => {
     bootstrap.settings.language = 'zh-CN';
     bootstrap.components.analysis.acceleration = 'cuda';
+    bootstrap.components.media.available = true;
     window.localStorage.clear();
     cleanup();
     vi.useRealTimers();
@@ -698,6 +700,199 @@ describe('App workflow notices and multi-task entry', () => {
     expect(await screen.findByRole('heading', { name: 'Choose match videos' })).toBeVisible();
   });
 
+  it('shows the requested artifact and its specific failure without claiming XML also failed', async () => {
+    bootstrap.settings.language = 'en';
+    const selected = { path: 'C:\\video\\first.mp4', name: 'first.mp4', size: 100, mediaUrl: 'ttcut-media://first' };
+    selectVideos.mockResolvedValue([selected]);
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose or drop a file here' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start analysis' }));
+    act(() => taskListener?.({ type: 'analysis-result', taskId: 'analysis-task-1',
+      analysisId: '11111111-1111-4111-8111-111111111111', calibration,
+      data: { schema_version: 1, video: metadata(selected.path),
+        rallies: [{ id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 1, end_time_seconds: 5 }] } }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start cutting' }));
+    await screen.findByRole('heading', { name: 'Preparing' });
+    act(() => taskListener?.({ type: 'error', taskId: 'export-task-1', code: 'CUSTOM_ARTIFACT_EXPORT_FAILED', message: 'failed',
+      artifacts: { requestedOutputs: { rallyVideos: true, premiereXml: false },
+        failedRallies: [{ rallyIndex: 1, code: 'VIDEO_UNREADABLE', message: 'VIDEO_UNREADABLE' }], xmlFailure: null } }));
+    expect(await screen.findByText('Rally video export failed.')).toBeVisible();
+    expect(screen.getByText('The video is unreadable or damaged. Check the file and choose it again.')).toBeVisible();
+    expect(screen.queryByText(/Neither rally videos nor XML/)).toBeNull();
+    expect(screen.queryByText('Export XML')).toBeNull();
+  });
+
+  it('does not restore an active export after cancellation arrived before its task ID', async () => {
+    bootstrap.settings.language = 'en';
+    const selected = { path: 'C:/video/first.mp4', name: 'first.mp4', size: 100, mediaUrl: 'ttcut-media://first' };
+    selectVideos.mockResolvedValue([selected]);
+    let reply!: (taskId: string) => void;
+    vi.mocked(window.ttcut.startExport).mockReturnValue(new Promise<string>((resolve) => { reply = resolve; }));
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose or drop a file here' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start analysis' }));
+    act(() => taskListener?.({ type: 'analysis-result', taskId: 'analysis-task-1', analysisId: '11111111-1111-4111-8111-111111111111', calibration,
+      data: { schema_version: 1, video: metadata(selected.path), rallies: [
+        { id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 1, end_time_seconds: 5 },
+      ] } }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start cutting' }));
+    await waitFor(() => expect(window.ttcut.startExport).toHaveBeenCalledOnce());
+    act(() => taskListener?.({ type: 'error', taskId: 'export-task-1', code: 'EXPORT_CANCELLED', message: 'cancelled' }));
+    expect(await screen.findByRole('button', { name: 'Back' })).toBeVisible();
+    await act(async () => { reply('export-task-1'); });
+    expect(screen.getByRole('button', { name: 'Back' })).toBeVisible();
+  });
+
+  it('keeps source-time exclusions out of the initial custom export ranges', async () => {
+    bootstrap.settings.language = 'en';
+    const selected = { path: 'C:/video/first.mp4', name: 'first.mp4', size: 100, mediaUrl: 'ttcut-media://first' };
+    selectVideos.mockResolvedValue([selected]);
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose or drop a file here' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start analysis' }));
+    const data = analysisResultSchema.parse({ schema_version: 3, video: metadata(selected.path), calibration,
+      rally_recognition: sourceTimeProvenance,
+      rallies: [
+        { id: 'rally_001', index: 1, bounce_count: 2, start_time_seconds: 1, end_time_seconds: 4 },
+        { id: 'rally_002', index: 2, bounce_count: 2, start_time_seconds: 6, end_time_seconds: 8 },
+      ],
+      bounce_times_seconds: [1.5, 3, 6.5, 7.5],
+      excluded_fragments: [{ start_time_seconds: 4.5, end_time_seconds: 5.5, evidence: [{ reason: 'observed_pause' }] }],
+    });
+    act(() => taskListener?.({ type: 'analysis-result', taskId: 'analysis-task-1',
+      analysisId: '11111111-1111-4111-8111-111111111111', calibration, data }));
+    fireEvent.click(await screen.findByRole('button', { name: /Custom/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start cutting' }));
+    await waitFor(() => expect(window.ttcut.startExport).toHaveBeenCalledWith(expect.objectContaining({
+      selection: { mode: 'custom', segments: [
+        expect.objectContaining({ rally_id: 'rally_001', start_time_seconds: 0, end_time_seconds: 4.5 }),
+        expect.objectContaining({ rally_id: 'rally_002', start_time_seconds: 5.5, end_time_seconds: 9 }),
+      ] },
+    })));
+  });
+
+  it('returns invalid custom ranges to the editor so they can be adjusted', async () => {
+    bootstrap.settings.language = 'en';
+    const selected = { path: 'C:/video/first.mp4', name: 'first.mp4', size: 100, mediaUrl: 'ttcut-media://first' };
+    selectVideos.mockResolvedValue([selected]);
+    vi.mocked(window.ttcut.startExport).mockRejectedValue(new Error('INVALID_CUSTOM_SEGMENTS'));
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose or drop a file here' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start analysis' }));
+    act(() => taskListener?.({ type: 'analysis-result', taskId: 'analysis-task-1', analysisId: '11111111-1111-4111-8111-111111111111', calibration,
+      data: { schema_version: 1, video: metadata(selected.path), rallies: [
+        { id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 1, end_time_seconds: 5 },
+      ] } }));
+    fireEvent.click(await screen.findByRole('button', { name: /Custom/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start cutting' }));
+    expect(await screen.findByText(/shorter than one frame/)).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(await screen.findByRole('region', { name: 'Custom cut timeline' })).toBeVisible();
+  });
+
+  it('exports current custom ranges when draft persistence fails after the CFR cache disappears', async () => {
+    bootstrap.settings.language = 'en';
+    const selected = { path: 'C:/video/first.mp4', name: 'first.mp4', size: 100, mediaUrl: 'ttcut-media://first' };
+    selectVideos.mockResolvedValue([selected]);
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose or drop a file here' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start analysis' }));
+    act(() => taskListener?.({ type: 'analysis-result', taskId: 'analysis-task-1', analysisId: '11111111-1111-4111-8111-111111111111', calibration,
+      data: { schema_version: 1, video: metadata(selected.path), rallies: [
+        { id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 1, end_time_seconds: 5 },
+      ] } }));
+    fireEvent.click(await screen.findByRole('button', { name: /Custom/ }));
+    fireEvent.keyDown(screen.getByRole('slider', { name: 'Resize clip end 1' }), { key: 'ArrowLeft' });
+    const currentEnd = Number(screen.getByRole('slider', { name: 'Resize clip end 1' }).getAttribute('aria-valuenow'));
+    vi.mocked(window.ttcut.saveCustomEditorDraft).mockRejectedValue(new Error('HISTORY_PROCESSING_MEDIA_MISSING'));
+    fireEvent.pointerEnter(screen.getByRole('button', { name: 'Start cutting' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Export XML' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start cutting' }));
+    await waitFor(() => expect(window.ttcut.startExport).toHaveBeenCalledWith(expect.objectContaining({
+      selection: { mode: 'custom', segments: [expect.objectContaining({ start_time_seconds: 0, end_time_seconds: currentEnd })] },
+      outputs: { combined_video: false, rally_videos: false, premiere_xml: true },
+    })));
+    expect(screen.getByRole('alert')).toHaveTextContent('Could not save custom edits. Please retry before closing this page.');
+    act(() => taskListener?.({ type: 'error', taskId: 'export-task-1', code: 'EXPORT_CANCELLED', message: 'EXPORT_CANCELLED' }));
+    expect(await screen.findByRole('region', { name: 'Custom cut timeline' })).toBeVisible();
+    expect(screen.getByRole('slider', { name: 'Resize clip end 1' })).toHaveAttribute('aria-valuenow', String(currentEnd));
+    expect(screen.getByRole('alert')).toHaveTextContent('Could not save custom edits. Please retry before closing this page.');
+    vi.mocked(window.ttcut.saveCustomEditorDraft).mockResolvedValue(undefined);
+    fireEvent.click(within(screen.getByRole('alert')).getByRole('button'));
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+    expect(window.ttcut.saveCustomEditorDraft).toHaveBeenLastCalledWith('11111111-1111-4111-8111-111111111111',
+      expect.objectContaining({ clips: [expect.objectContaining({ end: currentEnd })] }));
+  });
+
+  it('exports XML without loading fonts or drawing scoreboard images when the scoreboard is enabled', async () => {
+    bootstrap.settings.language = 'en';
+    const selected = { path: 'C:/video/first.mp4', name: 'first.mp4', size: 100, mediaUrl: 'ttcut-media://first' };
+    selectVideos.mockResolvedValue([selected]);
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose or drop a file here' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start analysis' }));
+    act(() => taskListener?.({ type: 'analysis-result', taskId: 'analysis-task-1', analysisId: '11111111-1111-4111-8111-111111111111', calibration,
+      data: { schema_version: 1, video: metadata(selected.path), rallies: [
+        { id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 1, end_time_seconds: 5 },
+      ] } }));
+    fireEvent.click(await screen.findByRole('button', { name: /Custom/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Scoreboard' }));
+    fireEvent.pointerEnter(screen.getByRole('button', { name: 'Start cutting' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Export XML' }));
+    const fonts = Object.getOwnPropertyDescriptor(document, 'fonts');
+    const load = vi.fn().mockRejectedValue(new Error('FONT_LOAD_FAILED'));
+    Object.defineProperty(document, 'fonts', { configurable: true, value: { load } });
+    const draw = vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockImplementation(() => { throw new Error('CANVAS_FAILED'); });
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Start cutting' }));
+      await waitFor(() => expect(window.ttcut.startExport).toHaveBeenCalledTimes(1));
+      const request = vi.mocked(window.ttcut.startExport).mock.calls[0]![0];
+      expect(request.outputs).toEqual({ combined_video: false, rally_videos: false, premiere_xml: true });
+      expect(request.scoreboard).toBeUndefined();
+      expect(load).not.toHaveBeenCalled();
+      expect(draw).not.toHaveBeenCalled();
+    } finally {
+      if (fonts) Object.defineProperty(document, 'fonts', fonts);
+      else Reflect.deleteProperty(document, 'fonts');
+    }
+  });
+
+  it.each(['font', 'canvas'] as const)('preserves XML and both requested outputs when scoreboard %s preparation fails', async (failure) => {
+    bootstrap.settings.language = 'en';
+    const selected = { path: 'C:/video/first.mp4', name: 'first.mp4', size: 100, mediaUrl: 'ttcut-media://first' };
+    selectVideos.mockResolvedValue([selected]);
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose or drop a file here' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start analysis' }));
+    act(() => taskListener?.({ type: 'analysis-result', taskId: 'analysis-task-1', analysisId: '11111111-1111-4111-8111-111111111111', calibration,
+      data: { schema_version: 1, video: metadata(selected.path), rallies: [
+        { id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 1, end_time_seconds: 5 },
+      ] } }));
+    fireEvent.click(await screen.findByRole('button', { name: /Custom/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Scoreboard' }));
+    fireEvent.pointerEnter(screen.getByRole('button', { name: 'Start cutting' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Export rally videos' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Export XML' }));
+    const fonts = Object.getOwnPropertyDescriptor(document, 'fonts');
+    const load = failure === 'font' ? vi.fn().mockRejectedValue(new Error('FONT_LOAD_FAILED')) : vi.fn().mockResolvedValue([]);
+    if (failure === 'canvas') vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => { throw new Error('CANVAS_FAILED'); });
+    Object.defineProperty(document, 'fonts', { configurable: true, value: { load } });
+    const draw = vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockImplementation(() => { throw new Error('CANVAS_FAILED'); });
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Start cutting' }));
+      await waitFor(() => expect(window.ttcut.startExport).toHaveBeenCalledTimes(1));
+      const request = vi.mocked(window.ttcut.startExport).mock.calls[0]![0];
+      expect(request.outputs).toEqual({ combined_video: false, rally_videos: true, premiere_xml: true });
+      expect(request.scoreboard?.scores).toEqual([expect.objectContaining({ clip_id: 'rally_001', image_error: 'SCOREBOARD_RENDER_FAILED' })]);
+      expect(request.scoreboard?.scores[0]).not.toHaveProperty('image_data');
+      expect(load).toHaveBeenCalledOnce();
+      expect(draw).not.toHaveBeenCalled();
+    } finally {
+      if (fonts) Object.defineProperty(document, 'fonts', fonts);
+      else Reflect.deleteProperty(document, 'fonts');
+    }
+  });
+
   it.each(['classic', 'classic-orange', 'classic-green', 'red-blue'] as const)('exports %s scoreboard names through the canvas text renderer after a settings change', async (style) => {
     bootstrap.settings.language = 'en';
     const selected = { path: 'C:\\video\\first.mp4', name: 'first.mp4', size: 100, mediaUrl: 'ttcut-media://first' };
@@ -973,6 +1168,48 @@ describe('App workflow notices and multi-task entry', () => {
     expect(screen.getByRole('checkbox', { name: 'Rally 2' })).not.toBeChecked();
     expect(screen.getByRole('button', { name: 'Loop playback' })).toBeVisible();
     expect(screen.getByRole('checkbox', { name: 'Export XML' })).toBeChecked();
+  });
+
+  it('attempts XML and allows deselecting video when restored outputs include unavailable media', async () => {
+    bootstrap.settings.language = 'en';
+    const id = '11111111-1111-4111-8111-111111111111';
+    const selected = { path: 'C:/video/match.mp4', name: 'match.mp4', size: 100, mediaUrl: 'ttcut-media://match' };
+    const analysis = analysisResultSchema.parse({ schema_version: 1, video: metadata(selected.path), rallies: [
+      { id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 1, end_time_seconds: 2 },
+    ] });
+    let saved: CustomEditorDraft | undefined;
+    vi.mocked(window.ttcut.saveCustomEditorDraft).mockImplementation(async (_id, draft) => { saved = structuredClone(draft); });
+    window.ttcut.openHistory = vi.fn(async () => ({ analysisId: id, video: selected, analysis, calibration,
+      ...(saved ? { customEditorDraft: structuredClone(saved) } : {}) }));
+    vi.mocked(window.ttcut.listHistory).mockResolvedValue([{ schema_version: 1, id, analyzed_at: '2026-09-27',
+      video_name: selected.name, rally_count: 1, duration_seconds: 10, cover_url: null, source_status: 'available',
+      completion_kind: 'analysis', output_path: null }]);
+    const openEditor = async () => {
+      fireEvent.click(await screen.findByRole('button', { name: 'History' }));
+      fireEvent.click((await screen.findByText('match.mp4')).closest('button')!);
+      fireEvent.click(await screen.findByRole('button', { name: /Custom/ }));
+    };
+    render(<App />);
+    await openEditor();
+    fireEvent.pointerEnter(screen.getByRole('button', { name: 'Start cutting' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Export rally videos' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Export XML' }));
+    await waitFor(() => expect(saved?.outputs).toMatchObject({ rally_videos: true, premiere_xml: true }));
+    cleanup();
+    bootstrap.components.media.available = false;
+    render(<App />);
+    await openEditor();
+    const video = screen.getByRole('checkbox', { name: 'Export rally videos' });
+    expect(video).toBeChecked();
+    expect(video).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Start cutting' }));
+    await waitFor(() => expect(window.ttcut.startExport).toHaveBeenCalledWith(expect.objectContaining({
+      outputs: { combined_video: false, rally_videos: true, premiere_xml: true },
+    })));
+    act(() => taskListener?.({ type: 'error', taskId: 'export-task-1', code: 'EXPORT_CANCELLED', message: 'EXPORT_CANCELLED' }));
+    expect(await screen.findByRole('checkbox', { name: 'Export rally videos' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Export rally videos' }));
+    expect(screen.getByRole('checkbox', { name: 'Export rally videos' })).not.toBeChecked();
   });
 
   it('retains playback mode within a custom draft when reentering the editor', async () => {

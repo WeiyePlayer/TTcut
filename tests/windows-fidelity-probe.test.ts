@@ -33,6 +33,12 @@ describe('Windows HDR probing and historical exports', () => {
     state.streamSideData = [{ side_data_type: 'DOVI configuration record' }];
     expect((await probeVideo('source.mp4')).media_fidelity?.hdr).toBe('dolbyVision');
   });
+  it('retains the Dolby Vision base-layer compatibility needed for automatic export', async () => {
+    state.streamSideData = [{ side_data_type: 'DOVI configuration record', dv_profile: 8, bl_present_flag: 1, dv_bl_signal_compatibility_id: 4 }];
+    expect((await probeVideo('source.mp4')).media_fidelity?.dolby_vision).toEqual({
+      profile: 8, base_layer_present: true, signal_compatibility_id: 4,
+    });
+  });
   it('does not silently treat a failed HDR side-data probe as SDR', async () => {
     state.run.mockImplementationOnce(() => Promise.reject(new Error('probe failed')));
     await expect(probeVideo('source.mp4')).rejects.toThrow('probe failed');
@@ -43,5 +49,11 @@ describe('Windows HDR probing and historical exports', () => {
     expect(video.path.endsWith('original.mov')).toBe(true);
     expect(state.run.mock.calls.every(([, args]) => args.at(-1) === 'original.mov')).toBe(true);
     expect(record.video.path).toBe('legacy-cfr.mp4');
+  });
+  it('refreshes legacy Dolby Vision metadata that omitted base-layer compatibility', async () => {
+    state.streamSideData = [{ side_data_type: 'DOVI configuration record', dv_profile: 8, bl_present_flag: 1, dv_bl_signal_compatibility_id: 4 }];
+    const record = { video: { path: 'original.mov', media_fidelity: { hdr: 'dolbyVision', bit_depth: 10, chroma: '420', mastering_display: null, max_cll: null } } } as AnalysisResultV1;
+    expect((await exportSourceVideo(record)).media_fidelity?.dolby_vision?.signal_compatibility_id).toBe(4);
+    expect(record.video.media_fidelity?.dolby_vision).toBeUndefined();
   });
 });

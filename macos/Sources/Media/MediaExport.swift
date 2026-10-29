@@ -1,6 +1,19 @@
 import Foundation
 import TTcutCore
 
+private final class HDRSideDataScan: @unchecked Sendable {
+  private let lock = NSLock()
+  private var found = false
+
+  func inspect(_ line: String) {
+    let name = line.lowercased()
+    guard ["dovi", "dolby vision", "hdr", "mastering display", "content light"].contains(where: name.contains) else { return }
+    lock.lock(); found = true; lock.unlock()
+  }
+
+  var hasHDR: Bool { lock.lock(); defer { lock.unlock() }; return found }
+}
+
 public struct ScoreboardOverlay: Codable, Sendable {
   public let x: Double
   public let y: Double
@@ -76,10 +89,10 @@ public struct MediaExporter: Sendable {
     }
     return args + ["-i", video.path]
   }
-  private func run(
+  @discardableResult private func run(
     _ args: [String], duration: Double, progress: @escaping @Sendable (Double) -> Void
-  ) async throws {
-    _ = try await ProcessRunner.run(
+  ) async throws -> ProcessOutput {
+    try await ProcessRunner.run(
       paths.ffmpeg,
       ["-hide_banner", "-nostdin", "-v", "error", "-y", "-progress", "pipe:1", "-nostats"] + args,
       onLine: { line in
@@ -99,7 +112,7 @@ public struct MediaExporter: Sendable {
     let y = Int((max(0, min(1 - Double(boardHeight) / height, score.y)) * height).rounded())
     return "overlay=x=\(x):y=\(y):shortest=1:format=auto"
   }
-  func filter(video: VideoInfo, ranges: [CutRange], normalizeFPS: Bool = false, scoreboards: [ScoreboardOverlay]? = nil) -> (
+  func filter(video: VideoInfo, ranges: [CutRange], normalizeFPS: Bool = false, scoreboards: [ScoreboardOverlay]? = nil, toneMapFilters: [String] = []) -> (
     String, [String]
   ) {
     let origin = Self.decimal(video.videoStart)
@@ -122,9 +135,10 @@ public struct MediaExporter: Sendable {
       let vinput = ranges.count > 1 ? "[vs\(i)]" : "[0:v:0]setpts=PTS-\(origin)/TB,"
       let ainput = ranges.count > 1 ? "[as\(i)]" : "[0:a:0]asetpts=PTS-\(origin)/TB,"
       let fps = normalizeFPS ? ",fps=\(video.frameRate)" : ""
+      let color = toneMapFilters.isEmpty ? "" : "," + toneMapFilters.joined(separator: ",")
       let videoLabel = scoreboards == nil ? "v\(i)" : "vbase\(i)"
       parts.append(
-        vinput + "trim=start=\(start):end=\(end),setpts=PTS-STARTPTS\(fps)[\(videoLabel)]")
+        vinput + "trim=start=\(start):end=\(end),setpts=PTS-STARTPTS\(color)\(fps)[\(videoLabel)]")
       if let scoreboards {
         parts.append("[vbase\(i)][\(i + 1):v:0]" + Self.scoreboardFilter(video: video, score: scoreboards[i]) + "[v\(i)]")
       }
@@ -154,6 +168,7 @@ public struct MediaExporter: Sendable {
     disableBFrames: Bool = false,
     seekStart: Double? = nil,
     scoreboards: [ScoreboardOverlay]? = nil,
+    colorPlan: ExportColorPlan? = nil,
     progress: @escaping @Sendable (Double) -> Void = { _ in }
   ) async throws {
     guard !ranges.isEmpty,
@@ -166,16 +181,16 @@ public struct MediaExporter: Sendable {
       throw TTError("INVALID_SCOREBOARD")
     }
     try video.validate()
-    var encodingVideo = video
+    var encodingVideo = colorPlan?.target ?? video
     if normalizeFPS {
       encodingVideo.frameRate = video.nominalFrameRate ?? video.frameRate
       encodingVideo.variableFrameRate = false
     }
-    let (graph, maps) = filter(video: encodingVideo, ranges: ranges, normalizeFPS: normalizeFPS, scoreboards: scoreboards)
+    let (graph, maps) = filter(video: encodingVideo, ranges: ranges, normalizeFPS: normalizeFPS, scoreboards: scoreboards, toneMapFilters: colorPlan?.filters ?? [])
     // x265's reorder delay can produce an invalid DTS when fewer than five frames are flushed.
     // Keep the same choice for every independently encoded segment in a concatenated output.
     let shortHEVC =
-      video.encoder == "libx265"
+      encodingVideo.encoder == "libx265"
       && (disableBFrames || ranges.reduce(0) { $0 + $1.duration } * video.fps < 5)
     let overlayInputs = scoreboards?.flatMap { ["-loop", "1", "-i", $0.imagePath] } ?? []
     let duration = ranges.reduce(0) { $0 + $1.duration }
@@ -183,12 +198,54 @@ public struct MediaExporter: Sendable {
     let args =
       Self.inputArguments(video, seekStart: seekStart) + overlayInputs + ["-filter_complex", graph] + maps
       + (try Self.encoding(encodingVideo)) + (shortHEVC ? ["-bf", "0"] : []) + ["-bsf:v", packetDuration, destination.path]
-    try await run(args, duration: ranges.reduce(0) { $0 + $1.duration }, progress: progress)
+    do {
+      let result = try await run(args, duration: duration, progress: progress)
+      if colorPlan?.toneMapTransfer != nil, video.videoCodec == "hevc", (seekStart ?? 0) > 0,
+        Self.missingParameterSets(result.stderr) {
+        throw TTError("EXPORT_SEEK_DECODE_FAILED", result.stderr)
+      }
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      let message = error.localizedDescription
+      if colorPlan?.toneMapTransfer != nil, video.videoCodec == "hevc", (seekStart ?? 0) > 0,
+        Self.missingParameterSets(message) {
+        // Some Dolby Vision MP4s keep SPS/PPS in the initial packets instead of
+        // hvcC. Decode from the beginning while retaining this segment's exact
+        // trim, color plan and export algorithm.
+        try await encode(video: video, ranges: ranges, destination: destination,
+          normalizeFPS: normalizeFPS, disableBFrames: disableBFrames,
+          scoreboards: scoreboards, colorPlan: colorPlan, progress: progress)
+        return
+      }
+      if colorPlan?.toneMapTransfer != nil,
+        message.contains("No such filter") && (message.contains("zscale") || message.contains("tonemap")) {
+        throw TTError("HDR_TONEMAP_UNAVAILABLE", "当前媒体组件缺少 HDR 色调映射能力，请转换源视频为 SDR BT.709 后重试")
+      }
+      throw error
+    }
   }
-  public func validate(_ url: URL, source: VideoInfo, duration: Double, segments: Int) async throws
+
+  private static func missingParameterSets(_ message: String) -> Bool {
+    message.range(of: #"(?:(?:PPS|SPS|VPS)[^\n]*(?:out of range|not available|missing|non-existing|does not exist)|(?:missing|non-existing)[^\n]*(?:PPS|SPS|VPS))"#,
+      options: [.regularExpression, .caseInsensitive]) != nil
+  }
+  public func validate(_ url: URL, source: VideoInfo, duration: Double, segments: Int, requireSDRMetadata: Bool = false) async throws
     -> VideoInfo
   {
     let info = try await MediaProbe(paths: paths).inspect(url)
+    if requireSDRMetadata && (info.hdr != .sdr || info.dolbyVision != nil || info.masteringDisplay != nil || info.maxCLL != nil) {
+      throw TTError("EXPORT_HDR_MISMATCH", "SDR 输出仍包含 HDR 元数据")
+    }
+    if requireSDRMetadata {
+      // HDR SEI can occur outside the probe's bounded sample windows. Stream
+      // the small side-data names while decoding every output frame.
+      let scan = HDRSideDataScan()
+      _ = try await ProcessRunner.run(paths.ffprobe, ["-v", "error", "-select_streams", "v:0", "-show_frames",
+        "-show_entries", "frame=:frame_side_data=side_data_type", "-of", "compact=p=0:nk=1", url.path],
+        onLine: { scan.inspect($0) })
+      if scan.hasHDR { throw TTError("EXPORT_HDR_MISMATCH", "SDR 输出仍包含 HDR 元数据") }
+    }
     let tolerance = Segments.durationTolerance(segments: segments, video: source)
     guard info.width == source.width, info.height == source.height,
       info.bitDepth == source.bitDepth,
@@ -231,14 +288,14 @@ public struct MediaExporter: Sendable {
     progress: @escaping @Sendable (Double) -> Void = { _ in }
   ) async throws {
     try video.validate()
-    try video.validateHDRExport()
+    let colorPlan = try ExportColorPlan(source: video)
     guard scoreboards == nil || (scoreboards!.count == ranges.count && scoreboards!.allSatisfy(\.isValid)) else {
       throw TTError("INVALID_SCOREBOARD")
     }
     let duration = ranges.reduce(0) { $0 + $1.duration }
     let probe = MediaProbe(paths: paths)
     // Copy is an optimization with validation, not a replacement for either clipping strategy.
-    if scoreboards == nil && strategy == .fastSegmented, ranges.count == 1 {
+    if colorPlan.toneMapTransfer == nil, scoreboards == nil && strategy == .fastSegmented, ranges.count == 1 {
       let boundaries = try await probe.withBoundaries(video, ranges: ranges)
       if Segments.canCopy(ranges, video: boundaries), video.videoCodec == video.outputCodec {
         do {
@@ -256,10 +313,10 @@ public struct MediaExporter: Sendable {
       }
     }
     if strategy == .compatible {
-      try await encode(video: video, ranges: ranges, destination: destination, scoreboards: scoreboards, progress: progress)
+      try await encode(video: video, ranges: ranges, destination: destination, scoreboards: scoreboards, colorPlan: colorPlan, progress: progress)
     } else if ranges.count == 1 {
       try await encode(
-        video: video, ranges: ranges, destination: destination, seekStart: ranges[0].start, scoreboards: scoreboards,
+        video: video, ranges: ranges, destination: destination, seekStart: ranges[0].start, scoreboards: scoreboards, colorPlan: colorPlan,
         progress: progress)
     } else {
       let work = destination.deletingLastPathComponent().appendingPathComponent(
@@ -273,11 +330,11 @@ public struct MediaExporter: Sendable {
         let segment = work.appendingPathComponent("\(index).mp4")
         try await encode(
           video: video, ranges: [range], destination: segment, disableBFrames: shortSegment,
-          seekStart: range.start, scoreboards: scoreboards.map { [$0[index]] }
+          seekStart: range.start, scoreboards: scoreboards.map { [$0[index]] }, colorPlan: colorPlan
         ) { part in
           progress((Double(index) + part) / Double(ranges.count + 1))
         }
-        _ = try await validate(segment, source: video, duration: range.duration, segments: 1)
+        _ = try await validate(segment, source: colorPlan.target, duration: range.duration, segments: 1, requireSDRMetadata: colorPlan.toneMapTransfer != nil)
         lines.append("file '\(index).mp4'")
       }
       let list = work.appendingPathComponent("segments.txt")
@@ -289,7 +346,7 @@ public struct MediaExporter: Sendable {
         ], duration: duration
       ) { part in progress((Double(ranges.count) + part) / Double(ranges.count + 1)) }
     }
-    _ = try await validate(destination, source: video, duration: duration, segments: ranges.count)
+    _ = try await validate(destination, source: colorPlan.target, duration: duration, segments: ranges.count, requireSDRMetadata: colorPlan.toneMapTransfer != nil)
   }
   public func cover(video: VideoInfo, destination: URL) async throws {
     let tone =

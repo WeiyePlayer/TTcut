@@ -51,6 +51,7 @@ vi.mock('../src/main/media-protocol', () => ({
 }));
 
 vi.mock('../src/main/probe', () => ({
+  hasCompleteCfrContent: vi.fn().mockResolvedValue(true),
   probeAudioPacketBoundaries: vi.fn().mockResolvedValue([]),
   probeKeyframes: state.keyframes,
   probeStreamSignature: vi.fn(),
@@ -60,6 +61,7 @@ vi.mock('../src/main/probe', () => ({
 
 vi.mock('../src/main/history', () => ({
   getHistoryStore: () => ({
+    assertExportSource: vi.fn().mockResolvedValue(undefined),
     open: vi.fn(async () => ({
       id: '11111111-1111-4111-8111-111111111111',
       analysis: state.analysis ?? {
@@ -174,7 +176,6 @@ describe('export task start and terminal lifecycle', () => {
     const original: AnalysisResultV1['video'] = {
       path: state.source, duration_seconds: 30, width: 1280, height: 720, fps: 30,
       variable_frame_rate: true, video_codec: 'hevc', pixel_format: 'yuv420p10le', audio_codec: null, container: 'mp4',
-      media_fidelity: { hdr: 'hlg', bit_depth: 10, chroma: '420', mastering_display: null, max_cll: null },
     };
     const cache = path.join(directory, 'missing-cfr.mp4');
     state.analysis = {
@@ -184,7 +185,9 @@ describe('export task start and terminal lifecycle', () => {
       processing: { mode: 'normalized_cfr', target_fps_ratio: '30/1', encoder: 'libx264', warning_code: null },
       rallies: [{ id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 10, end_time_seconds: 12 }],
     };
-    vi.mocked(probeVideo).mockResolvedValue(original);
+    vi.mocked(probeVideo).mockResolvedValue({
+      ...original, media_fidelity: { hdr: 'hlg', bit_depth: 10, chroma: '420', mastering_display: null, max_cll: null },
+    });
     await expect(access(cache)).rejects.toThrow();
 
     const taskId = await startExport(windowMock() as never, request);
@@ -344,6 +347,149 @@ describe('export task start and terminal lifecycle', () => {
       failedRallies: [{ rallyId: 'rally_001', rallyIndex: 1 }],
       premiereXml: { quantizedForVfr: false },
     });
+  });
+
+  it('retains XML and reports scoreboard preparation failure for requested rally videos', async () => {
+    const taskId = await startExport(windowMock() as never, {
+      analysis_id: request.analysis_id,
+      selection: { mode: 'custom', segments: [{ rally_id: 'rally_001', start_time_seconds: 8, end_time_seconds: 14 }] },
+      scoreboard: { x: 0, y: 0, scores: [{ clip_id: 'rally_001', left: 0, right: 0, image_error: 'SCOREBOARD_RENDER_FAILED' }] },
+      destination: 'source', outputs: { combined_video: false, rally_videos: true, premiere_xml: true },
+    });
+    await waitForTaskEnd(taskId);
+    const result = state.events.find((event) => event.type === 'export-result');
+    expect(result).toMatchObject({ data: { kind: 'custom-artifacts', partialSuccess: true,
+      requestedOutputs: { rallyVideos: true, premiereXml: true }, rallyVideos: [], xmlFailure: null,
+      failedRallies: [{ code: 'SCOREBOARD_RENDER_FAILED' }] } });
+    if (result?.type !== 'export-result' || result.data.kind !== 'custom-artifacts') throw new Error('Missing XML');
+    expect(await readFile(result.data.premiereXml!.outputPath, 'utf8')).toContain('source.mp4');
+    expect(state.keyframes).not.toHaveBeenCalled();
+  });
+
+  it('retains XML when video source probing fails before segment export', async () => {
+    state.analysis = {
+      schema_version: 1,
+      video: { path: state.source, duration_seconds: 30, width: 1280, height: 720, fps: 30,
+        variable_frame_rate: false, video_codec: 'hevc', audio_codec: null, container: 'mp4' },
+      rallies: [{ id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 10, end_time_seconds: 12 }],
+    };
+    vi.mocked(probeVideo).mockRejectedValue(new Error('VIDEO_UNREADABLE'));
+    const taskId = await startExport(windowMock() as never, {
+      analysis_id: request.analysis_id,
+      selection: { mode: 'custom', segments: [{ rally_id: 'rally_001', start_time_seconds: 8, end_time_seconds: 14 }] },
+      destination: 'source', outputs: { combined_video: false, rally_videos: true, premiere_xml: true },
+    });
+    await waitForTaskEnd(taskId);
+    const result = state.events.find((event) => event.type === 'export-result');
+    expect(result).toMatchObject({ data: { kind: 'custom-artifacts', partialSuccess: true,
+      premiereXml: { quantizedForVfr: false }, failedRallies: [{ message: 'VIDEO_UNREADABLE' }] } });
+    if (result?.type !== 'export-result' || result.data.kind !== 'custom-artifacts') throw new Error('Missing XML');
+    expect(await readFile(result.data.premiereXml!.outputPath, 'utf8')).toContain('source.mp4');
+    expect(state.analysis.video.path).toBe(state.source);
+  });
+
+  it.each([30000 / 1001, 60000 / 1001])('references the original VFR source at %s when a legacy CFR cache is missing or untrusted', async (fps) => {
+    const original: AnalysisResultV1['video'] = {
+      path: state.source, duration_seconds: 30, width: 1280, height: 720, fps,
+      nominal_fps: fps, variable_frame_rate: true, video_codec: 'hevc', audio_codec: null, container: 'mp4',
+      media_fidelity: { hdr: 'dolbyVision', bit_depth: 10, chroma: '420', mastering_display: null, max_cll: null },
+    };
+    const cache = path.join(directory, 'missing-cfr.mp4');
+    if (fps > 40) await writeFile(cache, 'untrusted legacy cache');
+    state.analysis = { schema_version: 1,
+      video: { ...original, path: cache, fps: 30, variable_frame_rate: false, media_fidelity: undefined },
+      source_video: original,
+      processing: { mode: 'normalized_cfr', target_fps_ratio: '30/1', encoder: 'libx264', warning_code: null },
+      rallies: [{ id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 10, end_time_seconds: 12 }],
+    };
+    const taskId = await startExport(windowMock() as never, { analysis_id: request.analysis_id,
+      selection: { mode: 'custom', segments: [{ rally_id: 'rally_001', start_time_seconds: 8, end_time_seconds: 14 }] },
+      destination: 'source', outputs: { combined_video: false, rally_videos: false, premiere_xml: true } });
+    await waitForTaskEnd(taskId);
+    const result = state.events.find((event) => event.type === 'export-result');
+    expect(result).toMatchObject({ data: { premiereXml: { quantizedForVfr: true }, xmlFailure: null } });
+    if (result?.type !== 'export-result' || result.data.kind !== 'custom-artifacts') throw new Error('Missing XML');
+    const xml = await readFile(result.data.premiereXml!.outputPath, 'utf8');
+    expect(xml).toContain('source.mp4');
+    expect(xml).toContain(`<in>${fps > 40 ? 480 : 240}</in>`);
+    expect(xml).toContain(`<out>${fps > 40 ? 839 : 420}</out>`);
+    expect(xml).not.toContain('_CFR.mp4');
+    expect(await readdir(result.data.outputDirectory)).toHaveLength(1);
+    expect(resolveUsableMediaComponents).not.toHaveBeenCalled();
+    expect(state.analysis.video.path).toBe(cache);
+  });
+
+  it('copies a CFR source for XML after validating its recorded properties', async () => {
+    const cache = path.join(directory, 'trusted-cfr.mp4');
+    await writeFile(cache, 'trusted CFR bytes');
+    state.analysis = { schema_version: 1,
+      video: { path: cache, duration_seconds: 30, width: 1280, height: 720, fps: 30,
+        variable_frame_rate: false, video_codec: 'hevc', audio_codec: null, container: 'mp4',
+        media_fidelity: { hdr: 'hlg', bit_depth: 10, chroma: '420', mastering_display: null, max_cll: null } },
+      source_video: { path: state.source, duration_seconds: 30, width: 1280, height: 720, fps: 30,
+        variable_frame_rate: true, video_codec: 'hevc', audio_codec: null, container: 'mp4' },
+      processing: { mode: 'normalized_cfr', target_fps_ratio: '30/1', encoder: 'libx265', warning_code: null },
+      rallies: [{ id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 10, end_time_seconds: 12 }],
+    };
+    vi.mocked(probeVideo).mockResolvedValue(state.analysis.video);
+    const taskId = await startExport(windowMock() as never, { analysis_id: request.analysis_id,
+      selection: { mode: 'custom', segments: [{ rally_id: 'rally_001', start_time_seconds: 8, end_time_seconds: 14 }] },
+      destination: 'source', outputs: { combined_video: false, rally_videos: false, premiere_xml: true } });
+    await waitForTaskEnd(taskId);
+    const result = state.events.find((event) => event.type === 'export-result');
+    if (result?.type !== 'export-result' || result.data.kind !== 'custom-artifacts') throw new Error('Missing XML');
+    expect(result.data.premiereXml!.quantizedForVfr).toBe(false);
+    expect(await readFile(path.join(result.data.outputDirectory, 'source_TTcut_CFR.mp4'), 'utf8')).toBe('trusted CFR bytes');
+    expect(await readFile(result.data.premiereXml!.outputPath, 'utf8')).toContain('source_TTcut_CFR.mp4');
+  });
+
+  it('reports video-only failures without claiming XML was requested', async () => {
+    state.analysis = { schema_version: 1,
+      video: { path: state.source, duration_seconds: 30, width: 1280, height: 720, fps: 30,
+        variable_frame_rate: false, video_codec: 'hevc', audio_codec: null, container: 'mp4' },
+      rallies: [{ id: 'rally_001', index: 1, bounce_count: 5, start_time_seconds: 10, end_time_seconds: 12 }],
+    };
+    vi.mocked(probeVideo).mockRejectedValue(new Error('DYNAMIC_HDR_UNSUPPORTED'));
+    const taskId = await startExport(windowMock() as never, { analysis_id: request.analysis_id,
+      selection: { mode: 'custom', segments: [{ rally_id: 'rally_001', start_time_seconds: 8, end_time_seconds: 14 }] },
+      destination: 'source', outputs: { combined_video: false, rally_videos: true, premiere_xml: false } });
+    await waitForTaskEnd(taskId);
+    expect(state.events.find((event) => event.type === 'error')).toMatchObject({
+      code: 'CUSTOM_ARTIFACT_EXPORT_FAILED', artifacts: {
+        requestedOutputs: { rallyVideos: true, premiereXml: false },
+        failedRallies: [{ code: 'DYNAMIC_HDR_UNSUPPORTED', rallyIndex: 1 }], xmlFailure: null,
+      },
+    });
+  });
+
+  it('retains XML and reports the video failure after an unexpected video-stage exception', async () => {
+    state.keyframes.mockImplementationOnce(async () => []);
+    const window = { isDestroyed: () => false, webContents: { send: (_channel: string, event: AppEvent) => {
+      if (event.type === 'progress' && event.data.stage === 'exporting-rallies') throw new Error('VIDEO_STAGE_FAILED');
+      state.events.push(event);
+    } } };
+    const taskId = await startExport(window as never, { analysis_id: request.analysis_id,
+      selection: { mode: 'custom', segments: [{ rally_id: 'rally_001', start_time_seconds: 8, end_time_seconds: 14 }] },
+      destination: 'source', outputs: { combined_video: false, rally_videos: true, premiere_xml: true } });
+    await waitForTaskEnd(taskId);
+    const terminal = state.events.filter((event) => event.type === 'error' || event.type === 'export-result');
+    expect(terminal).toHaveLength(1);
+    const result = terminal[0];
+    if (result?.type !== 'export-result' || result.data.kind !== 'custom-artifacts') throw new Error(JSON.stringify(result));
+    expect(result.data).toMatchObject({ partialSuccess: true, failedRallies: [{ code: 'VIDEO_STAGE_FAILED' }], xmlFailure: null });
+    expect(await readFile(result.data.premiereXml!.outputPath, 'utf8')).toContain('source.mp4');
+  });
+
+  it('exports XML when media component validation fails', async () => {
+    vi.mocked(resolveUsableMediaComponents).mockRejectedValueOnce(new Error('MEDIA_RUNTIME_INVALID'));
+    const taskId = await startExport(windowMock() as never, { analysis_id: request.analysis_id,
+      selection: { mode: 'custom', segments: [{ rally_id: 'rally_001', start_time_seconds: 8, end_time_seconds: 14 }] },
+      destination: 'source', outputs: { combined_video: false, rally_videos: true, premiere_xml: true } });
+    await waitForTaskEnd(taskId);
+    expect(state.events.find((event) => event.type === 'export-result')).toMatchObject({ data: {
+      partialSuccess: true, premiereXml: { quantizedForVfr: false },
+      failedRallies: [{ code: 'MEDIA_RUNTIME_INVALID' }],
+    } });
   });
 
   it('removes all artifact files when the user cancels', async () => {

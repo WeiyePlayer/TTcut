@@ -122,6 +122,10 @@ button:disabled { cursor: not-allowed !important; opacity: 0.42; transform: none
 }
 .notice span { color: #806425; }
 .notice .secondary { min-height: 32px; margin-left: auto; flex: 0 0 auto; }
+.artifact-failures { width: min(680px, 100%); margin: 12px auto 20px; text-align: left; }
+.artifact-failures > div { display: grid; gap: 6px; padding: 12px 16px; border: 1px solid #f2d79a; background: #fffaf0; border-radius: 10px; font-size: 13px; overflow-wrap: anywhere; }
+.artifact-failures > div + div { margin-top: 10px; }
+.artifact-failures code { font-size: 11px; }
 .drop-zone {
   width: min(620px, 72vw); min-height: 270px; margin-top: 28px; padding: 36px;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;

@@ -8,6 +8,7 @@ import {
   type AppSettings,
   type Calibration,
   type CutSelectionV1,
+  type CustomArtifactExportFailures,
   type ExportRequest,
   type ScoreboardPosition,
   type ExportResult,
@@ -20,6 +21,7 @@ import {
 import type { AppEvent, BootstrapData, SelectedVideo } from '../shared/api';
 import { DONATION_URL, GITHUB_URL, RELEASES_URL, WEBSITE_URL } from '../shared/urls';
 import { formatTimestamp } from '../domain/time';
+import { exportExclusions } from '../domain/segments';
 import { scoreboardDisplayDimensions, scoreboardName } from '../domain/scoreboard';
 import { createCustomClipDraft, customExportSegments, resolvedSelectedClipScores, setCustomClipSelected, type CustomRallyClip } from '../domain/custom-clips';
 import type { CustomPlaybackMode } from '../domain/custom-playback';
@@ -74,6 +76,22 @@ function errorCode(error: unknown): string {
 
 function localizedError(code: string, translations: Messages): string {
   return translations.errors[code as keyof typeof translations.errors] ?? translations.errors.UNKNOWN;
+}
+
+function ArtifactFailureReasons({ failures, translations }: {
+  failures: Pick<CustomArtifactExportFailures, 'failedRallies' | 'xmlFailure'>;
+  translations: Messages;
+}) {
+  const videoCodes = [...new Set(failures.failedRallies.map((failure) => failure.code))];
+  if (!videoCodes.length && !failures.xmlFailure) return null;
+  return <div className="artifact-failures" role="status">
+    {videoCodes.map((code) => <div key={code}>
+      <strong>{translations.exportRallyVideos}</strong><span>{localizedError(code, translations)}</span><code>{code}</code>
+    </div>)}
+    {failures.xmlFailure && <div>
+      <strong>{translations.exportPremiereXml}</strong><span>{localizedError(failures.xmlFailure.code, translations)}</span><code>{failures.xmlFailure.code}</code>
+    </div>}
+  </div>;
 }
 
 function updateErrorMessage(code: string | null, language: Language): string {
@@ -132,10 +150,11 @@ export function App() {
   });
   const [progress, setProgress] = useState({ percent: 0, stage: 'probe' });
   const [activeTask, setActiveTask] = useState<string | null>(null);
+  const pendingExportStartRef = useRef<{ terminalTaskIds: Set<string> } | null>(null);
   const [videoTaskOwner, setVideoTaskOwnerState] = useState<VideoTaskOwner>(null);
   const videoTaskOwnerRef = useRef<VideoTaskOwner>(null);
   const [exportResult, setExportResult] = useState<ExportResult | null>(null);
-  const [error, setError] = useState<{ code: string; recoveredOutputPath?: string } | null>(null);
+  const [error, setError] = useState<{ code: string; recoveredOutputPath?: string; artifacts?: CustomArtifactExportFailures } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [supportPromptVisible, setSupportPromptVisible] = useState(false);
   const [closeDialog, setCloseDialog] = useState(false);
@@ -183,6 +202,9 @@ export function App() {
     });
     const removeTask = window.ttcut.onTaskEvent((event: AppEvent) => {
       if (multiActiveRef.current) return;
+      if (event.type === 'export-result' || event.type === 'error') {
+        pendingExportStartRef.current?.terminalTaskIds.add(event.taskId);
+      }
       if (event.type === 'progress') {
         setActiveTask(event.data.taskId);
         setProgress({ percent: event.data.percent, stage: event.data.stage });
@@ -248,6 +270,7 @@ export function App() {
         setError({
           code: event.code,
           ...(event.recoveredOutputPath ? { recoveredOutputPath: event.recoveredOutputPath } : {}),
+          ...(event.artifacts ? { artifacts: event.artifacts } : {}),
         });
         setStep('error');
       }
@@ -379,6 +402,7 @@ export function App() {
       analysis.video.duration_seconds,
       analysis.video.fps,
       rallyRecognitionMethod(analysis),
+      exportExclusions(analysis),
     ));
     setCustomPlaybackMode('source');
     setCustomScoreboard(DEFAULT_SCOREBOARD);
@@ -414,7 +438,7 @@ export function App() {
 
   const startCutting = async (preparedSelection?: CutSelectionV1, outputs?: ExportRequest['outputs']) => {
     const mediaRequired = (outputs?.combined_video ?? true) || outputs?.rally_videos === true;
-    if (!analysis || !analysisId || !platformSupported || (mediaRequired && !bootstrap?.components.media.available)) return;
+    if (!analysis || !analysisId || !platformSupported || (mediaRequired && !outputs?.premiere_xml && !bootstrap?.components.media.available)) return;
     if (!preparedSelection && selectedCount === 0) return;
     let selection: CutSelectionV1;
     const common = { pre_roll_seconds: settings.pre_roll_seconds, post_roll_seconds: settings.post_roll_seconds } as const;
@@ -430,17 +454,15 @@ export function App() {
     setStep('cutting'); setProgress({ percent: 0, stage: 'preparing' });
     try {
       if (selection.mode === 'custom' && customDraft) {
-        await window.ttcut.saveCustomEditorDraft(analysisId, {
+        customSaveRef.current = window.ttcut.saveCustomEditorDraft(analysisId, {
           schema_version: 1, clips: customDraft, playbackMode: customPlaybackMode, scoreboard: customScoreboard, outputs: outputs ?? customOutputs,
-        });
+        }).then(() => setCustomSaveError(false), () => setCustomSaveError(true));
+        // The current ranges are part of the export request even when draft
+        // persistence fails; Main separately validates their source for export.
+        await customSaveRef.current;
       }
       let scoreboardRequest: ExportRequest['scoreboard'];
-      if (selection.mode === 'custom' && customScoreboard.enabled && customDraft) {
-        if (document.fonts) {
-          const names = `${scoreboardName(customScoreboard.left_name, 'A')}${scoreboardName(customScoreboard.right_name, 'B')}0123456789`;
-          await document.fonts.load('800 24px "Noto Sans SC Variable"', names);
-        }
-        const display = scoreboardDisplayDimensions(analysis.video);
+      if (mediaRequired && selection.mode === 'custom' && customScoreboard.enabled && customDraft) {
         const scores = resolvedSelectedClipScores(customDraft);
         scoreboardRequest = {
           x: customScoreboard.x,
@@ -449,24 +471,39 @@ export function App() {
           style: customScoreboard.style,
           left_name: customScoreboard.left_name,
           right_name: customScoreboard.right_name,
-          scores: customDraft.filter((clip) => clip.selected).map((clip) => {
-            const score = scores.get(clip.clipId)!;
-            return {
-              clip_id: clip.clipId,
-              ...score,
-              image_data: renderScoreboardImage(display.width, display.height, customScoreboard, score),
-            };
-          }),
+          scores: customDraft.filter((clip) => clip.selected).map((clip) => ({
+            clip_id: clip.clipId, ...scores.get(clip.clipId)!,
+          })),
         };
+        try {
+          if (document.fonts) {
+            const names = `${scoreboardName(customScoreboard.left_name, 'A')}${scoreboardName(customScoreboard.right_name, 'B')}0123456789`;
+            await document.fonts.load('800 24px "Noto Sans SC Variable"', names);
+          }
+          const display = scoreboardDisplayDimensions(analysis.video);
+          scoreboardRequest.scores = scoreboardRequest.scores.map((score) => ({
+            ...score, image_data: renderScoreboardImage(display.width, display.height, customScoreboard, score),
+          }));
+        } catch {
+          if (!outputs?.premiere_xml) throw new Error('SCOREBOARD_RENDER_FAILED');
+          // Keep both requested artifacts: Main can write XML independently and
+          // report the video preparation failure without dropping its overlay.
+          scoreboardRequest.scores = scoreboardRequest.scores.map((score) => ({ ...score, image_error: 'SCOREBOARD_RENDER_FAILED' }));
+        }
       }
-      setActiveTask(await window.ttcut.startExport({
+      const pending = { terminalTaskIds: new Set<string>() };
+      pendingExportStartRef.current = pending;
+      const taskId = await window.ttcut.startExport({
         analysis_id: analysisId,
         selection,
         destination: 'source',
         ...(scoreboardRequest ? { scoreboard: scoreboardRequest } : {}),
         ...(outputs ? { outputs } : {}),
-      }));
+      });
+      if (!pending.terminalTaskIds.has(taskId)) setActiveTask(taskId);
+      if (pendingExportStartRef.current === pending) pendingExportStartRef.current = null;
     } catch (caught) {
+      pendingExportStartRef.current = null;
       if (videoTaskOwnerRef.current === 'single') updateVideoTaskOwner(null);
       setError({ code: errorCode(caught) }); setStep('error');
     }
@@ -815,6 +852,9 @@ export function App() {
           </section>
         ) : (
           <section className="page auto-page">
+            {customSaveError && (step === 'cutting' || step === 'complete') && (
+              <div className="notice" role="alert">{t.customSaveFailed}<button className="text-button" type="button" onClick={() => setCustomSaveVersion((version) => version + 1)}>{t.retry}</button></div>
+            )}
             {bootstrap && !platformSupported && step === 'select' && (
               <div className="notice platform-notice"><strong>{t.platformUnsupported}</strong><span>{platformDetail}</span><button className="secondary" onClick={() => setView('settings')}>{t.openSetup}</button></div>
             )}
@@ -954,13 +994,14 @@ export function App() {
                 <div className="success-heading"><span>✓</span><div><p className="eyebrow">4 / 4</p><h1>{t.exportComplete}</h1></div></div>
                 <div className="card output-details custom-artifact-details">
                   <div><span>{t.outputPath}</span><strong>{exportResult.outputDirectory}</strong></div>
-                  <div><span>{t.exportRallyVideos}</span><strong>{interpolate(t.exportedRallyVideos, { count: exportResult.rallyVideos.length })}</strong></div>
-                  <div><span>{t.exportPremiereXml}</span><strong>{exportResult.premiereXml ? t.exported : t.notExported}</strong></div>
+                  {(exportResult.requestedOutputs?.rallyVideos ?? true) && <div><span>{t.exportRallyVideos}</span><strong>{interpolate(t.exportedRallyVideos, { count: exportResult.rallyVideos.length })}</strong></div>}
+                  {(exportResult.requestedOutputs?.premiereXml ?? true) && <div><span>{t.exportPremiereXml}</span><strong>{exportResult.premiereXml ? t.exported : t.notExported}</strong></div>}
                 </div>
                 {exportResult.partialSuccess && <div className="notice" role="status"><span>{t.partialExportNotice}</span></div>}
                 {exportResult.premiereXml?.quantizedForVfr && <div className="notice" role="status"><span>{t.xmlVfrNotice}</span></div>}
                 {exportResult.failedRallies.length > 0 && <div className="notice" role="status"><span>{interpolate(t.rallyExportFailures, { count: exportResult.failedRallies.length })} {interpolate(t.failedRallyDetails, { rallies: exportResult.failedRallies.map((failure) => failure.rallyIndex === undefined ? failure.rallyId ?? '?' : String(failure.rallyIndex)).join(', ') })}</span></div>}
                 {exportResult.xmlFailure && <div className="notice" role="status"><span>{t.xmlExportFailed}</span></div>}
+                <ArtifactFailureReasons failures={exportResult} translations={t} />
                 <div className="footer-actions"><button className="secondary" onClick={() => void window.ttcut.openOutputDirectory(exportResult.outputDirectory)}>{t.openFolder}</button><button className="primary" onClick={reset}>{t.cutAnother}</button></div>
               </div>
             )}
@@ -974,7 +1015,9 @@ export function App() {
                     allowed: exportResult.timing.allowedDriftSeconds.toFixed(2),
                   })}</span></div>
                 )}
-                <ExportVideoPreview hdr={Boolean(analysis && (analysis.video.media_fidelity?.hdr ?? analysis.video.native_video?.hdr ?? 'sdr') !== 'sdr')} className="output-preview" src={exportResult.mediaUrl} controls preload="metadata" />
+                <ExportVideoPreview hdr={(exportResult.outputColor
+                  ? exportResult.outputColor.media_fidelity?.hdr ?? exportResult.outputMediaFidelity?.hdr ?? 'sdr'
+                  : exportResult.outputMediaFidelity?.hdr ?? analysis?.video.media_fidelity?.hdr ?? analysis?.video.native_video?.hdr ?? 'sdr') !== 'sdr'} className="output-preview" src={exportResult.mediaUrl} controls preload="metadata" />
                 <div className="card output-details"><div><span>{t.outputName}</span><strong>{exportResult.outputName}</strong></div><div><span>{t.outputPath}</span><strong>{exportResult.outputPath}</strong></div></div>
                 <div className="footer-actions"><button className="secondary" onClick={() => void window.ttcut.revealOutput(exportResult.outputPath)}>{t.openFolder}</button><button className="primary" onClick={reset}>{t.cutAnother}</button></div>
                 {exportResult.warning && (
@@ -993,7 +1036,12 @@ export function App() {
 
             {step === 'error' && error && (
               <div className="empty-state error-state">
-                <span>!</span><h1>{t.errorTitle}</h1><p>{localizedError(error.code, t)}</p><code>{error.code}</code>
+                <span>!</span><h1>{t.errorTitle}</h1><p>{localizedError(error.artifacts
+                  ? error.artifacts.requestedOutputs.rallyVideos && error.artifacts.requestedOutputs.premiereXml
+                    ? 'CUSTOM_ARTIFACT_EXPORT_FAILED' : error.artifacts.requestedOutputs.premiereXml
+                      ? 'PREMIERE_XML_FAILED' : 'RALLY_VIDEOS_EXPORT_FAILED'
+                  : error.code, t)}</p><code>{error.code}</code>
+                {error.artifacts && <ArtifactFailureReasons failures={error.artifacts} translations={t} />}
                 {error.recoveredOutputPath && (
                   <div className="card output-details"><div><span>{t.recoveredOutput}</span><strong>{error.recoveredOutputPath}</strong></div></div>
                 )}
@@ -1001,7 +1049,11 @@ export function App() {
                 <div className="error-actions">
                   <button className="secondary" onClick={() => void window.ttcut.revealLogs()}>{t.logs}</button>
                   {error.recoveredOutputPath && <button className="secondary" onClick={() => void window.ttcut.revealOutput(error.recoveredOutputPath!)}>{t.openRecoveredOutput}</button>}
-                  <button className="primary" onClick={() => { setError(null); setStep(video && metadata ? 'calibrate' : 'select'); }}>{t.retry}</button>
+                  <button className="primary" onClick={() => {
+                    const returnToCustom = error.code === 'INVALID_CUSTOM_SEGMENTS' && exportOriginRef.current === 'custom' && analysis;
+                    setError(null);
+                    setStep(returnToCustom ? 'custom' : video && metadata ? 'calibrate' : 'select');
+                  }}>{t.retry}</button>
                 </div>
               </div>
             )}

@@ -334,6 +334,11 @@ export const mediaFidelitySchema = z.object({
   chroma: z.string().min(1),
   mastering_display: z.string().nullable(),
   max_cll: z.string().nullable(),
+  dolby_vision: z.object({
+    profile: z.number().int().nonnegative(),
+    base_layer_present: z.boolean(),
+    signal_compatibility_id: z.number().int().nonnegative(),
+  }).strict().optional(),
 }).strict();
 
 export const videoMetadataSchema = z.object({
@@ -845,6 +850,7 @@ export const exportScoreboardSchema = scoreboardPositionSchema.extend({
   scores: z.array(scoreboardScoreSchema.extend({
     clip_id: z.string().min(1),
     image_data: z.string().max(2_000_000).optional(),
+    image_error: z.literal('SCOREBOARD_RENDER_FAILED').optional(),
   }).strict()).min(1),
 }).strict();
 
@@ -1129,6 +1135,16 @@ export type ExportWarning = {
   message: string;
 };
 
+export type ExportOutputColor = {
+  video_codec: string | null;
+  pixel_format: string | null;
+  color_range: string | null;
+  color_space: string | null;
+  color_transfer: string | null;
+  color_primaries: string | null;
+  media_fidelity: z.infer<typeof mediaFidelitySchema> | null;
+};
+
 export type CombinedVideoExportResult = {
   kind?: 'combined-video';
   taskId: string;
@@ -1138,6 +1154,8 @@ export type CombinedVideoExportResult = {
   mediaUrl: string;
   timing: ExportTimingInfo;
   warning?: ExportWarning;
+  outputMediaFidelity?: z.infer<typeof mediaFidelitySchema>;
+  outputColor?: ExportOutputColor;
 };
 
 export type CustomArtifactFailure = {
@@ -1148,17 +1166,25 @@ export type CustomArtifactFailure = {
   message: string;
 };
 
+export type CustomArtifactExportFailures = {
+  requestedOutputs: { rallyVideos: boolean; premiereXml: boolean };
+  failedRallies: CustomArtifactFailure[];
+  xmlFailure: CustomArtifactFailure | null;
+};
+
 export type CustomArtifactExportResult = {
   kind: 'custom-artifacts';
   taskId: string;
   analysisId: string;
   outputDirectory: string;
   partialSuccess: boolean;
+  requestedOutputs?: CustomArtifactExportFailures['requestedOutputs'];
   rallyVideos: Array<{
     clipId: string;
     rallyId?: string;
     rallyIndex: number;
     outputPath: string;
+    outputColor?: ExportOutputColor;
   }>;
   failedRallies: CustomArtifactFailure[];
   premiereXml: {

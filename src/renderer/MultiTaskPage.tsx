@@ -49,6 +49,7 @@ type BatchItem = {
   recoveredOutputPath: string | null;
   exportWarning: ExportWarning | null;
   error: string | null;
+  errorDetail: { code: string; message: string } | null;
 };
 
 interface MultiTaskPageProps {
@@ -95,6 +96,7 @@ async function createItems(videos: SelectedVideo[], firstOrder = 0): Promise<Bat
       recoveredOutputPath: null,
       exportWarning: null,
       error,
+      errorDetail: null,
     };
   }));
 }
@@ -157,6 +159,8 @@ export function MultiTaskPage({
   const cancelRequested = useRef(false);
   const autoCalibrationAvailableRef = useRef(true);
   const pendingTaskStartRef = useRef<Promise<string> | null>(null);
+  const earlyTaskEventsRef = useRef(new Map<string, { progress?: AppEvent; terminal?: AppEvent }>());
+  const taskEventHandlerRef = useRef<(event: AppEvent) => void>(() => undefined);
   const scheduleRef = useRef<() => void>(() => undefined);
   const rowRefs = useRef(new Map<string, HTMLElement>());
   const previousRects = useRef(new Map<string, DOMRect>());
@@ -353,7 +357,8 @@ export function MultiTaskPage({
     cancelRequested.current = false;
     setActiveItem(candidate.id);
     if (candidate.analysisId && candidate.analysis && candidate.processingStatus !== 'failed' && candidate.mode !== 'analyze-only') {
-      updateItem(candidate.id, (item) => ({ ...item, processingStatus: 'exporting', progress: 70, error: null }));
+      earlyTaskEventsRef.current.clear();
+      updateItem(candidate.id, (item) => ({ ...item, processingStatus: 'exporting', progress: 70, error: null, errorDetail: null }));
       activeRef.current = { taskId: null, itemId: candidate.id, phase: 'export' };
       setActivePhase('export');
       const selection = selectionFor(candidate);
@@ -367,8 +372,14 @@ export function MultiTaskPage({
       void startPromise.then((taskId) => {
         if (activeRef.current?.itemId !== candidate.id || activeRef.current.phase !== 'export') return;
         activeRef.current = { taskId, itemId: candidate.id, phase: 'export' };
+        const early = earlyTaskEventsRef.current.get(taskId);
+        earlyTaskEventsRef.current.clear();
+        if (early?.progress) taskEventHandlerRef.current(early.progress);
+        if (early?.terminal) taskEventHandlerRef.current(early.terminal);
+        if (cancelRequested.current && activeRef.current?.taskId === taskId) void window.ttcut.cancelTask(taskId);
       }).catch((caught) => {
         if (activeRef.current?.itemId !== candidate.id || activeRef.current.phase !== 'export') return;
+        earlyTaskEventsRef.current.clear();
         updateItem(candidate.id, (item) => ({ ...item, processingStatus: 'failed', error: String(caught) }));
         finishActive();
         setTimeout(() => scheduleRef.current(), 0);
@@ -386,6 +397,7 @@ export function MultiTaskPage({
       outputPath: null,
       outputMediaUrl: null,
       error: null,
+      errorDetail: null,
     }));
     const calibrationChoice = candidate.calibration
       ? {
@@ -399,6 +411,7 @@ export function MultiTaskPage({
       setTimeout(() => scheduleRef.current(), 0);
       return;
     }
+    earlyTaskEventsRef.current.clear();
     activeRef.current = { taskId: null, itemId: candidate.id, phase: 'analysis' };
     setActivePhase('analysis');
     const startPromise = window.ttcut.startAnalysis({
@@ -412,8 +425,16 @@ export function MultiTaskPage({
     void startPromise.then((taskId) => {
       if (activeRef.current?.itemId !== candidate.id || activeRef.current.phase !== 'analysis') return;
       activeRef.current = { taskId, itemId: candidate.id, phase: 'analysis' };
+      const early = earlyTaskEventsRef.current.get(taskId);
+      earlyTaskEventsRef.current.clear();
+      if (early?.progress) taskEventHandlerRef.current(early.progress);
+      if (early?.terminal) taskEventHandlerRef.current(early.terminal);
+      if (cancelRequested.current && activeRef.current?.taskId === taskId) {
+        void window.ttcut.cancelTask(taskId);
+      }
     }).catch((caught) => {
       if (activeRef.current?.itemId !== candidate.id || activeRef.current.phase !== 'analysis') return;
+      earlyTaskEventsRef.current.clear();
       updateItem(candidate.id, (item) => ({ ...item, processingStatus: 'failed', error: String(caught) }));
       finishActive();
       setTimeout(() => scheduleRef.current(), 0);
@@ -454,7 +475,7 @@ export function MultiTaskPage({
     previousRects.current = nextRects;
   }, [items]);
 
-  useEffect(() => window.ttcut.onTaskEvent((event: AppEvent) => {
+  useEffect(() => window.ttcut.onTaskEvent(taskEventHandlerRef.current = (event: AppEvent) => {
     const eventTaskId = event.type === 'progress' ? event.data.taskId : event.taskId;
     if (batchExportRef.current?.taskId === eventTaskId) {
       if (event.type === 'progress') {
@@ -477,6 +498,17 @@ export function MultiTaskPage({
     const active = activeRef.current;
     if (!active) return;
     const taskId = event.type === 'progress' ? event.data.taskId : event.taskId;
+    if (active.phase !== 'calibration' && active.taskId === null) {
+      if ((event.type === 'progress' && event.data.kind === active.phase)
+        || (active.phase === 'analysis' && event.type === 'analysis-result')
+        || (active.phase === 'export' && event.type === 'export-result') || event.type === 'error') {
+        const early = earlyTaskEventsRef.current.get(taskId) ?? {};
+        if (event.type === 'progress') early.progress = event;
+        else early.terminal = event;
+        earlyTaskEventsRef.current.set(taskId, early);
+      }
+      return;
+    }
     if (active.taskId !== taskId) return;
     if (event.type === 'progress') {
       const mapped = active.phase === 'calibration'
@@ -569,8 +601,7 @@ export function MultiTaskPage({
       setTimeout(() => scheduleRef.current(), 0);
       return;
     }
-    const cancelled = event.code === 'EXPORT_CANCELLED'
-      || (active.phase === 'analysis' && cancelRequested.current);
+    const cancelled = event.code === 'EXPORT_CANCELLED' || event.code === 'ANALYSIS_CANCELLED';
     updateItem(active.itemId, (item) => ({
       ...item,
       processingStatus: cancelled ? 'cancelled' : 'failed',
@@ -580,6 +611,7 @@ export function MultiTaskPage({
       recoveredOutputPath: event.recoveredOutputPath ?? null,
       exportWarning: item.exportWarning,
       error: cancelled ? null : event.code,
+      errorDetail: cancelled ? null : { code: event.code, message: event.message },
     }));
     if (cancelled) {
       replaceItems((current) => {
@@ -672,9 +704,9 @@ export function MultiTaskPage({
 
   const cancel = async () => {
     const active = activeRef.current;
-    if (!active?.taskId || active.phase === 'calibration') return;
+    if (!active || active.phase === 'calibration') return;
     cancelRequested.current = true;
-    await window.ttcut.cancelTask(active.taskId);
+    if (active.taskId) await window.ttcut.cancelTask(active.taskId);
   };
 
   const remove = async (item: BatchItem) => {
@@ -815,7 +847,7 @@ export function MultiTaskPage({
                 <strong title={item.video.name}>{item.video.name}</strong>
                 {item.metadata && <span>{formatTimestamp(item.metadata.duration_seconds)} · {item.metadata.width} × {item.metadata.height} · {item.metadata.fps.toFixed(3)} fps</span>}
                 {mergeWorkflow && done && item.mode !== 'analyze-only' && batchExport.status !== 'done' && <span>{text.mergeWaiting}</span>}
-                {item.error && !manualRequired && <small>{item.error}</small>}
+                {item.error && !manualRequired && <small title={item.errorDetail?.code === item.error ? item.errorDetail.message : undefined}>{item.error}</small>}
                 {item.exportWarning && (
                   <div className="batch-export-warning" role="alert">
                     <span><b>{item.analysis?.processing?.mode === 'vfr_fallback' ? text.processingWarning : text.warning}</b><code>{item.exportWarning.code}</code></span>

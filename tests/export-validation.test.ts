@@ -13,6 +13,7 @@ vi.mock('electron', () => ({
 }));
 
 vi.mock('../src/main/probe', () => ({
+  hasHdrFrameSideData: vi.fn().mockResolvedValue(false),
   probeAudioPacketBoundaries: vi.fn(),
   probeKeyframes: vi.fn(),
   probeStreamSignature: vi.fn(),
@@ -78,6 +79,20 @@ describe('export timestamp validation', () => {
     });
 
     await expect(validateExportOutput(output, { targetSeconds: 2, segmentCount: 1 }, source)).resolves.toBeDefined();
+  });
+  it('validates convertible dynamic HDR against the SDR output instead of the source HDR tags', async () => {
+    const hdr: VideoMetadata = { ...source, video_codec: 'hevc', pixel_format: 'yuv420p10le',
+      color_transfer: 'smpte2084', color_primaries: 'bt2020', color_space: 'bt2020nc',
+      media_fidelity: { hdr: 'hdr10Plus', bit_depth: 10, chroma: '420', mastering_display: null, max_cll: null } };
+    state.probeVideo.mockResolvedValue({ ...source, path: output });
+    await expect(validateExportOutput(output, { targetSeconds: 2, segmentCount: 1 }, hdr)).resolves.toMatchObject({ metadata: { video_codec: 'h264' } });
+  });
+  it('rejects leftover mastering metadata in a tone-mapped SDR output', async () => {
+    const hdr: VideoMetadata = { ...source, video_codec: 'hevc', color_transfer: 'smpte2084',
+      media_fidelity: { hdr: 'hdr10Plus', bit_depth: 10, chroma: '420', mastering_display: null, max_cll: null } };
+    state.probeVideo.mockResolvedValue({ ...source, path: output,
+      media_fidelity: { hdr: 'sdr', bit_depth: 8, chroma: '420', mastering_display: 'stale HDR mastering display', max_cll: null } });
+    await expect(validateExportOutput(output, { targetSeconds: 2, segmentCount: 1 }, hdr)).rejects.toThrow('EXPORT_HDR_MISMATCH');
   });
 
   it('accepts output duration drift within the domain tolerance', async () => {

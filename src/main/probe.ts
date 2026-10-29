@@ -188,6 +188,94 @@ export async function probeVideo(videoPath: string, signal?: AbortSignal, mode: 
   });
 }
 
+/** Stream all output frame side-data names without buffering a long video in memory. */
+export async function hasHdrFrameSideData(videoPath: string, signal?: AbortSignal): Promise<boolean> {
+  const { ffprobe } = await resolveUsableMediaComponents();
+  if (!ffprobe) throw new Error('MEDIA_COMPONENT_MISSING');
+  let found = false;
+  let tail = '';
+  await runProcess(ffprobe, ['-v', 'error', '-select_streams', 'v:0', '-show_frames',
+    '-show_entries', 'frame=:frame_side_data=side_data_type', '-of', 'compact=p=0:nk=1', videoPath], {
+    ...(signal ? { signal } : {}),
+    stderrMaxChars: 16_384,
+    onStdout: (chunk) => {
+      const text = `${tail}${chunk}`;
+      if (/DOVI|Dolby Vision|HDR|Mastering display|Content light/i.test(text)) found = true;
+      tail = text.slice(-64);
+    },
+  });
+  return found;
+}
+
+/** A readable container header is insufficient: decode the complete CFR audio and video streams. */
+export async function hasCompleteCfrContent(videoPath: string, hasAudio: boolean, signal?: AbortSignal): Promise<boolean> {
+  const { ffprobe } = await resolveUsableMediaComponents();
+  if (!ffprobe) throw new Error('MEDIA_COMPONENT_MISSING');
+  const video = await runProcess(ffprobe, ['-v', 'error', '-threads', '0', '-err_detect', 'explode', '-select_streams', 'v:0',
+    '-count_frames', '-show_entries', 'stream=nb_frames,nb_read_frames', '-of', 'json', videoPath], {
+    ...(signal ? { signal } : {}), stderrMaxChars: 16_384,
+  });
+  if (video.stderr.trim()) return false;
+  const info = parseJson<{ streams?: ProbeStream[] }>(video.stdout).streams?.[0];
+  const decoded = optionalInteger(info?.nb_read_frames);
+  const declared = optionalInteger(info?.nb_frames);
+  if (!decoded || (declared !== null && decoded !== declared)) return false;
+  if (!hasAudio) return true;
+
+  const audioStream = await runProcess(ffprobe, ['-v', 'error', '-select_streams', 'a:0',
+    '-show_entries', 'stream=sample_rate,start_time,duration', '-of', 'json', videoPath], {
+    ...(signal ? { signal } : {}), stderrMaxChars: 16_384,
+  });
+  if (audioStream.stderr.trim()) return false;
+  const audioInfo = parseJson<{ streams?: ProbeStream[] }>(audioStream.stdout).streams?.[0];
+  const sampleRate = optionalInteger(audioInfo?.sample_rate);
+  const duration = optionalNumber(audioInfo?.duration);
+  const streamStart = optionalNumber(audioInfo?.start_time);
+  if (!sampleRate || !duration || duration <= 0) return false;
+
+  let pending = '';
+  let samples = 0;
+  let largestFrame = 0;
+  let firstPts: number | null = null;
+  let previousEnd: number | null = null;
+  let malformed = false;
+  const consume = (line: string) => {
+    if (line.startsWith('frame|')) {
+      const frame = Number(line.match(/(?:^|\|)nb_samples=(\d+)(?:\||$)/)?.[1]);
+      const pts = Number(line.match(/(?:^|\|)best_effort_timestamp_time=(-?\d+(?:\.\d+)?)(?:\||$)/)?.[1]);
+      if (!Number.isSafeInteger(frame) || frame <= 0 || !Number.isSafeInteger(samples + frame) || !Number.isFinite(pts)) {
+        malformed = true;
+      } else {
+        // Timestamp rounding can differ by a few samples, but overlaps or
+        // missing intervals between decoded frames must not be hidden by counts.
+        if (previousEnd !== null && Math.abs(pts - previousEnd) > Math.max(0.002, 2 / sampleRate)) malformed = true;
+        firstPts ??= pts;
+        previousEnd = pts + frame / sampleRate;
+        samples += frame;
+        largestFrame = Math.max(largestFrame, frame);
+      }
+    }
+  };
+  const audio = await runProcess(ffprobe, ['-v', 'error', '-threads', '0', '-err_detect', 'explode', '-select_streams', 'a:0',
+    '-count_frames', '-show_frames', '-show_entries', 'frame=best_effort_timestamp_time,nb_samples', '-of', 'compact=p=1', videoPath], {
+    ...(signal ? { signal } : {}), stderrMaxChars: 16_384,
+    onStdout: (chunk) => {
+      const lines = `${pending}${chunk}`.split('\n');
+      pending = lines.pop() ?? '';
+      for (const line of lines) consume(line.trim());
+      if (pending.length > 4096) { malformed = true; pending = pending.slice(-4096); }
+    },
+  });
+  if (pending) consume(pending.trim());
+  if (audio.stderr.trim() || malformed || !samples || firstPts === null || previousEnd === null) return false;
+  // Decode priming and the final partial frame vary by codec and container.
+  const tolerance = Math.min(0.25, Math.max(0.1, 2 * largestFrame / sampleRate));
+  return samples / sampleRate + tolerance >= duration
+    && previousEnd - firstPts + tolerance >= duration
+    && (streamStart === null || (Math.abs(firstPts - streamStart) <= tolerance
+      && previousEnd + tolerance >= streamStart + duration));
+}
+
 export async function probeKeyframes(
   videoPath: string,
   ffprobeOverride?: string,
