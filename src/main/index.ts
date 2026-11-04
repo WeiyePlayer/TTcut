@@ -33,8 +33,9 @@ import { startBatchExport } from './batch-export';
 import { getLogDirectory, logLine } from './logger';
 import { installRuntimeDiagnostics, attachWindowDiagnostics } from './runtime-diagnostics';
 import { getHistoryStore } from './history';
-import { clearMediaPaths, installMediaProtocol, registeredVideoPath, registerMediaPath } from './media-protocol';
+import { clearMediaPaths, installMediaProtocol, registeredVideoPath, registerMediaPath, unregisterMediaPath } from './media-protocol';
 import { disposePreviewMedia, hasPreviewMedia, preparePreviewMedia } from './preview-media';
+import { disposePreviewFrames, extractPreviewFrame, hasPreviewFrames } from './preview-frame';
 import { probeVideo } from './probe';
 import {
   cancelAllTasksAndWait,
@@ -62,6 +63,7 @@ protocol.registerSchemesAsPrivileged([{
 let mainWindow: BrowserWindow | null = null;
 let exitApproved = false;
 const isMac = process.platform === 'darwin';
+const previewFrameUrls = new Map<string, string>();
 const distribution = distributionIdentity();
 if (distribution.independentBeta) {
   app.setName(distribution.productName);
@@ -167,6 +169,19 @@ function registerIpc(): void {
   ipcMain.handle(IPC.videoPreparePreview, async (_event, value: unknown) => {
     if (typeof value !== 'string') throw new Error('INVALID_INPUT');
     return registerMediaPath(await preparePreviewMedia(registeredVideoPath(value)));
+  });
+  ipcMain.handle(IPC.videoPreviewFrame, async (_event, value: unknown, seconds: unknown) => {
+    if (typeof value !== 'string' || typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) {
+      throw new Error('INVALID_INPUT');
+    }
+    const source = registeredVideoPath(value);
+    if (isMac) throw new Error('PREVIEW_FRAME_UNSUPPORTED');
+    const frame = await extractPreviewFrame(source, seconds);
+    const previous = previewFrameUrls.get(source);
+    const url = registerMediaPath(frame, 'image/jpeg');
+    if (previous) unregisterMediaPath(previous);
+    previewFrameUrls.set(source, url);
+    return url;
   });
   ipcMain.handle(IPC.calibrationStart, async (_event, value: unknown) => {
     if (!value || typeof value !== 'object') throw new Error('INVALID_REQUEST');
@@ -391,9 +406,11 @@ app.on('before-quit', async (event) => {
     app.quit();
     return;
   }
-  if (hasPreviewMedia()) {
+  if (hasPreviewMedia() || hasPreviewFrames()) {
     event.preventDefault();
-    await disposePreviewMedia();
+    await Promise.all([disposePreviewMedia(), disposePreviewFrames()]);
+    for (const url of previewFrameUrls.values()) unregisterMediaPath(url);
+    previewFrameUrls.clear();
     app.quit();
     return;
   }

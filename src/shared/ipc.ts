@@ -9,6 +9,7 @@ export const IPC = {
   previewPrepare: 'preview:prepare',
   previewProgress: 'preview:progress',
   videoPreparePreview: 'video:prepare-preview',
+  videoPreviewFrame: 'video:preview-frame',
   calibrationStart: 'calibration:start',
   analysisStart: 'analysis:start',
   exportStart: 'export:start',

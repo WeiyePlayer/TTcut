@@ -81,10 +81,14 @@ function previewDiagnostics(source: VideoMetadata, preview: VideoMetadata) {
   };
 }
 
+export function previewToneFilter(metadata: VideoMetadata): string {
+  return mediaFidelity(metadata).hdr === 'sdr' ? ''
+    : 'zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable,zscale=t=bt709:m=bt709:r=tv,';
+}
+
 export function buildPreviewArgs(input: string, output: string, metadata: VideoMetadata, encoder: MediaEncoder): string[] {
   const fps = Math.min(60, metadata.nominal_fps || metadata.fps);
-  const tone = mediaFidelity(metadata).hdr === 'sdr' ? ''
-    : 'zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable,zscale=t=bt709:m=bt709:r=tv,';
+  const tone = previewToneFilter(metadata);
   return [
     '-hide_banner', '-loglevel', 'error', '-nostdin', '-y', '-i', input,
     '-map', '0:v:0', '-map', '0:a:0?', '-sn', '-dn', '-map_metadata', '-1',
