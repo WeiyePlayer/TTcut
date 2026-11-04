@@ -8,7 +8,7 @@ TTcut is a local automatic table-tennis video cutter for players and enthusiasts
 
 Videos, analysis results, and history stay on the local computer. TTcut requires no account, uploads no video, and collects no telemetry. The Windows full installer and macOS packages include their runtime resources. Analysis, preview, and cutting can run offline after setup.
 
-> Windows `v1.3.11` is being prepared as an unpublished stable release draft. The current downloadable Windows stable release is `v1.3.10`.
+> Windows `v1.3.12` is being prepared as an unpublished stable release draft. Download published versions from the Releases page below.
 
 ## Download and installation
 
@@ -19,14 +19,13 @@ Videos, analysis results, and history stay on the local computer. TTcut requires
 
 TTcut detects an NVIDIA GPU automatically and falls back to CPU if accelerated setup or its self-test fails. Its video-processing capability reads media information, cuts and joins segments, and validates exported files.
 
-## What's new in v1.3.11
+## What's new in v1.3.12
 
-- Single-source HDR10+ and compatible Dolby Vision 8.1/8.4 exports automatically tone-map to SDR without a new setting.
-- Premiere XML is independent of video encoding and scoreboard preparation, with results reported per requested artifact.
-- Stronger original-source recovery, CFR cache integrity checks, and cancellation handling prevent damaged-cache reuse and leftover cancelled outputs.
-- Initial custom-editing drafts respect confirmed hybrid v4 excluded ranges while remaining manually adjustable.
+- Calibration falls back to time-based FFmpeg frame extraction when browser video decoding is unavailable, allowing frame selection and table marking to continue.
+- Extracted previews retain display rotation and tone-map HDR; rapid seeking prioritizes the latest request.
+- Windows native preview, analysis models, sampling defaults and export rules remain unchanged.
 
-See the [v1.3.11 release notes](docs/release-notes-v1.3.11.en.md) for the complete details.
+See the [v1.3.12 release notes](docs/release-notes-v1.3.12.en.md) for the complete details.
 
 ## Contact the author on WeChat: m2924931661
 
