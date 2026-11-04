@@ -1,6 +1,6 @@
 export type PreviewController = {
   native?: boolean;
-  status: 'ready' | 'preparing' | 'failed';
+  status: 'ready' | 'preparing' | 'failed' | 'unsupported';
   error: string | null;
   url: string;
   seekTo(time: number, playing?: boolean, exact?: boolean): void;

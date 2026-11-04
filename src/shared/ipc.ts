@@ -13,6 +13,7 @@ export const IPC = {
   nativePreviewCommand: 'preview:native-command',
   nativePreviewClose: 'preview:native-close',
   nativePreviewEvent: 'preview:native-event',
+  videoPreviewFrame: 'video:preview-frame',
   calibrationStart: 'calibration:start',
   analysisStart: 'analysis:start',
   exportStart: 'export:start',

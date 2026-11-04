@@ -28,6 +28,7 @@ const api: TTcutApi = {
   acceptDroppedVideo: (path: string) => ipcRenderer.invoke(IPC.videoAcceptDrop, path),
   probeVideo: (path: string) => ipcRenderer.invoke(IPC.videoProbe, path),
   prepareVideoPreview: (mediaUrl: string) => ipcRenderer.invoke(IPC.videoPreparePreview, mediaUrl),
+  extractPreviewFrame: (mediaUrl: string, seconds: number) => ipcRenderer.invoke(IPC.videoPreviewFrame, mediaUrl, seconds),
   startAutoCalibration: (input: { videoPath: string; device: 'auto' | 'directml' | 'cuda' | 'cpu' }) => (
     ipcRenderer.invoke(IPC.calibrationStart, input)
   ),

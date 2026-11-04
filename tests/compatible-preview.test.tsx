@@ -3,9 +3,9 @@ import { useRef } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useCompatiblePreview } from '../src/renderer/use-compatible-preview';
 
-function Harness({ source = 'ttcut-media://media/source', codec }: { source?: string; codec?: string }) {
+function Harness({ source = 'ttcut-media://media/source', codec, fallback }: { source?: string; codec?: string; fallback?: 'proxy' | 'report' }) {
   const ref = useRef<HTMLVideoElement>(null);
-  const preview = useCompatiblePreview(ref, source, codec);
+  const preview = useCompatiblePreview(ref, source, codec, fallback ? { fallback } : undefined);
   return <><video ref={ref} src={preview.url} /><span>{preview.status}</span><span data-testid="preview-error">{preview.error}</span><button onClick={() => preview.seekTo(12, true)}>Play clip</button><button onClick={() => preview.seekTo(24, true)}>Next clip</button><button onClick={preview.togglePlayback}>Toggle</button><button onClick={preview.retry}>Retry</button></>;
 }
 
@@ -22,6 +22,27 @@ function setup() {
 }
 
 describe('compatible preview recovery', () => {
+  it.each(['error', 'missing-video-track'])('reports %s without preparing a proxy and retries native loading', async (reason) => {
+    const prepare = setup();
+    const load = vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => undefined);
+    vi.stubGlobal('ttcut', { platform: 'win32', prepareVideoPreview: prepare });
+    render(<Harness codec="hevc" fallback="report" />);
+    expect(screen.getByText('ready')).toBeInTheDocument();
+    const video = document.querySelector('video')!;
+    if (reason === 'error') fireEvent.error(video);
+    else fireEvent.loadedMetadata(video);
+    expect(screen.getByText('unsupported')).toBeInTheDocument();
+    expect(screen.getByTestId('preview-error')).toHaveTextContent(reason === 'error' ? 'media-error' : reason);
+    expect(prepare).not.toHaveBeenCalled();
+    expect(console.warn).toHaveBeenCalled();
+    fireEvent.click(screen.getByText('Retry'));
+    expect(screen.getByText('ready')).toBeInTheDocument();
+    expect(load).toHaveBeenCalledOnce();
+    fireEvent.error(video);
+    expect(screen.getByText('unsupported')).toBeInTheDocument();
+    expect(prepare).not.toHaveBeenCalled();
+  });
+
   it('prepares Windows HEVC without relying on decoder events and restores the latest clip', async () => {
     const prepare = setup();
     vi.stubGlobal('ttcut', { platform: 'win32', prepareVideoPreview: prepare });

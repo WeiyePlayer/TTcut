@@ -19,6 +19,12 @@ export function clearMediaPaths(): void {
   registered.clear();
 }
 
+export function unregisterMediaPath(mediaUrl: string): void {
+  const url = new URL(mediaUrl);
+  if (url.protocol !== 'ttcut-media:' || url.hostname !== 'media') throw new Error('INVALID_INPUT');
+  registered.delete(url.pathname.replace(/^\//, ''));
+}
+
 export function registeredVideoPath(mediaUrl: string): string {
   const url = new URL(mediaUrl);
   if (url.protocol !== 'ttcut-media:' || url.hostname !== 'media') throw new Error('INVALID_INPUT');
