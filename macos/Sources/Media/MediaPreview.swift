@@ -2,21 +2,44 @@ import Foundation
 import TTcutCore
 
 public enum MediaPreview {
+  static func videoDuration(_ video: VideoInfo) -> Double? {
+    if let duration = video.videoDuration, duration.isFinite, duration > 0 { return duration }
+    if let frames = video.frameCount, frames > 0, video.fps.isFinite, video.fps > 0 {
+      return Double(frames) / video.fps
+    }
+    return nil
+  }
+
+  static func validate(source: VideoInfo, preview: VideoInfo) throws {
+    guard preview.videoCodec == "h264", ["yuv420p", "yuvj420p"].contains(preview.pixelFormat) else {
+      throw TTError("PREVIEW_VALIDATION_FAILED", "PREVIEW_VALIDATION_FAILED:FORMAT_UNSUPPORTED")
+    }
+    if let expected = videoDuration(source), let actual = videoDuration(preview),
+      expected - actual > max(1, min(5, expected * 0.005))
+    {
+      throw TTError("PREVIEW_VALIDATION_FAILED", "PREVIEW_VALIDATION_FAILED:VIDEO_TRUNCATED")
+    }
+  }
   /// Caller-owned output, without a dependency on history or shared cache directories.
-  public static func render(video: VideoInfo, paths: RuntimePaths, destination: URL,
-    progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws {
+  public static func render(
+    video: VideoInfo, paths: RuntimePaths, destination: URL,
+    progress: @escaping @Sendable (Double) -> Void = { _ in }
+  ) async throws {
     let tone =
       video.hdr == .sdr
       ? ""
       : "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable,zscale=t=bt709:m=bt709:r=tv,"
-    let filter = tone + "scale=w=trunc(min(1920\\,iw*sar)/2)*2:h=trunc(ow/(iw*sar/ih)/2)*2,setsar=1"
+    let filter =
+      tone
+      + "scale=w=trunc(min(1920\\,iw*sar)/2)*2:h=trunc(ow/(iw*sar/ih)/2)*2:out_range=tv,setsar=1"
     _ = try await ProcessRunner.run(
       paths.ffmpeg,
       [
         "-v", "error", "-nostdin", "-y", "-i", video.path, "-map", "0:v:0", "-map", "0:a:0?", "-vf",
         filter, "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23", "-pix_fmt", "yuv420p",
         "-threads", "2", "-c:a", "aac", "-ac", "2", "-color_primaries", "bt709", "-color_trc",
-        "bt709", "-colorspace", "bt709", "-map_metadata", "-1", "-movflags", "+faststart",
+        "bt709", "-colorspace", "bt709", "-color_range", "tv", "-map_metadata", "-1", "-movflags",
+        "+faststart",
         "-progress", "pipe:1", destination.path,
       ],
       onLine: { line in
@@ -25,9 +48,7 @@ public enum MediaPreview {
         }
       })
     let result = try await MediaProbe(paths: paths).inspect(destination)
-    guard
-      abs(result.duration - video.duration) <= Segments.durationTolerance(segments: 1, video: video)
-    else { throw TTError("PREVIEW_DURATION_MISMATCH") }
+    try validate(source: video, preview: result)
   }
 
 }

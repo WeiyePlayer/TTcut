@@ -75,10 +75,17 @@ def main():
         run(["./autogen.sh"], src)
         run(["./configure", f"--prefix={PREFIX}", "--enable-shared", "--disable-static"], src)
         run(["make", "-j", JOBS], src); run(["make", "install"], src)
-    if not (PREFIX / "bin/ffmpeg").exists():
+    ffmpeg = PREFIX / "bin/ffmpeg"
+    # --disable-autodetect otherwise disables zlib and PNG. Scoreboard exports
+    # consume renderer-generated PNGs, including when reusing an older runtime.
+    png_available = ffmpeg.exists() and any(
+        len(line.split()) > 1 and line.split()[1] == "png"
+        for line in subprocess.check_output([ffmpeg, "-hide_banner", "-decoders"], text=True).splitlines()
+    )
+    if not png_available:
         src = source("ffmpeg")
         run(["./configure", f"--prefix={PREFIX}", "--arch=arm64", "--enable-shared", "--disable-static", "--disable-doc", "--disable-debug", "--disable-ffplay",
-             "--disable-autodetect", "--enable-gpl", "--enable-libx264", "--enable-libx265", "--enable-libzimg", "--enable-videotoolbox", "--enable-audiotoolbox",
+             "--disable-autodetect", "--enable-zlib", "--enable-gpl", "--enable-libx264", "--enable-libx265", "--enable-libzimg", "--enable-videotoolbox", "--enable-audiotoolbox",
              "--extra-cflags=-mmacosx-version-min=15.0", f"--extra-ldflags=-mmacosx-version-min=15.0 -Wl,-rpath,{PREFIX / 'lib'}"], src)
         run(["make", "-j", JOBS], src); run(["make", "install"], src)
     if not (PREFIX / "lib/libopencv_imgproc.a").exists():

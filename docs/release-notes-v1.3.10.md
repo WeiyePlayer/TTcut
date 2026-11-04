@@ -1,41 +1,43 @@
-# TTcut Windows v1.3.10
+# TTcut v1.3.10
 
-**简体中文** | [English](https://github.com/WeiyePlayer/TTcut/blob/develop/docs/release-notes-v1.3.10.en.md)
+**简体中文** | [English](https://github.com/WeiyePlayer/TTcut/blob/v1.3.10/docs/release-notes-v1.3.10.en.md)
 
-`v1.3.10` 是面向 Windows x64 的正式版本更新，重点修复运行时污染、视频导出保真和旧历史缓存恢复问题。
+面向 Windows x64 和 macOS 15+ Apple Silicon，改善视频导出保真、动态 HDR 处理和运行时可靠性。
 
-## 分析运行时
+## 双平台：视频导出与预览
 
-- 隔离随包 Python 的模块搜索路径，防止系统 `PYTHONHOME`、`PYTHONPATH`、用户包及外部同名模块干扰组件检查、自动标定和分析。
-- 保留原有 BlurBall 模型、`hybrid_motion_bounce` 回合识别方式，以及 DirectML 真实模型探测和 CPU 回退，不调整分析采样默认值。
+- HDR10/HLG 或 HEVC 输入使用 HEVC/hvc1 导出，其他 SDR 输入使用 H.264；保留支持的 8/10 位深度、色度、色彩及静态 HDR 元数据。保真不等于无损编码。
+- 改善 VFR 时间戳、帧时长和尾帧处理，避免遗漏最后一帧；保留既有批量成片尺寸、帧率及音频规则。色彩、位深或 HDR 契约不兼容时明确拒绝，不静默降为 SDR。
+- Dolby Vision/HDR10+ 保真视频导出仍不支持，在导出前明确拦截，避免静默丢失动态元数据；不支持的位深也会明确报错。
+- HDR/HEVC 成片可使用兼容预览副本播放和跳转，不替换原片或导出文件。
+- 批量导出只探测实际参与导出的素材，空选择不决定输出规格。
 
-## 视频导出与预览
+## Windows
 
-- 完整安装包的视频工具新增 x265 支持。HDR10/HLG 和 HEVC 输入使用 HEVC/hvc1 导出，其他 SDR 输入使用 H.264；保留受支持的 8/10 位深度、色度、色彩及静态 HDR 元数据。
-- 改善 VFR 时间戳、帧时长和尾帧处理，避免导出后丢失最后一帧。批量成片保留既有统一尺寸、帧率和音频规则；色彩、位深或 HDR 契约不兼容时明确拒绝，不静默降为 SDR。
-- Dolby Vision/HDR10+ 的保真重编码仍不支持，导出前明确拦截，避免丢失动态元数据；不支持的位深也会明确报错。
-- HDR/HEVC 导出结果可生成兼容预览副本，支持播放和跳转；预览副本不替换原片或导出文件。
+- 隔离随包 Python 的模块搜索路径，避免系统 PYTHONHOME、PYTHONPATH、用户包及外部同名模块污染组件检查、标定和分析；保留 DirectML 模型探测及 CPU 回退。
+- 完整安装包的视频工具新增 x265 支持。
+- 导出旧历史前重新检查原片，避免复用已经丢失 HDR 信息的旧 CFR 缓存。缓存缺失但原片路径与指纹校验通过时恢复使用原片，不改写原始分析元数据；原片缺失或变更时仍保留安全校验。
 
-## 历史与批量导出
+## macOS
 
-- 旧 Windows 历史导出前重新检查原片，避免继续使用已经丢失 HDR 信息的旧 CFR 缓存。
-- 修复旧 CFR 缓存缺失后无法打开或导出：在原片路径和指纹校验通过时恢复使用原片，不改写历史中的原始分析元数据。原片缺失或变更时仍保留安全校验。
-- 批量导出只检查实际选中的素材，未选中或空选择的源文件不再阻断导出，也不决定成片规格。
+- 修复动态 HDR 视频在导入、标定或分析前被导出限制误拦截的问题，将动态 HDR 保真限制移至导出入口。已以合成 HDR10+ 素材验证，未取得用户原片或真实 Dolby Vision 素材，不能保证所有 Dolby Vision 格式均可处理。
+- 补充实际 HDR 类型、位深、传递函数与探测失败日志；日志失败不覆盖原始异常。
+- 保留原生 Core ML 分析及 Swift 原生媒体处理；不调整模型、识别算法或默认采样参数。
 
-## 发布文件与限制
+## 安装包和限制
 
-- **Windows x64 完整安装包**：`TTcut-1.3.10-x64-Setup.exe`，包含模型、分析运行时、原生预览与视频工具。
-- 使用固定 `CN=weiye` 自签名 Authenticode 证书和 RFC 3161 时间戳。未信任该证书的系统仍可能提示未知发布者或 SmartScreen。
-- 本次 GitHub Release 仅准备草稿，不公开发布；不提供新的 macOS 安装包。
-- 真实 Dolby Vision 原片、特定用户问题视频、Windows 系统播放器以及 NSIS 安装/升级交互未在本轮验收；HDR 验收素材为合成片，真实比赛分析仅证明链路有效，不代表新的算法准确率评估。
+- **Windows x64 v1.3.10**：`TTcut-1.3.10-x64-Setup.exe`，包含模型、运行时、原生预览及视频工具。固定 `CN=weiye` 自签名 Authenticode 证书及 RFC 3161 时间戳；未信任证书的系统可能提示未知发布者或 SmartScreen。
+- **macOS 15+ Apple Silicon v1.3.10**：`TTcut-1.3.10-arm64-Setup.dmg`（推荐）及 `TTcut-1.3.10-arm64-Setup.zip`；不支持 Intel Mac。
+- macOS 为临时签名、未公证；首次打开受阻时可在系统设置的隐私与安全性中允许。应用内更新禁用，不提供 `latest-mac.yml`。
+- Windows 草稿所列 libmpv 固定构建及链接依赖的对应源码与许可分发材料尚未核实齐备；现有安装包和更新校验文件不等于该材料已经补齐。
+- Windows 本轮记录的 103 项相关回归、签名/更新清单及 7 项实际应用验收通过，详见 [Windows 验收记录](https://github.com/WeiyePlayer/TTcut/blob/develop/docs/windows-runtime-fidelity-validation-2026-10-16.md)。本次 macOS 发布不重复或扩大 Windows 验证结论。
+- 未验证 Windows 系统播放器、NSIS 安装/升级交互、用户问题原片或真实 Dolby Vision；合成 HDR 素材及分析链路验收不代表算法准确率评估。
 
-## 验证记录
+## 本次 macOS 交付验证
 
-- 本轮类型检查通过；运行时隔离、保真策略、历史恢复、导出及界面流程相关回归 103 项全部通过；网站构建和渲染检查 2 项通过。
-- 正式构建、包内容、固定证书与时间戳、分离式更新清单签名检查通过；模型、DirectML/CPU 运行时、原生预览和 x264/x265 契约通过。
-- 1.3.10 签名程序在独立配置下完成 7 项实际验收：外部 Python 污染下组件检查、自动标定及 BlurBall 分析，HLG/HDR10+ 探测，动态 HDR 导出拦截，缺失旧 CFR 缓存恢复，以及 HLG 实际导出、完整解码和兼容预览播放/跳转。原片与导出文件哈希保持，程序正常退出。
-- 更广的实现验收见 [Windows 运行时与导出修复记录](https://github.com/WeiyePlayer/TTcut/blob/develop/docs/windows-runtime-fidelity-validation-2026-10-16.md)。本轮不重复该记录的全量测试。
-
-## 公开发布前待办
-
-- 核对并补齐原生预览/libmpv 固定构建及其链接依赖的对应源码与许可分发材料；本草稿仅附安装包和更新校验文件。
+- 类型检查、81 项相关回归及 22 项 macOS 专项通过；相关回归另有 3 项按环境跳过，两个集合有重叠，不累加为总数。
+- 原生测试覆盖动态 HDR 探测/预览/分析及导出拒绝、静态 HDR、8K、VFR 尾帧、比分牌和领域逻辑。初跑发现一项旧比分牌夹具缺少有效视频字段，修正后该组 6 项重跑通过；其余原生用例通过。
+- 打包应用 21 项验收通过，包括离线启动、Core ML、120 fps、实际解码帧推进、HDR/VFR、历史与导出；29 个 arm64 原生文件、DMG 挂载、签名完整性及归档 SHA-256 校验通过。
+- macOS 构建源码：`c1648c88c8ef425759251796465d8845e0339444`（构建清单记录干净工作树）；Windows 草稿源码：`285fa450cd8f31fc79502cc0db5803ab8626033a`。Windows 校验清单与 GitHub 摘要一致，更新清单版本、名称和大小匹配；本机未重新验证 Windows 签名或安装器。
+- macOS DMG SHA-256：`4ab660e6bf04ae96b659e63b01969d44b6ca7ad295228e31216429d7c50dd52b`。
+- macOS ZIP SHA-256：`c664081827db86bf6be8041cb3ab801610a9196e4c3c99ce7f04c0f228831d3f`。

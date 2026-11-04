@@ -1,8 +1,8 @@
-# TTcut Windows v1.3.6
+# TTcut v1.3.6
 
 **简体中文** | [English](https://github.com/WeiyePlayer/TTcut/blob/v1.3.6/docs/release-notes-v1.3.6.en.md)
 
-`v1.3.6` 是面向 Windows x64 的正式版本更新。本次将分析模型、运行时和视频工具完整放入安装包，同时补齐自定义时间线编辑能力并修复分析边界问题。
+`v1.3.6` 是面向 Windows x64 与 macOS 15+ Apple Silicon 的正式版本更新。本次补齐两个平台的自定义时间线编辑能力并修复分析边界问题；Windows 另外将分析模型、运行时和视频工具完整放入安装包。
 
 ## Windows 分析运行时
 
@@ -23,14 +23,24 @@
 - x264 兼容输出改用非 JPEG 的有限范围像素格式，避免颜色范围错误。
 - 组件完整性提示现在明确区分校验失败与正常的内置状态。
 
+## macOS 平台说明
+
+- macOS 继续使用随包 Core ML 原生分析与媒体运行时，保留连续运动回合识别及独立板数检测；不使用 Windows 的 ONNX Runtime DirectML/CPU 路径。
+- 按板数多选、相邻边界拖动、当前编辑回合、播放头吸附及 `A`/`D` 边界编辑同时适用于 macOS。
+- macOS 软件内更新继续禁用，因此不上传 `latest-mac.yml`。
+
 ## 安装包
 
 - **Windows x64 · v1.3.6**：`TTcut-1.3.6-x64-Setup.exe`，只提供包含模型、运行时和视频工具的完整安装包。
 - 安装包使用固定 `CN=weiye` 自签名 Authenticode 证书、RFC 3161 时间戳和签名更新清单。未信任该证书的 Windows 环境仍可能显示“未知发布者”或 SmartScreen 提示。
-- 本次 GitHub Release 保持草稿状态，暂不公开发布，也不创建 `v1.3.6` 远端标签。
+- **macOS 15+ · Apple Silicon · v1.3.6**：`TTcut-1.3.6-arm64-Setup.dmg`（推荐）与 `TTcut-1.3.6-arm64-Setup.zip`，内置原生分析及媒体处理资源，不支持 Intel Mac。
+- macOS 包使用临时签名且未经过 Apple 公证；首次打开若被拦截，请在“系统设置 > 隐私与安全性”中确认允许。
 
 ## 验证
 
+- macOS 发布验证：类型检查、17 项 macOS 边界测试、156 项相关 TypeScript/React 回归测试及启用原生依赖的 Swift 测试通过。
+- macOS 打包应用通过 17 项真实 Electron 分析/媒体验收、10 项板数多选与时间线编辑验收及 3 项批处理界面验收。
+- macOS DMG 挂载、打包应用签名完整性、29 个 arm64 原生文件的依赖边界，以及 DMG/ZIP 大小和 SHA-256 摘要校验通过；这些检查不等同于 Apple 公证。
 - TypeScript 类型检查通过；Vitest 共 62 个测试文件、439 项测试通过，另有 6 个文件、24 项测试按既有条件跳过；Python Worker 共 198 项回归测试通过。
 - 官网生产构建及 2 项渲染测试通过。
 - Windows x64 打包应用验收 10/10 通过，覆盖完整逐帧 Worker、板数多选、相邻边界、播放头命中、Windows 混合结果和旧历史兼容；界面数据使用确定性记录，不作为真实视频落点准确率证据。

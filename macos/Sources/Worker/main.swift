@@ -313,14 +313,13 @@ final class Worker {
         analysisWidthPixels: Double(analysisROI.width),
         analysisHeightPixels: Double(analysisROI.height),
         verticalExchangeEnabled: try VisibilityRallies.isEndOnTableView(calibration.points))
-      let rallies = try BlurBallVisibilityRallies.detect(
-        points, fps: request.video.fps, calibration: calibration, motionConfig: config)
-      let bounceFrames = try BlurBallBoardCountDetector.detect(points, calibration: calibration)
-      let bounceFrameSet = Set(bounceFrames)
+      let decisions = try SourceTimeRallies.detect(points, calibration: calibration, motionConfig: config)
       var event = WorkerEvent(type: "result", taskID: request.taskID)
       event.roi = analysisROI
-      event.visibilityRallies = rallies
-      event.bounceTimes = points.filter { bounceFrameSet.contains($0.frame) }.map(\.time).sorted()
+      event.visibilityRallies = decisions.rallies
+      event.bounceTimes = decisions.bounceTimes
+      event.rallyTimebaseVersion = SourceTimeRallies.version
+      event.observedPauses = decisions.pauses
       emit(event)
       return
     }

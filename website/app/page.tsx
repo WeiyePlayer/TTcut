@@ -14,8 +14,8 @@ const features = [
   },
   {
     number: "03",
-    title: "时间轴精细编辑",
-    description: "自定义模式可全选或按最低板数批量筛选回合，并在时间轴中精确调整每个片段的起止边界。",
+    title: "稳定预览与控制",
+    description: "自定义页面统一使用空格暂停或继续播放，Windows HEVC 视频会优先准备兼容预览。",
   },
   {
     number: "04",

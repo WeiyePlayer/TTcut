@@ -1,8 +1,8 @@
-# TTcut Windows v1.3.7
+# TTcut v1.3.7
 
-[简体中文](https://github.com/WeiyePlayer/TTcut/blob/develop/docs/release-notes-v1.3.7.md) | **English**
+[简体中文](https://github.com/WeiyePlayer/TTcut/blob/v1.3.7/docs/release-notes-v1.3.7.md) | **English**
 
-`v1.3.7` is a stable update for Windows x64 focused on DirectML recovery, custom-cut previews, hybrid rally time boundaries, and bundled runtime files.
+`v1.3.7` is a stable update for Windows x64 and macOS 15+ on Apple Silicon, focused on custom-cut previews and source-video timing. Windows additionally improves DirectML recovery and bundled runtime files.
 
 ## Analysis reliability
 
@@ -16,14 +16,24 @@
 - The Windows full installer now includes the Visual C++ runtime files required by the analysis runtime, with no separate installation step.
 - Independent Beta builds use their own app identity and data directory. This stable build uses the stable-channel configuration.
 
+## macOS platform notes
+
+- Native Core ML continuous-motion analysis uses source-video timestamps and observed pause ranges for rally boundaries, so variable-frame-rate conversion does not change the export timebase.
+- Native compatible previews preserve source time and play/pause intent while staying synchronized with the custom-cut timeline.
+- macOS continues to use its bundled native analysis and media runtime rather than Windows DirectML or Visual C++ libraries. In-app updates remain disabled.
+
 ## Release files
 
 - **Windows x64 full installer**: `TTcut-1.3.7-x64-Setup.exe`, containing the analysis models, DirectML/CPU runtime, and video tools.
 - The installer uses the pinned `CN=weiye` self-signed Authenticode certificate and an RFC 3161 timestamp. Windows may still show Unknown publisher or SmartScreen when the certificate is not trusted.
-- The GitHub Release remains a draft and is not publicly published yet.
+- **macOS 15+ · Apple Silicon**: `TTcut-1.3.7-arm64-Setup.dmg` (recommended) and `TTcut-1.3.7-arm64-Setup.zip`. Intel Macs are not supported.
+- macOS packages are ad-hoc signed and not notarized. If first launch is blocked, allow the app in System Settings > Privacy & Security. No `latest-mac.yml` is provided because in-app updates are disabled.
 
 ## Verification
 
+- macOS release verification passed type checking, 17 macOS boundary tests, 192 preview/contract/rally-boundary tests, and Swift tests with native dependencies enabled; the Swift Core suite passed 19 tests.
+- The packaged macOS app passed 21 real Electron checks and three batch-UI checks covering Core ML, 120 fps source-time results, full-range compatible previews, HDR/VFR, native export, and excluded-range grouping.
+- macOS DMG mounting, packaged-app signature integrity, dependency boundaries for 29 arm64 native files, and DMG/ZIP size and SHA-256 verification passed. These checks are not Apple notarization.
 - TypeScript type checks, project tests (460 passed, 25 skipped), Python Worker tests (236 passed), and website build/render tests passed.
 - The official installer build passed automated model and runtime integrity checks, update-manifest signature verification, and installer Authenticode verification.
-- No real-video quality comparison or manual installer run was performed for this release preparation.
+- No Windows real-video quality comparison or manual installer run was performed. The macOS 120 fps inference acceptance used synthetic video and does not establish accuracy on real match footage.

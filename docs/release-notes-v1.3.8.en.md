@@ -1,35 +1,31 @@
-# TTcut Windows v1.3.8
+# TTcut v1.3.8
 
-[简体中文](https://github.com/WeiyePlayer/TTcut/blob/develop/docs/release-notes-v1.3.8.md) | **English**
+[简体中文](https://github.com/WeiyePlayer/TTcut/blob/v1.3.8/docs/release-notes-v1.3.8.md) | **English**
 
-`v1.3.8` is a stable update for Windows x64 focused on custom editing, scoreboard exports, original-media previews, and analysis reliability.
+For Windows x64 and macOS 15+ on Apple Silicon, adding persistent editing drafts, per-rally scoreboards, and loop playback.
 
-## Custom editing and scoreboards
+## Editing on both platforms
 
-- Editing drafts are saved with history records. Reopening restores clip selection, edited boundaries, playback mode, scoreboard settings, and export options.
-- Per-rally scoreboards support player names, editable scores, positioning and scaling, and overlays in exported videos. Choosing the rally winner advances to the next rally.
-- A new loop mode repeats the current rally's edited range. The rally list highlights the loop target, and clicking another rally changes it without changing export selection.
+- History saves clip selection, edited boundaries, playback mode, scoreboard settings, and export options.
+- Scoreboards support Chinese and English player names, game and point scores, positioning, scaling, and overlays in combined or separate exports. Choosing a rally winner advances to the next rally.
+- Loop the current rally's edited range with persistent target highlighting. Clicking another rally changes the target independently of export selection.
+- History writes are serialized; unfinished tasks do not overwrite the last successful result.
 
-## Preview and analysis reliability
+## Windows
 
-- Native Windows preview in custom cutting plays the original video directly, improving seeking, pausing, and timeline scrubbing.
-- Fixed input handling in native previews, reopening the editor, and playhead positioning after scrubbing.
-- Validated DirectML sessions are reused to reduce repeated initialization. Acceleration failures during analysis trigger smaller-batch retries, with CPU fallback when necessary.
-- Analysis completion is reported after task cleanup to reduce incorrect busy errors on subsequent tasks. History writes are serialized, and unfinished runs do not overwrite the last successful result.
+- Native original-media previews improve seeking, pausing, scrubbing, input handling, and reopening the editor.
+- Validated DirectML sessions are reused; acceleration failures retry smaller batches and fall back to CPU when needed. Completion waits for task cleanup.
+- `TTcut-1.3.8-x64-Setup.exe` includes models, runtimes, native preview, and video tools. It uses the pinned self-signed `CN=weiye` certificate and RFC 3161 timestamps. Untrusted systems may show Unknown publisher or SmartScreen.
 
-## Release files
+## macOS
 
-- **Windows x64 full installer**: `TTcut-1.3.8-x64-Setup.exe`, including analysis models, runtimes, native preview, and video tools.
-- The installer uses the pinned `CN=weiye` self-signed Authenticode certificate and an RFC 3161 timestamp. Windows may still show Unknown publisher or SmartScreen when the certificate is not trusted.
-- The GitHub Release remains a draft and is not publicly published. No new macOS installer is included in this release preparation.
+- Retains native Core ML analysis, source-time exclusions, and compatible previews. Native Swift scoreboard exports support rotated video, HDR10, and HLG.
+- Fixes score editing at the beginning, in gaps, and after rallies. Display and saving use a defined selected rally. Double-clicking a field pauses playback to preserve editing focus.
+- `TTcut-1.3.8-arm64-Setup.dmg` (recommended) and `TTcut-1.3.8-arm64-Setup.zip` require macOS 15+ and Apple Silicon. Intel Macs are unsupported.
+- Packages are ad-hoc signed and not notarized. If blocked on first launch, allow the app in System Settings > Privacy & Security. In-app updates remain disabled; no `latest-mac.yml` is provided.
 
-## Before public publication
+## Verification scope
 
-- The bundled native-preview NOTICE requires corresponding source and license materials for the pinned build and its linked dependencies. The current draft assets do not include the complete corresponding-source package; add it before publishing.
-
-## Verification
-
-- TypeScript type checks passed. Project tests: 510 passed, 25 skipped, including a scoreboard export integration test using actual video encoding. Python Worker tests: 259 passed, 3 skipped.
-- This packaged Windows build passed 5 original-media preview checks and 8 scoreboard editing checks, covering playback, pause, reopening, timeline scrubbing, Chinese names, score input, and wheel adjustments.
-- The official installer build passed automated model/runtime integrity checks, native-preview file hash verification, Authenticode verification, and signed-update manifest verification.
-- No manual installer run or real-video analysis-quality comparison was performed. The macOS build was not verified.
+- Windows preparation records report successful type checking, 510 project tests with 25 skipped, and 259 Python tests with three skipped; five original-preview and eight scoreboard checks passed, along with automated package-signature and update-manifest verification.
+- macOS release checks passed type checking and 85 relevant regression tests, plus 11 packaged editing/export checks covering score input, decoded loop playback, draft restoration after restart, and actual scoreboard output. DMG mounting, dependencies for 29 arm64 native files, signature integrity, and archive SHA-256 verification passed.
+- No manual Windows installer run or real-match analysis-accuracy comparison was performed. Signature-integrity checks are not Apple notarization.
