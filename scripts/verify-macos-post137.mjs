@@ -73,6 +73,11 @@ async function openEditor() {
   await page.locator('.mode-card').filter({ hasText: 'Custom' }).click();
   await expect(page.locator('.custom-monitor video')).toBeVisible();
   await expect.poll(() => page.locator('.custom-monitor video').evaluate(v => v.readyState)).toBeGreaterThanOrEqual(2);
+  const guide = page.locator('dialog.custom-editing-guide[open]');
+  if (await guide.isVisible()) {
+    await guide.locator('.custom-guide-close').click();
+    await expect(guide).toBeHidden();
+  }
 }
 const state = () => page.locator('.custom-monitor video').evaluate(v => ({ time: v.currentTime, paused: v.paused, frames: v.getVideoPlaybackQuality().totalVideoFrames }));
 async function pause() { if (!(await state()).paused) await page.keyboard.press('Space'); await expect.poll(async () => (await state()).paused).toBe(true); }
