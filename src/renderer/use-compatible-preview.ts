@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 
-type PreviewState = { source: string; url: string; status: 'ready' | 'preparing' | 'failed'; error: string | null };
+type PreviewState = { source: string; url: string; status: 'ready' | 'preparing' | 'failed' | 'unsupported'; error: string | null };
 
 function previewErrorDetail(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);
@@ -10,10 +10,14 @@ function previewErrorDetail(error: unknown): string {
     .slice(0, 500) || 'UNKNOWN_PREVIEW_ERROR';
 }
 
-export function useCompatiblePreview(videoRef: RefObject<HTMLVideoElement | null>, source: string, videoCodec?: string) {
+export function useCompatiblePreview(
+  videoRef: RefObject<HTMLVideoElement | null>, source: string, videoCodec?: string,
+  options?: { fallback: 'proxy' | 'report' },
+) {
+  const fallbackMode = options?.fallback ?? 'proxy';
   // HEVC support varies with the Windows GPU/driver and installed decoder. A
   // metadata/first-frame success does not prove that a later rally seek works.
-  const requiresProxy = window.ttcut?.platform === 'win32' && videoCodec?.toLowerCase() === 'hevc';
+  const requiresProxy = fallbackMode === 'proxy' && window.ttcut?.platform === 'win32' && videoCodec?.toLowerCase() === 'hevc';
   const initialStatus: PreviewState['status'] = requiresProxy ? 'preparing' : 'ready';
   const [state, setState] = useState<PreviewState>({ source, url: source, status: initialStatus, error: null });
   // Keep user intent separate from the media element: loading a source/proxy
@@ -84,6 +88,14 @@ export function useCompatiblePreview(videoRef: RefObject<HTMLVideoElement | null
 
     const fallback = (reason: string | Event = 'media-error', force = false) => {
       if (disposed || nativePreview) return;
+      if (force && fallbackMode === 'report') {
+        attempted = false;
+        preparing.current = false;
+        pending.current = null;
+        setState({ source, url: source, status: 'ready', error: null });
+        video.load();
+        return;
+      }
       if (force) {
         attempted = false;
         proxy = false;
@@ -110,6 +122,11 @@ export function useCompatiblePreview(videoRef: RefObject<HTMLVideoElement | null
         currentTime: video.currentTime, paused: video.paused,
         frames: video.getVideoPlaybackQuality?.().totalVideoFrames ?? null,
       }));
+      if (fallbackMode === 'report') {
+        video.pause();
+        setState({ source, url: source, status: 'unsupported', error: typeof reason === 'string' ? reason : 'media-error' });
+        return;
+      }
       resumeTime = pending.current?.time ?? (Number.isFinite(video.currentTime) ? video.currentTime : 0);
       resumePlayback = pending.current?.playing ?? !video.paused;
       pending.current ??= { source, time: resumeTime, playing: resumePlayback };
@@ -182,7 +199,7 @@ export function useCompatiblePreview(videoRef: RefObject<HTMLVideoElement | null
       video.removeEventListener('stalled', playing);
       video.removeEventListener('playing', playing);
     };
-  }, [source, videoRef, applyPending, requiresProxy]);
+  }, [source, videoRef, applyPending, requiresProxy, fallbackMode]);
   return {
     ...(state.source === source ? state : { source, url: source, status: initialStatus, error: null }),
     seekTo,

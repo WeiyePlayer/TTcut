@@ -77,6 +77,7 @@ export interface TTcutApi {
   acceptDroppedVideo(path: string): Promise<SelectedVideo>;
   probeVideo(path: string): Promise<VideoMetadata>;
   prepareVideoPreview(mediaUrl: string): Promise<string>;
+  extractPreviewFrame?(mediaUrl: string, seconds: number): Promise<string>;
   startAutoCalibration(input: {
     videoPath: string;
     device: 'auto' | 'directml' | 'cuda' | 'cpu';
