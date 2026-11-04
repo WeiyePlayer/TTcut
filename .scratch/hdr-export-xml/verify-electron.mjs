@@ -24,7 +24,8 @@ const hash = async (file) => createHash('sha256').update(await readFile(file)).d
 const report = { host: process.platform, run, checks: [], errors: [], events: [] };
 const environment = { ...process.env, TTCUT_E2E: '1', TTCUT_E2E_USER_DATA: profile };
 delete environment.ELECTRON_RUN_AS_NODE;
-const executablePath = windowsApp ?? path.join(root, 'node_modules/electron/dist/Electron.app/Contents/MacOS/Electron');
+const packagedApp = windowsApp ?? process.env.TTCUT_MACOS_ACCEPTANCE_APP;
+const executablePath = packagedApp ?? path.join(root, 'node_modules/electron/dist/Electron.app/Contents/MacOS/Electron');
 const waitFor = async (condition, timeout = 120000) => {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) { const result = await condition(); if (result) return result; await delay(100); }
@@ -32,7 +33,7 @@ const waitFor = async (condition, timeout = 120000) => {
 };
 let instance, browser, child, exited, page;
 try {
-  if (windowsApp) {
+  if (packagedApp) {
     const server = createServer();
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
     const port = server.address().port;

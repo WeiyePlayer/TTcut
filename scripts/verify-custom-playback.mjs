@@ -59,7 +59,7 @@ createRoot(document.getElementById('root')).render(<Harness/>);
 await build({ root: run, configFile: false, base: './', plugins: [{ name: 'baseline-source', enforce: 'pre', load(id) { return original.get(id); } }, react()], logLevel: 'error', build: { outDir: path.join(run, 'renderer'), emptyOutDir: true } });
 const protocolSource = await readFile(path.join(root, 'src/main/media-protocol.ts'), 'utf8');
 await writeFile(path.join(run, 'media-protocol.cjs'), ts.transpileModule(protocolSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true, target: ts.ScriptTarget.ES2022 } }).outputText);
-await writeFile(path.join(run, 'preload.cjs'), `const {contextBridge,ipcRenderer}=require('electron');contextBridge.exposeInMainWorld('fixture',JSON.parse(process.argv.find(a=>a.startsWith('--fixture=')).slice(10)));contextBridge.exposeInMainWorld('ttcut',{platform:'win32',prepareVideoPreview:()=>ipcRenderer.invoke('proxy')});`);
+await writeFile(path.join(run, 'preload.cjs'), `const {contextBridge,ipcRenderer}=require('electron');contextBridge.exposeInMainWorld('fixture',JSON.parse(process.argv.find(a=>a.startsWith('--fixture=')).slice(10)));contextBridge.exposeInMainWorld('ttcut',{platform:${JSON.stringify(originalMedia ? 'win32' : process.platform)},prepareVideoPreview:()=>ipcRenderer.invoke('proxy')});`);
 await writeFile(path.join(run, 'main.cjs'), `
 const {app,BrowserWindow,Menu,protocol,ipcMain}=require('electron');const path=require('node:path');
 const originalMedia=${originalMedia};
@@ -257,7 +257,7 @@ try {
   await expect(button).toBeVisible();
   await expect.poll(async()=> (await frameState()).ready).toBeGreaterThanOrEqual(2);
   const monitorBefore = await page.locator('.custom-monitor').boundingBox();
-  expect(await button.evaluate(element=>element.nextElementSibling?.classList.contains('playback-mode-toggle'))).toBe(true);
+  expect(await button.evaluate(element=>element.nextElementSibling?.classList.contains('scoreboard-tool'))).toBe(true);
   await button.click();
   const bounds = await track.boundingBox();
   await page.mouse.move(bounds.x+bounds.width/2,bounds.y+bounds.height/2);

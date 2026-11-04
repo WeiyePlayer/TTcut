@@ -480,7 +480,9 @@ const analysisResultBaseSchema = z.object({
         name: z.enum(['full', 'candidate', 'refinement']),
         confidence_threshold: finiteNumber.min(0).max(1),
         window_size: z.literal(3),
-        window_stride: z.union([z.literal(1), z.literal(3)]),
+        window_stride: z.union([z.literal(1), z.literal(3), z.literal(6), z.literal(9)]),
+        temporal_stride: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(),
+        interpolated_frames: z.number().int().nonnegative().optional(),
         retained_output: z.enum(['all_window_frames', 'center_frame']),
       }).strict()).min(1),
     }).strict().optional(),
@@ -595,11 +597,30 @@ export const continuousVisibilityAnalysisResultV2Schema = analysisResultBaseSche
   }).strict(),
 }).strict();
 
+export const SOURCE_TIME_RALLY_TIMEBASE = {
+  version: 1, maximum_clock_hz: 30, selection: 'nearest_source_observation',
+  pause_window_seconds: 0.5, pause_minimum_seconds: 0.75,
+  pause_minimum_support_seconds: 0.3, pause_maximum_speed_ratio_per_second: 0.35,
+  pause_maximum_observation_gap_seconds: 0.1, pause_boundary_context_seconds: 0.2,
+} as const;
+const sourceTimeRallyTimebaseSchema = z.object({
+  version: z.literal(1), maximum_clock_hz: z.literal(30), selection: z.literal('nearest_source_observation'),
+  pause_window_seconds: z.literal(0.5), pause_minimum_seconds: z.literal(0.75),
+  pause_minimum_support_seconds: z.literal(0.3), pause_maximum_speed_ratio_per_second: z.literal(0.35),
+  pause_maximum_observation_gap_seconds: z.literal(0.1), pause_boundary_context_seconds: z.literal(0.2),
+}).strict();
+const observedPauseFragmentSchema = z.object({
+  start_time_seconds: finiteNumber.nonnegative(), end_time_seconds: finiteNumber.positive(),
+  evidence: z.tuple([z.object({ reason: z.literal('observed_pause') }).strict()]),
+}).strict().refine(f => f.end_time_seconds > f.start_time_seconds);
+
 export const continuousVisibilityAnalysisResultV3Schema = continuousVisibilityAnalysisResultV2Schema.extend({
   schema_version: z.literal(3),
   rallies: z.array(continuousVisibilityBoardCountRallySchema),
   bounce_times_seconds: z.array(finiteNumber.nonnegative()),
+  excluded_fragments: z.array(observedPauseFragmentSchema).optional(),
   rally_recognition: continuousVisibilityAnalysisResultV2Schema.shape.rally_recognition.extend({
+    timebase: sourceTimeRallyTimebaseSchema.optional(),
     board_count: z.object({
       detector: z.literal('blurball_trajectory_change'),
       source_path: z.literal('worker/ttcut_worker/blurball_bounce.py'),
@@ -612,13 +633,28 @@ export const continuousVisibilityAnalysisResultV3Schema = continuousVisibilityAn
   }).strict(),
 }).strict().superRefine((result, ctx) => {
   const invalid = (message: string) => ctx.addIssue({ code: 'custom', message });
+  if ((result.rally_recognition.timebase !== undefined) !== (result.excluded_fragments !== undefined)) {
+    invalid('Source-time decisions must include both timebase provenance and exclusions');
+  }
+  const excluded = result.excluded_fragments ?? [];
+  for (const [index, fragment] of excluded.entries()) {
+    if (fragment.end_time_seconds > result.video.duration_seconds
+      || (index > 0 && fragment.start_time_seconds < excluded[index - 1]!.end_time_seconds)) {
+      invalid('Observed pauses must be ordered, non-overlapping and source-bound');
+    }
+  }
   for (const [index, time] of result.bounce_times_seconds.entries()) {
     if (time > result.video.duration_seconds
-      || (index > 0 && time <= result.bounce_times_seconds[index - 1]!)) {
+      || (index > 0 && time <= result.bounce_times_seconds[index - 1]!)
+      || excluded.some(f => f.start_time_seconds <= time && time < f.end_time_seconds)) {
       invalid('Bounce times must be ordered, unique and source-bound');
     }
   }
   for (const rally of result.rallies) {
+    if (result.rally_recognition.timebase && (rally.end_time_seconds > result.video.duration_seconds
+      || excluded.some(f => rally.start_time_seconds < f.end_time_seconds && rally.end_time_seconds >= f.start_time_seconds))) {
+      invalid('Rally must be source-bound and outside observed pauses');
+    }
     const count = result.bounce_times_seconds.filter((time) => (
       time >= rally.start_time_seconds && time <= rally.end_time_seconds
     )).length;

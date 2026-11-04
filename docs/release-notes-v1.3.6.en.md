@@ -1,8 +1,8 @@
-# TTcut Windows v1.3.6
+# TTcut v1.3.6
 
 [简体中文](https://github.com/WeiyePlayer/TTcut/blob/v1.3.6/docs/release-notes-v1.3.6.md) | **English**
 
-`v1.3.6` is a stable update for Windows x64. It places the analysis models, runtime, and video tools inside the full installer, expands custom timeline editing, and fixes analysis-boundary failures.
+`v1.3.6` is a stable update for Windows x64 and macOS 15+ on Apple Silicon. It expands custom timeline editing and fixes analysis-boundary failures on both platforms; Windows additionally places the analysis models, runtime, and video tools inside the full installer.
 
 ## Windows analysis runtime
 
@@ -23,14 +23,24 @@
 - Compatible x264 output now uses a non-JPEG limited-range pixel format to avoid incorrect range handling.
 - Component-integrity messaging now distinguishes a failed check from the normal built-in state.
 
+## macOS platform notes
+
+- macOS continues to use its bundled native Core ML analysis and media runtime, retaining continuous-motion rally recognition and separate bounce counting. It does not use the Windows ONNX Runtime DirectML/CPU path.
+- Bounce-count multi-selection, shared-boundary dragging, current-rally editing, playhead snapping, and `A`/`D` boundary editing also apply to macOS.
+- In-app updates remain disabled on macOS, so no `latest-mac.yml` is uploaded.
+
 ## Installer
 
 - **Windows x64 · v1.3.6**: `TTcut-1.3.6-x64-Setup.exe`, the only Windows installer, containing the models, runtime, and video tools.
 - The installer uses the pinned `CN=weiye` self-signed Authenticode certificate, an RFC 3161 timestamp, and a signed update manifest. Windows may still show Unknown publisher or SmartScreen on systems that do not trust this certificate.
-- This GitHub Release remains a draft. It is not published, and no remote `v1.3.6` tag is created.
+- **macOS 15+ · Apple Silicon · v1.3.6**: `TTcut-1.3.6-arm64-Setup.dmg` (recommended) and `TTcut-1.3.6-arm64-Setup.zip`, with native analysis and media resources included. Intel Macs are not supported.
+- macOS packages are ad-hoc signed and not notarized. If first launch is blocked, allow the app in System Settings > Privacy & Security.
 
 ## Verification
 
+- macOS release verification: type checking, 17 macOS boundary tests, 156 relevant TypeScript/React regression tests, and Swift tests with native dependencies enabled passed.
+- The packaged macOS app passed 17 real Electron analysis/media checks, 10 bounce-count multi-select and timeline-editing checks, and three batch-UI checks.
+- macOS DMG mounting, packaged-app signature integrity, dependency boundaries for 29 arm64 native files, and DMG/ZIP size and SHA-256 verification passed. These checks are not Apple notarization.
 - TypeScript type checking passed. Vitest passed 439 tests across 62 files, with 24 tests across 6 files skipped by existing conditions. All 198 Python Worker regression tests passed.
 - The production website build and both rendered-page tests passed.
 - Packaged Windows x64 acceptance passed 10/10 checks covering the full-frame Worker, bounce-count multi-selection, shared boundaries, playhead hit testing, Windows hybrid results, and legacy history. Its deterministic UI records do not establish real-video landing accuracy.

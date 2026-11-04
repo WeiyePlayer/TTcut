@@ -8,7 +8,7 @@ TTcut is a local automatic table-tennis video cutter for players and enthusiasts
 
 Videos, analysis results, and history stay on the local computer. TTcut requires no account, uploads no video, and collects no telemetry. The Windows full installer and macOS packages include their runtime resources. Analysis, preview, and cutting can run offline after setup.
 
-> Windows `v1.3.12` is being prepared as an unpublished stable release draft. Download published versions from the Releases page below.
+> The current stable release for Windows x64 and macOS 15+ on Apple Silicon is `v1.3.12`.
 
 ## Download and installation
 
@@ -21,9 +21,9 @@ TTcut detects an NVIDIA GPU automatically and falls back to CPU if accelerated s
 
 ## What's new in v1.3.12
 
-- Calibration falls back to time-based FFmpeg frame extraction when browser video decoding is unavailable, allowing frame selection and table marking to continue.
-- Extracted previews retain display rotation and tone-map HDR; rapid seeking prioritizes the latest request.
-- Windows native preview, analysis models, sampling defaults and export rules remain unchanged.
+- Windows calibration falls back to frame extraction when browser decoding is unavailable.
+- Frames respect rotation, tone-map HDR for preview and prioritize the latest request.
+- macOS updates the shared calibration UI while retaining compatible video previews.
 
 See the [v1.3.12 release notes](docs/release-notes-v1.3.12.en.md) for the complete details.
 

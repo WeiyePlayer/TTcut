@@ -1,41 +1,43 @@
-# TTcut Windows v1.3.10
+# TTcut v1.3.10
 
-[简体中文](https://github.com/WeiyePlayer/TTcut/blob/develop/docs/release-notes-v1.3.10.md) | **English**
+[简体中文](https://github.com/WeiyePlayer/TTcut/blob/v1.3.10/docs/release-notes-v1.3.10.md) | **English**
 
-`v1.3.10` is a stable Windows x64 update focused on runtime isolation, export fidelity, and legacy-history recovery.
+For Windows x64 and macOS 15+ on Apple Silicon: improved export fidelity, dynamic HDR handling and runtime reliability.
 
-## Analysis runtime
+## Both platforms: export and preview
 
-- Isolate bundled Python module paths from system `PYTHONHOME`, `PYTHONPATH`, user packages, and conflicting external modules during component checks, automatic calibration, and analysis.
-- Retain the existing BlurBall model, `hybrid_motion_bounce` rally recognition, real-model DirectML validation, and CPU fallback. Default analysis sampling is unchanged.
+- HDR10/HLG or HEVC inputs export as HEVC/hvc1; other SDR inputs use H.264. Supported 8/10-bit depth, chroma, color properties and static HDR metadata are retained. Fidelity does not mean lossless encoding.
+- Preserve VFR timestamps, frame durations and the last frame. Batch exports retain existing sizing, frame-rate and audio rules; incompatible color/depth/HDR contracts fail explicitly instead of silently converting to SDR.
+- Fidelity-preserving Dolby Vision/HDR10+ video export remains unsupported and is rejected before export to avoid losing dynamic metadata. Unsupported bit depths also fail explicitly.
+- Compatible HDR/HEVC result previews support playback and seeking without replacing original or exported files.
+- Batch exports probe participating sources only; empty selections do not determine output specifications.
 
-## Video exports and previews
+## Windows
 
-- Bundled video tools now support x265. HDR10/HLG and HEVC inputs export as HEVC/hvc1; other SDR inputs use H.264. Supported 8/10-bit depth, chroma, color information, and static HDR metadata are retained.
-- Improve VFR timestamps, frame durations, and final-frame handling. Merged highlights retain their existing common dimensions, frame rate, and audio rules; incompatible color/depth/HDR profiles are rejected rather than silently converted to SDR.
-- Faithful Dolby Vision/HDR10+ re-encoding remains unsupported. Export rejects these inputs before dynamic metadata can be lost; unsupported bit depths also produce an explicit error.
-- HDR/HEVC exports can use compatible preview copies for playback and seeking. Preview copies never replace original or exported media.
+- Isolate bundled Python search paths from external PYTHONHOME, PYTHONPATH, user packages and shadowing modules, retaining DirectML model validation and CPU fallback.
+- Add x265 support to bundled video tools.
+- Re-probe original media for legacy histories rather than using CFR caches that may have lost HDR metadata. Missing caches can recover through the original source after path/fingerprint validation, without rewriting original analysis metadata. Missing or changed sources remain protected.
 
-## History and batch exports
+## macOS
 
-- Reprobe original media before exporting old Windows histories instead of relying on legacy CFR caches that may have lost HDR information.
-- Recover opening and exporting when a legacy CFR cache is missing but the original path and fingerprint still match, without rewriting original analysis metadata. Missing or modified originals remain protected by validation.
-- Batch exports check only participating sources. Unselected or empty sources no longer block exports or determine the output profile.
+- Move dynamic HDR export restrictions out of import, calibration and analysis validation. Synthetic HDR10+ footage was tested; user originals and real Dolby Vision footage were unavailable, so support for every Dolby Vision format is not claimed.
+- Log actual HDR type, bit depth, transfer characteristics and probe failures without masking original errors if logging fails.
+- Retain native Core ML analysis and Swift media processing; models, recognition algorithms and default sampling settings are unchanged.
 
-## Release files and limitations
+## Packages and limitations
 
-- **Windows x64 full installer**: `TTcut-1.3.10-x64-Setup.exe`, including models, analysis runtime, native preview, and video tools.
-- Uses the pinned `CN=weiye` self-signed Authenticode certificate and an RFC 3161 timestamp. Systems that do not trust this certificate may still show Unknown publisher or SmartScreen.
-- The GitHub Release is prepared as an unpublished draft only. No new macOS installer is included.
-- Real Dolby Vision originals, specific user-reported videos, Windows system-player behavior, and interactive NSIS installation/upgrades were not tested in this round. HDR fixtures are synthetic; real-match analysis validates the pipeline, not new algorithm accuracy.
+- **Windows x64 v1.3.10**: `TTcut-1.3.10-x64-Setup.exe`, including models, runtime, native preview and video tools. Fixed self-signed `CN=weiye` Authenticode certificate and RFC 3161 timestamp; untrusted systems may show Unknown Publisher or SmartScreen.
+- **macOS 15+ Apple Silicon v1.3.10**: `TTcut-1.3.10-arm64-Setup.dmg` (recommended) and `TTcut-1.3.10-arm64-Setup.zip`. Intel Macs are unsupported.
+- macOS is ad-hoc signed, not notarized. If blocked on first launch, allow it in System Settings > Privacy & Security. In-app updates remain disabled; no `latest-mac.yml` is supplied.
+- Corresponding source and notices for the pinned Windows libmpv build and linked dependencies, listed as pending in the Windows draft, have not been verified complete. Installer and update-check files do not satisfy or prove completion of that material.
+- Windows preparation records 103 related regressions, signing/update checks and 7 real-app checks passing; see the [Windows validation record](https://github.com/WeiyePlayer/TTcut/blob/develop/docs/windows-runtime-fidelity-validation-2026-10-16.md). This macOS release does not rerun or extend those Windows claims.
+- Windows system-player compatibility, NSIS installation/upgrades, user problem originals and real Dolby Vision footage were not verified. Synthetic HDR and analysis-pipeline tests are not algorithm-accuracy evaluations.
 
-## Verification
+## macOS delivery verification
 
-- Type checking passed in this round, along with all 103 targeted regressions for isolation, fidelity policy, history recovery, exports, and UI workflows. Website build and both rendering checks passed.
-- Official build, package contents, pinned certificate/timestamps, and detached update-manifest signature checks passed, including models, DirectML/CPU runtime, native preview, and x264/x265 contracts.
-- The signed 1.3.10 application passed seven isolated-profile checks: components, automatic calibration, and BlurBall analysis under external Python pollution; HLG/HDR10+ detection; dynamic-HDR export rejection; missing legacy CFR recovery; and actual HLG export, full decoding, compatible-preview playback/seeking. Original/export hashes remained unchanged and the application exited normally.
-- Broader implementation acceptance is documented in the [Windows runtime and export validation](https://github.com/WeiyePlayer/TTcut/blob/develop/docs/windows-runtime-fidelity-validation-2026-10-16.md). Its full suite was not repeated for this release preparation.
-
-## Before public publication
-
-- Check and complete corresponding source and license distribution materials for the pinned native-preview/libmpv build and linked dependencies. This draft includes only the installer and update verification files.
+- Type checking, 81 related regressions and 22 macOS-specific tests passed; 3 related tests were skipped for their environment. The sets overlap and are not added together.
+- Native tests cover dynamic HDR probing/preview/analysis and export rejection, static HDR, 8K, VFR final frames, scoreboards and domain behavior. One legacy scoreboard fixture initially lacked valid video fields; after correction, all 6 tests in that group passed on rerun. Other native cases passed.
+- All 21 packaged-app checks passed, including offline startup, Core ML, 120 fps, decoded-frame advancement, HDR/VFR, history and export. Checks passed for 29 arm64 native binaries, DMG mounting, signature integrity and archive SHA-256 values.
+- macOS build source: `c1648c88c8ef425759251796465d8845e0339444` (manifest records a clean worktree); Windows draft source: `285fa450cd8f31fc79502cc0db5803ab8626033a`. Windows checksums match GitHub digests, and update metadata agrees on version, filename and size. Windows signing and installer checks were not rerun on this Mac.
+- macOS DMG SHA-256: `4ab660e6bf04ae96b659e63b01969d44b6ca7ad295228e31216429d7c50dd52b`.
+- macOS ZIP SHA-256: `c664081827db86bf6be8041cb3ab801610a9196e4c3c99ce7f04c0f228831d3f`.

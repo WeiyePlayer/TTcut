@@ -13,9 +13,14 @@ const EPSILON = 1e-9;
 export const FINAL_RALLY_TAIL_SECONDS = 1;
 export type ExcludedRange = { start_time_seconds: number; end_time_seconds: number };
 
-/** Older analyses retain their original export behavior. */
+/** Legacy histories keep their original grouping rules. Only new native decisions opt in. */
 export function exportExclusions(result: AnalysisResultV1): readonly ExcludedRange[] {
-  return 'excluded_fragments' in result && result.rally_recognition.version >= 4 ? result.excluded_fragments : [];
+  if (!('rally_recognition' in result) || !('excluded_fragments' in result)) return [];
+  const recognition = result.rally_recognition;
+  const usesSourceTime = recognition.method === 'continuous_visibility'
+    ? 'timebase' in recognition && Boolean(recognition.timebase)
+    : 'version' in recognition && recognition.version >= 4;
+  return usesSourceTime ? result.excluded_fragments ?? [] : [];
 }
 
 export function clampRollToExclusions(

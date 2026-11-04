@@ -29,6 +29,8 @@ let stderr=''; child.stderr.on('data',(b)=>{stderr+=b.toString();}); child.stdou
 let browser; let page; const checks=[];
 async function check(name, work) { const value=await work(); checks.push({ name, passed:true }); console.log(`PASS ${name}`); await writeFile(path.join(run,'report.json'),JSON.stringify({app,offlineSandbox,checks},null,2)); return value; }
 async function task(method, input) {
+  // UI verification reloads the renderer; reinstall the observer before later IPC checks.
+  await page.evaluate(()=>{if(!window.__events){window.__events=[];window.ttcut.onTaskEvent(e=>window.__events.push(e));}});
   const id=await page.evaluate(async({method,input})=>window.ttcut[method](input),{method,input});
   await page.waitForFunction((id)=>window.__events.some((e)=>e.taskId===id && ['analysis-result','calibration-result','export-result','error'].includes(e.type)),id,{timeout:180000});
   return page.evaluate((id)=>window.__events.find((e)=>e.taskId===id && ['analysis-result','calibration-result','export-result','error'].includes(e.type)),id);
@@ -55,14 +57,60 @@ try {
   await page.evaluate(()=>{window.__events=[];window.ttcut.onTaskEvent(e=>window.__events.push(e));});
   await browser.contexts()[0].setOffline(true);
   const bootstrap=await check('offline runtime bootstrap with system-only PATH', async()=>{const value=await page.evaluate(()=>window.ttcut.bootstrap()); assert.equal(value.platformCompatibility.status,'supported');assert.equal(value.components.analysis.acceleration,'coreml');assert.equal(value.components.media.available,true);assert.equal(value.capabilities.managedComponents,false);assert.ok(value.logsPath.startsWith(userData));return value;});
-  await check('Chinese Electron UI and native titlebar',async()=>{await page.getByRole('button',{name:'设置',exact:true}).click();await page.getByText('内置运行时',{exact:true}).waitFor();assert.equal(await page.locator('.window-controls').count(),0);assert.equal(await page.locator('.setup-manual').count(),0);await page.screenshot({path:path.join(run,'settings-zh.png')});});
-  await check('English UI',async()=>{await page.evaluate(async(settings)=>window.ttcut.saveSettings({...settings,language:'en'}),bootstrap.settings);await page.reload();await page.waitForFunction(()=>Boolean(window.ttcut));await page.getByRole('button',{name:'Settings',exact:true}).click();await page.getByText('Built-in runtime',{exact:true}).waitFor();await page.screenshot({path:path.join(run,'settings-en.png')});await page.evaluate(()=>{window.__events=[];window.ttcut.onTaskEvent(e=>window.__events.push(e));});});
+  await check('Chinese Electron UI and native titlebar',async()=>{await page.getByRole('button',{name:'设置',exact:true}).click();await page.getByText(`当前版本 ${bootstrap.version}`,{exact:true}).waitFor();assert.equal(await page.locator('.window-controls').count(),0);assert.equal(await page.locator('.setup-manual').count(),0);await page.screenshot({path:path.join(run,'settings-zh.png')});});
+  await check('English UI',async()=>{await page.evaluate(async(settings)=>window.ttcut.saveSettings({...settings,language:'en'}),bootstrap.settings);await page.reload();await page.waitForFunction(()=>Boolean(window.ttcut));await page.getByRole('button',{name:'Settings',exact:true}).click();await page.getByText(`Version ${bootstrap.version}`,{exact:true}).waitFor();await page.screenshot({path:path.join(run,'settings-en.png')});await page.evaluate(()=>{window.__events=[];window.ttcut.onTaskEvent(e=>window.__events.push(e));});});
   const video=await check('source import and native probe',async()=>{const selected=await page.evaluate(p=>window.ttcut.acceptDroppedVideo(p),media); const v=await page.evaluate(p=>window.ttcut.probeVideo(p),media);assert.equal(v.width,320);assert.equal(v.native_video.bitDepth,8);return selected;});
   const calibration={video_width:320,video_height:180,points:{top_left:[60,40],top_right:[250,40],bottom_right:[275,145],bottom_left:[40,145]}};
   await check('actual eleven-sample table Core ML consensus invocation',async()=>{const result=await task('startAutoCalibration',{videoPath:media,device:'auto'});assert.ok(result.type==='calibration-result'||result.code==='AUTO_CALIBRATION_FAILED',JSON.stringify(result));if(result.type==='calibration-result'){assert.equal(result.tableAnalysis.aggregation_rule,'temporal_peak_clusters_geometric_consensus');assert.equal(result.tableAnalysis.sampling.length,11);assert.deepEqual(result.tableAnalysis.sampling.map(sample=>sample.label),Array.from({length:11},(_,index)=>`sample_${String(index+1).padStart(2,'0')}`));}assert.ok(await page.evaluate(()=>window.__events.some(e=>e.type==='progress'&&e.data.stage==='table_inference')));});
   const input={videoPath:media,calibrationChoice:{method:'manual',calibration},device:'auto',historyVisibility:'visible',normalizeVariableFrameRate:false};
   const analysis=await check('actual BlurBall continuous-visibility Core ML analysis',async()=>{const result=await task('startAnalysis',input);assert.equal(result.type,'analysis-result',JSON.stringify(result));assert.equal(result.data.inference_runtime.engine,'coreml');assert.equal(result.data.schema_version,3);assert.equal(result.data.rally_recognition.method,'continuous_visibility');assert.equal(result.data.rally_recognition.detection_confidence_threshold,0.3);assert.equal(result.data.rally_recognition.board_count.detector,'blurball_trajectory_change');assert.equal(result.data.rally_recognition.board_count.source_sha256,'e1e7674cd1209a6f4deffe5ff0e57633e2859605f031b1c012cb2d16c9f49ea8');assert.ok(Array.isArray(result.data.bounce_times_seconds));assert.equal(result.data.model_provenance.analysis.mode,'full');return result;});
   await check('compatible preview is separate from analysis media',async()=>{const url=await preparePreview(video);assert.notEqual(url,video.mediaUrl);const reopened=await page.evaluate(id=>window.ttcut.openHistory(id),analysis.analysisId);assert.equal(reopened.analysis.video.path,media);});
+  await check('native source-time provenance survives worker IPC and history',async()=>{
+    const reopened=await page.evaluate(id=>window.ttcut.openHistory(id),analysis.analysisId);
+    assert.equal(reopened.analysis.rally_recognition.timebase.version,1);
+    assert.equal(reopened.analysis.rally_recognition.timebase.maximum_clock_hz,30);
+    assert.equal(reopened.analysis.rally_recognition.timebase.selection,'nearest_source_observation');
+    assert.ok(Array.isArray(reopened.analysis.excluded_fragments));
+  });
+  await check('actual 120 fps source passes native decoding, Core ML and source-time result validation',async()=>{
+    const highFPS=path.join(run,'120fps.mp4');
+    const generated=spawnSync(ffmpeg,['-v','error','-f','lavfi','-i','testsrc2=size=320x180:rate=120:duration=1',
+      '-c:v','libx264','-preset','ultrafast','-pix_fmt','yuv420p',highFPS],{encoding:'utf8'});
+    assert.equal(generated.status,0,generated.stderr);
+    const result=await task('startAnalysis',{...input,videoPath:highFPS});
+    assert.equal(result.type,'analysis-result',JSON.stringify(result));
+    assert.equal(result.data.video.fps,120);assert.equal(result.data.video.frame_count,120);
+    assert.equal(result.data.rally_recognition.timebase.maximum_clock_hz,30);
+    await page.evaluate(id=>window.ttcut.deleteHistory(id),result.analysisId);
+  });
+  await check('full-range source with audio tail produces a seekable native preview with advancing decoded frames',async()=>{
+    const fullRange=path.join(run,'full-range-audio-tail.mp4');
+    const generated=spawnSync(ffmpeg,['-v','error','-f','lavfi','-i','testsrc2=size=320x180:rate=30:duration=3',
+      '-f','lavfi','-i','sine=frequency=440:duration=5','-vf','scale=out_range=pc','-c:v','libx264','-preset','ultrafast',
+      '-pix_fmt','yuv420p','-color_range','pc','-c:a','aac',fullRange],{encoding:'utf8'});
+    assert.equal(generated.status,0,generated.stderr);
+    const selected=await page.evaluate(p=>window.ttcut.acceptDroppedVideo(p),fullRange);
+    const url=await preparePreview(selected);
+    const playback=await page.evaluate(url=>new Promise((resolve,reject)=>{
+      const video=document.createElement('video');video.src=url;video.muted=true;document.body.append(video);
+      let frames=0;const times=[];
+      const finish=(error)=>{clearTimeout(timer);video.pause();video.remove();error?reject(error):resolve({frames,times});};
+      const timer=setTimeout(()=>finish(new Error('Native preview frame advancement timeout')),15000);
+      video.onerror=()=>finish(new Error(video.error?.message??'Native preview decode failed'));
+      video.onloadedmetadata=()=>{video.currentTime=1;video.play().catch(finish);};
+      const decoded=(_now,metadata)=>{
+        if(metadata.mediaTime>=1){frames++;times.push(metadata.mediaTime);}
+        if(frames>=8)finish();else video.requestVideoFrameCallback(decoded);
+      };video.requestVideoFrameCallback(decoded);
+    }),url);
+    assert.ok(playback.frames>=8);assert.ok(playback.times.at(-1)>playback.times[0]+0.15);
+    // Media protocol URLs are fresh access tokens, not cache identities.
+    const cacheSnapshot=async()=>Promise.all((await readdir(path.join(userData,'preview'))).sort().map(async name=>{
+      const info=await stat(path.join(userData,'preview',name));return {name,size:info.size,mtimeMs:info.mtimeMs};
+    }));
+    const before=await cacheSnapshot();await preparePreview(selected);
+    assert.deepEqual(await cacheSnapshot(),before,'Valid preview cache files should be reused');
+  });
   const segment={clip_id:'manual_11111111-1111-4111-8111-111111111111',source:'manual',display_index:1,start_time_seconds:0.5,end_time_seconds:1.5};
   const request={analysis_id:analysis.analysisId,destination:'source',selection:{mode:'custom',segments:[segment]}};
   const combined=await check('Electron-selected manual range combined export',async()=>{const result=await task('startExport',request);assert.equal(result.type,'export-result',JSON.stringify(result));assert.ok((await stat(result.data.outputPath)).size>0);return result.data.outputPath;});
@@ -126,6 +174,7 @@ try {
     await page.waitForTimeout(400);
     await page.screenshot({path:path.join(run,'continuous-duration-review-en.png')});
     await page.locator('.mode-card').filter({hasText:'Custom'}).click();
+    await page.getByRole('dialog',{name:'Custom editing guide',exact:true}).getByRole('button',{name:'Got it',exact:true}).click();
     assert.equal(await page.getByText(/^Bounces \d+$/).count(),2);
     await page.getByRole('button',{name:'Clear all',exact:true}).click();
     assert.equal(await page.locator('.custom-rally-list input:checked').count(),0);
@@ -146,6 +195,19 @@ try {
     await page.locator('video').press('Space');
     await page.waitForFunction(()=>document.querySelector('video').currentTime>0.1,null,{polling:100});
     await page.locator('video').evaluate(video=>video.pause());});
+  await check('native export keeps observed pauses out of grouped and expanded ranges',async()=>{
+    // Controlled boundaries isolate the export contract from model accuracy.
+    record.analysis={...analysis.data,bounce_times_seconds:[],rallies:[
+      {id:'rally_001',index:1,start_time_seconds:0.5,end_time_seconds:2,bounce_count:0},
+      {id:'rally_002',index:2,start_time_seconds:4.5,end_time_seconds:7.5,bounce_count:0},
+    ],excluded_fragments:[{start_time_seconds:2.2,end_time_seconds:4.3,evidence:[{reason:'observed_pause'}]}]};
+    await writeFile(recordPath,JSON.stringify(record));
+    const result=await task('startExport',{analysis_id:analysis.analysisId,destination:'source',
+      selection:{mode:'all',pre_roll_seconds:2.5,post_roll_seconds:2}});
+    assert.equal(result.type,'export-result',JSON.stringify(result));
+    const output=await page.evaluate(p=>window.ttcut.probeVideo(p),result.data.outputPath);
+    assert.ok(Math.abs(output.duration_seconds-7.4)<0.15,JSON.stringify(output));
+  });
   await check('history deletion preserves original and deliverables',async()=>{await appendFile(media,'changed source fixture');const changed=await page.evaluate(async id=>{try{await window.ttcut.openHistory(id);return '';}catch(error){return String(error);}},analysis.analysisId);assert.match(changed,/HISTORY_SOURCE_CHANGED/);await page.evaluate(id=>window.ttcut.deleteHistory(id),analysis.analysisId);assert.ok((await stat(media)).size>0);assert.ok((await stat(combined)).size>0);});
   await page.evaluate(()=>window.ttcut.confirmClose('exit')).catch(error=>{if(!String(error).includes('closed'))throw error;});
   await new Promise((resolve,reject)=>{if(child.exitCode!==null)return resolve();child.once('exit',resolve);setTimeout(()=>reject(new Error('App failed to quit')),10000).unref();});

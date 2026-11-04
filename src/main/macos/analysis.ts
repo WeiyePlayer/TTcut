@@ -2,7 +2,7 @@ import path from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { mkdir, rename, rm, stat } from 'node:fs/promises';
 import { app, type BrowserWindow } from 'electron';
-import { analysisResultSchema, calibrationSchema, tableAnalysisSchema, type Calibration, type TableAnalysis, type AnalysisResultV1 } from '../../shared/contracts';
+import { analysisResultSchema, calibrationSchema, tableAnalysisSchema, SOURCE_TIME_RALLY_TIMEBASE, type Calibration, type TableAnalysis, type AnalysisResultV1 } from '../../shared/contracts';
 import type { NativeEvent } from '../../shared/native-contracts';
 import type { AppEvent } from '../../shared/api';
 import { IPC } from '../../shared/ipc';
@@ -171,7 +171,7 @@ export async function startMacAnalysis(window: BrowserWindow, value: AnalysisOpt
         } finally { await rm(partial, { force: true }); }
       }
       const result = await callNative('TTcutWorker', { ...base, operation: 'analyze', video: video.native_video, calibration: nativeCalibration(calibration) }, { taskId, onProgress: progress });
-      if (!result.roi || !result.visibilityRallies || !result.bounceTimes) throw new Error('NATIVE_ANALYSIS_RESULT_MISSING');
+      if (!result.roi || !result.visibilityRallies || !result.bounceTimes || result.rallyTimebaseVersion !== 1 || !result.observedPauses) throw new Error('NATIVE_ANALYSIS_RESULT_MISSING');
       const roi = result.roi;
       const bounceTimes = [...new Set(result.bounceTimes)].sort((a, b) => a - b);
       const commonResult = {
@@ -186,6 +186,9 @@ export async function startMacAnalysis(window: BrowserWindow, value: AnalysisOpt
         schema_version: 3,
         ...commonResult,
         bounce_times_seconds: bounceTimes,
+        excluded_fragments: result.observedPauses.map(pause => ({
+          start_time_seconds: pause.start, end_time_seconds: pause.end, evidence: [{ reason: 'observed_pause' }],
+        })),
         rallies: result.visibilityRallies!.map((rally, i) => ({
           id: `rally_${String(i + 1).padStart(3, '0')}`, index: i + 1,
           start_time_seconds: rally.startTime, end_time_seconds: rally.endTime,
@@ -194,6 +197,7 @@ export async function startMacAnalysis(window: BrowserWindow, value: AnalysisOpt
         })),
         rally_recognition: {
           method: 'continuous_visibility', ...continuousVisibilityProvenance,
+          timebase: SOURCE_TIME_RALLY_TIMEBASE,
           board_count: {
             detector: 'blurball_trajectory_change',
             source_path: 'worker/ttcut_worker/blurball_bounce.py',

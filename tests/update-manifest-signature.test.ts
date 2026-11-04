@@ -39,7 +39,7 @@ async function createTestCertificate(pfxPath: string, certificatePath: string): 
   });
 }
 
-describe('update manifest signing command', () => {
+describe.skipIf(process.platform !== 'win32')('update manifest signing command', () => {
   const temporaryDirectories: string[] = [];
 
   afterEach(async () => {

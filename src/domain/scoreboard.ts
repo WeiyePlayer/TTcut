@@ -44,6 +44,7 @@ export function scoreboardDimensions(videoWidth: number, videoHeight: number, sc
 
 export function scoreboardDisplayDimensions(video: Pick<VideoMetadata, 'width' | 'height' | 'rotation' | 'native_video'>): { width: number; height: number } {
   const { width: videoWidth, height: videoHeight } = video;
+  // Native MediaProbe already applies display rotation to its dimensions.
   const rotation = video.native_video ? 0 : video.rotation ?? 0;
   const normalized = ((rotation % 360) + 360) % 360;
   return normalized === 90 || normalized === 270

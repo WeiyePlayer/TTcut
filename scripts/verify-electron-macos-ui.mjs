@@ -10,13 +10,20 @@ const media = ['批处理 A.mp4','批处理 B.mp4'].map(name=>path.join(run,name
 for(const file of media) {
   const r=spawnSync(path.join(root,'.runtime/macos/bin/ffmpeg'),['-v','error','-f','lavfi','-i','color=c=black:size=320x180:rate=30:duration=10','-c:v','libx264','-preset','ultrafast',file],{encoding:'utf8'});assert.equal(r.status,0,r.stderr);
 }
-const instance = await electron.launch({executablePath:path.join(root,'node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'),args:[root],env:{...process.env,TTCUT_E2E:'1',TTCUT_E2E_USER_DATA:path.join(run,'user-data'),TTCUT_E2E_VIDEOS:JSON.stringify(media),PATH:'/usr/bin:/bin:/usr/sbin:/sbin'}});
+const damaged = path.join(run, '损坏视频.mp4'); await writeFile(damaged, 'invalid video fixture');
+const instance = await electron.launch({executablePath:path.join(root,'node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'),args:[root],env:{...process.env,TTCUT_E2E:'1',TTCUT_E2E_USER_DATA:path.join(run,'user-data'),TTCUT_E2E_VIDEOS:JSON.stringify([...media, damaged]),PATH:'/usr/bin:/bin:/usr/sbin:/sbin'}});
 const appProcess=instance.process();const page=await instance.firstWindow();const checks=[];const errors=[];page.on('pageerror',error=>errors.push(error.message));
 async function check(name,work){await work();checks.push({name,passed:true});console.log(`PASS ${name}`);await writeFile(path.join(run,'report.json'),JSON.stringify({mode:'development dialog fixtures, real native workers',checks,errors},null,2));}
 try {
   await page.waitForFunction(()=>Boolean(window.ttcut));await page.context().setOffline(true);
+  await check('damaged batch input remains visible and removable without losing valid videos',async()=>{
+    await page.locator('.drop-zone').click();await expect(page.locator('.batch-row')).toHaveCount(3);
+    const row=page.locator('.batch-row').filter({hasText:'损坏视频.mp4'});
+    await expect(row.locator('.batch-cover')).toBeDisabled();
+    await expect(row.locator('small')).not.toBeEmpty();
+    await row.locator('.batch-remove').click();await expect(page.locator('.batch-row')).toHaveCount(2);
+  });
   await check('batch import and automatic calibration failure recovery',async()=>{
-    await page.locator('.drop-zone').click();await expect(page.locator('.batch-row')).toHaveCount(2);
     await expect(page.getByText('手动标定',{exact:true})).toHaveCount(2,{timeout:180000});
     assert.equal(await page.getByText('完成本任务后关机',{exact:true}).count(),0);
     for(const name of media.map(p=>path.basename(p))) {
