@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { BrowserWindow } from 'electron';
@@ -14,8 +14,9 @@ const state = vi.hoisted(() => ({
   open: vi.fn(),
   markVisible: vi.fn().mockResolvedValue(undefined),
   probe: vi.fn(),
+  videos: '',
 }));
-vi.mock('electron', () => ({ dialog: {} }));
+vi.mock('electron', () => ({ dialog: {}, app: { getPath: (name: string) => (name === 'videos' ? state.videos : '') } }));
 vi.mock('../src/main/logger', () => ({ logLine: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../src/main/history', () => ({ getHistoryStore: () => ({ open: state.open, markVisible: state.markVisible }) }));
 vi.mock('../src/main/media-protocol', () => ({ registerMediaPath: (value: string) => `media:${value}` }));
@@ -31,11 +32,14 @@ vi.mock('../src/main/export', async (importOriginal) => ({
 }));
 
 import { startBatchExport } from '../src/main/batch-export';
+import { assertExportPreconditions } from '../src/main/export';
 import { cancelAllTasksAndWait, cancelTask, hasActiveTasks } from '../src/main/processes';
 
 const ids = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'];
 const selection = { mode: 'all', pre_roll_seconds: 1.5, post_roll_seconds: 0.5 } as const;
 const request = { items: ids.map((analysis_id) => ({ analysis_id, selection })) };
+// chmod cannot make a directory read-only on Windows, and root ignores mode bits.
+const readOnlyDirectoriesEnforced = process.platform !== 'win32' && process.getuid?.() !== 0;
 const windowStub = { isDestroyed: () => false, webContents: { send: (_channel: string, event: AppEvent) => {
   if (event.type === 'batch-export-result' || event.type === 'error') expect(hasActiveTasks()).toBe(false);
   state.events.push(event);
@@ -45,6 +49,8 @@ describe('batch export task', () => {
   let root: string;
   beforeEach(async () => {
     root = await mkdtemp(path.join(tmpdir(), 'ttcut-batch-test-'));
+    state.videos = await mkdtemp(path.join(tmpdir(), 'ttcut-batch-videos-'));
+    vi.mocked(assertExportPreconditions).mockClear();
     state.events.length = 0;
     state.records.clear();
     state.markVisible.mockClear();
@@ -71,7 +77,9 @@ describe('batch export task', () => {
   });
   afterEach(async () => {
     await cancelAllTasksAndWait();
+    await chmod(root, 0o755).catch(() => undefined);
     await rm(root, { recursive: true, force: true });
+    await rm(state.videos, { recursive: true, force: true });
   });
 
   it('rejects empty, duplicate, custom and path-bearing requests before reserving a task', async () => {
@@ -166,5 +174,28 @@ describe('batch export task', () => {
     expect(state.run.mock.calls.at(-1)![3]).toEqual(expect.arrayContaining(['-xerror', '-f', 'null']));
     expect(await readFile(original, 'utf8')).toBe('keep-me');
     expect(await readdir(root)).toEqual(['video-0_TTcut_合并集锦.mp4', 'video-0_TTcut_合并集锦_2.mp4']);
+  });
+
+  it('writes into the source directory and leaves Movies/TTcut untouched when the source is writable', async () => {
+    await startBatchExport(windowStub, request);
+    await vi.waitFor(() => expect(state.events.some((event) => event.type === 'batch-export-result')).toBe(true));
+    expect(vi.mocked(assertExportPreconditions).mock.calls[0]![1]).toBe(root);
+    expect(await readdir(root)).toEqual(['video-0_TTcut_合并集锦.mp4']);
+    expect(await readdir(state.videos)).toEqual([]);
+  });
+
+  it.skipIf(!readOnlyDirectoriesEnforced)('publishes into Movies/TTcut with its temporary files there when the source directory is read-only', async () => {
+    const fallback = path.join(state.videos, 'TTcut');
+    await chmod(root, 0o555);
+    await startBatchExport(windowStub, request);
+    await vi.waitFor(() => expect(state.events.some((event) => event.type === 'batch-export-result' || event.type === 'error')).toBe(true));
+    const result = state.events.find((event) => event.type === 'batch-export-result');
+    expect(result).toMatchObject({ data: { outputPath: path.join(fallback, 'video-0_TTcut_合并集锦.mp4') } });
+    expect(vi.mocked(assertExportPreconditions).mock.calls[0]![1]).toBe(fallback);
+    const segmentOutputs = state.run.mock.calls.filter((call) => call[6]?.segmentIndex).map((call) => (call[3] as string[]).at(-1)!);
+    expect(segmentOutputs.length).toBeGreaterThan(0);
+    for (const segment of segmentOutputs) expect(path.dirname(path.dirname(segment))).toBe(fallback);
+    expect(await readdir(fallback)).toEqual(['video-0_TTcut_合并集锦.mp4']);
+    expect(await readdir(root)).toEqual([]);
   });
 });
