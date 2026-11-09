@@ -175,7 +175,7 @@ const zh = {
     NO_CUSTOM_SELECTION: '请至少选择一个回合后再开始剪辑。',
     INVALID_CUSTOM_SEGMENTS: '自定义片段不足一帧、范围无效或发生重叠。请返回自定义剪辑，调整边界或取消选择后重试。',
     INVALID_EXPORT_OUTPUTS: '导出选项组合无效。请只选择合并视频，或在自定义剪辑中选择分段视频和/或 XML。',
-    OUTPUT_DIRECTORY_UNWRITABLE: '无法写入源视频所在目录。请检查目录权限。',
+    OUTPUT_DIRECTORY_UNWRITABLE: '无法写入源视频所在目录，也无法写入「影片/TTcut」（Windows 为「视频/TTcut」）。请检查目录权限。',
     DISK_SPACE_LOW: '磁盘可用空间不足。请释放空间后重试。',
     OUTPUT_COLLISION: '输出名称在导出期间被占用。请重试以生成新的安全名称。',
     EXPORT_INVALID: '导出文件未通过完整性检查。',
@@ -382,7 +382,7 @@ const en: Messages = {
     NO_CUSTOM_SELECTION: 'Select at least one rally before cutting.',
     INVALID_CUSTOM_SEGMENTS: 'A custom range is shorter than one frame, invalid or overlaps another. Return to custom cutting and adjust its boundaries or deselect it.',
     INVALID_EXPORT_OUTPUTS: 'The export output combination is invalid. Choose combined video, or choose rally videos and/or XML in custom cutting.',
-    OUTPUT_DIRECTORY_UNWRITABLE: 'The source video directory is not writable. Check its permissions.',
+    OUTPUT_DIRECTORY_UNWRITABLE: 'Neither the source video folder nor Movies/TTcut (Videos/TTcut on Windows) is writable. Check their permissions.',
     DISK_SPACE_LOW: 'There is not enough free disk space. Free space and retry.',
     OUTPUT_COLLISION: 'The output name became occupied during export. Retry to choose another safe name.',
     EXPORT_INVALID: 'The exported file did not pass the integrity check.',
@@ -412,6 +412,17 @@ const en: Messages = {
 
 export function messages(language: Language): Messages {
   return language === 'en' ? en : zh;
+}
+
+/** The stable error code in an Error or an IPC-wrapped rejection ("Error invoking remote method …: Error: CODE"). */
+export function errorCode(error: unknown): string {
+  const text = error instanceof Error ? error.message : String(error);
+  return text.match(/\b[A-Z][A-Z0-9_]{2,}\b/)?.[0] ?? 'UNKNOWN';
+}
+
+/** The translated message for a known error code, or the code itself. */
+export function errorText(code: string, translations: Messages): string {
+  return translations.errors[code as keyof Messages['errors']] ?? code;
 }
 
 export function interpolate(template: string, values: Record<string, string | number>): string {

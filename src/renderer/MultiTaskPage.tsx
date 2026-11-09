@@ -20,6 +20,7 @@ import { normalizeCalibrationPoints, validateCalibration } from '../domain/calib
 import { overallCalibrationProgress } from '../domain/analysis-progress';
 import { isSupportedVideoFileName } from '../domain/video-input';
 import { CalibrationSurface } from './CalibrationSurface';
+import { errorCode, errorText, messages } from './i18n';
 import { GlassRadioGroup } from './GlassRadioGroup';
 
 type BatchMode = 'all' | 'highlight' | 'analyze-only';
@@ -171,6 +172,7 @@ export function MultiTaskPage({
   });
 
   const isEnglish = language === 'en';
+  const translations = messages(language);
   const text = {
     title: isEnglish ? 'Batch cutting' : '多任务剪辑',
     add: isEnglish ? '+ Add videos' : '＋ 添加视频',
@@ -272,7 +274,7 @@ export function MultiTaskPage({
       if (batchExportRef.current.cancelRequested) void window.ttcut.cancelTask(taskId);
     }).catch((error) => {
       batchExportRef.current = null;
-      setBatchExport({ status: 'failed', progress: 0, result: null, error: String(error) });
+      setBatchExport({ status: 'failed', progress: 0, result: null, error: errorCode(error) });
       completeRun(false);
     }).finally(() => {
       if (pendingTaskStartRef.current === promise) pendingTaskStartRef.current = null;
@@ -380,7 +382,7 @@ export function MultiTaskPage({
       }).catch((caught) => {
         if (activeRef.current?.itemId !== candidate.id || activeRef.current.phase !== 'export') return;
         earlyTaskEventsRef.current.clear();
-        updateItem(candidate.id, (item) => ({ ...item, processingStatus: 'failed', error: String(caught) }));
+        updateItem(candidate.id, (item) => ({ ...item, processingStatus: 'failed', error: errorCode(caught) }));
         finishActive();
         setTimeout(() => scheduleRef.current(), 0);
       }).finally(() => {
@@ -847,7 +849,7 @@ export function MultiTaskPage({
                 <strong title={item.video.name}>{item.video.name}</strong>
                 {item.metadata && <span>{formatTimestamp(item.metadata.duration_seconds)} · {item.metadata.width} × {item.metadata.height} · {item.metadata.fps.toFixed(3)} fps</span>}
                 {mergeWorkflow && done && item.mode !== 'analyze-only' && batchExport.status !== 'done' && <span>{text.mergeWaiting}</span>}
-                {item.error && !manualRequired && <small title={item.errorDetail?.code === item.error ? item.errorDetail.message : undefined}>{item.error}</small>}
+                {item.error && !manualRequired && <small title={item.errorDetail?.code === item.error ? item.errorDetail.message : undefined}>{errorText(item.error, translations)}</small>}
                 {item.exportWarning && (
                   <div className="batch-export-warning" role="alert">
                     <span><b>{item.analysis?.processing?.mode === 'vfr_fallback' ? text.processingWarning : text.warning}</b><code>{item.exportWarning.code}</code></span>
@@ -931,7 +933,7 @@ export function MultiTaskPage({
             <button className="secondary" type="button" onClick={cancelMergedExport}>{text.cancel}</button>
           </>}
           {batchExport.error && batchExport.status === 'failed' && <>
-            <small>{batchExport.error}</small>
+            <small>{errorText(batchExport.error, translations)}</small>
             <button className="text-button" type="button" onClick={() => void window.ttcut.revealLogs()}>{text.logs}</button>
           </>}
           {['blocked', 'failed', 'cancelled', 'empty'].includes(batchExport.status) && (

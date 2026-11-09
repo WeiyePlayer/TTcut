@@ -17,6 +17,7 @@ import { assertExportPreconditions, clearExportProgress, runFfmpeg, uniqueOutput
 import { beginTrackedTask, endTrackedTask, markTaskTerminal } from './processes';
 import { registerMediaPath } from './media-protocol';
 import { logLine } from './logger';
+import { resolveWritableOutputDirectory } from './output-location';
 
 function send(window: BrowserWindow, event: AppEvent): void {
   if (!window.isDestroyed()) window.webContents.send(IPC.taskEvent, event);
@@ -57,7 +58,8 @@ async function executeBatchExport(window: BrowserWindow, taskId: string, request
     if (!components.ffmpeg || !components.ffprobe || components.mediaEncoder === 'unavailable') {
       throw new Error('MEDIA_COMPONENT_MISSING');
     }
-    const first = records[0]!;
+    // The merged video is named and placed after the first record that contributes segments.
+    const first = records.find((record) => !skippedAnalysisIds.includes(record.id))!;
     const source = first.analysis.source_video?.path ?? first.source.path;
     const profile = batchOutputProfile(segments[0]!.video, segments.some((segment) => segment.video.audio_codec !== null));
     if (segments.some((segment) => outputVideoCodec(segment.video) === 'hevc')) profile.video_codec = 'hevc';
@@ -65,9 +67,10 @@ async function executeBatchExport(window: BrowserWindow, taskId: string, request
     const requestedDuration = segments.reduce((sum, segment) => sum + segment.group.end - segment.group.start, 0);
     const durations = segments.map((segment) => batchSegmentDuration(segment.group, profile));
     const duration = durations.reduce((sum, value) => sum + value, 0);
-    await assertExportPreconditions(segments[0]!.video.path, path.dirname(source), taskId, duration, profile, components.mediaEncoder);
+    const outputDirectory = await resolveWritableOutputDirectory(source, taskId);
+    await assertExportPreconditions(segments[0]!.video.path, outputDirectory, taskId, duration, profile, components.mediaEncoder);
     signal.throwIfAborted();
-    temporaryDirectory = await mkdtemp(path.join(path.dirname(source), `.ttcut-batch-${taskId}-`));
+    temporaryDirectory = await mkdtemp(path.join(outputDirectory, `.ttcut-batch-${taskId}-`));
     const names: string[] = [];
     let elapsed = 0;
     for (const [index, segment] of segments.entries()) {
@@ -100,7 +103,7 @@ async function executeBatchExport(window: BrowserWindow, taskId: string, request
     signal.throwIfAborted();
     let output: string;
     for (;;) {
-      output = await uniqueOutput(source, '合并集锦');
+      output = await uniqueOutput(source, '合并集锦', outputDirectory);
       signal.throwIfAborted();
       try {
         // Both paths are on the output volume. A hard link publishes atomically without

@@ -8,6 +8,7 @@ import { probeVideo } from './probe';
 import { runProcess } from './processes';
 import { logLine } from './logger';
 import { mediaFidelity } from '../domain/media-fidelity';
+import { hableToneMap, isHlgSource } from '../domain/export-color-plan';
 
 // These files are playback proxies only. Analysis, calibration and exports keep
 // their original media identity, dimensions and timestamps.
@@ -83,7 +84,7 @@ function previewDiagnostics(source: VideoMetadata, preview: VideoMetadata) {
 
 export function previewToneFilter(metadata: VideoMetadata): string {
   return mediaFidelity(metadata).hdr === 'sdr' ? ''
-    : 'zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable,zscale=t=bt709:m=bt709:r=tv,';
+    : `zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,${hableToneMap(isHlgSource(metadata))},zscale=t=bt709:m=bt709:r=tv,`;
 }
 
 export function buildPreviewArgs(input: string, output: string, metadata: VideoMetadata, encoder: MediaEncoder): string[] {

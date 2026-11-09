@@ -8,7 +8,7 @@ final class MediaFidelityPolicyTests: XCTestCase {
     struct Case: Decodable {
       let name: String, codec: String, hdr: HDRKind, depth: Int
       let transfer: String?, dolbyVision: DolbyVisionInfo?, error: String?
-      let outputHDR: HDRKind?, outputCodec: String?, outputDepth: Int?
+      let outputHDR: HDRKind?, outputCodec: String?, outputDepth: Int?, toneMap: String?
     }
     let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
       .deletingLastPathComponent().deletingLastPathComponent()
@@ -30,6 +30,8 @@ final class MediaFidelityPolicyTests: XCTestCase {
         XCTAssertEqual(plan.target.outputCodec, test.outputCodec, test.name)
         XCTAssertEqual(plan.target.bitDepth, test.outputDepth, test.name)
         XCTAssertEqual(video.hdr, test.hdr, test.name)
+        // HLG base layers (DV 8.4) keep scene colour; PQ keeps highlight desaturation.
+        XCTAssertEqual(plan.filters.filter { $0.hasPrefix("tonemap=") }, test.toneMap.map { [$0] } ?? [], test.name)
       }
     }
   }

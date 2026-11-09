@@ -28,7 +28,7 @@ import type { CustomPlaybackMode } from '../domain/custom-playback';
 import { normalizeCalibrationPoints, validateCalibration } from '../domain/calibration';
 import { isSupportedVideoFileName } from '../domain/video-input';
 import { isSupportPromptSuppressed, suppressSupportPromptForThirtyDays } from '../domain/support-prompt';
-import { interpolate, messages, type Language, type Messages } from './i18n';
+import { errorCode, interpolate, messages, type Language, type Messages } from './i18n';
 import { MultiTaskPage } from './MultiTaskPage';
 import { CalibrationSurface } from './CalibrationSurface';
 import { SupportPrompt } from './SupportPrompt';
@@ -67,11 +67,6 @@ function fileSize(value: number): string {
   if (value >= 1024 ** 3) return `${(value / 1024 ** 3).toFixed(2)} GB`;
   if (value >= 1024 ** 2) return `${(value / 1024 ** 2).toFixed(1)} MB`;
   return `${(value / 1024).toFixed(1)} KB`;
-}
-
-function errorCode(error: unknown): string {
-  const text = error instanceof Error ? error.message : String(error);
-  return text.match(/\b[A-Z][A-Z0-9_]{2,}\b/)?.[0] ?? 'UNKNOWN';
 }
 
 function localizedError(code: string, translations: Messages): string {

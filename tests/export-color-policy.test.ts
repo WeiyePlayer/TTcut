@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import policy from './fixtures/export-color-policy.json';
-import { exportColorPlan } from '../src/domain/export-color-plan';
+import { exportColorPlan, exportToneMapFilters } from '../src/domain/export-color-plan';
 import type { VideoMetadata } from '../src/shared/contracts';
 
 describe('shared automatic Windows and macOS export color policy', () => {
@@ -23,6 +23,9 @@ describe('shared automatic Windows and macOS export color policy', () => {
       expect(plan.target.video_codec).toBe(test.outputCodec);
       expect(plan.target.media_fidelity?.bit_depth).toBe(test.outputDepth);
       expect(source.media_fidelity?.hdr).toBe(test.hdr);
+      // HLG base layers (DV 8.4) keep scene colour; PQ keeps highlight desaturation.
+      const toneMap = exportToneMapFilters(plan).filter((filter) => filter.startsWith('tonemap='));
+      expect(toneMap).toEqual(test.toneMap ? [test.toneMap] : []);
     }
   });
 });

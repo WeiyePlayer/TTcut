@@ -124,9 +124,9 @@ describe('multi-task clipping', () => {
     render(<MultiTaskPage initialVideos={videos} preRoll={2.5} postRoll={1} onOpenAnalysis={vi.fn()} />);
     await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledOnce());
     expect(document.querySelectorAll('.batch-row')).toHaveLength(2);
-    expect(screen.getByText('VIDEO_UNREADABLE')).toBeVisible();
+    expect(screen.getByText('视频无法读取或已经损坏。请检查文件后重新选择。')).toBeVisible();
     expect(startAutoCalibration).toHaveBeenCalledWith(expect.objectContaining({ videoPath: videos[0]!.path }));
-    const failedRow = screen.getByText('VIDEO_UNREADABLE').closest('article')!;
+    const failedRow = screen.getByText('视频无法读取或已经损坏。请检查文件后重新选择。').closest('article')!;
     fireEvent.click(failedRow.querySelector('button.batch-remove')!);
     expect(document.querySelectorAll('.batch-row')).toHaveLength(1);
   });
@@ -421,6 +421,41 @@ describe('multi-task clipping', () => {
     expect(await screen.findByText('CFR_PREFLIGHT_FAILED')).toBeVisible();
   });
 
+  const unwritable = /无法写入源视频所在目录，也无法写入「影片\/TTcut」/;
+
+  it('explains an item export that Main rejects before a task starts', async () => {
+    startExport.mockReset().mockRejectedValue(
+      new Error("Error invoking remote method 'export:start': Error: OUTPUT_DIRECTORY_UNWRITABLE"),
+    );
+    render(<MultiTaskPage initialVideos={[videos[0]!]} preRoll={2.5} postRoll={1} onOpenAnalysis={vi.fn()} />);
+    await waitFor(() => expect(startAutoCalibration).toHaveBeenCalledOnce());
+    await finishCalibration('calibration-task-1');
+    fireEvent.click(await screen.findByRole('button', { name: '开始分析剪辑' }));
+    await finishAnalysis(1);
+    expect(await screen.findByText(unwritable)).toBeVisible();
+    expect(screen.queryByText(/Error invoking remote method/)).toBeNull();
+  });
+
+  it('explains a merged export that Main rejects before a task starts', async () => {
+    vi.mocked(window.ttcut.startBatchExport).mockRejectedValueOnce(
+      new Error("Error invoking remote method 'batch-export:start': Error: OUTPUT_DIRECTORY_UNWRITABLE"),
+    );
+    await prepareMergedBatch(vi.fn(), videos.slice(0, 1));
+    fireEvent.click(screen.getByRole('button', { name: '开始分析剪辑' }));
+    await finishAnalysis(1);
+    expect(await screen.findByText(unwritable)).toBeVisible();
+    expect(screen.queryByText(/Error invoking remote method/)).toBeNull();
+  });
+
+  it('explains a merged export that fails after its task starts', async () => {
+    await prepareMergedBatch(vi.fn(), videos.slice(0, 1));
+    fireEvent.click(screen.getByRole('button', { name: '开始分析剪辑' }));
+    await finishAnalysis(1);
+    await waitFor(() => expect(window.ttcut.startBatchExport).toHaveBeenCalledTimes(1));
+    act(() => listener?.({ type: 'error', taskId: 'batch-export-1', code: 'DISK_SPACE_LOW', message: 'DISK_SPACE_LOW' }));
+    expect(await screen.findByText('磁盘可用空间不足。请释放空间后重试。')).toBeVisible();
+  });
+
   it('queues cancellation until an analysis task ID is returned', async () => {
     let reply!: (taskId: string) => void;
     startAnalysis.mockReset().mockReturnValue(new Promise<string>((resolve) => { reply = resolve; }));
@@ -448,7 +483,7 @@ describe('multi-task clipping', () => {
     fireEvent.click(screen.getByRole('button', { name: '取消 first.mp4' }));
     act(() => listener?.({ type: 'error', taskId: 'analysis-task-1', code: 'INFERENCE_FAILED', message: 'inference failed' }));
     await act(async () => { reply('analysis-task-1'); });
-    expect(await screen.findByText('INFERENCE_FAILED')).toBeVisible();
+    expect(await screen.findByText('球检测计算出现异常，未能完成分析。请重试；若仍失败，请通过日志反馈问题。')).toBeVisible();
     expect(window.ttcut.cancelTask).not.toHaveBeenCalled();
   });
 
@@ -461,7 +496,7 @@ describe('multi-task clipping', () => {
     fireEvent.click(screen.getByRole('button', { name: '取消 first.mp4' }));
     await waitFor(() => expect(window.ttcut.cancelTask).toHaveBeenCalledWith('analysis-task-1'));
     act(() => listener?.({ type: 'error', taskId: 'analysis-task-1', code: 'INFERENCE_FAILED', message: 'inference failed' }));
-    expect(await screen.findByText('INFERENCE_FAILED')).toBeVisible();
+    expect(await screen.findByText('球检测计算出现异常，未能完成分析。请重试；若仍失败，请通过日志反馈问题。')).toBeVisible();
   });
 
   it('keeps a real worker exit failure when cancellation arrives before its delayed event', async () => {
@@ -473,7 +508,7 @@ describe('multi-task clipping', () => {
     fireEvent.click(screen.getByRole('button', { name: '取消 first.mp4' }));
     await waitFor(() => expect(window.ttcut.cancelTask).toHaveBeenCalledWith('analysis-task-1'));
     act(() => listener?.({ type: 'error', taskId: 'analysis-task-1', code: 'WORKER_EXITED', message: 'worker crashed' }));
-    expect(await screen.findByText('WORKER_EXITED')).toHaveAttribute('title', 'worker crashed');
+    expect(await screen.findByText('分析进程意外退出。请检查组件状态、显存和技术日志。')).toHaveAttribute('title', 'worker crashed');
     expect(document.querySelector('.batch-row.cancelled')).toBeNull();
   });
 

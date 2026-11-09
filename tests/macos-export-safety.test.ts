@@ -4,8 +4,8 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import type { BrowserWindow } from 'electron';
-const state=vi.hoisted(()=>({root:'',record:{} as any,fault:'',render:vi.fn()}));
-vi.mock('electron',()=>({app:{},dialog:{}}));
+const state=vi.hoisted(()=>({root:'',videos:'',record:{} as any,fault:'',render:vi.fn()}));
+vi.mock('electron',()=>({app:{getPath:()=>state.videos},dialog:{}}));
 vi.mock('../src/main/logger',()=>({logLine:vi.fn().mockResolvedValue(undefined)}));
 vi.mock('../src/main/history',()=>({getHistoryStore:()=>({open:async()=>state.record,assertExportSource:async()=>{}})}));
 vi.mock('../src/main/components',()=>({resolveUsableMediaComponents:async()=>({ffmpeg:'bundled',ffprobe:'bundled',mediaEncoder:'libx264'})}));
@@ -21,11 +21,11 @@ import { startExport } from '../src/main/export';
 import { hasActiveTasks } from '../src/main/processes';
 const id='11111111-1111-4111-8111-111111111111';
 beforeEach(async()=>{
-  state.root=await mkdtemp(path.join(tmpdir(),'ttcut-export-safety-'));state.render.mockReset();state.fault='';
+  state.root=await mkdtemp(path.join(tmpdir(),'ttcut-export-safety-'));state.videos=await mkdtemp(path.join(tmpdir(),'ttcut-export-safety-videos-'));state.render.mockReset();state.fault='';
   const source=path.join(state.root,'source.mp4');await writeFile(source,'source fixture');await writeFile(path.join(state.root,'finished.mp4'),'completed export');
   state.record={id,analysis:{schema_version:1,video:{path:source,width:320,height:180,duration_seconds:3,fps:30,variable_frame_rate:false,video_codec:'h264',audio_codec:null,container:'mp4'},rallies:[{id:'rally_001',index:1,start_time_seconds:1,end_time_seconds:2,bounce_count:4}]}};
 });
-afterEach(async()=>{await rm(state.root,{recursive:true,force:true});});
+afterEach(async()=>{await rm(state.root,{recursive:true,force:true});await rm(state.videos,{recursive:true,force:true});});
 describe.skipIf(process.platform!=='darwin')('Mac export filesystem failures',()=>{
   it('preserves the native dynamic HDR restriction in the renderer error event',async()=>{
     state.render.mockRejectedValue(Object.assign(new Error('Dynamic HDR fidelity export is unsupported'),{code:'DYNAMIC_HDR_UNSUPPORTED'}));
@@ -38,7 +38,15 @@ describe.skipIf(process.platform!=='darwin')('Mac export filesystem failures',()
     expect(hasActiveTasks()).toBe(false);
     expect((await readdir(state.root)).sort()).toEqual(['finished.mp4','source.mp4']);
   });
-  it.each([['space','DISK_SPACE_LOW'],['write','OUTPUT_DIRECTORY_UNWRITABLE']])('preserves source and completed output when %s fails',async(fault,code)=>{
+  it('preserves source and completed output when neither the source directory nor Movies/TTcut is writable',async()=>{
+    state.fault='write';
+    const send=vi.fn();
+    await expect(startExport({isDestroyed:()=>false,webContents:{send}} as unknown as BrowserWindow,{analysis_id:id,destination:'source',selection:{mode:'all',pre_roll_seconds:1.5,post_roll_seconds:0.5}}))
+      .rejects.toThrow('OUTPUT_DIRECTORY_UNWRITABLE');
+    expect(state.render).not.toHaveBeenCalled();expect(hasActiveTasks()).toBe(false);
+    expect(await readFile(path.join(state.root,'source.mp4'),'utf8')).toBe('source fixture');expect(await readFile(path.join(state.root,'finished.mp4'),'utf8')).toBe('completed export');expect((await readdir(state.root)).sort()).toEqual(['finished.mp4','source.mp4']);
+  });
+  it.each([['space','DISK_SPACE_LOW']])('preserves source and completed output when %s fails',async(fault,code)=>{
     state.fault=fault;
     const send=vi.fn();
     const taskId=await startExport({isDestroyed:()=>false,webContents:{send}} as unknown as BrowserWindow,{analysis_id:id,destination:'source',selection:{mode:'all',pre_roll_seconds:1.5,post_roll_seconds:0.5}});

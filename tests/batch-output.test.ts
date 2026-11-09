@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -19,6 +19,16 @@ describe('batch output naming', () => {
     await writeFile(source, 'source');
     await writeFile(first, 'existing');
     await expect(uniqueOutput(source, '精彩回合_5板')).resolves.toBe(path.join(root, '比赛_TTcut_精彩回合_5板_2.mp4'));
+  });
+
+  it('names outputs after the source inside an explicit output directory and increments collisions there', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'ttcut-batch-output-'));
+    temporaryDirectories.push(root);
+    const source = path.join(root, 'readonly', '杜比视界.mp4');
+    const fallback = path.join(root, 'Movies', 'TTcut');
+    await mkdir(fallback, { recursive: true });
+    await writeFile(path.join(fallback, '杜比视界_TTcut_自定义.mp4'), 'existing');
+    await expect(uniqueOutput(source, '自定义', fallback)).resolves.toBe(path.join(fallback, '杜比视界_TTcut_自定义_2.mp4'));
   });
 
   it('exports a MOV source to an MP4 path', async () => {
