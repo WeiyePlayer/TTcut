@@ -2,7 +2,7 @@ import { beforeAll as beforeWindowsSuite, afterAll as afterWindowsSuite } from '
 const actualPlatform = process.platform;
 beforeWindowsSuite(() => Object.defineProperty(process, 'platform', { value: 'win32' }));
 afterWindowsSuite(() => Object.defineProperty(process, 'platform', { value: actualPlatform }));
-import { access, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -27,10 +27,12 @@ const state = vi.hoisted(() => {
     })),
     release: (value: number[]) => releaseKeyframes?.(value),
     markVisible: vi.fn(),
+    videos: '',
   };
 });
 
 vi.mock('electron', () => ({
+  app: { getPath: vi.fn((name: string) => (name === 'videos' ? state.videos : '')) },
   dialog: { showSaveDialog: vi.fn() },
 }));
 
@@ -103,6 +105,11 @@ import { startExport } from '../src/main/export';
 import { resolveUsableMediaComponents } from '../src/main/components';
 import { probeVideo } from '../src/main/probe';
 import { cancelAllTasks, cancelTask, getTaskController } from '../src/main/processes';
+import { dialog } from 'electron';
+import { logLine } from '../src/main/logger';
+
+// chmod cannot make a directory read-only on Windows, and root ignores mode bits.
+const readOnlyDirectoriesEnforced = actualPlatform !== 'win32' && process.getuid?.() !== 0;
 
 const request: ExportRequest = {
   analysis_id: '11111111-1111-4111-8111-111111111111',
@@ -140,7 +147,9 @@ describe('export task start and terminal lifecycle', () => {
 
   beforeEach(async () => {
     directory = await mkdtemp(path.join(tmpdir(), 'ttcut-export-start-'));
-    state.source = path.join(directory, 'source.mp4');
+    await mkdir(path.join(directory, 'source'));
+    state.source = path.join(directory, 'source', 'source.mp4');
+    state.videos = path.join(directory, 'Movies');
     state.analysis = null;
     state.events.length = 0;
     state.terminalTaskActive.length = 0;
@@ -154,7 +163,74 @@ describe('export task start and terminal lifecycle', () => {
   afterEach(async () => {
     await cancelAllTasks('app-exit');
     state.release([]);
+    await chmod(path.dirname(state.source), 0o755).catch(() => undefined);
     await rm(directory, { recursive: true, force: true });
+  });
+
+  describe('when the source directory is read-only', () => {
+    const fallback = () => path.join(state.videos, 'TTcut');
+    const xmlRequest = (): ExportRequest => ({
+      analysis_id: request.analysis_id,
+      selection: { mode: 'custom', segments: [{ rally_id: 'rally_001', start_time_seconds: 8, end_time_seconds: 14 }] },
+      destination: 'source',
+      outputs: { combined_video: false, rally_videos: false, premiere_xml: true },
+    });
+
+    beforeEach(async () => {
+      if (readOnlyDirectoriesEnforced) await chmod(path.dirname(state.source), 0o555);
+      vi.mocked(logLine).mockClear();
+      vi.mocked(dialog.showSaveDialog).mockReset();
+    });
+
+    it.skipIf(!readOnlyDirectoriesEnforced)('writes custom XML artifacts into Movies/TTcut with the usual directory suffixes', async () => {
+      const first = await startExport(windowMock() as never, xmlRequest());
+      await waitForTaskEnd(first);
+      const second = await startExport(windowMock() as never, xmlRequest());
+      await waitForTaskEnd(second);
+
+      const results = state.events
+        .filter((event): event is Extract<AppEvent, { type: 'export-result' }> => event.type === 'export-result')
+        .flatMap((event) => event.data.kind === 'custom-artifacts' ? [event.data] : []);
+      expect(results.map((result) => result.outputDirectory)).toEqual([
+        path.join(fallback(), 'source_TTcut_自定义'),
+        path.join(fallback(), 'source_TTcut_自定义_2'),
+      ]);
+      const xmlPath = results[0]?.premiereXml?.outputPath ?? '';
+      expect(path.dirname(xmlPath)).toBe(results[0]?.outputDirectory);
+      await expect(access(xmlPath)).resolves.toBeUndefined();
+      expect(await readdir(path.dirname(state.source))).toEqual(['source.mp4']);
+      expect(logLine).toHaveBeenCalledWith(
+        first,
+        'INFO',
+        `Export output directory fallback: ${path.dirname(state.source)} -> ${fallback()}`,
+      );
+    });
+
+    it.skipIf(!readOnlyDirectoriesEnforced)('starts a source-destination video export in Movies/TTcut instead of failing as unwritable', async () => {
+      const taskId = await startExport(windowMock() as never, request);
+      await vi.waitFor(() => expect(state.keyframes).toHaveBeenCalledTimes(1));
+      await cancelTask(taskId, 'user');
+      await waitForTaskEnd(taskId);
+
+      expect(state.events.filter((event) => event.type === 'error')).toEqual([
+        expect.objectContaining({ code: 'EXPORT_CANCELLED' }),
+      ]);
+      expect(logLine).toHaveBeenCalledWith(
+        taskId,
+        'INFO',
+        `Export output directory fallback: ${path.dirname(state.source)} -> ${fallback()}`,
+      );
+    });
+
+    it.skipIf(!readOnlyDirectoriesEnforced)('opens the save dialog in Movies/TTcut for prompted exports', async () => {
+      vi.mocked(dialog.showSaveDialog).mockResolvedValue({ canceled: true, filePath: '' });
+
+      await expect(startExport(windowMock() as never, { ...request, destination: 'prompt' }))
+        .rejects.toThrow('EXPORT_CANCELLED');
+      expect(dialog.showSaveDialog).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+        defaultPath: path.join(fallback(), 'source_TTcut.mp4'),
+      }));
+    });
   });
 
   it('returns a registered taskId before keyframe probing finishes and emits one user-cancel terminal event', async () => {
@@ -506,6 +582,6 @@ describe('export task start and terminal lifecycle', () => {
     await cancelTask(taskId, 'user');
     await waitForTaskEnd(taskId);
 
-    expect(await readdir(directory)).toEqual(['source.mp4']);
+    expect(await readdir(path.dirname(state.source))).toEqual(['source.mp4']);
   });
 });

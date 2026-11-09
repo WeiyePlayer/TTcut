@@ -4,10 +4,10 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Main 中有一个共享的输出目录解析：源目录写探测失败（EACCES/EPERM/EROFS）时创建并返回回退目录，并记录日志
-- [ ] 回退目录也不可写时仍报 `OUTPUT_DIRECTORY_UNWRITABLE`；ENOENT 等其他错误不触发回退
-- [ ] 合并视频、自定义分段视频与 XML 目录、`destination: 'source'` 都落到回退目录，同名后缀规则不变
-- [ ] 请求契约不新增字段；结果中的输出路径为实际路径
-- [ ] 单元测试用只读临时目录模拟不可写源目录；`npm test` 与 typecheck 通过
+- [x] Main 中有一个共享的输出目录解析：源目录写探测失败（EACCES/EPERM/EROFS）时创建并返回回退目录，并记录日志
+- [x] 回退目录也不可写时仍报 `OUTPUT_DIRECTORY_UNWRITABLE`；ENOENT 等其他错误不触发回退
+- [x] 合并视频、自定义分段视频与 XML 目录、`destination: 'source'` 都落到回退目录，同名后缀规则不变
+- [x] 请求契约不新增字段；结果中的输出路径为实际路径
+- [x] 单元测试用只读临时目录模拟不可写源目录；`npm test` 与 typecheck 通过

@@ -44,6 +44,7 @@ import { createExportCfrResolver, exportSourceVideo } from './export-source';
 import { copyExportCfr } from './export-copy';
 import { resolveUsableMediaComponents, type MediaEncoder } from './components';
 import { logLine as writeLogLine } from './logger';
+import { resolveWritableOutputDirectory } from './output-location';
 import { getHistoryStore } from './history';
 import {
   buildConcatArgs,
@@ -164,8 +165,11 @@ async function available(filePath: string): Promise<boolean> {
   }
 }
 
-export async function uniqueOutput(input: string, suffixLabel: string): Promise<string> {
-  const directory = path.dirname(input);
+export async function uniqueOutput(
+  input: string,
+  suffixLabel: string,
+  directory = path.dirname(input),
+): Promise<string> {
   const base = path.basename(input, path.extname(input));
   let suffix = 1;
   while (true) {
@@ -219,21 +223,27 @@ export async function retainUsableExportOutput(
   return null;
 }
 
-async function chooseOutput(window: BrowserWindow, input: string, request: ExportRequest): Promise<string> {
+async function chooseOutput(
+  window: BrowserWindow,
+  input: string,
+  request: ExportRequest,
+  taskId: string,
+): Promise<string> {
   const base = path.basename(input, path.extname(input));
   const label = (request.mode_label ?? request.selection.mode).replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').trim();
-  if (request.destination === 'source') return uniqueOutput(input, label || request.selection.mode);
+  const directory = await resolveWritableOutputDirectory(input, taskId);
+  if (request.destination === 'source') return uniqueOutput(input, label || request.selection.mode, directory);
   const result = await dialog.showSaveDialog(window, {
     title: 'Save TTcut video',
-    defaultPath: path.join(path.dirname(input), `${base}_TTcut.mp4`),
+    defaultPath: path.join(directory, `${base}_TTcut.mp4`),
     filters: [{ name: 'MP4 video', extensions: ['mp4'] }],
   });
   if (result.canceled || !result.filePath) throw new Error('EXPORT_CANCELLED');
   return path.extname(result.filePath).toLowerCase() === '.mp4' ? result.filePath : `${result.filePath}.mp4`;
 }
 
-async function createCustomArtifactDirectory(input: string): Promise<string> {
-  const directory = path.dirname(input);
+async function createCustomArtifactDirectory(input: string, taskId: string): Promise<string> {
+  const directory = await resolveWritableOutputDirectory(input, taskId);
   const base = path.basename(input, path.extname(input));
   let suffix = 1;
   while (true) {
@@ -1441,7 +1451,7 @@ export async function startExport(window: BrowserWindow, rawRequest: ExportReque
   if (outputs.combinedVideo && !mediaAvailable) throw new Error('MEDIA_COMPONENT_MISSING');
   const taskId = randomUUID();
   if (artifactExport) {
-    const outputDirectory = await createCustomArtifactDirectory(sourceVideoPath);
+    const outputDirectory = await createCustomArtifactDirectory(sourceVideoPath, taskId);
     let taskTracked = false;
     try {
       beginTrackedTask(taskId);
@@ -1474,7 +1484,7 @@ export async function startExport(window: BrowserWindow, rawRequest: ExportReque
     ffprobe: components.ffprobe,
     mediaEncoder: components.mediaEncoder,
   };
-  const output = await chooseOutput(window, sourceVideoPath, request);
+  const output = await chooseOutput(window, sourceVideoPath, request, taskId);
   const partial = path.join(path.dirname(output), `.${path.basename(output, '.mp4')}.${taskId}.partial.mp4`);
   const duration = expectedOutputDuration(groups);
   beginTrackedTask(taskId);
