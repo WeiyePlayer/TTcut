@@ -50,9 +50,11 @@ public struct ExportColorPlan: Sendable {
   public var filters: [String] {
     guard let toneMapTransfer else { return [] }
     let range = ["pc", "full", "jpeg"].contains(source.colorRange ?? "") ? "full" : "limited"
+    // HLG diffuse white linearises to ~2.0 at npl=100, so desat=2 would grey well-lit scenes.
+    let desat = toneMapTransfer == "arib-std-b67" ? 0 : 2
     return [
       "zscale=pin=bt2020:tin=\(toneMapTransfer):min=bt2020nc:rin=\(range):t=linear:npl=100",
-      "format=gbrpf32le", "zscale=p=bt709", "tonemap=tonemap=hable:desat=2",
+      "format=gbrpf32le", "zscale=p=bt709", "tonemap=tonemap=hable:desat=\(desat)",
       "zscale=t=bt709:m=bt709:r=limited", "format=yuv420p",
     ] + ["MASTERING_DISPLAY_METADATA", "CONTENT_LIGHT_LEVEL", "DYNAMIC_HDR_PLUS", "DOVI_RPU_BUFFER", "DOVI_METADATA"].map {
       "sidedata=mode=delete:type=\($0)"

@@ -35,9 +35,11 @@ export function exportColorPlan(source: VideoMetadata): ExportColorPlan {
 export function exportToneMapFilters(plan: ExportColorPlan): string[] {
   if (!plan.toneMapTransfer) return [];
   const range = ['pc', 'full', 'jpeg'].includes(plan.source.color_range ?? '') ? 'full' : 'limited';
+  // HLG diffuse white linearises to ~2.0 at npl=100, so desat=2 would grey well-lit scenes.
+  const desat = plan.toneMapTransfer === 'arib-std-b67' ? 0 : 2;
   return [
     `zscale=pin=bt2020:tin=${plan.toneMapTransfer}:min=bt2020nc:rin=${range}:t=linear:npl=100`,
-    'format=gbrpf32le', 'zscale=p=bt709', 'tonemap=tonemap=hable:desat=2',
+    'format=gbrpf32le', 'zscale=p=bt709', `tonemap=tonemap=hable:desat=${desat}`,
     'zscale=t=bt709:m=bt709:r=limited', 'format=yuv420p',
     ...['MASTERING_DISPLAY_METADATA', 'CONTENT_LIGHT_LEVEL', 'DYNAMIC_HDR_PLUS', 'DOVI_RPU_BUFFER', 'DOVI_METADATA']
       .map((type) => `sidedata=mode=delete:type=${type}`),
