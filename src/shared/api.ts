@@ -73,6 +73,8 @@ export interface TTcutApi {
   onNativePreviewEvent?(listener: (event: NativePreviewEvent) => void): () => void;
   preparePreview?(mediaUrl: string, taskId: string): Promise<string>;
   onPreviewProgress?(listener: (value: { taskId: string; percent: number }) => void): () => void;
+  /** Fires once each time the last user-started task ends (completed, failed or cancelled). */
+  onTasksIdle?(listener: () => void): () => void;
   bootstrap(): Promise<BootstrapData>;
   saveSettings(settings: AppSettings): Promise<AppSettings>;
   refreshComponents(): Promise<ComponentStatus>;

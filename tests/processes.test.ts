@@ -14,6 +14,7 @@ import {
   hasActiveTasks,
   hasPreemptibleTasks,
   markTaskTerminal,
+  onTasksIdle,
   runProcess,
   spawnTracked,
 } from '../src/main/processes';
@@ -66,6 +67,43 @@ describe('tracked task lifecycle', () => {
     await cancelAllTasks('app-exit');
     expect(preview.signal.aborted).toBe(true);
     endTrackedTask('preview');
+  });
+
+  it('announces once when the last user-started task ends, but not for preview-only changes', async () => {
+    const idle = vi.fn();
+    const off = onTasksIdle(idle);
+    beginTrackedTask('preview', { preemptible: true });
+    endTrackedTask('preview');
+    expect(idle).not.toHaveBeenCalled();
+
+    beginTrackedTask('analysis');
+    expect(() => beginTrackedTask('preview', { preemptible: true })).toThrow('TASK_BUSY');
+    expect(idle).not.toHaveBeenCalled();
+    endTrackedTask('analysis');
+    expect(idle).toHaveBeenCalledTimes(1);
+
+    beginExternalTask('native-export', () => undefined);
+    endExternalTask('native-export');
+    expect(idle).toHaveBeenCalledTimes(2);
+
+    beginTrackedTask('export');
+    await cancelTask('export');
+    expect(idle).toHaveBeenCalledTimes(2);
+    endTrackedTask('export');
+    expect(idle).toHaveBeenCalledTimes(3);
+
+    const child = spawnTracked('implicit', process.execPath, ['-e', 'process.exit(0)']);
+    await once(child, 'close');
+    expect(idle).toHaveBeenCalledTimes(4);
+
+    beginExternalTask('external-cancel', () => undefined);
+    await cancelTask('external-cancel');
+    expect(idle).toHaveBeenCalledTimes(5);
+
+    off();
+    beginTrackedTask('after-off');
+    endTrackedTask('after-off');
+    expect(idle).toHaveBeenCalledTimes(5);
   });
 
   it('keeps an explicit task registered after one child exits', async () => {

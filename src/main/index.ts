@@ -45,6 +45,7 @@ import {
   hasActiveTasks,
   hasBackgroundProcesses,
   hasPreemptibleTasks,
+  onTasksIdle,
 } from './processes';
 import { loadSettings, saveSettings } from './settings';
 import { getPlatformCompatibility } from './platform-compatibility';
@@ -385,6 +386,7 @@ async function createWindow(): Promise<void> {
 
 app.whenReady().then(async () => {
   configureTaskSuspensionBlocker(powerSaveBlocker);
+  onTasksIdle(() => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.tasksIdle); });
   const compatibility = await getPlatformCompatibility();
   await logLine('app', 'INFO', `Platform compatibility gate disabled: ${JSON.stringify(compatibility)}`)
     .catch(() => undefined);

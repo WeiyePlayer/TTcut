@@ -8,6 +8,7 @@ export const IPC = {
   videoProbe: 'video:probe',
   previewPrepare: 'preview:prepare',
   previewProgress: 'preview:progress',
+  tasksIdle: 'task:idle',
   videoPreparePreview: 'video:prepare-preview',
   nativePreviewOpen: 'preview:native-open',
   nativePreviewCommand: 'preview:native-command',

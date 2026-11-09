@@ -52,7 +52,9 @@ export function CompatibleVideo({ ref, hdr = false, ...props }: VideoHTMLAttribu
   useEffect(() => {
     generation.current++; attempted.current = false; deferred.current = false; failure.current = null; sourceFailed.current = false; setProxy(null); setError(null);
     if (mac && hdr) void prepare();
-    return () => { generation.current++; const id = task.current; task.current = null; if (id) void window.ttcut.cancelTask(id); };
+    // Resume a deferred proxy once the user task that held the slot ends; one retry per deferral.
+    const off = mac ? window.ttcut.onTasksIdle?.(() => { if (deferred.current) { deferred.current = false; void prepare(); } }) : undefined;
+    return () => { off?.(); generation.current++; const id = task.current; task.current = null; if (id) void window.ttcut.cancelTask(id); };
   }, [props.src, hdr]);
   return <>
     <video {...props} ref={attach} src={proxy ?? props.src}

@@ -61,6 +61,25 @@ const preemptibleTasks = new Set<string>();
 const taskCompletions = new Map<string, { promise: Promise<void>; resolve: () => void }>();
 let suspensionBlocker: TaskSuspensionBlocker | null = null;
 let suspensionBlockerId: number | null = null;
+const idleListeners = new Set<() => void>();
+let userTaskActive = false;
+
+/** Notifies once each time the last user-started task ends, so deferred previews can resume. */
+export function onTasksIdle(listener: () => void): () => void {
+  idleListeners.add(listener);
+  return () => { idleListeners.delete(listener); };
+}
+
+function synchronizeTaskState(): void {
+  synchronizeSuspensionBlocker();
+  const active = exclusiveTaskCount() > 0;
+  const becameIdle = userTaskActive && !active;
+  userTaskActive = active;
+  if (!becameIdle) return;
+  for (const listener of [...idleListeners]) {
+    try { listener(); } catch (error) { console.warn('A task idle listener failed.', error); }
+  }
+}
 
 function synchronizeSuspensionBlocker(): void {
   const active = controllers.size > 0 || externalTasks.size > 0;
@@ -148,7 +167,7 @@ export function beginTrackedTask(taskId: string, options: { preemptible?: boolea
   controllers.set(taskId, controller);
   if (options.preemptible) preemptibleTasks.add(taskId);
   registerCompletion(taskId);
-  synchronizeSuspensionBlocker();
+  synchronizeTaskState();
   return controller;
 }
 
@@ -160,7 +179,7 @@ export function endTrackedTask(taskId: string): void {
   controllers.delete(taskId);
   preemptibleTasks.delete(taskId);
   completeTask(taskId);
-  synchronizeSuspensionBlocker();
+  synchronizeTaskState();
 }
 
 export function markTaskTerminal(taskId: string): boolean {
@@ -173,12 +192,12 @@ export function markTaskTerminal(taskId: string): boolean {
 export function beginExternalTask(taskId: string, cancel: () => void | Promise<void>): void {
   assertTaskSlotAvailable(taskId);
   externalTasks.set(taskId, cancel);
-  synchronizeSuspensionBlocker();
+  synchronizeTaskState();
 }
 
 export function endExternalTask(taskId: string): void {
   externalTasks.delete(taskId);
-  synchronizeSuspensionBlocker();
+  synchronizeTaskState();
 }
 
 export function spawnTracked(taskId: string, executable: string, args: readonly string[], options: {
@@ -201,7 +220,7 @@ export function spawnTracked(taskId: string, executable: string, args: readonly 
     };
     controllers.set(taskId, controller);
     registerCompletion(taskId);
-    synchronizeSuspensionBlocker();
+    synchronizeTaskState();
   }
   if (controller.cancelRequested) throw new Error('EXPORT_CANCELLED');
   if (controller.currentProcess) throw new Error(`Task ${taskId} already has a child process.`);
@@ -219,7 +238,7 @@ export function spawnTracked(taskId: string, executable: string, args: readonly 
     if (controller && !controller.explicit) {
       controllers.delete(taskId);
       completeTask(taskId);
-      synchronizeSuspensionBlocker();
+      synchronizeTaskState();
     }
   });
   return child;
@@ -315,7 +334,7 @@ export async function cancelTask(taskId: string, reason: TaskCancellationReason 
   if (cancelExternal) {
     await cancelExternal();
     externalTasks.delete(taskId);
-    synchronizeSuspensionBlocker();
+    synchronizeTaskState();
     return;
   }
   const controller = controllers.get(taskId);
@@ -327,7 +346,7 @@ export async function cancelTask(taskId: string, reason: TaskCancellationReason 
   if (!controller.explicit) {
     controllers.delete(taskId);
     completeTask(taskId);
-    synchronizeSuspensionBlocker();
+    synchronizeTaskState();
   }
 }
 
