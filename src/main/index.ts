@@ -44,6 +44,7 @@ import {
   configureTaskSuspensionBlocker,
   hasActiveTasks,
   hasBackgroundProcesses,
+  hasPreemptibleTasks,
 } from './processes';
 import { loadSettings, saveSettings } from './settings';
 import { getPlatformCompatibility } from './platform-compatibility';
@@ -422,7 +423,7 @@ app.on('before-quit', async (event) => {
   }
   if (!hasActiveTasks()) {
     exitApproved = true;
-    if (isMac && hasBackgroundProcesses()) { event.preventDefault(); await cancelAllTasksAndWait('app-exit'); app.quit(); return; }
+    if (isMac && (hasBackgroundProcesses() || hasPreemptibleTasks())) { event.preventDefault(); await cancelAllTasksAndWait('app-exit'); app.quit(); return; }
   }
   if (!exitApproved && hasActiveTasks()) {
     event.preventDefault();

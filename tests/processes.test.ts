@@ -11,6 +11,8 @@ import {
   endExternalTask,
   endTrackedTask,
   getTaskController,
+  hasActiveTasks,
+  hasPreemptibleTasks,
   markTaskTerminal,
   runProcess,
   spawnTracked,
@@ -37,6 +39,35 @@ afterEach(async () => {
 });
 
 describe('tracked task lifecycle', () => {
+  it('lets a user-started task preempt a disposable preview instead of reporting TASK_BUSY', async () => {
+    const preview = beginTrackedTask('preview', { preemptible: true });
+    const child = spawnTracked('preview', process.execPath, ['-e', 'setInterval(() => {}, 1000)']);
+    const closed = once(child, 'close');
+    expect(hasActiveTasks()).toBe(false);
+    expect(hasPreemptibleTasks()).toBe(true);
+
+    expect(() => beginTrackedTask('analysis')).not.toThrow();
+    expect(preview.signal.aborted).toBe(true);
+    expect(preview.cancelRequested).toBe(true);
+    await closed;
+    endTrackedTask('preview');
+    expect(hasPreemptibleTasks()).toBe(false);
+    expect(activeTaskIds()).toEqual(['analysis']);
+  });
+
+  it('keeps a preview waiting while a user-started task is active', () => {
+    beginTrackedTask('export');
+    expect(() => beginTrackedTask('preview', { preemptible: true })).toThrow('TASK_BUSY');
+    expect(hasPreemptibleTasks()).toBe(false);
+  });
+
+  it('still cancels a running preview on app exit', async () => {
+    const preview = beginTrackedTask('preview', { preemptible: true });
+    await cancelAllTasks('app-exit');
+    expect(preview.signal.aborted).toBe(true);
+    endTrackedTask('preview');
+  });
+
   it('keeps an explicit task registered after one child exits', async () => {
     beginTrackedTask('normal');
     const child = spawnTracked('normal', process.execPath, ['-e', 'process.exit(0)']);

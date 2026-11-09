@@ -56,6 +56,8 @@ export function trackBackgroundProcess(child: ChildProcess): void {
 export function hasBackgroundProcesses(): boolean { return backgroundProcesses.size > 0; }
 
 const externalTasks = new Map<string, () => void | Promise<void>>();
+/** Disposable UI work (macOS compatible preview proxies) that yields to user-started tasks. */
+const preemptibleTasks = new Set<string>();
 const taskCompletions = new Map<string, { promise: Promise<void>; resolve: () => void }>();
 let suspensionBlocker: TaskSuspensionBlocker | null = null;
 let suspensionBlockerId: number | null = null;
@@ -106,13 +108,32 @@ function completeTask(taskId: string): void {
   taskCompletions.delete(taskId);
 }
 
-function assertTaskSlotAvailable(taskId: string): void {
-  if (controllers.has(taskId) || externalTasks.has(taskId)) throw new Error(`Task ${taskId} is already active.`);
-  if (controllers.size > 0 || externalTasks.size > 0) throw new Error('TASK_BUSY');
+function exclusiveTaskCount(): number {
+  let count = externalTasks.size;
+  for (const taskId of controllers.keys()) if (!preemptibleTasks.has(taskId)) count++;
+  return count;
 }
 
-export function beginTrackedTask(taskId: string): TaskController {
-  assertTaskSlotAvailable(taskId);
+function preemptTasks(): void {
+  for (const taskId of preemptibleTasks) {
+    const controller = controllers.get(taskId);
+    if (!controller || controller.cancelRequested) continue;
+    controller.cancelRequested = true;
+    controller.cancelReason = 'user';
+    controller.abortController.abort();
+    if (controller.currentProcess) void terminateChild(controller.currentProcess);
+  }
+}
+
+function assertTaskSlotAvailable(taskId: string, preemptible = false): void {
+  if (controllers.has(taskId) || externalTasks.has(taskId)) throw new Error(`Task ${taskId} is already active.`);
+  // Previews wait for any task; user-started tasks only wait for each other and cancel previews.
+  if (preemptible ? controllers.size > 0 || externalTasks.size > 0 : exclusiveTaskCount() > 0) throw new Error('TASK_BUSY');
+  if (!preemptible) preemptTasks();
+}
+
+export function beginTrackedTask(taskId: string, options: { preemptible?: boolean } = {}): TaskController {
+  assertTaskSlotAvailable(taskId, options.preemptible);
   const abortController = new AbortController();
   const controller: TaskController = {
     taskId,
@@ -125,6 +146,7 @@ export function beginTrackedTask(taskId: string): TaskController {
     explicit: true,
   };
   controllers.set(taskId, controller);
+  if (options.preemptible) preemptibleTasks.add(taskId);
   registerCompletion(taskId);
   synchronizeSuspensionBlocker();
   return controller;
@@ -136,6 +158,7 @@ export function getTaskController(taskId: string): TaskController | undefined {
 
 export function endTrackedTask(taskId: string): void {
   controllers.delete(taskId);
+  preemptibleTasks.delete(taskId);
   completeTask(taskId);
   synchronizeSuspensionBlocker();
 }
@@ -243,11 +266,18 @@ export function classifyProcessExit(
   };
 }
 
+/** User-started tasks only; a preemptible preview never blocks history, calibration or exit. */
 export function hasActiveTasks(): boolean {
-  return controllers.size > 0 || externalTasks.size > 0;
+  return exclusiveTaskCount() > 0;
 }
 
 export function activeTaskIds(): string[] {
+  return [...new Set([...controllers.keys(), ...externalTasks.keys()])].filter((taskId) => !preemptibleTasks.has(taskId));
+}
+
+export function hasPreemptibleTasks(): boolean { return preemptibleTasks.size > 0; }
+
+function allTaskIds(): string[] {
   return [...new Set([...controllers.keys(), ...externalTasks.keys()])];
 }
 
@@ -302,12 +332,12 @@ export async function cancelTask(taskId: string, reason: TaskCancellationReason 
 }
 
 export async function cancelAllTasks(reason: TaskCancellationReason = 'app-exit'): Promise<void> {
-  await Promise.all([...activeTaskIds().map((taskId) => cancelTask(taskId, reason)), ...[...backgroundProcesses.keys()].map(terminateChild)]);
+  await Promise.all([...allTaskIds().map((taskId) => cancelTask(taskId, reason)), ...[...backgroundProcesses.keys()].map(terminateChild)]);
 }
 
 export async function cancelAllTasksAndWait(reason: TaskCancellationReason = 'app-exit'): Promise<void> {
   const backgroundCompletions = [...backgroundProcesses.values()];
-  const completions = activeTaskIds()
+  const completions = allTaskIds()
     .map((taskId) => taskCompletions.get(taskId)?.promise)
     .filter((value): value is Promise<void> => Boolean(value));
   await cancelAllTasks(reason);

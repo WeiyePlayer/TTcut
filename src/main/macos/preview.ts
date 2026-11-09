@@ -11,7 +11,8 @@ import { logLine } from '../logger';
 
 export async function prepareMacPreview(window: BrowserWindow, mediaUrl: string, taskId: string): Promise<string> {
   const source = resolveMediaPath(mediaUrl);
-  const controller = beginTrackedTask(taskId);
+  // The proxy is disposable: it must not block analysis/export, which cancel it instead.
+  const controller = beginTrackedTask(taskId, { preemptible: true });
   try {
     const info = await stat(source);
     const key = createHash('sha256').update(JSON.stringify([source, info.size, info.mtimeMs, 'sdr-preview-v3-limited-video-timeline'])).digest('hex');
