@@ -4,10 +4,10 @@
 
 **Blocked by:** 01 预览给用户发起的任务让路
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] 准备中、取消、TASK_BUSY 状态都不渲染 status/alert 浮层
-- [ ] 代理生成失败但原视频可播时不打扰用户（记录日志即可）
-- [ ] 播放彻底失败时仍出现重试
-- [ ] Windows 行为不变
-- [ ] macos-compatible-video 组件测试覆盖上述状态
+- [x] 准备中、取消、TASK_BUSY 状态都不渲染 status/alert 浮层
+- [x] 代理生成失败但原视频可播时不打扰用户（记录日志即可）
+- [x] 播放彻底失败时仍出现重试
+- [x] Windows 行为不变
+- [x] macos-compatible-video 组件测试覆盖上述状态

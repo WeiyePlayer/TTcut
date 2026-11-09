@@ -3,11 +3,17 @@ import { useCallback, useEffect, useRef, useState, type Ref, type VideoHTMLAttri
 /** Keeps the same HTML video/ref while swapping only its disposable playback URL. */
 export function CompatibleVideo({ ref, hdr = false, ...props }: VideoHTMLAttributes<HTMLVideoElement> & { ref?: Ref<HTMLVideoElement>; hdr?: boolean }) {
   const [proxy, setProxy] = useState<string | null>(null);
-  const [percent, setPercent] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const task = useRef<string | null>(null);
   const generation = useRef(0);
   const attempted = useRef(false);
+  // A preempted (CANCELLED) or postponed (TASK_BUSY) attempt is not a failure:
+  // the original keeps playing and the proxy can be prepared again later.
+  const deferred = useRef(false);
+  // Proxy failures stay in the log while the original still plays; the notice
+  // and retry appear only once neither the original nor the proxy is playable.
+  const failure = useRef<string | null>(null);
+  const sourceFailed = useRef(false);
   const video = useRef<HTMLVideoElement | null>(null);
   const attach = useCallback((element: HTMLVideoElement | null) => {
     video.current = element;
@@ -18,10 +24,9 @@ export function CompatibleVideo({ ref, hdr = false, ...props }: VideoHTMLAttribu
   const english = document.documentElement.lang.startsWith('en');
   async function prepare() {
     if (!mac || !props.src || !window.ttcut.preparePreview || task.current) return;
-    attempted.current = true;
+    attempted.current = true; deferred.current = false; failure.current = null;
     const current = generation.current;
-    const id = crypto.randomUUID(); task.current = id; setPercent(0); setError(null);
-    const off = window.ttcut.onPreviewProgress?.((value) => { if (value.taskId === id && current === generation.current) setPercent(value.percent); });
+    const id = crypto.randomUUID(); task.current = id; setError(null);
     try {
       const url = await window.ttcut.preparePreview(props.src, id);
       if (current === generation.current) {
@@ -33,17 +38,19 @@ export function CompatibleVideo({ ref, hdr = false, ...props }: VideoHTMLAttribu
     catch (error) {
       if (current === generation.current) {
         const reason = (error instanceof Error ? error.message : String(error)).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '');
-        setError(reason.includes('TASK_BUSY')
-          ? (english ? 'Finish the current task, then retry preview.' : '请在当前任务完成后重试预览。')
-          : reason.includes('CANCELLED')
-            ? (english ? 'Preview cancelled.' : '已取消预览。')
-            : `${english ? 'Preview failed' : '预览生成失败'}: ${reason.slice(0, 500)}`);
+        if (reason.includes('TASK_BUSY') || reason.includes('CANCELLED')) deferred.current = true;
+        else fail(`${english ? 'Preview failed' : '预览生成失败'}: ${reason.slice(0, 500)}`);
       }
     }
-    finally { off?.(); if (task.current === id) task.current = null; if (current === generation.current) setPercent(null); }
+    finally { if (task.current === id) task.current = null; }
+  }
+  function fail(message: string) {
+    failure.current = message;
+    console.warn(`[preview] ${message}`);
+    if (sourceFailed.current) setError(message);
   }
   useEffect(() => {
-    generation.current++; attempted.current = false; setProxy(null); setError(null); setPercent(null);
+    generation.current++; attempted.current = false; deferred.current = false; failure.current = null; sourceFailed.current = false; setProxy(null); setError(null);
     if (mac && hdr) void prepare();
     return () => { generation.current++; const id = task.current; task.current = null; if (id) void window.ttcut.cancelTask(id); };
   }, [props.src, hdr]);
@@ -52,13 +59,17 @@ export function CompatibleVideo({ ref, hdr = false, ...props }: VideoHTMLAttribu
       onError={(event) => {
         props.onError?.(event);
         if (!mac) return;
-        if (proxy) setError(english ? 'Preview playback failed. Please retry.' : '预览播放失败，请重试。');
-        else if (!attempted.current) void prepare();
+        if (proxy) {
+          const message = english ? 'Preview playback failed. Please retry.' : '预览播放失败，请重试。';
+          // An HDR original that still plays is a better fallback than a notice.
+          if (!sourceFailed.current) setProxy(null);
+          fail(message);
+          return;
+        }
+        sourceFailed.current = true;
+        if (!attempted.current) void prepare();
+        else if (failure.current && !task.current) setError(failure.current);
       }} />
-    {percent !== null && <div className="compatibility-preview-status" role="status" onPointerDown={(e) => e.stopPropagation()}>
-      <span>{english ? 'Preparing preview' : '正在准备预览'} {Math.round(percent)}%</span>
-      <button type="button" onClick={() => { if (task.current) void window.ttcut.cancelTask(task.current); }}>{english ? 'Cancel' : '取消'}</button>
-    </div>}
     {error && <div className="compatibility-preview-status" role="alert" onPointerDown={(e) => e.stopPropagation()}><span>{error}</span><button type="button" onClick={() => void prepare()}>{english ? 'Retry' : '重试'}</button></div>}
   </>;
 }
