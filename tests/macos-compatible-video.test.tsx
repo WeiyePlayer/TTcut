@@ -7,12 +7,9 @@ function setup() {
   document.documentElement.lang = 'en';
   const preparePreview = vi.fn().mockResolvedValue('ttcut-media://media/proxy');
   const cancelTask = vi.fn().mockResolvedValue(undefined);
-  const idleListeners = new Set<() => void>();
-  const onTasksIdle = vi.fn((listener: () => void) => { idleListeners.add(listener); return () => { idleListeners.delete(listener); }; });
-  const announceIdle = () => act(async () => { for (const listener of [...idleListeners]) listener(); });
-  vi.stubGlobal('ttcut', { platform: 'darwin', preparePreview, cancelTask, onTasksIdle });
+  vi.stubGlobal('ttcut', { platform: 'darwin', preparePreview, cancelTask });
   vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => undefined);
-  return { preparePreview, cancelTask, announceIdle, idleListeners };
+  return { preparePreview, cancelTask };
 }
 it('logs a proxy failure without notice while the original stays playable', async () => {
   const { preparePreview } = setup();
@@ -78,17 +75,30 @@ it('prepares the HDR proxy silently while the original keeps playing, then swaps
   expect(document.querySelector('video')).toHaveAttribute('src', 'ttcut-media://media/proxy');
   expect(screen.queryByRole('status')).toBeNull();
 });
-it.each([
-  ['preempted by a user task', "Error invoking remote method 'preview': Error: CANCELLED"],
-  ['deferred by a busy task slot', "Error invoking remote method 'preview': Error: TASK_BUSY"],
-])('keeps the original playing without any notice when the preview is %s', async (_label, message) => {
+it('keeps the original playing without any notice when the request is cancelled at app exit', async () => {
   const { preparePreview } = setup();
-  preparePreview.mockRejectedValueOnce(new Error(message));
+  preparePreview.mockRejectedValueOnce(new Error("Error invoking remote method 'preview': Error: PREVIEW_CANCELLED"));
   render(<CompatibleVideo src="ttcut-media://media/source" hdr />);
   await act(async () => {});
   expect(preparePreview).toHaveBeenCalledOnce();
   expect(document.querySelector('video')).toHaveAttribute('src', 'ttcut-media://media/source');
   expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.queryByRole('status')).toBeNull();
+});
+it('hints that the compatible preview is coming only when the original cannot play while main still prepares it', async () => {
+  const { preparePreview } = setup();
+  let finish!: (url: string) => void;
+  // Main holds the request (e.g. behind an export) and settles it only with the URL.
+  preparePreview.mockImplementationOnce(() => new Promise<string>(resolve => { finish = resolve; }));
+  render(<CompatibleVideo src="ttcut-media://media/source" hdr />);
+  expect(screen.queryByRole('status')).toBeNull();
+  await act(async () => { fireEvent.error(document.querySelector('video')!); });
+  expect(preparePreview).toHaveBeenCalledOnce();
+  expect(screen.getByRole('status')).toHaveTextContent('Preparing a compatible preview');
+  expect(screen.queryByRole('button')).toBeNull();
+  expect(screen.queryByRole('alert')).toBeNull();
+  await act(async () => { finish('ttcut-media://media/proxy'); });
+  expect(document.querySelector('video')).toHaveAttribute('src', 'ttcut-media://media/proxy');
   expect(screen.queryByRole('status')).toBeNull();
 });
 it('falls back to the playable HDR original when its proxy cannot be decoded', async () => {
@@ -105,40 +115,4 @@ it('falls back to the playable HDR original when its proxy cannot be decoded', a
   await act(async () => { fireEvent.error(video); });
   expect(preparePreview).toHaveBeenCalledOnce();
   expect(screen.getByRole('alert')).toHaveTextContent('Preview playback failed');
-});
-it('resumes a preempted preview exactly once when the user task ends', async () => {
-  const { preparePreview, announceIdle } = setup();
-  preparePreview.mockRejectedValueOnce(new Error("Error invoking remote method 'preview': Error: CANCELLED"));
-  render(<CompatibleVideo src="ttcut-media://media/source" hdr />);
-  await act(async () => {});
-  expect(preparePreview).toHaveBeenCalledOnce();
-  await announceIdle();
-  expect(preparePreview).toHaveBeenCalledTimes(2);
-  expect(preparePreview).toHaveBeenLastCalledWith('ttcut-media://media/source', expect.any(String));
-  expect(document.querySelector('video')).toHaveAttribute('src', 'ttcut-media://media/proxy');
-  await announceIdle();
-  expect(preparePreview).toHaveBeenCalledTimes(2);
-});
-it('does not re-prepare a preview that was never deferred', async () => {
-  const { preparePreview, announceIdle } = setup();
-  render(<CompatibleVideo src="ttcut-media://media/source" hdr />);
-  await act(async () => {});
-  await announceIdle();
-  expect(preparePreview).toHaveBeenCalledOnce();
-});
-it('stops waiting for the idle event after unmount or a source change', async () => {
-  const { preparePreview, announceIdle, idleListeners } = setup();
-  preparePreview.mockRejectedValue(new Error("Error invoking remote method 'preview': Error: TASK_BUSY"));
-  const view = render(<CompatibleVideo src="ttcut-media://media/source" hdr />);
-  await act(async () => {});
-  view.rerender(<CompatibleVideo src="ttcut-media://media/other" />);
-  await announceIdle();
-  expect(preparePreview).toHaveBeenCalledOnce();
-  view.rerender(<CompatibleVideo src="ttcut-media://media/third" hdr />);
-  await act(async () => {});
-  expect(preparePreview).toHaveBeenCalledTimes(2);
-  view.unmount();
-  expect(idleListeners.size).toBe(0);
-  await announceIdle();
-  expect(preparePreview).toHaveBeenCalledTimes(2);
 });

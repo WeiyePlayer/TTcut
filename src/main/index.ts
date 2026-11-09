@@ -45,7 +45,6 @@ import {
   hasActiveTasks,
   hasBackgroundProcesses,
   hasPreemptibleTasks,
-  onTasksIdle,
 } from './processes';
 import { loadSettings, saveSettings } from './settings';
 import { getPlatformCompatibility } from './platform-compatibility';
@@ -134,7 +133,7 @@ function registerIpc(): void {
   });
   ipcMain.handle(IPC.previewPrepare, (_event, mediaUrl: unknown, taskId: unknown) => {
     if (!isMac || typeof mediaUrl !== 'string' || typeof taskId !== 'string' || !/^[a-f0-9-]{36}$/i.test(taskId)) throw new Error('INVALID_REQUEST');
-    return prepareMacPreview(currentWindow(), mediaUrl, taskId);
+    return prepareMacPreview(mediaUrl, taskId);
   });
   ipcMain.handle(IPC.settingsSave, (_event, value: unknown) => saveSettings(appSettingsSchema.parse(value)));
   ipcMain.handle(IPC.componentsRefresh, () => inspectInstalledComponents());
@@ -386,7 +385,6 @@ async function createWindow(): Promise<void> {
 
 app.whenReady().then(async () => {
   configureTaskSuspensionBlocker(powerSaveBlocker);
-  onTasksIdle(() => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.tasksIdle); });
   const compatibility = await getPlatformCompatibility();
   await logLine('app', 'INFO', `Platform compatibility gate disabled: ${JSON.stringify(compatibility)}`)
     .catch(() => undefined);

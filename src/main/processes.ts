@@ -19,7 +19,8 @@ export class ProcessExecutionError extends Error {
     this.signal = details.signal;
   }
 }
-export type TaskCancellationReason = 'user' | 'app-exit';
+/** 'preempted' marks a disposable preview yielding to a user-started task; it is retried, never reported. */
+export type TaskCancellationReason = 'user' | 'app-exit' | 'preempted';
 export type ProcessExitClassification = {
   kind: 'success' | 'cancelled' | 'terminated' | 'failed';
   code: 'EXPORT_CANCELLED' | 'EXPORT_TERMINATED' | 'EXPORT_FAILED' | null;
@@ -56,33 +57,52 @@ export function trackBackgroundProcess(child: ChildProcess): void {
 export function hasBackgroundProcesses(): boolean { return backgroundProcesses.size > 0; }
 
 const externalTasks = new Map<string, () => void | Promise<void>>();
-/** Disposable UI work (macOS compatible preview proxies) that yields to user-started tasks. */
-const preemptibleTasks = new Set<string>();
 const taskCompletions = new Map<string, { promise: Promise<void>; resolve: () => void }>();
 let suspensionBlocker: TaskSuspensionBlocker | null = null;
 let suspensionBlockerId: number | null = null;
-const idleListeners = new Set<() => void>();
-let userTaskActive = false;
 
-/** Notifies once each time the last user-started task ends, so deferred previews can resume. */
-export function onTasksIdle(listener: () => void): () => void {
-  idleListeners.add(listener);
-  return () => { idleListeners.delete(listener); };
-}
+/**
+ * A preemptible request lives from the call to runPreemptibleTask until it settles.
+ * While it cannot start (a user task runs, or another preview is still unwinding)
+ * it waits here in main; a preempted run is re-queued instead of surfacing.
+ */
+type PreemptibleRequest = { cancelled: boolean; wake: (() => void) | null; abandon: (() => void) | null; done: Promise<void> };
+const preemptibleRequests = new Map<string, PreemptibleRequest>();
+/** Delay before a waiting preview starts once the slot frees, so the finished task's terminal event
+ *  and any resulting navigation reach the renderer first and cancel requests that became stale. */
+export const PREEMPTIBLE_RESUME_DELAY_MS = 400;
+let resumeTimer: ReturnType<typeof setTimeout> | null = null;
 
 function synchronizeTaskState(): void {
   synchronizeSuspensionBlocker();
-  const active = exclusiveTaskCount() > 0;
-  const becameIdle = userTaskActive && !active;
-  userTaskActive = active;
-  if (!becameIdle) return;
-  for (const listener of [...idleListeners]) {
-    try { listener(); } catch (error) { console.warn('A task idle listener failed.', error); }
-  }
+  scheduleWaitingRequest();
+}
+
+function slotFree(): boolean { return controllers.size === 0 && externalTasks.size === 0; }
+
+function nextWaitingRequest(): PreemptibleRequest | undefined {
+  for (const request of preemptibleRequests.values()) if (request.wake) return request;
+  return undefined;
+}
+
+function scheduleWaitingRequest(): void {
+  // Restart the delay on every slot change so a waiter starts only after the slot has stayed free.
+  if (resumeTimer) clearTimeout(resumeTimer);
+  resumeTimer = null;
+  if (!slotFree() || !nextWaitingRequest()) return;
+  resumeTimer = setTimeout(() => {
+    resumeTimer = null;
+    if (!slotFree()) return; // The next task end reschedules.
+    const request = nextWaitingRequest();
+    const wake = request?.wake;
+    if (request && wake) { request.wake = null; request.abandon = null; wake(); }
+  }, PREEMPTIBLE_RESUME_DELAY_MS);
+  resumeTimer.unref?.();
 }
 
 function synchronizeSuspensionBlocker(): void {
-  const active = controllers.size > 0 || externalTasks.size > 0;
+  // Only user-started work keeps the Mac awake; a silent preview proxy does not.
+  const active = activeTaskIds().length > 0;
   if (active && suspensionBlocker && suspensionBlockerId === null) {
     try {
       suspensionBlockerId = suspensionBlocker.start('prevent-app-suspension');
@@ -127,32 +147,24 @@ function completeTask(taskId: string): void {
   taskCompletions.delete(taskId);
 }
 
-function exclusiveTaskCount(): number {
-  let count = externalTasks.size;
-  for (const taskId of controllers.keys()) if (!preemptibleTasks.has(taskId)) count++;
-  return count;
-}
-
-function preemptTasks(): void {
-  for (const taskId of preemptibleTasks) {
-    const controller = controllers.get(taskId);
-    if (!controller || controller.cancelRequested) continue;
-    controller.cancelRequested = true;
-    controller.cancelReason = 'user';
-    controller.abortController.abort();
-    if (controller.currentProcess) void terminateChild(controller.currentProcess);
+function assertTaskSlotAvailable(taskId: string, preemptible = false): void {
+  if (controllers.has(taskId) || externalTasks.has(taskId)) throw new Error(`Task ${taskId} is already active.`);
+  // Previews wait for any task; user-started tasks only wait for each other and preempt previews.
+  if (preemptible ? !slotFree() : activeTaskIds().length > 0) throw new Error('TASK_BUSY');
+  if (!preemptible) {
+    for (const previewId of preemptibleRequests.keys()) {
+      const running = controllers.get(previewId);
+      if (running && !running.cancelRequested) void cancelTask(previewId, 'preempted');
+    }
   }
 }
 
-function assertTaskSlotAvailable(taskId: string, preemptible = false): void {
-  if (controllers.has(taskId) || externalTasks.has(taskId)) throw new Error(`Task ${taskId} is already active.`);
-  // Previews wait for any task; user-started tasks only wait for each other and cancel previews.
-  if (preemptible ? controllers.size > 0 || externalTasks.size > 0 : exclusiveTaskCount() > 0) throw new Error('TASK_BUSY');
-  if (!preemptible) preemptTasks();
+export function beginTrackedTask(taskId: string): TaskController {
+  return beginController(taskId, false);
 }
 
-export function beginTrackedTask(taskId: string, options: { preemptible?: boolean } = {}): TaskController {
-  assertTaskSlotAvailable(taskId, options.preemptible);
+function beginController(taskId: string, preemptible: boolean): TaskController {
+  assertTaskSlotAvailable(taskId, preemptible);
   const abortController = new AbortController();
   const controller: TaskController = {
     taskId,
@@ -165,7 +177,6 @@ export function beginTrackedTask(taskId: string, options: { preemptible?: boolea
     explicit: true,
   };
   controllers.set(taskId, controller);
-  if (options.preemptible) preemptibleTasks.add(taskId);
   registerCompletion(taskId);
   synchronizeTaskState();
   return controller;
@@ -177,7 +188,6 @@ export function getTaskController(taskId: string): TaskController | undefined {
 
 export function endTrackedTask(taskId: string): void {
   controllers.delete(taskId);
-  preemptibleTasks.delete(taskId);
   completeTask(taskId);
   synchronizeTaskState();
 }
@@ -285,20 +295,61 @@ export function classifyProcessExit(
   };
 }
 
+/**
+ * Runs disposable UI work (the macOS compatible preview proxy) that yields to user-started tasks.
+ * It waits in main while the slot is taken, is re-run after a preemption, and settles only with
+ * its final result, a real failure, or CANCELLED when this taskId itself is cancelled.
+ */
+export async function runPreemptibleTask<T>(taskId: string, run: (controller: TaskController) => Promise<T>): Promise<T> {
+  if (preemptibleRequests.has(taskId) || controllers.has(taskId) || externalTasks.has(taskId)) throw new Error(`Task ${taskId} is already active.`);
+  let finish: () => void = () => {};
+  const request: PreemptibleRequest = { cancelled: false, wake: null, abandon: null, done: new Promise<void>((resolve) => { finish = resolve; }) };
+  preemptibleRequests.set(taskId, request);
+  try {
+    // A fresh request starts at once when nothing holds the slot or waits ahead of it.
+    let mustWait = Boolean(nextWaitingRequest());
+    for (;;) {
+      if (request.cancelled) throw new Error('PREVIEW_CANCELLED');
+      if (mustWait || !slotFree()) {
+        await new Promise<void>((resolve, reject) => {
+          request.wake = resolve;
+          request.abandon = () => reject(new Error('PREVIEW_CANCELLED'));
+          scheduleWaitingRequest();
+        });
+        mustWait = false;
+        continue;
+      }
+      const controller = beginController(taskId, true);
+      try {
+        return await run(controller);
+      } catch (error) {
+        if (request.cancelled || controller.cancelReason !== 'preempted') throw error;
+      } finally { endTrackedTask(taskId); }
+      mustWait = true;
+    }
+  } finally {
+    preemptibleRequests.delete(taskId);
+    finish();
+    scheduleWaitingRequest();
+  }
+}
+
+/** User-started task ids, excluding preemptible previews. */
+export function activeTaskIds(): string[] {
+  return taskIds().filter((taskId) => !preemptibleRequests.has(taskId));
+}
+
+function taskIds(): string[] {
+  return [...new Set([...controllers.keys(), ...externalTasks.keys(), ...preemptibleRequests.keys()])];
+}
+
 /** User-started tasks only; a preemptible preview never blocks history, calibration or exit. */
 export function hasActiveTasks(): boolean {
-  return exclusiveTaskCount() > 0;
+  return activeTaskIds().length > 0;
 }
 
-export function activeTaskIds(): string[] {
-  return [...new Set([...controllers.keys(), ...externalTasks.keys()])].filter((taskId) => !preemptibleTasks.has(taskId));
-}
-
-export function hasPreemptibleTasks(): boolean { return preemptibleTasks.size > 0; }
-
-function allTaskIds(): string[] {
-  return [...new Set([...controllers.keys(), ...externalTasks.keys()])];
-}
+/** Running or waiting previews, which app exit still has to cancel. */
+export function hasPreemptibleTasks(): boolean { return preemptibleRequests.size > 0; }
 
 export function terminateChild(child: ChildProcess): Promise<void> {
   const existing = terminationRequests.get(child);
@@ -330,6 +381,14 @@ export function terminateChild(child: ChildProcess): Promise<void> {
 }
 
 export async function cancelTask(taskId: string, reason: TaskCancellationReason = 'user'): Promise<void> {
+  const request = reason === 'preempted' ? undefined : preemptibleRequests.get(taskId);
+  if (request) {
+    // Cancelling the request itself (renderer cleanup or app exit) ends it whether waiting or running.
+    request.cancelled = true;
+    const abandon = request.abandon;
+    request.wake = null; request.abandon = null;
+    abandon?.();
+  }
   const cancelExternal = externalTasks.get(taskId);
   if (cancelExternal) {
     await cancelExternal();
@@ -351,14 +410,15 @@ export async function cancelTask(taskId: string, reason: TaskCancellationReason 
 }
 
 export async function cancelAllTasks(reason: TaskCancellationReason = 'app-exit'): Promise<void> {
-  await Promise.all([...allTaskIds().map((taskId) => cancelTask(taskId, reason)), ...[...backgroundProcesses.keys()].map(terminateChild)]);
+  await Promise.all([...taskIds().map((taskId) => cancelTask(taskId, reason)), ...[...backgroundProcesses.keys()].map(terminateChild)]);
 }
 
 export async function cancelAllTasksAndWait(reason: TaskCancellationReason = 'app-exit'): Promise<void> {
   const backgroundCompletions = [...backgroundProcesses.values()];
-  const completions = allTaskIds()
-    .map((taskId) => taskCompletions.get(taskId)?.promise)
-    .filter((value): value is Promise<void> => Boolean(value));
+  const completions = [
+    ...taskIds().map((taskId) => taskCompletions.get(taskId)?.promise),
+    ...[...preemptibleRequests.values()].map((request) => request.done),
+  ].filter((value): value is Promise<void> => Boolean(value));
   await cancelAllTasks(reason);
   await Promise.all([...completions, ...backgroundCompletions]);
 }

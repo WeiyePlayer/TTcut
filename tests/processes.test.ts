@@ -5,6 +5,7 @@ import {
   beginExternalTask,
   beginTrackedTask,
   cancelAllTasks,
+  cancelAllTasksAndWait,
   cancelTask,
   classifyProcessExit,
   configureTaskSuspensionBlocker,
@@ -14,9 +15,11 @@ import {
   hasActiveTasks,
   hasPreemptibleTasks,
   markTaskTerminal,
-  onTasksIdle,
+  PREEMPTIBLE_RESUME_DELAY_MS,
+  runPreemptibleTask,
   runProcess,
   spawnTracked,
+  type TaskController,
 } from '../src/main/processes';
 
 const suspensionBlocker = {
@@ -40,70 +43,128 @@ afterEach(async () => {
 });
 
 describe('tracked task lifecycle', () => {
-  it('lets a user-started task preempt a disposable preview instead of reporting TASK_BUSY', async () => {
-    const preview = beginTrackedTask('preview', { preemptible: true });
-    const child = spawnTracked('preview', process.execPath, ['-e', 'setInterval(() => {}, 1000)']);
-    const closed = once(child, 'close');
+  it('lets a user-started task preempt a running preview instead of reporting TASK_BUSY', async () => {
+    let preview!: TaskController;
+    let closed!: Promise<unknown>;
+    const result = runPreemptibleTask('preview', async (controller) => {
+      preview = controller;
+      const child = spawnTracked('preview', process.execPath, ['-e', 'setInterval(() => {}, 1000)']);
+      closed = once(child, 'close');
+      await closed;
+      throw new Error('PROCESS_CANCELLED');
+    });
     expect(hasActiveTasks()).toBe(false);
     expect(hasPreemptibleTasks()).toBe(true);
-
     expect(() => beginTrackedTask('analysis')).not.toThrow();
     expect(preview.signal.aborted).toBe(true);
-    expect(preview.cancelRequested).toBe(true);
+    expect(preview.cancelReason).toBe('preempted');
     await closed;
-    endTrackedTask('preview');
-    expect(hasPreemptibleTasks()).toBe(false);
     expect(activeTaskIds()).toEqual(['analysis']);
+    await cancelTask('preview');
+    await expect(result).rejects.toThrow('CANCELLED');
   });
 
-  it('keeps a preview waiting while a user-started task is active', () => {
-    beginTrackedTask('export');
-    expect(() => beginTrackedTask('preview', { preemptible: true })).toThrow('TASK_BUSY');
+  it('keeps a preview request waiting in main while a user task runs, then starts it after the task ends', async () => {
+    vi.useFakeTimers();
+    try {
+      beginTrackedTask('export');
+      const run = vi.fn(async () => 'proxy-url');
+      const result = runPreemptibleTask('preview', run);
+      expect(run).not.toHaveBeenCalled();
+      expect(hasPreemptibleTasks()).toBe(true);
+      endTrackedTask('export');
+      // Not synchronously at task end: the terminal event and any navigation reach the renderer first.
+      expect(run).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(PREEMPTIBLE_RESUME_DELAY_MS);
+      expect(run).toHaveBeenCalledOnce();
+      await expect(result).resolves.toBe('proxy-url');
+      expect(hasPreemptibleTasks()).toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('re-runs a preempted preview once the user task ends, settling only with its final result', async () => {
+    vi.useFakeTimers();
+    try {
+      let attempts = 0;
+      const result = runPreemptibleTask('preview', async (controller) => {
+        attempts++;
+        if (attempts === 1) {
+          await new Promise((_resolve, reject) => controller.signal.addEventListener('abort', () => reject(new Error('PROCESS_CANCELLED'))));
+        }
+        return `proxy-${attempts}`;
+      });
+      beginTrackedTask('analysis');
+      await vi.advanceTimersByTimeAsync(PREEMPTIBLE_RESUME_DELAY_MS * 2);
+      expect(attempts).toBe(1);
+      expect(hasPreemptibleTasks()).toBe(true);
+      endTrackedTask('analysis');
+      await vi.advanceTimersByTimeAsync(PREEMPTIBLE_RESUME_DELAY_MS);
+      await expect(result).resolves.toBe('proxy-2');
+      expect(attempts).toBe(2);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('waits for a cancelled preview that is still unwinding instead of reporting TASK_BUSY', async () => {
+    vi.useFakeTimers();
+    try {
+      let unwind!: () => void;
+      const old = runPreemptibleTask('old-page', (controller) => new Promise<string>((_resolve, reject) => {
+        controller.signal.addEventListener('abort', () => { unwind = () => reject(new Error('PROCESS_CANCELLED')); });
+      }));
+      const oldSettled = expect(old).rejects.toThrow('CANCELLED');
+      await cancelTask('old-page');
+      const run = vi.fn(async () => 'new-proxy');
+      const next = runPreemptibleTask('new-page', run);
+      await vi.advanceTimersByTimeAsync(PREEMPTIBLE_RESUME_DELAY_MS * 2);
+      expect(run).not.toHaveBeenCalled();
+      unwind();
+      await oldSettled;
+      await vi.advanceTimersByTimeAsync(PREEMPTIBLE_RESUME_DELAY_MS);
+      await expect(next).resolves.toBe('new-proxy');
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('rejects a waiting preview with CANCELLED when its own task is cancelled, and never runs it', async () => {
+    vi.useFakeTimers();
+    try {
+      beginTrackedTask('export');
+      const run = vi.fn(async () => 'proxy');
+      const result = runPreemptibleTask('preview', run);
+      const settled = expect(result).rejects.toThrow('CANCELLED');
+      await cancelTask('preview');
+      await settled;
+      expect(hasPreemptibleTasks()).toBe(false);
+      endTrackedTask('export');
+      await vi.advanceTimersByTimeAsync(PREEMPTIBLE_RESUME_DELAY_MS * 2);
+      expect(run).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('cancels running and waiting previews on app exit', async () => {
+    let running!: TaskController;
+    const first = runPreemptibleTask('preview', (controller) => {
+      running = controller;
+      return new Promise<string>((_resolve, reject) => controller.signal.addEventListener('abort', () => reject(new Error('PROCESS_CANCELLED'))));
+    });
+    const waitingRun = vi.fn(async () => 'proxy');
+    const waiting = runPreemptibleTask('waiting', waitingRun);
+    const settled = Promise.all([expect(first).rejects.toThrow('CANCELLED'), expect(waiting).rejects.toThrow('CANCELLED')]);
+    expect(hasPreemptibleTasks()).toBe(true);
+    await cancelAllTasksAndWait('app-exit');
+    await settled;
+    expect(running.cancelReason).toBe('app-exit');
+    expect(waitingRun).not.toHaveBeenCalled();
     expect(hasPreemptibleTasks()).toBe(false);
   });
 
-  it('still cancels a running preview on app exit', async () => {
-    const preview = beginTrackedTask('preview', { preemptible: true });
-    await cancelAllTasks('app-exit');
-    expect(preview.signal.aborted).toBe(true);
-    endTrackedTask('preview');
-  });
-
-  it('announces once when the last user-started task ends, but not for preview-only changes', async () => {
-    const idle = vi.fn();
-    const off = onTasksIdle(idle);
-    beginTrackedTask('preview', { preemptible: true });
-    endTrackedTask('preview');
-    expect(idle).not.toHaveBeenCalled();
-
-    beginTrackedTask('analysis');
-    expect(() => beginTrackedTask('preview', { preemptible: true })).toThrow('TASK_BUSY');
-    expect(idle).not.toHaveBeenCalled();
-    endTrackedTask('analysis');
-    expect(idle).toHaveBeenCalledTimes(1);
-
-    beginExternalTask('native-export', () => undefined);
-    endExternalTask('native-export');
-    expect(idle).toHaveBeenCalledTimes(2);
-
+  it('does not keep the Mac awake for a silent preview', async () => {
+    let finish!: () => void;
+    const result = runPreemptibleTask('preview', () => new Promise<void>((resolve) => { finish = resolve; }));
+    expect(suspensionBlocker.start).not.toHaveBeenCalled();
     beginTrackedTask('export');
-    await cancelTask('export');
-    expect(idle).toHaveBeenCalledTimes(2);
-    endTrackedTask('export');
-    expect(idle).toHaveBeenCalledTimes(3);
-
-    const child = spawnTracked('implicit', process.execPath, ['-e', 'process.exit(0)']);
-    await once(child, 'close');
-    expect(idle).toHaveBeenCalledTimes(4);
-
-    beginExternalTask('external-cancel', () => undefined);
-    await cancelTask('external-cancel');
-    expect(idle).toHaveBeenCalledTimes(5);
-
-    off();
-    beginTrackedTask('after-off');
-    endTrackedTask('after-off');
-    expect(idle).toHaveBeenCalledTimes(5);
+    expect(suspensionBlocker.start).toHaveBeenCalledOnce();
+    finish();
+    await result;
   });
 
   it('keeps an explicit task registered after one child exits', async () => {

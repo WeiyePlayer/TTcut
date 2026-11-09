@@ -14,16 +14,6 @@ const api: TTcutApi = {
     return () => ipcRenderer.removeListener(IPC.nativePreviewEvent, wrapped);
   },
   preparePreview: (mediaUrl, taskId) => ipcRenderer.invoke(IPC.previewPrepare, mediaUrl, taskId),
-  onPreviewProgress: (listener) => {
-    const wrapped = (_event: Electron.IpcRendererEvent, value: { taskId: string; percent: number }) => listener(value);
-    ipcRenderer.on(IPC.previewProgress, wrapped);
-    return () => ipcRenderer.removeListener(IPC.previewProgress, wrapped);
-  },
-  onTasksIdle: (listener) => {
-    const wrapped = () => listener();
-    ipcRenderer.on(IPC.tasksIdle, wrapped);
-    return () => ipcRenderer.removeListener(IPC.tasksIdle, wrapped);
-  },
   bootstrap: () => ipcRenderer.invoke(IPC.appBootstrap),
   saveSettings: (settings: AppSettings) => ipcRenderer.invoke(IPC.settingsSave, settings),
   refreshComponents: () => ipcRenderer.invoke(IPC.componentsRefresh),

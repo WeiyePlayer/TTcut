@@ -4,12 +4,13 @@ import { useCallback, useEffect, useRef, useState, type Ref, type VideoHTMLAttri
 export function CompatibleVideo({ ref, hdr = false, ...props }: VideoHTMLAttributes<HTMLVideoElement> & { ref?: Ref<HTMLVideoElement>; hdr?: boolean }) {
   const [proxy, setProxy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Main settles a request only with the URL, a real failure, or CANCELLED for this request's own id;
+  // while it waits behind a user task or re-runs after a preemption, the original keeps playing.
+  const [pending, setPending] = useState(false);
+  const [sourceUnplayable, setSourceUnplayable] = useState(false);
   const task = useRef<string | null>(null);
   const generation = useRef(0);
   const attempted = useRef(false);
-  // A preempted (CANCELLED) or postponed (TASK_BUSY) attempt is not a failure:
-  // the original keeps playing and the proxy can be prepared again later.
-  const deferred = useRef(false);
   // Proxy failures stay in the log while the original still plays; the notice
   // and retry appear only once neither the original nor the proxy is playable.
   const failure = useRef<string | null>(null);
@@ -24,9 +25,9 @@ export function CompatibleVideo({ ref, hdr = false, ...props }: VideoHTMLAttribu
   const english = document.documentElement.lang.startsWith('en');
   async function prepare() {
     if (!mac || !props.src || !window.ttcut.preparePreview || task.current) return;
-    attempted.current = true; deferred.current = false; failure.current = null;
+    attempted.current = true; failure.current = null;
     const current = generation.current;
-    const id = crypto.randomUUID(); task.current = id; setError(null);
+    const id = crypto.randomUUID(); task.current = id; setError(null); setPending(true);
     try {
       const url = await window.ttcut.preparePreview(props.src, id);
       if (current === generation.current) {
@@ -38,11 +39,10 @@ export function CompatibleVideo({ ref, hdr = false, ...props }: VideoHTMLAttribu
     catch (error) {
       if (current === generation.current) {
         const reason = (error instanceof Error ? error.message : String(error)).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '');
-        if (reason.includes('TASK_BUSY') || reason.includes('CANCELLED')) deferred.current = true;
-        else fail(`${english ? 'Preview failed' : '预览生成失败'}: ${reason.slice(0, 500)}`);
+        if (!reason.includes('CANCELLED')) fail(`${english ? 'Preview failed' : '预览生成失败'}: ${reason.slice(0, 500)}`);
       }
     }
-    finally { if (task.current === id) task.current = null; }
+    finally { if (task.current === id) task.current = null; if (current === generation.current) setPending(false); }
   }
   function fail(message: string) {
     failure.current = message;
@@ -50,11 +50,10 @@ export function CompatibleVideo({ ref, hdr = false, ...props }: VideoHTMLAttribu
     if (sourceFailed.current) setError(message);
   }
   useEffect(() => {
-    generation.current++; attempted.current = false; deferred.current = false; failure.current = null; sourceFailed.current = false; setProxy(null); setError(null);
+    generation.current++; attempted.current = false; failure.current = null; sourceFailed.current = false;
+    setProxy(null); setError(null); setPending(false); setSourceUnplayable(false);
     if (mac && hdr) void prepare();
-    // Resume a deferred proxy once the user task that held the slot ends; one retry per deferral.
-    const off = mac ? window.ttcut.onTasksIdle?.(() => { if (deferred.current) { deferred.current = false; void prepare(); } }) : undefined;
-    return () => { off?.(); generation.current++; const id = task.current; task.current = null; if (id) void window.ttcut.cancelTask(id); };
+    return () => { generation.current++; const id = task.current; task.current = null; if (id) void window.ttcut.cancelTask(id); };
   }, [props.src, hdr]);
   return <>
     <video {...props} ref={attach} src={proxy ?? props.src}
@@ -68,10 +67,12 @@ export function CompatibleVideo({ ref, hdr = false, ...props }: VideoHTMLAttribu
           fail(message);
           return;
         }
-        sourceFailed.current = true;
+        sourceFailed.current = true; setSourceUnplayable(true);
         if (!attempted.current) void prepare();
         else if (failure.current && !task.current) setError(failure.current);
       }} />
+    {/* Only an unplayable original leaves nothing on screen, so only then say a proxy is coming. */}
+    {!error && pending && sourceUnplayable && !proxy && <div className="compatibility-preview-status" role="status" style={{ pointerEvents: 'none' }}><span>{english ? 'Preparing a compatible preview…' : '正在准备兼容预览…'}</span></div>}
     {error && <div className="compatibility-preview-status" role="alert" onPointerDown={(e) => e.stopPropagation()}><span>{error}</span><button type="button" onClick={() => void prepare()}>{english ? 'Retry' : '重试'}</button></div>}
   </>;
 }
