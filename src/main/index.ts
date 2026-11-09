@@ -44,6 +44,7 @@ import {
   configureTaskSuspensionBlocker,
   hasActiveTasks,
   hasBackgroundProcesses,
+  hasPreemptibleTasks,
 } from './processes';
 import { loadSettings, saveSettings } from './settings';
 import { getPlatformCompatibility } from './platform-compatibility';
@@ -132,7 +133,7 @@ function registerIpc(): void {
   });
   ipcMain.handle(IPC.previewPrepare, (_event, mediaUrl: unknown, taskId: unknown) => {
     if (!isMac || typeof mediaUrl !== 'string' || typeof taskId !== 'string' || !/^[a-f0-9-]{36}$/i.test(taskId)) throw new Error('INVALID_REQUEST');
-    return prepareMacPreview(currentWindow(), mediaUrl, taskId);
+    return prepareMacPreview(mediaUrl, taskId);
   });
   ipcMain.handle(IPC.settingsSave, (_event, value: unknown) => saveSettings(appSettingsSchema.parse(value)));
   ipcMain.handle(IPC.componentsRefresh, () => inspectInstalledComponents());
@@ -422,7 +423,7 @@ app.on('before-quit', async (event) => {
   }
   if (!hasActiveTasks()) {
     exitApproved = true;
-    if (isMac && hasBackgroundProcesses()) { event.preventDefault(); await cancelAllTasksAndWait('app-exit'); app.quit(); return; }
+    if (isMac && (hasBackgroundProcesses() || hasPreemptibleTasks())) { event.preventDefault(); await cancelAllTasksAndWait('app-exit'); app.quit(); return; }
   }
   if (!exitApproved && hasActiveTasks()) {
     event.preventDefault();

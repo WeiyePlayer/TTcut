@@ -7,7 +7,6 @@ export const IPC = {
   videoAcceptDrop: 'video:accept-drop',
   videoProbe: 'video:probe',
   previewPrepare: 'preview:prepare',
-  previewProgress: 'preview:progress',
   videoPreparePreview: 'video:prepare-preview',
   nativePreviewOpen: 'preview:native-open',
   nativePreviewCommand: 'preview:native-command',

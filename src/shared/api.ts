@@ -72,7 +72,6 @@ export interface TTcutApi {
   nativePreviewClose?(sessionId: string): Promise<void>;
   onNativePreviewEvent?(listener: (event: NativePreviewEvent) => void): () => void;
   preparePreview?(mediaUrl: string, taskId: string): Promise<string>;
-  onPreviewProgress?(listener: (value: { taskId: string; percent: number }) => void): () => void;
   bootstrap(): Promise<BootstrapData>;
   saveSettings(settings: AppSettings): Promise<AppSettings>;
   refreshComponents(): Promise<ComponentStatus>;
