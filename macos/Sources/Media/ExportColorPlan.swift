@@ -1,6 +1,20 @@
 import Foundation
 import TTcutCore
 
+/// The Hable tone-map rule shared by export, preview proxies and covers.
+public enum HDRToneMap {
+  /// Plain HLG or a Dolby Vision 8.4 base layer.
+  public static func isHLG(_ video: VideoInfo) -> Bool {
+    video.colorTransfer == "arib-std-b67" || video.hdr == .hlg
+      || video.dolbyVision?.signalCompatibilityID == 4
+  }
+
+  /// HLG diffuse white linearises to ~2.0 at npl=100, so desat=2 would grey well-lit scenes; PQ keeps desat=2.
+  public static func hable(hlg: Bool) -> String {
+    "tonemap=tonemap=hable:desat=\(hlg ? 0 : 2)"
+  }
+}
+
 public struct ExportColorPlan: Sendable {
   public let source: VideoInfo
   public let target: VideoInfo
@@ -50,11 +64,9 @@ public struct ExportColorPlan: Sendable {
   public var filters: [String] {
     guard let toneMapTransfer else { return [] }
     let range = ["pc", "full", "jpeg"].contains(source.colorRange ?? "") ? "full" : "limited"
-    // HLG diffuse white linearises to ~2.0 at npl=100, so desat=2 would grey well-lit scenes.
-    let desat = toneMapTransfer == "arib-std-b67" ? 0 : 2
     return [
       "zscale=pin=bt2020:tin=\(toneMapTransfer):min=bt2020nc:rin=\(range):t=linear:npl=100",
-      "format=gbrpf32le", "zscale=p=bt709", "tonemap=tonemap=hable:desat=\(desat)",
+      "format=gbrpf32le", "zscale=p=bt709", HDRToneMap.hable(hlg: toneMapTransfer == "arib-std-b67"),
       "zscale=t=bt709:m=bt709:r=limited", "format=yuv420p",
     ] + ["MASTERING_DISPLAY_METADATA", "CONTENT_LIGHT_LEVEL", "DYNAMIC_HDR_PLUS", "DOVI_RPU_BUFFER", "DOVI_METADATA"].map {
       "sidedata=mode=delete:type=\($0)"

@@ -199,11 +199,13 @@ describe('export task start and terminal lifecycle', () => {
       expect(path.dirname(xmlPath)).toBe(results[0]?.outputDirectory);
       await expect(access(xmlPath)).resolves.toBeUndefined();
       expect(await readdir(path.dirname(state.source))).toEqual(['source.mp4']);
+      // The directory is resolved before the task is tracked, so the fallback is an app-level line.
       expect(logLine).toHaveBeenCalledWith(
-        first,
+        'app',
         'INFO',
         `Export output directory fallback: ${path.dirname(state.source)} -> ${fallback()}`,
       );
+      expect(logLine).not.toHaveBeenCalledWith(first, 'INFO', expect.stringContaining('Export output directory fallback'));
     });
 
     it.skipIf(!readOnlyDirectoriesEnforced)('starts a source-destination video export in Movies/TTcut instead of failing as unwritable', async () => {
@@ -216,7 +218,7 @@ describe('export task start and terminal lifecycle', () => {
         expect.objectContaining({ code: 'EXPORT_CANCELLED' }),
       ]);
       expect(logLine).toHaveBeenCalledWith(
-        taskId,
+        'app',
         'INFO',
         `Export output directory fallback: ${path.dirname(state.source)} -> ${fallback()}`,
       );
@@ -229,6 +231,22 @@ describe('export task start and terminal lifecycle', () => {
         .rejects.toThrow('EXPORT_CANCELLED');
       expect(dialog.showSaveDialog).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
         defaultPath: path.join(fallback(), 'source_TTcut.mp4'),
+      }));
+    });
+
+    it.skipIf(!readOnlyDirectoriesEnforced)('still opens the save dialog, at the source folder, when Movies/TTcut cannot be created', async () => {
+      await mkdir(state.videos, { recursive: true });
+      await chmod(state.videos, 0o555);
+      vi.mocked(dialog.showSaveDialog).mockResolvedValue({ canceled: true, filePath: '' });
+
+      try {
+        await expect(startExport(windowMock() as never, { ...request, destination: 'prompt' }))
+          .rejects.toThrow('EXPORT_CANCELLED');
+      } finally {
+        await chmod(state.videos, 0o755);
+      }
+      expect(dialog.showSaveDialog).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+        defaultPath: path.join(path.dirname(state.source), 'source_TTcut.mp4'),
       }));
     });
   });

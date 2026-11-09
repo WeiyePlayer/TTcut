@@ -20,17 +20,18 @@ public enum MediaPreview {
       throw TTError("PREVIEW_VALIDATION_FAILED", "PREVIEW_VALIDATION_FAILED:VIDEO_TRUNCATED")
     }
   }
+  static func toneFilter(_ video: VideoInfo) -> String {
+    video.hdr == .sdr
+      ? ""
+      : "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,\(HDRToneMap.hable(hlg: HDRToneMap.isHLG(video))),zscale=t=bt709:m=bt709:r=tv,"
+  }
   /// Caller-owned output, without a dependency on history or shared cache directories.
   public static func render(
     video: VideoInfo, paths: RuntimePaths, destination: URL,
     progress: @escaping @Sendable (Double) -> Void = { _ in }
   ) async throws {
-    let tone =
-      video.hdr == .sdr
-      ? ""
-      : "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable,zscale=t=bt709:m=bt709:r=tv,"
     let filter =
-      tone
+      toneFilter(video)
       + "scale=w=trunc(min(1920\\,iw*sar)/2)*2:h=trunc(ow/(iw*sar/ih)/2)*2:out_range=tv,setsar=1"
     _ = try await ProcessRunner.run(
       paths.ffmpeg,

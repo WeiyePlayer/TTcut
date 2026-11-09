@@ -15,12 +15,24 @@
 ```sh
 node scripts/make-macos.mjs --app-only --skip-native   # 只用于生成 .vite/；打包阶段因下载中断失败，见 package-macos.log
 swift build --package-path macos -c release --product TTcutMediaWorker   # 修复后的 worker 放入工作树本地 .runtime/macos（manifest 已更新哈希）
-TTCUT_DV_SOURCE=/Users/weiye/Documents/ttcut-dv-acceptance/杜比视界.mp4 node .scratch/dolby-vision-export/verify-electron.mjs
+TTCUT_DV_SOURCE=/Users/weiye/Documents/ttcut-dv-acceptance/杜比视界.mp4 node .scratch/dolby-vision-export/verify-electron.mjs   # 当时的调用；记录 ID 与 profile 写死在脚本中
 ```
+
+脚本现已不再写死记录 ID、profile 路径和源路径，三者都必须显式传入（命令行参数或环境变量），缺任何一项都会打印用法并以退出码 2 结束：
+
+```sh
+node .scratch/dolby-vision-export/verify-electron.mjs \
+  --record <历史记录 UUID> \
+  --profile <含该记录的 TTcut userData 目录，只读取 history/records/<UUID>.json、封面和 settings.json> \
+  --source <源视频的可读副本，运行期间其所在目录设为 0555>
+# 等价环境变量：TTCUT_DV_RECORD_ID、TTCUT_DV_PROFILE、TTCUT_DV_SOURCE；可选 TTCUT_DV_RALLIES（默认 2,3,5,6）
+```
+
+本次验收对应的取值：`--record 5cbadae4-5106-4a94-87e5-654bce201e75 --profile "$HOME/Library/Application Support/TTcut-Electron" --source /Users/weiye/Documents/ttcut-dv-acceptance/杜比视界.mp4`。脚本只读取 `--profile`，写入的都是 `output/dolby-vision-export/electron-*/profile` 下的独立测试 profile。
 
 选择回合 2、3、5、6，共 4 段，草稿边界合计 33.254 秒。脚本操作自定义页：取消全选，勾选这 4 个回合；第一次关闭记分牌导出合并视频，第二次重新打开历史并开启记分牌导出。
 
-## 结果（修复后运行 `output/dolby-vision-export/electron-lupqJv/`，全部通过）
+## 结果（修复后运行 `/Users/weiye/DOS/TTcut-windows/TTcut/output/dolby-vision-export/electron-lupqJv/`，全部通过）
 
 | 验收项 | 合并视频 `杜比视界_TTcut_custom_3.mp4` | 带记分牌 `杜比视界_TTcut_custom_4.mp4` |
 | --- | --- | --- |
@@ -60,11 +72,13 @@ TTCUT_DV_SOURCE=/Users/weiye/Documents/ttcut-dv-acceptance/杜比视界.mp4 node
 
 ## 测试
 
-- `npm test`（vitest 全量）：**733 passed，104 skipped**（101 个文件，91 通过、10 跳过），见 `output/dolby-vision-export/vitest-full.log`。
+- `npm test`（vitest 全量）：**733 passed，104 skipped**（101 个文件，91 通过、10 跳过），见主检出的 `/Users/weiye/DOS/TTcut-windows/TTcut/output/dolby-vision-export/vitest-full.log`。
 - `npm run typecheck`：通过。
 - `TTCUT_NATIVE_TESTS=1 swift test --package-path macos --filter TTcutMediaTests`：**34 executed，3 skipped，0 failures**，见 `swift-media-tests.log`。另有 `swift-red.log`／`swift-green.log` 记录先红后绿；第一次全量运行因工作树缺少 `macos/Resources/Models` 有 2 项 `MODEL_MISSING`，链接模型后通过。
 
-## 证据（`output/dolby-vision-export/`，不提交）
+## 证据（主检出 `/Users/weiye/DOS/TTcut-windows/TTcut/output/dolby-vision-export/`，不提交）
+
+验收时证据写在临时工作树内；工作树清理前已按相同相对布局复制到主检出的上述目录。下文相对路径均相对于该目录。
 
 - 修复后：`electron-lupqJv/report.json`；结果页 `combined-result.png`、`scoreboard-result.png`、`*-result-join{1,2,3}.png`；中点帧 `frames/{combined,scoreboard}-rally{2,3,5,6}-mid.png`；对比图 `frames/*-compare.png`（输出｜独立 HLG→709 参考｜未转换像素）。
 - 修复前：`electron-uGlKaL/report.json` 和同名截图。

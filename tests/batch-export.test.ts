@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { BrowserWindow } from 'electron';
@@ -108,13 +108,13 @@ describe('batch export task', () => {
     expect(await readdir(root)).toEqual([]);
   });
 
-  it('skips empty sources while keeping the first participating source as output location', async () => {
+  it('skips empty sources and names the output after the first source that contributes rallies', async () => {
     state.records.get(ids[0]!)!.analysis.rallies = [];
     await startBatchExport(windowStub, request);
     await vi.waitFor(() => expect(state.events.some((event) => event.type === 'batch-export-result')).toBe(true));
     const result = state.events.find((event) => event.type === 'batch-export-result')!;
     if (result.type !== 'batch-export-result') throw new Error('Missing result');
-    expect(result.data.outputPath).toBe(path.join(root, 'video-0_TTcut_合并集锦.mp4'));
+    expect(result.data.outputPath).toBe(path.join(root, 'video-1_TTcut_合并集锦.mp4'));
     expect(result.data.skippedAnalysisIds).toEqual([ids[0]]);
     if (process.platform === 'win32') {
       expect(state.probe).toHaveBeenCalledExactlyOnceWith(state.records.get(ids[1]!)!.analysis.video.path, expect.any(AbortSignal));
@@ -122,7 +122,7 @@ describe('batch export task', () => {
       expect(state.probe).not.toHaveBeenCalled();
     }
     expect(state.records.get(ids[1]!)!.analysis.video.media_fidelity).toBeUndefined();
-    expect(await readdir(root)).toEqual(['video-0_TTcut_合并集锦.mp4']);
+    expect(await readdir(root)).toEqual(['video-1_TTcut_合并集锦.mp4']);
     const segmentCalls = state.run.mock.calls.filter((call) => call[6]?.segmentIndex);
     expect(segmentCalls).toHaveLength(1);
     expect(segmentCalls[0]![3]).toContain(state.records.get(ids[1]!)!.analysis.video.path);
@@ -197,5 +197,25 @@ describe('batch export task', () => {
     for (const segment of segmentOutputs) expect(path.dirname(path.dirname(segment))).toBe(fallback);
     expect(await readdir(fallback)).toEqual(['video-0_TTcut_合并集锦.mp4']);
     expect(await readdir(root)).toEqual([]);
+  });
+
+  it('names and places the merged video after the first record that contributes rallies', async () => {
+    const [skippedId, contributingId] = ids;
+    state.records.get(skippedId!)!.analysis.rallies = [];
+    const other = path.join(root, 'other');
+    await mkdir(other);
+    const contributing = state.records.get(contributingId!)!;
+    const source = path.join(other, 'video-1.mp4');
+    contributing.analysis.video.path = source;
+    contributing.source = { ...contributing.source, path: source, name: 'video-1.mp4' };
+
+    await startBatchExport(windowStub, request);
+    await vi.waitFor(() => expect(state.events.some((event) => event.type === 'batch-export-result' || event.type === 'error')).toBe(true));
+
+    expect(state.events.find((event) => event.type === 'batch-export-result')).toMatchObject({
+      data: { outputPath: path.join(other, 'video-1_TTcut_合并集锦.mp4'), skippedAnalysisIds: [skippedId] },
+    });
+    expect(vi.mocked(assertExportPreconditions).mock.calls[0]![1]).toBe(other);
+    expect(await readdir(root)).toEqual(['other']);
   });
 });

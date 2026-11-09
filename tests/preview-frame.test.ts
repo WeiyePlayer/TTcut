@@ -64,6 +64,21 @@ describe('calibration preview frames', () => {
     expect(previewToneFilter(metadata)).toBe('');
   });
 
+  it.each([
+    ['HDR10+ (PQ)', 'hdr10Plus', 'smpte2084', undefined, 'tonemap=tonemap=hable:desat=2'],
+    ['Dolby Vision 8.1 (PQ)', 'dolbyVision', 'smpte2084', 1, 'tonemap=tonemap=hable:desat=2'],
+    ['Dolby Vision 8.4 (HLG)', 'dolbyVision', 'arib-std-b67', 4, 'tonemap=tonemap=hable:desat=0'],
+    ['HLG', 'hlg', 'arib-std-b67', undefined, 'tonemap=tonemap=hable:desat=0'],
+  ] as const)('tone-maps %s previews with the same operator as export', async (_name, hdr, color_transfer, sci, operator) => {
+    const { previewToneFilter } = await import('../src/main/preview-media');
+    const source: VideoMetadata = { ...metadata, color_transfer, media_fidelity: {
+      hdr, bit_depth: 10, chroma: '420', mastering_display: null, max_cll: null,
+      ...(sci ? { dolby_vision: { profile: 8, base_layer_present: true, signal_compatibility_id: sci } } : {}),
+    } };
+    const tonemaps = previewToneFilter(source).split(',').filter((filter) => filter.startsWith('tonemap='));
+    expect(tonemaps).toEqual([operator]);
+  });
+
   it('caches interactive metadata by source identity and keeps only the latest frame', async () => {
     const first = await service.extractPreviewFrame(source, 0);
     const second = await service.extractPreviewFrame(source, 4);

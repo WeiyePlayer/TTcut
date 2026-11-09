@@ -58,7 +58,8 @@ async function executeBatchExport(window: BrowserWindow, taskId: string, request
     if (!components.ffmpeg || !components.ffprobe || components.mediaEncoder === 'unavailable') {
       throw new Error('MEDIA_COMPONENT_MISSING');
     }
-    const first = records[0]!;
+    // The merged video is named and placed after the first record that contributes segments.
+    const first = records.find((record) => !skippedAnalysisIds.includes(record.id))!;
     const source = first.analysis.source_video?.path ?? first.source.path;
     const profile = batchOutputProfile(segments[0]!.video, segments.some((segment) => segment.video.audio_codec !== null));
     if (segments.some((segment) => outputVideoCodec(segment.video) === 'hevc')) profile.video_codec = 'hevc';

@@ -1,11 +1,17 @@
 // Real Dolby Vision acceptance (ticket 03): drive the development Electron build through the
 // custom editor with an isolated profile, export a combined video and the same rallies with
-// the scoreboard, and check every output against the real 杜比视界.mp4 source.
+// the scoreboard, and check every output against a real Dolby Vision source.
 //
 // Usage (macOS, from the repo root, after `.vite/` has been built and `.runtime/macos` staged):
-//   node .scratch/dolby-vision-export/verify-electron.mjs
+//   node .scratch/dolby-vision-export/verify-electron.mjs \
+//     --record <history record UUID> --profile <TTcut userData dir> --source <readable source copy>
+// Each option can instead come from TTCUT_DV_RECORD_ID, TTCUT_DV_PROFILE or TTCUT_DV_SOURCE.
+//   --record   id of the history record to copy into the isolated test profile
+//   --profile  TTcut userData directory holding that record (history/records/<id>.json); it is
+//              only read, never written
+//   --source   readable copy of the record's source video; its folder is made read-only (0555)
+//              during the run to reproduce an unwritable source folder, then restored
 // Optional env:
-//   TTCUT_DV_RECORD   history record to copy (default: the user's 5cbadae4-… record, read-only)
 //   TTCUT_DV_RALLIES  comma-separated rally indexes to select (default 2,3,5,6)
 import assert from 'node:assert/strict';
 import { _electron as electron, expect } from '@playwright/test';
@@ -18,9 +24,23 @@ import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const root = process.cwd();
-const RECORD_ID = '5cbadae4-5106-4a94-87e5-654bce201e75';
-const realHistory = path.join(os.homedir(), 'Library/Application Support/TTcut-Electron/history');
-const recordSource = process.env.TTCUT_DV_RECORD ?? path.join(realHistory, 'records', `${RECORD_ID}.json`);
+const option = (flag, variable) => {
+  const index = process.argv.indexOf(flag);
+  return (index >= 0 ? process.argv[index + 1] : undefined) ?? process.env[variable] ?? '';
+};
+const RECORD_ID = option('--record', 'TTCUT_DV_RECORD_ID');
+const sourceProfile = option('--profile', 'TTCUT_DV_PROFILE');
+const sourceOption = option('--source', 'TTCUT_DV_SOURCE');
+if (!RECORD_ID || !sourceProfile || !sourceOption) {
+  console.error([
+    'Usage: node .scratch/dolby-vision-export/verify-electron.mjs --record <history record UUID> --profile <TTcut userData dir> --source <readable source copy>',
+    '  (or set TTCUT_DV_RECORD_ID, TTCUT_DV_PROFILE and TTCUT_DV_SOURCE)',
+    `Missing: ${[!RECORD_ID && '--record', !sourceProfile && '--profile', !sourceOption && '--source'].filter(Boolean).join(', ')}`,
+  ].join('\n'));
+  process.exit(2);
+}
+const realHistory = path.join(path.resolve(sourceProfile), 'history');
+const recordSource = path.join(realHistory, 'records', `${RECORD_ID}.json`);
 const rallyIndexes = (process.env.TTCUT_DV_RALLIES ?? '2,3,5,6').split(',').map(Number);
 assert.ok(rallyIndexes.length >= 3 && rallyIndexes.length <= 4, 'select 3–4 rallies');
 
@@ -58,7 +78,7 @@ let source = record.source.path;
 // macOS App Data protection blocks reading the WeChat container from this host, so the
 // acceptance can run against a user-made copy. Its folder is made read-only (0555) during
 // the run to reproduce the unwritable source folder; the profile record is pointed at it.
-const copiedSource = process.env.TTCUT_DV_SOURCE ? path.resolve(process.env.TTCUT_DV_SOURCE) : null;
+const copiedSource = path.resolve(sourceOption);
 if (copiedSource) {
   const copyStat = await stat(copiedSource);
   const rewrite = (value) => {

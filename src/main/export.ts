@@ -1,5 +1,5 @@
 import { renderMacMedia } from './macos/client';
-import { access, mkdir, open, rename, rm, stat, statfs, writeFile } from 'node:fs/promises';
+import { access, mkdir, rename, rm, stat, statfs, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { dialog, type BrowserWindow } from 'electron';
@@ -44,7 +44,7 @@ import { createExportCfrResolver, exportSourceVideo } from './export-source';
 import { copyExportCfr } from './export-copy';
 import { resolveUsableMediaComponents, type MediaEncoder } from './components';
 import { logLine as writeLogLine } from './logger';
-import { resolveWritableOutputDirectory } from './output-location';
+import { defaultSaveDialogDirectory, resolveWritableOutputDirectory, writeProbeFailure } from './output-location';
 import { getHistoryStore } from './history';
 import {
   buildConcatArgs,
@@ -223,27 +223,25 @@ export async function retainUsableExportOutput(
   return null;
 }
 
-async function chooseOutput(
-  window: BrowserWindow,
-  input: string,
-  request: ExportRequest,
-  taskId: string,
-): Promise<string> {
+// Runs before the export task exists, so a fallback is logged under 'app', not a task ID.
+async function chooseOutput(window: BrowserWindow, input: string, request: ExportRequest): Promise<string> {
   const base = path.basename(input, path.extname(input));
   const label = (request.mode_label ?? request.selection.mode).replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').trim();
-  const directory = await resolveWritableOutputDirectory(input, taskId);
-  if (request.destination === 'source') return uniqueOutput(input, label || request.selection.mode, directory);
+  if (request.destination === 'source') {
+    return uniqueOutput(input, label || request.selection.mode, await resolveWritableOutputDirectory(input));
+  }
   const result = await dialog.showSaveDialog(window, {
     title: 'Save TTcut video',
-    defaultPath: path.join(directory, `${base}_TTcut.mp4`),
+    defaultPath: path.join(await defaultSaveDialogDirectory(input), `${base}_TTcut.mp4`),
     filters: [{ name: 'MP4 video', extensions: ['mp4'] }],
   });
   if (result.canceled || !result.filePath) throw new Error('EXPORT_CANCELLED');
   return path.extname(result.filePath).toLowerCase() === '.mp4' ? result.filePath : `${result.filePath}.mp4`;
 }
 
-async function createCustomArtifactDirectory(input: string, taskId: string): Promise<string> {
-  const directory = await resolveWritableOutputDirectory(input, taskId);
+// Runs before the export task exists, so a fallback is logged under 'app', not a task ID.
+async function createCustomArtifactDirectory(input: string): Promise<string> {
+  const directory = await resolveWritableOutputDirectory(input);
   const base = path.basename(input, path.extname(input));
   let suffix = 1;
   while (true) {
@@ -287,16 +285,9 @@ export async function assertExportPreconditions(
   const inputInfo = await stat(input).catch(() => null);
   if (!inputInfo?.isFile() || inputInfo.size <= 0) throw new Error('INPUT_MOVED');
 
-  const writeProbe = path.join(outputDirectory, `.ttcut-${taskId}.write-test`);
-  let handle: Awaited<ReturnType<typeof open>> | null = null;
-  try {
-    handle = await open(writeProbe, 'wx');
-  } catch {
-    throw new Error('OUTPUT_DIRECTORY_UNWRITABLE');
-  } finally {
-    await handle?.close().catch(() => undefined);
-    await rm(writeProbe, { force: true }).catch(() => undefined);
-  }
+  const probeFailure = await writeProbeFailure(outputDirectory, `.ttcut-${taskId}.write-test`);
+  if (probeFailure === 'ENOSPC') throw new Error('DISK_SPACE_LOW');
+  if (probeFailure !== null) throw new Error('OUTPUT_DIRECTORY_UNWRITABLE');
 
   try {
     const filesystem = await statfs(outputDirectory, { bigint: true });
@@ -1451,7 +1442,7 @@ export async function startExport(window: BrowserWindow, rawRequest: ExportReque
   if (outputs.combinedVideo && !mediaAvailable) throw new Error('MEDIA_COMPONENT_MISSING');
   const taskId = randomUUID();
   if (artifactExport) {
-    const outputDirectory = await createCustomArtifactDirectory(sourceVideoPath, taskId);
+    const outputDirectory = await createCustomArtifactDirectory(sourceVideoPath);
     let taskTracked = false;
     try {
       beginTrackedTask(taskId);
@@ -1484,7 +1475,7 @@ export async function startExport(window: BrowserWindow, rawRequest: ExportReque
     ffprobe: components.ffprobe,
     mediaEncoder: components.mediaEncoder,
   };
-  const output = await chooseOutput(window, sourceVideoPath, request, taskId);
+  const output = await chooseOutput(window, sourceVideoPath, request);
   const partial = path.join(path.dirname(output), `.${path.basename(output, '.mp4')}.${taskId}.partial.mp4`);
   const duration = expectedOutputDuration(groups);
   beginTrackedTask(taskId);

@@ -352,11 +352,13 @@ public struct MediaExporter: Sendable {
     }
     _ = try await validate(destination, source: colorPlan.target, duration: duration, segments: ranges.count, requireSDRMetadata: colorPlan.toneMapTransfer != nil)
   }
-  public func cover(video: VideoInfo, destination: URL) async throws {
-    let tone =
-      video.hdr == .sdr
+  static func coverToneFilter(_ video: VideoInfo) -> String {
+    video.hdr == .sdr
       ? ""
-      : "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable,zscale=t=bt709:m=bt709:r=full,"
+      : "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,\(HDRToneMap.hable(hlg: HDRToneMap.isHLG(video))),zscale=t=bt709:m=bt709:r=full,"
+  }
+  public func cover(video: VideoInfo, destination: URL) async throws {
+    let tone = Self.coverToneFilter(video)
     _ = try await ProcessRunner.run(
       paths.ffmpeg,
       [
